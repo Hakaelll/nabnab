@@ -266,8 +266,9 @@ pub fn start(app: &AppHandle, bridge: &Bridge) -> Result<(), String> {
                         if stopping.load(Ordering::SeqCst) {
                             break;
                         }
-                        let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
-                        let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
+                        if prepare_stream(&stream).is_err() {
+                            continue;
+                        }
                         serve(&app, &state, &mut stream);
                     }
                     Ok(_) => {}
@@ -298,6 +299,12 @@ pub fn stop(bridge: &Bridge) {
         }
     }
     bridge.state.enabled.store(false, Ordering::SeqCst);
+}
+
+fn prepare_stream(stream: &TcpStream) -> std::io::Result<()> {
+    stream.set_nonblocking(false)?;
+    stream.set_read_timeout(Some(Duration::from_secs(2)))?;
+    stream.set_write_timeout(Some(Duration::from_secs(2)))
 }
 
 struct HttpRequest {
@@ -669,6 +676,37 @@ mod tests {
     use serde_json::json;
     const ID: &str = "abcdefghijklmnopabcdefghijklmnop";
     const TOKEN: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    #[test]
+    fn accepted_connections_wait_for_a_delayed_request_instead_of_returning_bad_request() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let address = listener.local_addr().unwrap();
+        let client = thread::spawn(move || {
+            let mut stream = TcpStream::connect(address).unwrap();
+            thread::sleep(Duration::from_millis(50));
+            stream
+                .write_all(b"GET /health HTTP/1.1\r\nHost: 127.0.0.1:49587\r\n\r\n")
+                .unwrap();
+        });
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let mut stream = loop {
+            match listener.accept() {
+                Ok((stream, _)) => break stream,
+                Err(error)
+                    if error.kind() == std::io::ErrorKind::WouldBlock
+                        && Instant::now() < deadline =>
+                {
+                    thread::sleep(Duration::from_millis(1))
+                }
+                Err(error) => panic!("{error}"),
+            }
+        };
+        stream.set_nonblocking(true).unwrap();
+        prepare_stream(&stream).unwrap();
+        let response = read_request(&mut stream);
+        client.join().unwrap();
+        assert_eq!(response.unwrap().path, "/health");
+    }
     fn request(host: &str, origin: &str, token: &str) -> HttpRequest {
         HttpRequest {
             method: "GET".into(),

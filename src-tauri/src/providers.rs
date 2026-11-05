@@ -58,7 +58,7 @@ pub fn identify(input: &str) -> Result<ProviderInfo, String> {
         } else if matches("pinterest.com") || host == "pin.it" {
             (ProviderId::Pinterest, "Pinterest")
         } else {
-            (ProviderId::Generic, "yt-dlp")
+            (ProviderId::Generic, "HTTP")
         };
     Ok(ProviderInfo {
         id,
@@ -238,6 +238,9 @@ mod tests {
         ] {
             let provider = identify(url).unwrap();
             assert_eq!(provider.id, expected, "{url}");
+            if expected == ProviderId::Generic {
+                assert_eq!(provider.name, "HTTP");
+            }
             assert!(!provider.capabilities.verified);
             assert!(!provider.capabilities.images);
         }

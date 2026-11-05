@@ -1,0 +1,40 @@
+{
+  "date": "2026-11-05T21:49:28.635Z",
+  "native": true,
+  "browser": "msedge",
+  "isolatedData": true,
+  "extensionLoaded": true,
+  "browserPageFixture": "Public URL is rendered with a local HTML link fixture; this tests extension permissions/transport, not platform downloading.",
+  "popupMethod": "DevTools Extensions.triggerAction grants the real activeTab permission; the same popup document is driven in an inactive extension tab.",
+  "results": [
+    {
+      "case": "actual unpacked extension service worker",
+      "status": "passed",
+      "browser": "msedge",
+      "version": "156.0.4314.58"
+    },
+    {
+      "case": "options UI pairing and real authenticated extension-origin CORS",
+      "status": "passed"
+    },
+    {
+      "case": "actual popup sends active tab once and receives native job",
+      "status": "passed"
+    },
+    {
+      "case": "actual service worker replay keeps one native job",
+      "status": "passed"
+    },
+    {
+      "case": "actual extension Origin is browser-supplied and invalid token is rejected",
+      "status": "passed"
+    },
+    {
+      "case": "revoked real extension cannot connect",
+      "status": "passed"
+    }
+  ],
+  "pending": [
+    "native context-menu click"
+  ]
+}

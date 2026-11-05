@@ -16,6 +16,7 @@ const output=path.join(data,"outputs");await mkdir(output);
 const port=Number(process.env.NABNAB_DEBUG_PORT||9223);
 let child,browser,page;
 const results=[];
+let engines=[];
 async function waitFor(check,timeout=30000){const end=Date.now()+timeout;while(Date.now()<end){const value=await check();if(value)return value;await new Promise(r=>setTimeout(r,150));}throw Error("Timed out waiting for the real app.");}
 async function launch(){
   child=spawn(executable,[],{cwd:root,windowsHide:true,stdio:"ignore",env:{...process.env,NABNAB_TEST_DATA_DIR:data,WEBVIEW2_USER_DATA_FOLDER:path.join(data,"webview"),WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS:`--remote-debugging-port=${port}`}});
@@ -33,7 +34,10 @@ async function close(){if(page&&!page.isClosed()){try{await page.evaluate(async(
 async function completed(id){return waitFor(async()=>{const snapshot=await rpc("get_snapshot");const job=snapshot.jobs.find(j=>j.id===id);if(job?.state==="error")throw Error(`${job.error?.code}: ${job.error?.technical}`);return job?.state==="completed"?job:false;},90000);}
 try{
   await launch();
+  await page.screenshot({path:path.join(data,'home-native.png')});
   const state=await rpc("get_snapshot");
+  engines=(await rpc('engine_status')).map(({name,version,status})=>({name,version,status}));
+  assert.ok(engines.length===4&&engines.every(engine=>engine.status==='installed'));
   assert.equal(state.settings.trayEnabled,false);assert.equal(state.settings.startWithWindows,false);
   await rpc("save_settings",{settings:{...state.settings,folder:output}});
   const imported=await rpc("import_paths",{paths:[fixture]});
@@ -83,11 +87,58 @@ try{
   const receipt=await(await send()).json();const replay=await(await send()).json();
   assert.deepEqual(replay.acceptedJobIds,receipt.acceptedJobIds);assert.equal(receipt.acceptedJobIds.length,1);
   await rpc("job_action",{ids:receipt.acceptedJobIds,action:"cancel"});
+  const secondId="b".repeat(32);
+  const second=await rpc("bridge_pair",{extensionId:secondId});
   await rpc("bridge_revoke",{extensionId});
+  assert.equal((await fetch(bridge+"/health",{headers})).status,403);
+  assert.equal((await fetch(bridge+"/health",{headers:{Origin:`chrome-extension://${secondId}`,Authorization:`Bearer ${second.token}`}})).status,200);
+  await rpc("bridge_revoke",{extensionId:secondId});
+  assert.equal((await rpc("bridge_status")).enabled,false);
+  await assert.rejects(fetch(bridge+"/health",{headers}));
   results.push({case:"live bridge authentication, origin checks, receipt deduplication and revocation",status:"passed"});
+  if(process.env.NABNAB_OPEN_SAMPLE==='1'){
+    // Big Buck Bunny, Blender Foundation, CC BY 3.0. See docs/PLATFORMS.md.
+    const url='https://www.w3schools.com/html/mov_bbb.mp4';
+    for(const format of ['mp4','mp3']){
+      let jobs;
+      if(format==='mp4'){
+        const previous=new Set((await rpc('get_snapshot')).jobs.map(job=>job.id));
+        await page.locator('[data-page="home"]').click();
+        await page.locator('#url').fill(url);
+        await page.locator('#video-title').waitFor();
+        assert.match(await page.locator('#video-title').innerText(),/HTTP media/);
+        assert.equal((await rpc('get_snapshot')).jobs.length,previous.size,'Link analysis must not enqueue a download.');
+        await page.locator('#output-format').selectOption('mp4');
+        await page.screenshot({path:path.join(data,'direct-preview-native.png')});
+        await page.locator('#download').click();
+        jobs=await waitFor(async()=>{const added=(await rpc('get_snapshot')).jobs.filter(job=>!previous.has(job.id));return added.length?added:false;});
+        assert.equal(jobs.length,1);
+        await waitFor(()=>page.locator('#url').inputValue().then(value=>value===''));
+      }else{
+        jobs=await rpc('queue_download',{urls:[url],titles:['Big Buck Bunny · CC BY 3.0'],format,height:null,audioBitrate:128,subtitleLanguage:null,clientRequest:`open-sample-${format}`});
+      }
+      const job=await completed(jobs[0].id);const snapshot=await rpc('get_snapshot');
+      assert.equal(job.provider,'HTTP');
+      const item=snapshot.library.find(i=>i.path===job.outputs[0]);assert.ok(item);
+      assert.equal(item.audioCodec,format==='mp3'?'mp3':'aac');
+      if(format==='mp4')assert.equal(item.videoCodec,'h264');
+      assert.equal(path.extname(item.path),'.'+format);assert.ok(item.duration>5);
+      results.push({case:`open-license public HTTP ${format}`,status:'passed',bytes:item.size,videoCodec:item.videoCodec,audioCodec:item.audioCodec,duration:item.duration});
+      if(format==='mp4'){
+        const beforeCount=snapshot.library.length;
+        const duplicate=await rpc('queue_download',{urls:[url],titles:['Big Buck Bunny · CC BY 3.0'],format,height:null,audioBitrate:null,subtitleLanguage:null,clientRequest:'open-sample-content-duplicate'});
+        const reused=await completed(duplicate[0].id);assert.equal(reused.outputs[0],job.outputs[0]);assert.equal((await rpc('get_snapshot')).library.length,beforeCount);
+        results.push({case:'byte-identical content and profile reuse an existing verified result',status:'passed'});
+      }
+    }
+  }
   await rpc("remove_library",{id:input.id});assert.equal(createHash("sha256").update(await readFile(fixture)).digest("hex"),original);
   results.push({case:"cancel, restart, organization and index-only removal",status:"passed"});
   assert.equal(results.filter(r=>r.pageError).length,0);
-  await writeFile(path.join(data,"results.json"),JSON.stringify({date:new Date().toISOString(),native:true,isolatedData:true,results},null,2));
+  await writeFile(path.join(data,"results.json"),JSON.stringify({date:new Date().toISOString(),native:true,isolatedData:true,engines,openLicenseSample:process.env.NABNAB_OPEN_SAMPLE==='1'?{source:'https://www.w3schools.com/html/mov_bbb.mp4',license:'CC BY 3.0',attribution:'Blender Foundation / www.bigbuckbunny.org',licenseSource:'https://peach.blender.org/about/'}:null,results},null,2));
   console.log(JSON.stringify({status:"passed",artifactDirectory:path.relative(root,data),checks:results.length}));
+}catch(error){
+  const visible=page&&!page.isClosed()?await page.locator('body').innerText().catch(()=>null):null;
+  if(page&&!page.isClosed())await page.screenshot({path:path.join(data,'failure.png')}).catch(()=>{});
+  await writeFile(path.join(data,'failure.json'),JSON.stringify({date:new Date().toISOString(),native:true,results,visible,error:error instanceof Error?error.message:String(error)},null,2));throw error;
 }finally{await close();}

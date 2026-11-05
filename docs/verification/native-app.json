@@ -1,0 +1,96 @@
+{
+  "date": "2026-11-05T21:49:11.759Z",
+  "native": true,
+  "isolatedData": true,
+  "engines": [
+    {
+      "name": "yt-dlp",
+      "version": "2026.10.26",
+      "status": "installed"
+    },
+    {
+      "name": "ffmpeg",
+      "version": "ffmpeg version 9.0.2 Copyright (c) 2000-2026 the FFmpeg developers",
+      "status": "installed"
+    },
+    {
+      "name": "ffprobe",
+      "version": "ffprobe version 9.0.2 Copyright (c) 2007-2026 the FFmpeg developers",
+      "status": "installed"
+    },
+    {
+      "name": "deno",
+      "version": "deno 2.9.8 (stable, release, x86_64-pc-windows-msvc)",
+      "status": "installed"
+    }
+  ],
+  "openLicenseSample": {
+    "source": "https://www.w3schools.com/html/mov_bbb.mp4",
+    "license": "CC BY 3.0",
+    "attribution": "Blender Foundation / www.bigbuckbunny.org",
+    "licenseSource": "https://peach.blender.org/about/"
+  },
+  "results": [
+    {
+      "case": "import and inspect",
+      "status": "passed",
+      "duration": 6,
+      "codecs": [
+        "h264",
+        "aac"
+      ]
+    },
+    {
+      "case": "native queue convert",
+      "status": "passed",
+      "bytes": 155863
+    },
+    {
+      "case": "native queue extractAudio",
+      "status": "passed",
+      "bytes": 145196
+    },
+    {
+      "case": "native queue trim",
+      "status": "passed",
+      "bytes": 98243
+    },
+    {
+      "case": "native queue compress",
+      "status": "passed",
+      "bytes": 171704
+    },
+    {
+      "case": "authorized playback ranges and thumbnail cache",
+      "status": "passed"
+    },
+    {
+      "case": "live bridge authentication, origin checks, receipt deduplication and revocation",
+      "status": "passed"
+    },
+    {
+      "case": "open-license public HTTP mp4",
+      "status": "passed",
+      "bytes": 788493,
+      "videoCodec": "h264",
+      "audioCodec": "aac",
+      "duration": 10.026667
+    },
+    {
+      "case": "byte-identical content and profile reuse an existing verified result",
+      "status": "passed"
+    },
+    {
+      "case": "open-license public HTTP mp3",
+      "status": "passed",
+      "bytes": 160990,
+      "videoCodec": null,
+      "audioCodec": "mp3",
+      "duration": 10.005333
+    },
+    {
+      "case": "cancel, restart, organization and index-only removal",
+      "status": "passed"
+    }
+  ]
+}
