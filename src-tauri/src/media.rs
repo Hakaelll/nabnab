@@ -42,8 +42,11 @@ pub fn validate(info: &Value, format: Format) -> Result<(), String> {
                 && (audio.is_none() || codec == "aac")
                 && container.split(',').any(|c| c == "mp4")
         }
-        Format::Source => video.is_some() && container.split(',').any(|c| c == "mp4"),
+        Format::Source => video.is_some() && !container.is_empty(),
         Format::Opus => codec == "opus" && container == "ogg" && video.is_none(),
+        Format::AudioOriginal => {
+            audio.is_some() && !codec.is_empty() && !container.is_empty() && video.is_none()
+        }
     };
     if !valid {
         return Err("The generated codecs or container do not match the requested format. The recoverable file was kept.".into());
@@ -59,9 +62,17 @@ pub async fn probe(
     file: &Path,
     cancel: watch::Receiver<bool>,
 ) -> Result<Value, String> {
+    let file = crate::library::authorized_path(file)?;
+    if !file.is_file() {
+        return Err("Choose an existing local media file.".into());
+    }
     let mut args: Vec<String> = [
         "-v",
         "error",
+        "-protocol_whitelist",
+        "file",
+        "-format_whitelist",
+        "mov,matroska,webm,mp3,ogg,wav,flac,aac,avi,asf,flv,mpeg,mpegts,nut,ac3,eac3,aiff,ape",
         "-show_streams",
         "-show_format",
         "-of",
@@ -209,5 +220,85 @@ mod tests {
         let mut info = fixture("mp3", "mp3", Some("mjpeg"));
         info["streams"][1]["disposition"] = json!({"attached_pic":1});
         assert!(validate(&info, Format::Mp3).is_ok());
+    }
+
+    #[test]
+    fn original_profiles_validate_real_tracks_without_forcing_lossy_conversion() {
+        assert!(validate(
+            &fixture("matroska,webm", "opus", Some("vp9")),
+            Format::Source
+        )
+        .is_ok());
+        assert!(validate(&fixture("matroska,webm", "opus", Some("vp9")), Format::Mp4).is_err());
+        assert!(validate(&fixture("ogg", "opus", None), Format::AudioOriginal).is_ok());
+        assert!(validate(
+            &fixture("mov,mp4,m4a,3gp,3g2,mj2", "aac", None),
+            Format::AudioOriginal
+        )
+        .is_ok());
+        assert!(validate(&fixture("ogg", "opus", None), Format::Mp3).is_err());
+        assert!(validate(
+            &fixture("matroska,webm", "opus", Some("vp9")),
+            Format::AudioOriginal
+        )
+        .is_err());
+    }
+
+    #[tokio::test]
+    #[ignore = "Requires bundled Windows FFprobe; uses a loopback request tripwire, no Internet"]
+    async fn real_engines_probe_rejects_manifests_disguised_as_local_media() {
+        use std::sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        };
+        use tokio::io::AsyncWriteExt;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let contacted = Arc::new(AtomicBool::new(false));
+        let signal = contacted.clone();
+        let tripwire = tokio::spawn(async move {
+            while let Ok((mut connection, _)) = listener.accept().await {
+                signal.store(true, Ordering::SeqCst);
+                let _ = connection
+                    .write_all(
+                        b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                    )
+                    .await;
+            }
+        });
+        let engines = Path::new(env!("CARGO_MANIFEST_DIR")).join("engines");
+        let directory = std::env::temp_dir().join(format!(
+            "nabnab-local-probe-{}-{}",
+            std::process::id(),
+            crate::queue::now()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let fixtures = [
+            format!("#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXTINF:1,\nhttp://{address}/segment.ts\n#EXT-X-ENDLIST\n"),
+            format!("<?xml version=\"1.0\"?><MPD xmlns=\"urn:mpeg:dash:schema:mpd:2011\" type=\"static\" mediaPresentationDuration=\"PT1S\"><Period><AdaptationSet mimeType=\"video/mp4\"><Representation id=\"1\" bandwidth=\"1000\"><BaseURL>http://{address}/segment.mp4</BaseURL></Representation></AdaptationSet></Period></MPD>"),
+            format!("ffconcat version 1.0\nfile 'http://{address}/segment.mp4'\n"),
+        ];
+        for (index, content) in fixtures.iter().enumerate() {
+            let input = directory.join(format!("manifest-{index}.mp4"));
+            std::fs::write(&input, content).unwrap();
+            let (sender, cancel) = watch::channel(false);
+            let result = tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                probe(&engines, &input, cancel),
+            )
+            .await;
+            let _ = sender.send(true);
+            assert!(
+                matches!(result, Ok(Err(_))),
+                "A disguised manifest must be rejected promptly"
+            );
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        tripwire.abort();
+        assert!(
+            !contacted.load(Ordering::SeqCst),
+            "FFprobe must not request any manifest resource"
+        );
+        std::fs::remove_dir_all(directory).unwrap();
     }
 }

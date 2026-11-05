@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="es">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>nabnab</title><link rel="stylesheet" href="style.css"></head>
+<body>
+  <main>
+    <header><h1>nabnab</h1><button id="settings" class="quiet" title="Ajustes de la extensión">Ajustes</button></header>
+    <p id="connection" role="status">Comprobando conexión…</p>
+    <label for="profile">Perfil de descarga</label>
+    <select id="profile"><option value="mp4">Vídeo compatible · MP4</option><option value="source">Vídeo · calidad original</option><option value="mp3">Audio compatible · MP3</option><option value="audio">Audio · códec original</option></select>
+    <button id="send" class="primary">Enviar pestaña actual</button>
+    <button id="retry" hidden>Reintentar la solicitud pendiente</button>
+    <p id="message" role="status" aria-live="polite">La descarga se añade a la cola de la aplicación.</p>
+  </main>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

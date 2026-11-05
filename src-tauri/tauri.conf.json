@@ -1,7 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "ytnabber",
-  "version": "0.1.1",
+  "productName": "nabnab",
+  "mainBinaryName": "nabnab",
+  "version": "0.2.0",
   "identifier": "com.ytnabber.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -13,18 +14,18 @@
     "windows": [
       {
         "label": "main",
-        "title": "ytnabber",
-        "width": 560,
-        "height": 680,
-        "minWidth": 430,
-        "minHeight": 630,
+        "title": "nabnab",
+        "width": 1180,
+        "height": 780,
+        "minWidth": 900,
+        "minHeight": 620,
         "resizable": true,
         "decorations": false,
-        "backgroundColor": "#0a0a0a"
+        "backgroundColor": "#090A0C"
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src ipc: http://ipc.localhost; object-src 'none'; base-uri 'self'; frame-src 'none'"
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http://nabmedia.localhost nabmedia:; media-src 'self' http://nabmedia.localhost nabmedia:; connect-src ipc: http://ipc.localhost; object-src 'none'; base-uri 'self'; frame-src 'none'"
     }
   },
   "bundle": {
@@ -44,6 +45,7 @@
     ],
     "windows": {
       "nsis": {
+        "template": "installer.nsi",
         "installMode": "currentUser",
         "displayLanguageSelector": false
       },

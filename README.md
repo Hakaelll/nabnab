@@ -1,33 +1,32 @@
-# ytnabber
+# nabnab
 
-A compact Windows app for downloading one public video or saving its audio.
+Aplicación local para Windows para descargar, organizar y transformar multimedia. Tauri 2, Rust y TypeScript. Conserva el emblema y el campo de caracteres de YTNabber.
 
-## Download
+Los cambios de `main` corresponden a 0.2.0. El instalador nuevo se genera al compilar; este trabajo no publica una release automáticamente.
 
-Get the **Windows x64 installer** from [Releases](https://github.com/Hakaelll/ytnabber/releases/latest). Requires Windows 10/11 and Microsoft WebView2, which the installer can set up if missing. Installation is per user, without admin rights.
+## Uso
 
-yt-dlp, Deno and FFmpeg are included. No Python, terminal or manual tool setup is needed. The installer is unsigned.
+1. Pega uno o varios enlaces en Inicio, o importa una lista `.txt`. El análisis no inicia descargas.
+2. Elige elementos y perfil, y pulsa Descargar o Añadir a la cola.
+3. Revisa actividad y errores en Descargas. Los resultados verificados aparecen en Biblioteca.
+4. Importa tus archivos o carpetas sin copiarlos. Selecciona un archivo para reproducirlo, abrirlo con Windows, localizarlo u organizar sus colecciones y etiquetas.
+5. En Herramientas puedes convertir, extraer audio, recortar y comprimir. Las operaciones usan la misma cola y conservan los originales.
 
-## Use
+MP4 compatible comprueba H.264/AAC y convierte las pistas incompatibles cuando hace falta. Calidad original conserva los códecs. Audio original conserva su formato real. Subir el bitrate o convertir audio con pérdida no mejora el original.
 
-1. Paste a public video link. Information loads automatically, or press Enter.
-2. Choose **MP4**, **MP3**, **M4A** or **Opus**, then select the available quality.
-3. Choose a folder and click **Download**. Cancel at any time, including during processing.
+Al reiniciar, los trabajos interrumpidos quedan pausados para revisión. Reintentar es una acción explícita. Los archivos existentes no se sobrescriben. Quitar de Biblioteca modifica el índice, no borra el archivo.
 
-MP4 defaults to compatible H.264/AAC; original source codecs are also available. MP3 defaults to 192 kbps. Existing files are never overwritten, and the last destination is remembered. Failed downloads retain recoverable files; an identical retry in the same session can resume them.
+Los formatos reproducibles dentro de la app dependen de WebView2. Para otros formatos se ofrece abrir con el reproductor de Windows. Las herramientas y la biblioteca funcionan sin conexión cuando los motores están instalados.
 
+## Ejecutar y empaquetar
 
-## Develop
-
-Requires Node.js 24 LTS, stable Rust/MSVC, Microsoft C++ Build Tools with vcpkg, and WebView2. See [Tauri's Windows prerequisites](https://v2.tauri.app/start/prerequisites/#windows).
+Requiere Node.js 24, Rust/MSVC, herramientas C++ de Windows y WebView2. La preparación de FFmpeg utiliza vcpkg; esas herramientas de desarrollo no forman parte de la aplicación instalada.
 
 ```powershell
 npm ci
 npm run engines:prepare
 npm run desktop:dev
 ```
-
-Engine preparation verifies pinned tools and builds compact shared FFmpeg. The first build can take several minutes; use a checkout path without spaces.
 
 ```powershell
 npm run check
@@ -36,14 +35,24 @@ npm run test:native
 npm run desktop:build
 ```
 
-The installer is written to `src-tauri/target/release/bundle/nsis/`. `npm run dev` provides a browser preview; native downloads require the desktop app. Opt-in engine integration checks are available through `npm run test:engines`.
+El instalador se genera en `src-tauri/target/release/bundle/nsis/`. Los motores fijados se incluyen en el paquete. La app puede abrirse si faltan componentes y muestra su estado en Ajustes > Motores. Su instalación o reparación requiere consentimiento.
 
-## Limits and documentation
+`npm run dev` muestra la interfaz en un navegador. Las operaciones nativas necesitan la aplicación de escritorio. Las pruebas de interfaz con IPC simulado no certifican motores ni plataformas.
 
-Only individual public videos are supported. Playlists, live streams, sign-in, cookies and access-restriction workarounds are outside this version. Source sites may throttle or deny requests independently of the app. Audio quality cannot exceed the source, and original-codec files may require additional player support.
+## Navegador y sesiones opcionales
 
-- [Current visual checks and known verification limits](docs/OPTICAL-GLASS.md)
-- [Architecture](docs/IMPLEMENTATION.md) and [engine verification](docs/UPDATE-0.1.1.md)
-- [Third-party notices](THIRD_PARTY_NOTICES.md) and [source/license information](licenses/SOURCES.md)
+La [extensión Chrome/Edge](docs/BROWSER.md) envía una pestaña o un enlace a la cola. Requiere emparejamiento explícito y permite revocarlo. No lee cookies ni intercepta la navegación.
 
-The supplied logo and emblem belong to their respective owner.
+Las sesiones se importan por sitio desde un archivo Netscape elegido por el usuario. Windows DPAPI las protege en disco. No se incluyen en historial ni diagnósticos. No se implementa elusión de DRM o controles de acceso.
+
+## Verificación y límites
+
+- [Pruebas y límites observados](docs/NABNAB-VERIFICATION.md).
+- [Matriz de plataformas](docs/PLATFORMS.md). Que yt-dlp tenga un extractor no certifica cada sitio o contenido.
+- [Arquitectura](docs/IMPLEMENTATION.md), [migración](docs/MIGRATION.md) y [herramientas](docs/TOOLS.md).
+- [Red, motores y privacidad](docs/NETWORK.md), [diseño](docs/design-reference.md) y [plan de trabajo](docs/PLAN.md).
+- [Licencias y avisos](THIRD_PARTY_NOTICES.md).
+
+No hay telemetría, fuentes remotas, servicios de extracción intermediarios ni IA en la nube. No hay un servicio nuevo de actualización de nabnab; la actualización de yt-dlp es una operación independiente.
+
+El identificador técnico `com.ytnabber.desktop`, algunas claves de instalación y datos históricos conservan el nombre anterior para mantener compatibilidad. No se renombran los medios existentes. La referencia de arquitectura fue [Omniget en b4c733f](https://github.com/OpenSelena/omniget/tree/b4c733f5a8a699634845e445fc8f162acde547c9), sin copiar su código GPL.

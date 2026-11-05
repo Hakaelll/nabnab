@@ -4,7 +4,7 @@ use std::{
     process::Stdio,
     time::Duration,
 };
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, BufReader},
     process::Command,
@@ -14,14 +14,10 @@ use tokio::{
 pub const CANCELLED: &str = "Cancelled.";
 
 pub fn engine_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    let root = app
-        .path()
-        .resource_dir()
-        .map_err(|e| e.to_string())?
-        .join("engines");
+    let root = crate::dependencies::engine_root(app)?;
     for name in ["yt-dlp.exe", "ffmpeg.exe", "ffprobe.exe", "deno.exe"] {
         if !root.join(name).is_file() {
-            return Err("The download tools are missing. Reinstall ytnabber or run npm run engines:prepare when developing.".into());
+            return Err("The download tools are missing. Repair nabnab's engines in Settings, or run npm run engines:prepare when developing.".into());
         }
     }
     Ok(root)
@@ -31,6 +27,7 @@ pub fn base_args(root: &Path) -> Vec<String> {
     vec![
         "--ignore-config".into(),
         "--no-plugin-dirs".into(),
+        "--no-remote-components".into(),
         "--no-playlist".into(),
         "--no-color".into(),
         "--encoding".into(),
@@ -57,6 +54,22 @@ pub fn base_args(root: &Path) -> Vec<String> {
         "--retry-sleep".into(),
         "extractor:exp=2:30".into(),
     ]
+}
+
+pub fn inspect_args(root: &Path, url: &str) -> Vec<String> {
+    let mut args = base_args(root);
+    args.retain(|arg| arg != "--no-playlist");
+    args.extend([
+        "--yes-playlist".into(),
+        "--flat-playlist".into(),
+        "--playlist-end".into(),
+        "200".into(),
+        "--dump-single-json".into(),
+        "--skip-download".into(),
+        "--".into(),
+        url.into(),
+    ]);
+    args
 }
 
 #[cfg(windows)]
@@ -328,4 +341,46 @@ pub fn download_args(
         url.to_owned(),
     ]);
     args
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn analysis_is_bounded_and_does_not_download_or_enable_remote_code() {
+        let args = inspect_args(
+            Path::new("C:/Managed engines"),
+            "https://www.youtube.com/playlist?list=one",
+        );
+        assert!(args.contains(&"--skip-download".into()));
+        assert!(args.contains(&"--flat-playlist".into()));
+        let limit = args.iter().position(|s| s == "--playlist-end").unwrap();
+        assert_eq!(args[limit + 1], "200");
+        assert!(args.contains(&"--no-remote-components".into()));
+        assert!(!args.contains(&"--no-playlist".into()));
+        assert_eq!(args[args.len() - 2], "--");
+        assert_eq!(
+            args.last().unwrap(),
+            "https://www.youtube.com/playlist?list=one"
+        );
+    }
+
+    #[test]
+    fn downloads_stay_single_item_with_managed_runtime_and_no_user_config() {
+        let args = download_args(
+            Path::new("C:/Managed engines"),
+            crate::model::Format::AudioOriginal,
+            None,
+            Path::new("C:/Output"),
+            "https://example.org/a",
+        );
+        assert!(args.contains(&"--no-playlist".into()));
+        assert!(args.contains(&"--ignore-config".into()));
+        assert!(args.contains(&"--no-plugin-dirs".into()));
+        assert!(args.contains(&"--no-remote-components".into()));
+        assert!(args
+            .iter()
+            .any(|arg| arg.starts_with("deno:C:/Managed engines")));
+    }
 }

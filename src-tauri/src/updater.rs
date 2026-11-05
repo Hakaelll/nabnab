@@ -45,6 +45,9 @@ fn version_path(data: &Path, bundled: &Path, version: &str) -> Option<PathBuf> {
     }
 }
 pub fn data_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    if let Some(root) = crate::test_data_dir() {
+        return Ok(root.join("engine-updates"));
+    }
     app.path()
         .app_local_data_dir()
         .map(|p| p.join("engine-updates"))

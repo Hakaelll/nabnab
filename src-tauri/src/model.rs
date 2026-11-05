@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeSet;
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Media {
     pub request_id: u64,
@@ -13,15 +13,23 @@ pub struct Media {
     pub heights: Vec<u32>,
     pub has_audio: bool,
     pub has_video: bool,
+    #[serde(default)]
+    pub entries: Vec<MediaEntry>,
+    #[serde(default)]
+    pub capabilities: crate::providers::Capabilities,
 }
 
-#[derive(Clone)]
-pub struct Selection {
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MediaEntry {
+    pub id: String,
+    pub title: String,
     pub url: String,
-    pub media: Media,
+    pub thumbnail: Option<String>,
+    pub duration: Option<f64>,
 }
 
-#[derive(Clone, Copy, Deserialize, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Debug)]
 #[serde(rename_all = "lowercase")]
 pub enum Format {
     Mp4,
@@ -29,6 +37,8 @@ pub enum Format {
     M4a,
     Opus,
     Source,
+    #[serde(rename = "audio")]
+    AudioOriginal,
 }
 
 impl Format {
@@ -46,7 +56,7 @@ pub struct DownloadKey {
     pub audio_bitrate: u16,
 }
 
-#[derive(Clone, Serialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct Progress {
     pub request_id: u64,
@@ -68,39 +78,105 @@ pub fn validate_url(input: &str) -> Result<String, String> {
         return Err("Use a public HTTP or HTTPS video URL without credentials.".into());
     }
     let host = parsed.host_str().unwrap_or_default();
-    if host == "localhost" || host.ends_with(".localhost") || host.ends_with(".local") {
-        return Err("Local network URLs are not supported.".into());
-    }
-    if let Some(url::Host::Ipv4(ip)) = parsed.host() {
-        if ip.is_private() || ip.is_loopback() || ip.is_link_local() || ip.is_unspecified() {
-            return Err("Local network URLs are not supported.".into());
+    let local_error = "Local or reserved network URLs are not supported.";
+    match parsed.host() {
+        Some(url::Host::Ipv4(ip)) if !crate::providers::is_public_ip(ip.into()) => {
+            return Err(local_error.into());
         }
-    }
-    if let Some(url::Host::Ipv6(ip)) = parsed.host() {
-        if ip.is_loopback()
-            || ip.is_unspecified()
-            || (ip.segments()[0] & 0xfe00 == 0xfc00)
-            || (ip.segments()[0] & 0xffc0 == 0xfe80)
-            || ip.to_ipv4_mapped().is_some()
-        {
-            return Err("Local network URLs are not supported.".into());
+        Some(url::Host::Ipv6(ip)) if !crate::providers::is_public_ip(ip.into()) => {
+            return Err(local_error.into());
         }
+        Some(url::Host::Domain(_)) => {
+            let host = host.trim_end_matches('.');
+            if !host.contains('.')
+                || [
+                    "localhost",
+                    "local",
+                    "internal",
+                    "lan",
+                    "home",
+                    "invalid",
+                    "test",
+                    "example",
+                ]
+                .iter()
+                .any(|suffix| host == *suffix || host.ends_with(&format!(".{suffix}")))
+            {
+                return Err(local_error.into());
+            }
+        }
+        _ => {}
     }
     Ok(parsed.to_string())
+}
+
+fn thumbnail(value: &Value) -> Option<String> {
+    value
+        .as_str()
+        .filter(|s| s.starts_with("https://"))
+        .and_then(|s| validate_url(s).ok())
+}
+
+fn duration(value: &Value) -> Option<f64> {
+    value.as_f64().filter(|v| v.is_finite() && *v > 0.0)
 }
 
 pub fn parse_media(raw: &str, request_id: u64) -> Result<Media, String> {
     let value: Value = serde_json::from_str(raw)
         .map_err(|_| "The source returned unreadable video information.")?;
-    if value.get("entries").is_some() || value["_type"] == "playlist" {
-        return Err("Choose a single video. Playlists are not supported.".into());
-    }
     if value["is_live"] == true || value["live_status"] == "is_upcoming" {
         return Err("Choose a finished video. Live and upcoming streams are not supported.".into());
     }
-    let formats = value["formats"]
+    if value["has_drm"] == true {
+        return Err("Protected media cannot be downloaded by nabnab.".into());
+    }
+    let entries: Vec<MediaEntry> = value["entries"]
         .as_array()
-        .ok_or("No downloadable formats were found.")?;
+        .into_iter()
+        .flatten()
+        .take(200)
+        .filter(|entry| {
+            entry["has_drm"] != true
+                && entry["is_live"] != true
+                && entry["live_status"] != "is_upcoming"
+        })
+        .filter_map(|entry| {
+            let url = ["webpage_url", "original_url", "url"]
+                .into_iter()
+                .filter_map(|field| entry[field].as_str())
+                .find_map(|url| validate_url(url).ok())?;
+            Some(MediaEntry {
+                id: entry["id"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .chars()
+                    .take(256)
+                    .collect(),
+                title: entry["title"]
+                    .as_str()
+                    .unwrap_or("Untitled item")
+                    .chars()
+                    .take(1024)
+                    .collect(),
+                url,
+                thumbnail: thumbnail(&entry["thumbnail"]).or_else(|| {
+                    entry["thumbnails"].as_array().and_then(|images| {
+                        images
+                            .iter()
+                            .rev()
+                            .find_map(|image| thumbnail(&image["url"]))
+                    })
+                }),
+                duration: duration(&entry["duration"]),
+            })
+        })
+        .collect();
+    let batch = value.get("entries").is_some() || value["_type"] == "playlist";
+    if batch && entries.is_empty() {
+        return Err("This list has no supported public items. Private, live and protected entries are excluded.".into());
+    }
+    let empty = Vec::new();
+    let formats = value["formats"].as_array().unwrap_or(&empty);
     let mut heights = BTreeSet::new();
     let mut has_audio = false;
     let mut has_video = false;
@@ -125,7 +201,7 @@ pub fn parse_media(raw: &str, request_id: u64) -> Result<Media, String> {
             }
         }
     }
-    if !has_audio && !has_video {
+    if !batch && !has_audio && !has_video {
         return Err("This source has no supported public formats.".into());
     }
     Ok(Media {
@@ -133,16 +209,28 @@ pub fn parse_media(raw: &str, request_id: u64) -> Result<Media, String> {
         title: value["title"]
             .as_str()
             .unwrap_or("Untitled video")
-            .to_owned(),
-        duration: value["duration"].as_f64(),
-        thumbnail: value["thumbnail"]
+            .chars()
+            .take(1024)
+            .collect(),
+        duration: duration(&value["duration"]),
+        thumbnail: thumbnail(&value["thumbnail"]),
+        uploader: value["uploader"]
             .as_str()
-            .filter(|s| s.starts_with("https://"))
-            .map(str::to_owned),
-        uploader: value["uploader"].as_str().map(str::to_owned),
+            .map(|s| s.chars().take(512).collect()),
         heights: heights.into_iter().rev().collect(),
         has_audio,
         has_video,
+        capabilities: crate::providers::Capabilities {
+            video: has_video,
+            audio: has_audio,
+            batches: batch,
+            subtitles: value["subtitles"]
+                .as_object()
+                .is_some_and(|s| !s.is_empty()),
+            images: false,
+            verified: false,
+        },
+        entries,
     })
 }
 
@@ -155,14 +243,16 @@ pub fn format_args(format: Format, height: Option<u32>) -> Vec<String> {
             } else {
                 format!("bv{filter}+ba/b{filter}/bv{filter}")
             };
-            vec![
+            let mut args = vec![
                 "-f".into(),
                 selection,
                 "--merge-output-format".into(),
-                "mp4".into(),
-                "--remux-video".into(),
-                "mp4".into(),
-            ]
+                if format == Format::Mp4 { "mp4" } else { "mkv" }.into(),
+            ];
+            if format == Format::Mp4 {
+                args.extend(["--remux-video".into(), "mp4".into()]);
+            }
+            args
         }
         Format::Mp3 => vec![
             "-f",
@@ -198,6 +288,10 @@ pub fn format_args(format: Format, height: Option<u32>) -> Vec<String> {
         .into_iter()
         .map(str::to_owned)
         .collect(),
+        Format::AudioOriginal => ["-f", "bestaudio/best", "-x", "--audio-format", "best"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
     }
 }
 
@@ -236,6 +330,14 @@ mod tests {
             "http://192.168.1.1/a",
             "http://[::1]/a",
             "http://[::ffff:127.0.0.1]/x",
+            "http://2130706433/x",
+            "http://0x7f000001/x",
+            "http://0177.0.0.1/x",
+            "http://100.64.0.1/x",
+            "http://224.0.0.1/x",
+            "http://server/x",
+            "https://files.internal/x",
+            "https://printer.local./x",
         ] {
             assert!(validate_url(u).is_err(), "{u}");
         }
@@ -292,6 +394,56 @@ mod tests {
         assert!(format_args(Format::Mp4, Some(1080))[1].contains("[vcodec^=avc1]"));
         assert!(format_args(Format::M4a, None)[1].contains("[acodec^=mp4a]"));
         assert!(format_args(Format::Mp3, None).contains(&"192K".to_owned()));
+    }
+    #[test]
+    fn original_profiles_keep_codecs_and_do_not_force_mp4_or_opus() {
+        let source = format_args(Format::Source, None);
+        assert!(source.contains(&"mkv".into()));
+        assert!(!source.contains(&"--remux-video".into()));
+        assert!(!source.contains(&"mp4".into()));
+        let audio = format_args(Format::AudioOriginal, None);
+        assert_eq!(
+            audio,
+            vec!["-f", "bestaudio/best", "-x", "--audio-format", "best"]
+        );
+        assert_eq!(
+            serde_json::to_string(&Format::AudioOriginal).unwrap(),
+            "\"audio\""
+        );
+    }
+    #[test]
+    fn batch_metadata_excludes_private_live_and_protected_entries() {
+        let media = parse_media(
+            r#"{"_type":"playlist","title":"A list","entries":[
+            {"id":"one","title":"First","url":"https://www.youtube.com/watch?v=one","duration":12},
+            {"id":"two","title":"Bad","url":"file:///C:/secret"},
+            {"id":"three","url":"http://127.0.0.1/secret"},
+            {"id":"four","url":"https://example.org/a","has_drm":true},
+            {"id":"five","url":"https://example.org/b","is_live":true},
+            {"id":"six","url":"an-id-is-not-a-url"}
+        ]}"#,
+            9,
+        )
+        .unwrap();
+        assert_eq!(media.entries.len(), 1);
+        assert_eq!(media.entries[0].id, "one");
+        assert_eq!(media.entries[0].duration, Some(12.0));
+        assert!(media.capabilities.batches);
+        assert!(!media.has_video && !media.has_audio);
+        assert!(media.heights.is_empty());
+    }
+    #[test]
+    fn batch_metadata_is_bounded_and_single_media_reports_observed_capabilities() {
+        let entries: Vec<Value> = (0..250).map(|n| serde_json::json!({"id":n.to_string(),"url":format!("https://example.org/{n}")})).collect();
+        let raw = serde_json::json!({"entries":entries}).to_string();
+        assert_eq!(parse_media(&raw, 1).unwrap().entries.len(), 200);
+        let media = parse_media(r#"{"formats":[{"vcodec":"none","acodec":"opus"}],"subtitles":{"en":[{"ext":"vtt"}]},"thumbnail":"https://127.0.0.1/secret"}"#, 2).unwrap();
+        assert!(media.capabilities.audio && media.capabilities.subtitles);
+        assert!(!media.capabilities.video && !media.capabilities.batches);
+        assert_eq!(media.thumbnail, None);
+        assert!(parse_media(r#"{"has_drm":true,"formats":[{"vcodec":"h264"}]}"#, 3).is_err());
+        let persisted = serde_json::to_string(&media).unwrap();
+        assert!(serde_json::from_str::<Media>(&persisted).is_ok());
     }
     #[test]
     fn recovery_keys_separate_sources_formats_destinations_and_qualities() {

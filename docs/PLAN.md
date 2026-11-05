@@ -26,11 +26,11 @@ Estado inicial: `7f533a8`, rama de trabajo `codex/nabnab`. El encargo completo e
 
 - [x] Leer encargo, Git, configuración, motores, persistencia y referencia.
 - [ ] Registrar comprobaciones iniciales y capturar UI anterior donde sea ejecutable.
-- [ ] Marca, ventana, navegación y migración con pruebas de arranque repetido.
-- [ ] Contratos de proveedores, lotes, perfiles y cola persistente con cancelación real.
-- [ ] Biblioteca autorizada, importación, colecciones, etiquetas e inspector con fallback local.
-- [ ] Convertir, extraer audio, recortar y comprimir conectados a cola y biblioteca.
-- [ ] Motores, ajustes, sesiones y privacidad con errores accionables.
+- [x] Marca, ventana, navegación y migración con pruebas de arranque repetido.
+- [x] Contratos de proveedores, lotes, perfiles y cola persistente con cancelación real.
+- [x] Biblioteca autorizada, importación, colecciones, etiquetas e inspector con fallback local.
+- [x] Convertir, extraer audio, recortar y comprimir conectados a cola y biblioteca.
+- [x] Motores, ajustes, sesiones y privacidad con errores accionables.
 - [ ] Extensión y transporte local protegido; pruebas de reenvío y clientes no autorizados.
 - [ ] Compilación, pruebas nativas/JS, recorridos reales con archivos autorizados, revisión visual y empaquetado.
 - [ ] Matriz de plataformas y mediciones reales; separar comprobado y pendiente.

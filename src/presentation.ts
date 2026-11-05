@@ -43,7 +43,13 @@ export function errorLabel(error: unknown): string {
 
 interface Failure { code: string; message: string; technical: string; retryable: boolean; retryAfter: number | null; phase: string }
 function isFailure(error: unknown): error is Failure {
-  return typeof error === "object" && error !== null && "code" in error && "message" in error && "technical" in error;
+  return typeof error === "object" && error !== null
+    && "code" in error && typeof error.code === "string"
+    && "message" in error && typeof error.message === "string"
+    && "technical" in error && typeof error.technical === "string"
+    && "retryable" in error && typeof error.retryable === "boolean"
+    && "phase" in error && typeof error.phase === "string"
+    && "retryAfter" in error && (error.retryAfter === null || (typeof error.retryAfter === "number" && Number.isFinite(error.retryAfter) && error.retryAfter >= 0));
 }
 export function isCancelled(error: unknown): boolean { return isFailure(error) ? error.code === "cancelled" : String(error) === "Cancelled."; }
 export function canRetry(error: unknown): boolean { return isFailure(error) ? error.retryable && !error.retryAfter : true; }

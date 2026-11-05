@@ -1,4 +1,14 @@
-# Graphite — Style Reference
+# Diseño de nabnab 0.2
+
+El encargo de nabnab define la dirección vigente. Los detalles Graphite que siguen se conservan como referencia histórica de 0.1; no autorizan efectos de cristal, espectros de color ni composición de landing.
+
+La app es una herramienta de escritorio monocromática. Su entrada y el emblema geométrico son el foco de Inicio. Descargas utiliza filas compactas; Biblioteca, una cuadrícula o lista e inspector; Herramientas comparte selección, opciones, destino y cola.
+
+Tokens canónicos: fondo `#090A0C`, secundario `#101114`, elevado `#17191D`, hover `#1E2126`, borde `#2B2E34`, texto `#F2F2F3`, secundario `#B2B5BD`, auxiliar `#858A95`, acción clara `#E9EBEF`. Espaciado 4/8/12/16/24/32, controles 36–40 px, radios 8–10 px y paneles 12–14 px. Fuente de sistema, 13–15 px habitual, títulos 20–24 px.
+
+Ventana inicial 1180 × 780, mínimo 900 × 620. Navegación de 200 px expandida y 64 px contraída. Foco visible, errores con texto, estados deshabilitados y movimiento reducido. El campo y el emblema reutilizan el renderer existente y se detienen fuera de Inicio o con la ventana oculta.
+
+## Archivo de referencia Graphite
 > Luminous terminal lattice. Build dark, bordered product surfaces around precise white typography and sparse bursts of spectral light.
 
 **Theme:** dark

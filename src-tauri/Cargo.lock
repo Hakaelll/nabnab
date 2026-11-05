@@ -1857,6 +1857,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "nabnab"
+version = "0.2.0"
+dependencies = [
+ "httpdate",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tokio",
+ "url",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "native-tls"
 version = "0.2.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4524,23 +4541,6 @@ dependencies = [
  "quote",
  "syn 3.0.9",
  "synstructure",
-]
-
-[[package]]
-name = "ytnabber"
-version = "0.1.1"
-dependencies = [
- "httpdate",
- "reqwest",
- "serde",
- "serde_json",
- "sha2",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tokio",
- "url",
- "windows-sys 0.61.2",
 ]
 
 [[package]]
