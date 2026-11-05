@@ -1,0 +1,49 @@
+# Evolución a nabnab
+
+Estado inicial: `7f533a8`, rama de trabajo `codex/nabnab`. El encargo completo está en `../artifacts/nabnab-spec.md` (copia local del encargo, excluida de Git). Las decisiones visuales de ese encargo sustituyen a los tratamientos históricos de `design-reference.md` y `OPTICAL-GLASS.md`.
+
+## Auditoría inicial
+
+- Tauri 2, Rust, TypeScript y Vite. Sin framework UI, reproductor ni motor 3D añadido.
+- Una ventana con análisis cancelable, una descarga, perfiles MP4/MP3/M4A/Opus, directorio persistido como `destination.json` y actualización explícita de yt-dlp.
+- Los recursos instalados resuelven yt-dlp, FFmpeg, ffprobe y Deno desde `resource_dir/engines`; Deno recibe una ruta explícita. No se usa PATH para motores.
+- No existen historial, colecciones, credenciales, cola persistente ni extensión que migrar. No se inventarán ubicaciones antiguas.
+- Identidad instalada `com.ytnabber.desktop`. Se conserva para acceso a configuración, motores actualizados y continuidad de NSIS. Marca visible y binario nuevos: `nabnab`.
+- La copia de trabajo no contiene motores, dependencias JS ni artefactos compilados. Node no está en PATH; se utiliza el runtime de desarrollo de Codex. La primera prueba de Cargo requiere acceso al registro. Esto limita la medición inicial instalada.
+- Omniget consultado en `b4c733f5a8a699634845e445fc8f162acde547c9`, GPL-3.0. Referencia conceptual de contratos, sin reutilizar código. Su cola/history no equivalen a una biblioteca local; su puente HTTP no cumple los requisitos de esta tarea.
+
+## Arquitectura y propiedad de archivos
+
+- `model.rs`, `providers.rs`, `engine.rs`, `media.rs`: URLs, metadatos y capacidades; procesos y verificación existentes conservados.
+- `store.rs`, `library.rs`: repositorio JSON versionado y reemplazo atómico, bloqueo exclusivo, migración idempotente e índices de archivos autorizados. Un escritor bajo mutex. No se necesita SQLite para esta primera colección local.
+- `queue.rs`: IDs estables y ejecuciones distintas; un planificador para red y procesamiento, límite por dominio, persistencia en transiciones y progreso efímero. Eventos antiguos descartados. Recuperación pausada.
+- `tools.rs`: cuatro operaciones FFmpeg, argumentos estructurados, salida temporal y ffprobe. La cola publica resultados e indexa archivos.
+- `main.rs`: frontera IPC y diálogos; valida entradas, autoriza archivos y adapta servicios.
+- `src/`: navegación, captura, cola, biblioteca, herramientas y ajustes; tokens del encargo, emblema y campo de caracteres existentes.
+- `browser-extension/` y puente local: solicitudes identificadas, emparejamiento explícito, revocación y permisos mínimos. Sin extracción en el navegador.
+
+## Plan verificable
+
+- [x] Leer encargo, Git, configuración, motores, persistencia y referencia.
+- [ ] Registrar comprobaciones iniciales y capturar UI anterior donde sea ejecutable.
+- [ ] Marca, ventana, navegación y migración con pruebas de arranque repetido.
+- [ ] Contratos de proveedores, lotes, perfiles y cola persistente con cancelación real.
+- [ ] Biblioteca autorizada, importación, colecciones, etiquetas e inspector con fallback local.
+- [ ] Convertir, extraer audio, recortar y comprimir conectados a cola y biblioteca.
+- [ ] Motores, ajustes, sesiones y privacidad con errores accionables.
+- [ ] Extensión y transporte local protegido; pruebas de reenvío y clientes no autorizados.
+- [ ] Compilación, pruebas nativas/JS, recorridos reales con archivos autorizados, revisión visual y empaquetado.
+- [ ] Matriz de plataformas y mediciones reales; separar comprobado y pendiente.
+
+Cada unidad se verifica antes de commit y push. No se certifica una plataforma mediante fixtures. Las pruebas de códecs usan archivos sintéticos locales autorizados; las de plataformas requieren fuentes autorizadas y se registran por separado.
+
+## Riesgos que deben probarse
+
+1. Corte durante persistencia/publicación y segundo arranque sin duplicados.
+2. Cancelación con procesos descendientes y resultados parciales.
+3. URLs engañosas, red privada, consultas sensibles, symlinks y colisiones de nombres.
+4. Metadatos fuera de orden y cambios de selección mientras hay trabajos activos.
+5. Biblioteca grande, archivos desaparecidos, ventana pequeña, escalado y teclado.
+
+La evidencia y las limitaciones se actualizarán en `NABNAB-VERIFICATION.md`; el registro de decisiones está en `decisions.tsv`.
+

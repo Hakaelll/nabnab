@@ -1,0 +1,4 @@
+ts	phase	decision	why	evidence	result
+2026-11-05T19:14:24.7874603Z	audit	Keep Tauri Rust and vanilla TypeScript	Existing engine runner already owns subprocess cancellation and codec verification	src-tauri/src/engine.rs; src-tauri/src/media.rs	implementation planned
+2026-11-05T19:14:24.7874603Z	identity	Keep com.ytnabber.desktop as installation and data identifier	Existing settings and updater must remain reachable	src-tauri/tauri.conf.json	compatibility identifier retained
+2026-11-05T19:14:24.7874603Z	reference	Use Omniget contracts only without copying code	GPL reference includes products outside scope and unsafe bridge defaults	https://github.com/OpenSelena/omniget/tree/b4c733f5a8a699634845e445fc8f162acde547c9	reference audited
