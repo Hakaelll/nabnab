@@ -1,6 +1,7 @@
 use crate::library::LibraryItem;
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::BTreeMap,
     fs::{self, File, OpenOptions},
     io::{Read, Write},
     path::{Path, PathBuf},
@@ -18,6 +19,7 @@ pub struct Settings {
     pub network_limit: usize,
     pub processing_limit: usize,
     pub reduced_motion: bool,
+    pub reduced_transparency: bool,
     pub sidebar_expanded: bool,
     pub tray_enabled: bool,
     pub close_to_tray: bool,
@@ -32,6 +34,7 @@ impl Default for Settings {
             network_limit: 3,
             processing_limit: 1,
             reduced_motion: false,
+            reduced_transparency: false,
             sidebar_expanded: true,
             tray_enabled: false,
             close_to_tray: false,
@@ -69,6 +72,20 @@ pub struct Data {
     pub library: Vec<LibraryItem>,
     #[serde(default)]
     pub collections: Vec<String>,
+    #[serde(default, serialize_with = "serialize_live_cooldowns")]
+    pub cooldowns: BTreeMap<String, u64>,
+}
+
+fn serialize_live_cooldowns<S: serde::Serializer>(
+    cooldowns: &BTreeMap<String, u64>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    let now = crate::queue::now();
+    let live: BTreeMap<_, _> = cooldowns
+        .iter()
+        .filter(|(_, until)| **until > now)
+        .collect();
+    live.serialize(serializer)
 }
 
 impl Data {
@@ -80,6 +97,16 @@ impl Data {
             ));
         }
         self.settings.validate()?;
+        if self.cooldowns.len() > crate::queue::MAX_PROVIDER_COOLDOWNS
+            || (self.cooldowns.len() == crate::queue::MAX_PROVIDER_COOLDOWNS
+                && !self.cooldowns.contains_key("*"))
+            || self
+                .cooldowns
+                .keys()
+                .any(|key| !crate::providers::valid_scope_key(key))
+        {
+            return Err("The saved provider cooldown map is invalid or exceeds its limit.".into());
+        }
         for job in &self.jobs {
             job.validate_public_source()?;
         }
@@ -194,6 +221,7 @@ impl Repository {
                 jobs: Vec::new(),
                 library: Vec::new(),
                 collections: Vec::new(),
+                cooldowns: BTreeMap::new(),
             }
         };
         if data.schema_version == 1 {
@@ -209,6 +237,8 @@ impl Repository {
         for job in &mut data.jobs {
             job.recover();
         }
+        let now = crate::queue::now();
+        data.cooldowns.retain(|_, until| *until > now);
         let repository = Self {
             data,
             root: root.to_owned(),
@@ -289,6 +319,67 @@ mod tests {
         assert_eq!(repository.data.settings.folder, folder);
         assert_eq!(repository.data.collections, vec!["Music"]);
         assert!(repository.data.settings.reduced_motion);
+        drop(repository);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn additive_cooldowns_default_empty_and_expired_entries_are_pruned_on_save() {
+        let root = directory();
+        let repository = Repository::open(&root, &root).unwrap();
+        drop(repository);
+        let mut previous: serde_json::Value =
+            serde_json::from_slice(&fs::read(root.join(STATE_FILE)).unwrap()).unwrap();
+        previous.as_object_mut().unwrap().remove("cooldowns");
+        fs::write(
+            root.join(STATE_FILE),
+            serde_json::to_vec(&previous).unwrap(),
+        )
+        .unwrap();
+        let mut repository = Repository::open(&root, &root).unwrap();
+        assert!(repository.data.cooldowns.is_empty());
+        let until = crate::queue::now() + 180_000;
+        repository.data.cooldowns.insert("Youtube".into(), until);
+        repository.data.cooldowns.insert("Vimeo".into(), 1);
+        repository.save().unwrap();
+        let saved: serde_json::Value =
+            serde_json::from_slice(&fs::read(root.join(STATE_FILE)).unwrap()).unwrap();
+        assert_eq!(saved["cooldowns"], serde_json::json!({"Youtube":until}));
+        drop(repository);
+        let repository = Repository::open(&root, &root).unwrap();
+        assert_eq!(repository.data.cooldowns.len(), 1);
+        assert_eq!(repository.data.cooldowns["Youtube"], until);
+        drop(repository);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn invalid_or_excessive_cooldowns_cannot_replace_saved_data() {
+        let root = directory();
+        let mut repository = Repository::open(&root, &root).unwrap();
+        let before = fs::read(root.join(STATE_FILE)).unwrap();
+        let until = crate::queue::now() + 180_000;
+        repository
+            .data
+            .cooldowns
+            .insert("https://example.org/secret".into(), until);
+        assert!(repository.save().is_err());
+        assert_eq!(fs::read(root.join(STATE_FILE)).unwrap(), before);
+        repository.data.cooldowns = (0..crate::queue::MAX_PROVIDER_COOLDOWNS)
+            .map(|index| (format!("host-{index}.example.org"), until))
+            .collect();
+        assert!(repository.save().is_err());
+        assert_eq!(fs::read(root.join(STATE_FILE)).unwrap(), before);
+        repository.data.cooldowns.remove("host-0.example.org");
+        repository.data.cooldowns.insert("*".into(), until);
+        repository.save().unwrap();
+        repository
+            .data
+            .cooldowns
+            .insert("excess.example.org".into(), until);
+        let before = fs::read(root.join(STATE_FILE)).unwrap();
+        assert!(repository.save().is_err());
+        assert_eq!(fs::read(root.join(STATE_FILE)).unwrap(), before);
         drop(repository);
         fs::remove_dir_all(root).unwrap();
     }
@@ -396,6 +487,7 @@ mod tests {
             crate::model::Format::Mp4,
             None,
             None,
+            None,
             "legacy-migration",
         )
         .unwrap();
@@ -481,6 +573,7 @@ mod tests {
             vec!["https://example.org/media?api_key=WRITE-GUARD-SECRET".into()],
             vec![],
             crate::model::Format::Mp4,
+            None,
             None,
             None,
             "write-guard",

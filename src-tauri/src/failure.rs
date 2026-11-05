@@ -90,6 +90,13 @@ impl Failure {
                 false,
             )
         } else if has(&[
+            "selected subtitles",
+            "requested subtitle",
+            "subtitle track",
+            "embedded subtitle",
+        ]) {
+            ("subtitles", "The selected subtitles could not be embedded. Choose another manual language or download without subtitles. The media was kept for recovery.", false)
+        } else if has(&[
             "ffmpeg",
             "ffprobe",
             "postprocess",
@@ -163,7 +170,7 @@ impl Failure {
                             .map(|wait| wait.as_secs() + 1)
                     })
             });
-            Some(exposed.unwrap_or(60).max(60))
+            Some(exposed.unwrap_or(120).max(60))
         } else {
             None
         };
@@ -208,6 +215,18 @@ mod tests {
         assert_eq!(
             Failure::classify("HTTP Error 429\nRetry-After: 120", "download").retry_after,
             Some(120)
+        );
+        assert_eq!(
+            Failure::classify("HTTP Error 429: Too Many Requests", "download").retry_after,
+            Some(120)
+        );
+        assert_eq!(
+            Failure::classify("HTTP Error 429\nRetry-After: 90", "download").retry_after,
+            Some(90)
+        );
+        assert_eq!(
+            Failure::classify("HTTP Error 429\nRetry-After: 5", "download").retry_after,
+            Some(60)
         );
         let tomorrow = std::time::SystemTime::now() + std::time::Duration::from_secs(86400);
         let wait = Failure::classify(

@@ -1,0 +1,31 @@
+# Embedded manual subtitles
+
+The video download flow offers one manual subtitle language when the inspected item reports an available manual track. The selection is optional and applies to the compatible MP4 and original video profiles. Audio profiles, batches and direct HTTP files do not advertise this option.
+
+`Media.subtitleLanguages` contains at most 50 language keys from yt-dlp's `subtitles` object. Empty format lists, protected tracks, malformed entries, automatic captions and batch metadata are excluded. Language keys have a recognized two- or three-letter ISO primary component and optional alphanumeric components separated by `-` or `_`, up to 24 characters. Reserved `all` and `live_chat` values, undefined language codes and regular expressions are rejected.
+
+`engine::subtitle_args` validates the native selection again. It supplies `--write-subs`, one anchored exact language selector via `--sub-langs`, `--embed-subs` and `--no-write-auto-subs`. These options exist in the pinned yt-dlp 2026.10.26 distribution. No remote executable components are enabled, and captions are retrieved by the existing provider engine from the requested platform and its authorized resources.
+
+Only the final media file is published and indexed. Subtitle sidecars remain in the owned job staging folder and are removed with that job's temporary files after successful publication. Cancellation cleans owned temporary files; publication recovery records may remain after a persistence failure. Sidecars do not become separate library items.
+
+## Conversion and verification
+
+The bundled FFmpeg 9.0.2 build includes the `mov_text` encoder. When compatible MP4 requires video or audio conversion, `media::prepare` explicitly maps embedded subtitle streams and encodes them as MP4 timed text. An already compatible file is retained. A cached conversion that lost captions is rejected and regenerated from the retained input.
+
+After conversion, the media layer checks both the total subtitle track count and the count for each known source language. A cache containing only English captions cannot replace a Spanish source track, even when the total count matches. The queue also calls `media::validate_subtitle` for an explicitly requested language before publishing the result. A successful engine exit without a matching embedded subtitle language fails that check and leaves recoverable media for review. The user can choose another manual language or download without subtitles.
+
+The verification requires a real subtitle stream with a recognized codec and a matching language tag. It normalizes ISO 639-1, ISO 639-2/T and bibliographic aliases: `es` matches `spa`, `de` matches `deu` or `ger`, and `en-US` matches `eng`. A request for Spanish rejects an English-only file. Missing, unregistered, `und`, `mul`, `mis` and `zxx` tags do not prove a selected language. Matching covers the primary language; it does not certify a region, dialect or the actual language of the subtitle text. Text subtitles can be converted to MP4 timed text; bitmap subtitle formats can fail conversion rather than being silently discarded. Original video quality can retain a suitable original container and subtitle codec.
+
+The normalizer contains a fixed factual snapshot of the [Library of Congress ISO 639-2 table](https://www.loc.gov/standards/iso639-2/ISO-639-2_utf-8.txt), consulted on 5 November 2026. Its 482 entries retain only canonical codes and aliases, excluding undefined and private-use ranges; no runtime lookup or dependency is added. The source snapshot SHA-256 is `42b71885e4dc885559fda5ad059fd81838cf4782cedb5fd08cc3431f7d067371`. No yt-dlp implementation was copied. The pinned [subtitle embedder](https://github.com/yt-dlp/yt-dlp/blob/2026.10.26/yt_dlp/postprocessor/ffmpeg.py#L525-L596) and [language conversion helper](https://github.com/yt-dlp/yt-dlp/blob/2026.10.26/yt_dlp/utils/_utils.py#L3566-L3569) were inspected to confirm that embedding writes language metadata and that a skipped embedding step can retain previous subtitle tracks. This is why track count alone is insufficient.
+
+## Executable checks
+
+- `model::tests::subtitle_metadata_lists_only_available_manual_languages` and `subtitle_metadata_is_bounded_and_legacy_media_defaults_to_no_selection` cover the metadata contract and older data without the new field.
+- `engine::tests::subtitles_are_one_exact_manual_language_and_never_an_audio_profile` covers exact selection, reserved values, argument injection and profile limits.
+- `media::tests::subtitle_validation_requires_an_embedded_track_and_preserves_existing_tracks` covers missing captions and conversion loss.
+- `media::tests::subtitle_language_must_match_the_requested_primary_language`, `subtitle_preservation_keeps_known_languages_not_just_track_count`, and `model::tests::subtitle_language_tags_normalize_official_iso_aliases_without_guessing` cover wrong, missing and undefined tags, ISO aliases and replacement of a known language.
+- The ignored `media::tests::real_engines_subtitles_survive_copy_and_compatible_video_conversion` creates synthetic local captions and video, embeds MP4 timed text, converts a VP9/Opus/SubRip MKV to compatible H.264/AAC/MP4 timed text, extracts the resulting subtitle text and checks that input bytes remain unchanged. It replaces valid MP4 caches missing captions or containing English instead of Spanish, then reuses a correct cache byte-for-byte. Run with `cargo test --manifest-path src-tauri/Cargo.toml real_engines_subtitles -- --ignored --nocapture` after preparing the managed engines.
+
+On 5 November 2026, the latest `cargo test --manifest-path src-tauri/Cargo.toml subtitle -- --nocapture` run passed all seven subtitle unit checks. The explicit ignored real-engine command above passed using the managed FFmpeg 9.0.2 bundle. Both paths retained one `mov_text` track tagged `spa`, rejected validation as English, and extracting that track returned the literal synthetic Spanish captions, including Unicode text. The fixture also verified recovery from the wrong-language cache and that source video bytes remained unchanged.
+
+The local engine check verifies embedding and conversion. It does not certify subtitle availability or retrieval on any remote platform; those results belong in the platform matrix after an authorized live test.

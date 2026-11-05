@@ -23,10 +23,34 @@ pub fn engine_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(root)
 }
 
+pub fn subtitle_args(
+    language: Option<&str>,
+    format: crate::model::Format,
+) -> Result<Vec<String>, String> {
+    let Some(language) = language else {
+        return Ok(Vec::new());
+    };
+    if !format.is_video() {
+        return Err("Subtitles can be embedded only with a video output profile.".into());
+    }
+    if crate::model::normalized_subtitle_language(language).is_none() {
+        return Err("Choose one available manual subtitle language.".into());
+    }
+    Ok(vec![
+        "--write-subs".into(),
+        "--sub-langs".into(),
+        format!("^{language}$"),
+        "--embed-subs".into(),
+        "--no-write-auto-subs".into(),
+    ])
+}
+
 pub fn base_args(root: &Path) -> Vec<String> {
     vec![
         "--ignore-config".into(),
         "--no-plugin-dirs".into(),
+        "--use-extractors".into(),
+        "default,-generic".into(),
         "--no-remote-components".into(),
         "--no-playlist".into(),
         "--no-color".into(),
@@ -346,6 +370,56 @@ pub fn download_args(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn subtitles_are_one_exact_manual_language_and_never_an_audio_profile() {
+        assert_eq!(
+            subtitle_args(None, crate::model::Format::Mp3).unwrap(),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            subtitle_args(Some("en-US"), crate::model::Format::Mp4).unwrap(),
+            vec![
+                "--write-subs",
+                "--sub-langs",
+                "^en-US$",
+                "--embed-subs",
+                "--no-write-auto-subs"
+            ]
+        );
+        assert!(subtitle_args(Some("es"), crate::model::Format::Source).is_ok());
+        for language in [
+            "all",
+            "ALL",
+            "live_chat",
+            "en.*",
+            "en,es",
+            "--exec",
+            "en\n--exec",
+            "../en",
+            "en--US",
+            "a",
+            "123",
+            "en-é",
+            "und",
+            "xyz",
+            "mul",
+            "zxx",
+        ] {
+            assert!(
+                subtitle_args(Some(language), crate::model::Format::Mp4).is_err(),
+                "{language}"
+            );
+        }
+        for format in [
+            crate::model::Format::Mp3,
+            crate::model::Format::M4a,
+            crate::model::Format::Opus,
+            crate::model::Format::AudioOriginal,
+        ] {
+            assert!(subtitle_args(Some("en"), format).is_err());
+        }
+    }
 
     #[test]
     fn analysis_is_bounded_and_does_not_download_or_enable_remote_code() {

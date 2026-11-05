@@ -1,12 +1,15 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod browser;
 mod dependencies;
+mod direct;
 mod engine;
 mod failure;
 mod library;
 mod local_media;
 mod media;
 mod model;
+#[cfg(test)]
+mod platform_checks;
 mod preferences;
 mod providers;
 mod queue;
@@ -152,7 +155,8 @@ async fn inspect_media(
 ) -> Result<Media, Failure> {
     let url = model::validate_url(&url)?;
     let receiver = {
-        let _repository = state.repository.lock().unwrap();
+        let repository = state.repository.lock().unwrap();
+        queue::check_cooldown(repository.as_ref().ok_or("Open the app first.")?, &url)?;
         if state.runtime.updating.load(Ordering::SeqCst) {
             return Err("Wait for the engine update to finish.".into());
         }
@@ -170,6 +174,13 @@ async fn inspect_media(
     };
     let result = async {
         let url = providers::validate_remote(&url).await?;
+        if providers::identify(&url)?.id == providers::ProviderId::Generic {
+            let metadata = direct::inspect(&url, request_id, receiver).await?;
+            if state.latest_metadata.load(Ordering::SeqCst) != request_id {
+                return Err(engine::CANCELLED.into());
+            }
+            return Ok(metadata);
+        }
         let root = engine::engine_dir(&app)?;
         let cookies = sessions::materialize(&config_root(&state)?, &url)?;
         let mut args = engine::inspect_args(&root, &url);
@@ -194,11 +205,25 @@ async fn inspect_media(
         model::parse_media(&raw, request_id)
     }
     .await;
-    let mut active = state.metadata.lock().unwrap();
-    if active.as_ref().is_some_and(|(id, _)| *id == request_id) {
-        *active = None;
+    {
+        let mut active = state.metadata.lock().unwrap();
+        if active.as_ref().is_some_and(|(id, _)| *id == request_id) {
+            *active = None;
+        }
     }
-    result.map_err(|e| Failure::classify(&e, "extraction"))
+    result.map_err(|raw| {
+        let mut failure = Failure::classify(&raw, "extraction");
+        if failure.code == "rate_limited" {
+            failure.retry_after = Some(queue::cooldown_seconds(failure.retry_after));
+        }
+        if let Err(error) = queue::record_metadata_failure(&state, &url, &failure) {
+            failure.technical.push_str(&format!(
+                "\nCould not persist the shared cooldown: {}",
+                failure::sanitize(&error)
+            ));
+        }
+        failure
+    })
 }
 #[tauri::command]
 fn cancel_job(state: State<Arc<AppState>>, kind: String, request_id: u64) -> Result<(), String> {
@@ -221,6 +246,7 @@ fn queue_download(
     format: Format,
     height: Option<u32>,
     audio_bitrate: Option<u16>,
+    subtitle_language: Option<String>,
     client_request: String,
 ) -> Result<Vec<queue::Job>, String> {
     let jobs = {
@@ -232,6 +258,7 @@ fn queue_download(
             format,
             height,
             audio_bitrate,
+            subtitle_language,
             &client_request,
         )?
     };
@@ -296,6 +323,7 @@ pub(crate) async fn accept_browser(
             vec![request.url],
             vec![],
             format,
+            None,
             None,
             None,
             &request_id,

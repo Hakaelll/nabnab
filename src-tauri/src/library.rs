@@ -30,6 +30,8 @@ pub struct LibraryItem {
     pub parent_id: Option<String>,
     pub collections: Vec<String>,
     pub tags: Vec<String>,
+    #[serde(default)]
+    pub content_hash: Option<String>,
 }
 
 fn extension_kind(path: &Path) -> Option<&'static str> {
@@ -116,6 +118,15 @@ pub fn index(
                 .iter()
                 .find(|stream| stream["codec_type"] == "audio")
         });
+    let kind = if kind == "image" {
+        kind
+    } else if video.is_some() {
+        "video"
+    } else if audio.is_some() {
+        "audio"
+    } else {
+        kind
+    };
     let duration = info
         .and_then(|v| v["format"]["duration"].as_str())
         .and_then(|v| v.parse::<f64>().ok())
@@ -158,6 +169,7 @@ pub fn index(
         parent_id,
         collections: Vec::new(),
         tags: Vec::new(),
+        content_hash: None,
     })
 }
 
@@ -347,6 +359,21 @@ pub fn locate(repository: &mut Repository, id: &str, path: &Path) -> Result<(), 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn probed_tracks_determine_audio_and_video_filters() {
+        let root = std::env::temp_dir().join(format!(
+            "nabnab-kind-{}-{}",
+            std::process::id(),
+            crate::queue::now()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let file = root.join("audio-in-video-container.mp4");
+        fs::write(&file, b"original").unwrap();
+        let info = serde_json::json!({"streams":[{"codec_type":"audio","codec_name":"aac"},{"codec_type":"video","codec_name":"mjpeg","disposition":{"attached_pic":1}}],"format":{"format_name":"mov,mp4,m4a,3gp,3g2,mj2","duration":"10"}});
+        assert_eq!(index(&file, Some(&info), None, None).unwrap().kind, "audio");
+        assert_eq!(fs::read(&file).unwrap(), b"original");
+        fs::remove_dir_all(root).unwrap();
+    }
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static NEXT: AtomicU64 = AtomicU64::new(1);

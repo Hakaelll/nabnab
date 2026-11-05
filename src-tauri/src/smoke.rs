@@ -1,4 +1,4 @@
-//! Opt-in checks against public media with the exact engine arguments used by the app.
+//! Legacy engine regressions with explicit HTTP fixtures. Native direct HTTP is tested separately.
 use crate::{
     engine,
     model::{self, Format, Progress},
@@ -12,6 +12,31 @@ use std::{
 };
 use tokio::sync::watch;
 
+fn fixture_base_args(root: &Path) -> Vec<String> {
+    let mut args = engine::base_args(root);
+    // Only this test module enables the generic extractor for its controlled HTTP fixtures.
+    args.extend(["--use-extractors".into(), "default".into()]);
+    args
+}
+fn fixture_download_args(
+    root: &Path,
+    format: Format,
+    height: Option<u32>,
+    staging: &Path,
+    url: &str,
+) -> Vec<String> {
+    let mut args = engine::download_args(root, format, height, staging, url);
+    if crate::providers::identify(url)
+        .map_or(true, |p| p.id == crate::providers::ProviderId::Generic)
+    {
+        let index = args
+            .iter()
+            .position(|arg| arg == "--")
+            .expect("URL argument boundary");
+        args.splice(index..index, ["--use-extractors".into(), "default".into()]);
+    }
+    args
+}
 fn engines() -> PathBuf {
     std::env::var_os("YTNABBER_TEST_ENGINES")
         .map(PathBuf::from)
@@ -44,17 +69,18 @@ async fn real_engines_stop_on_http_429() {
     use std::{
         io::{Read, Write},
         net::TcpListener,
-        sync::atomic::{AtomicUsize, Ordering},
-        time::{Duration, Instant},
+        sync::atomic::{AtomicBool, AtomicUsize, Ordering},
+        time::Duration,
     };
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
     listener.set_nonblocking(true).unwrap();
     let count = Arc::new(AtomicUsize::new(0));
     let requests = count.clone();
+    let stopped = Arc::new(AtomicBool::new(false));
+    let stop = stopped.clone();
     let server = std::thread::spawn(move || {
-        let start = Instant::now();
-        while start.elapsed() < Duration::from_secs(4) {
+        while !stop.load(Ordering::SeqCst) {
             if let Ok((mut socket, _)) = listener.accept() {
                 socket
                     .set_read_timeout(Some(Duration::from_secs(1)))
@@ -70,20 +96,24 @@ async fn real_engines_stop_on_http_429() {
     });
     let root = engines();
     let (_sender, cancel) = watch::channel(false);
-    let mut args = engine::base_args(&root);
+    let mut args = fixture_base_args(&root);
     args.extend([
         "--dump-single-json".into(),
         "--".into(),
         format!("http://{address}/fixture.mp4"),
     ]);
-    let raw = engine::run(&root, args, cancel, 99, true, |_| {})
-        .await
-        .unwrap_err();
+    let outcome = engine::run(&root, args, cancel, 99, true, |_| {}).await;
+    stopped.store(true, Ordering::SeqCst);
+    server
+        .join()
+        .expect("The local HTTP fixture must stop after the engine exits");
+    let raw = outcome.expect_err("The HTTP 429 fixture must fail with a structured rate limit");
+    let diagnostic = crate::failure::sanitize(&raw);
     assert_eq!(
         crate::failure::Failure::classify(&raw, "extraction").code,
-        "rate_limited"
+        "rate_limited",
+        "{diagnostic}"
     );
-    server.join().unwrap();
     assert_eq!(
         count.load(Ordering::SeqCst),
         1,
@@ -138,7 +168,7 @@ async fn real_engines_offline_codec_conversion() {
     ] {
         let staging = folder.join(extension);
         fs::create_dir(&staging).unwrap();
-        let mut args = engine::download_args(&root, format, None, &staging, url.as_str());
+        let mut args = fixture_download_args(&root, format, None, &staging, url.as_str());
         args.insert(0, "--enable-file-urls".into());
         let file = engine::run(&root, args, cancel.clone(), 90, false, |_| {})
             .await
@@ -270,7 +300,7 @@ async fn real_engines_720p_and_1080p_compatible_profiles() {
         let staging = folder.join(height.to_string());
         fs::create_dir(&staging).unwrap();
         let mut args =
-            engine::download_args(&root, Format::Mp4, Some(height), &staging, url.as_str());
+            fixture_download_args(&root, Format::Mp4, Some(height), &staging, url.as_str());
         args.truncate(args.len() - 2);
         args.extend([
             "--enable-file-urls".into(),
@@ -321,7 +351,7 @@ async fn real_engines_public_hd_samples() {
     for height in [720, 1080] {
         let staging = folder.join(height.to_string());
         fs::create_dir(&staging).unwrap();
-        let mut args = engine::download_args(&root, Format::Mp4, Some(height), &staging, url);
+        let mut args = fixture_download_args(&root, Format::Mp4, Some(height), &staging, url);
         let before_url = args.len() - 2;
         args.splice(
             before_url..before_url,
@@ -440,7 +470,7 @@ async fn real_engines_download_convert_report_progress_and_cancel() {
     fs::create_dir_all(&folder).unwrap();
     let url = "https://www.w3schools.com/html/mov_bbb.mp4";
     let (_sender, receiver) = watch::channel(false);
-    let mut args = engine::base_args(&root);
+    let mut args = fixture_base_args(&root);
     args.extend([
         "--dump-single-json".into(),
         "--skip-download".into(),
@@ -465,7 +495,7 @@ async fn real_engines_download_convert_report_progress_and_cancel() {
         let recorded = events.clone();
         let file = engine::run(
             &root,
-            engine::download_args(&root, format, None, &staging, url),
+            fixture_download_args(&root, format, None, &staging, url),
             receiver,
             id,
             false,
@@ -520,7 +550,7 @@ async fn real_engines_download_convert_report_progress_and_cancel() {
     let staging = folder.join("cancelled");
     fs::create_dir(&staging).unwrap();
     let (sender, receiver) = watch::channel(false);
-    let mut args = engine::download_args(&root, Format::Mp4, None, &staging, url);
+    let mut args = fixture_download_args(&root, Format::Mp4, None, &staging, url);
     args.splice(0..0, ["--limit-rate".into(), "10K".into()]);
     let start = std::time::Instant::now();
     let result = engine::run(&root, args, receiver, 5, false, move |progress| {
@@ -557,7 +587,7 @@ async fn real_engines_download_convert_report_progress_and_cancel() {
     fs::write(partial, &original[..32768]).unwrap();
     let resumed = Command::new(root.join("yt-dlp.exe"))
         .arg("--no-quiet")
-        .args(engine::download_args(
+        .args(fixture_download_args(
             &root,
             Format::Mp4,
             None,
@@ -587,7 +617,7 @@ async fn real_engines_download_convert_report_progress_and_cancel() {
     assert_eq!(fs::read(resumed_file).unwrap(), original);
     println!("Persisted interruption fixture resumed from 32 KiB and matched the complete media.");
     let (_sender, receiver) = watch::channel(false);
-    let mut args = engine::base_args(&root);
+    let mut args = fixture_base_args(&root);
     args.extend([
         "--dump-single-json".into(),
         "--".into(),
@@ -616,7 +646,7 @@ async fn real_engines_youtube_metadata_and_separate_track_merge() {
     fs::create_dir_all(&folder).unwrap();
     let url = "https://www.youtube.com/watch?v=jNQXAC9IVRw";
     let (_sender, receiver) = watch::channel(false);
-    let mut args = engine::base_args(&root);
+    let mut args = fixture_base_args(&root);
     args.extend([
         "--dump-single-json".into(),
         "--skip-download".into(),
@@ -630,7 +660,7 @@ async fn real_engines_youtube_metadata_and_separate_track_merge() {
     assert_eq!(media.title, "Me at the zoo");
     assert!(media.duration.is_some() && media.thumbnail.is_some());
     let height = *media.heights.last().unwrap();
-    let mut download_args = engine::download_args(&root, Format::Mp4, Some(height), &folder, url);
+    let mut download_args = fixture_download_args(&root, Format::Mp4, Some(height), &folder, url);
     download_args.splice(0..0, ["--verbose".into(), "--no-cache-dir".into()]);
     let output = Command::new(root.join("yt-dlp.exe"))
         .args(download_args)
@@ -690,7 +720,7 @@ async fn real_engines_windows_filename_regression() {
         ));
     fs::create_dir_all(&folder).unwrap();
     let (sender, receiver) = watch::channel(false);
-    let mut args = engine::download_args(
+    let mut args = fixture_download_args(
         &root,
         Format::Mp4,
         None,
@@ -730,7 +760,7 @@ async fn real_engines_cancel_during_ffmpeg_conversion() {
     let output_seen = Arc::new(AtomicBool::new(false));
     let checked_output = output_seen.clone();
     let destination = folder.clone();
-    let mut args = engine::download_args(
+    let mut args = fixture_download_args(
         &root,
         Format::Mp3,
         None,

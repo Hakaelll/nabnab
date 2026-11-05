@@ -76,6 +76,44 @@ pub fn identify(input: &str) -> Result<ProviderInfo, String> {
     })
 }
 
+pub fn scope(input: &str) -> Result<String, String> {
+    let provider = identify(input)?;
+    Ok(if provider.id == ProviderId::Generic {
+        provider.host
+    } else {
+        format!("{:?}", provider.id)
+    })
+}
+
+pub(crate) fn valid_scope_key(key: &str) -> bool {
+    if key == "*" {
+        return true;
+    }
+    if matches!(
+        key,
+        "Youtube"
+            | "Twitter"
+            | "Instagram"
+            | "Reddit"
+            | "Tiktok"
+            | "Vimeo"
+            | "Twitch"
+            | "Pinterest"
+    ) {
+        return true;
+    }
+    if key.is_empty()
+        || key.len() > 253
+        || !key
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b".-:[]".contains(&byte))
+    {
+        return false;
+    }
+    identify(&format!("https://{key}"))
+        .is_ok_and(|provider| provider.id == ProviderId::Generic && provider.host == key)
+}
+
 pub(crate) fn is_public_ip(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(ip) => {
@@ -136,6 +174,47 @@ pub async fn validate_remote(input: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cooldown_scopes_share_provider_aliases_and_ignore_generic_ports() {
+        for url in [
+            "https://youtube.com/watch?v=1",
+            "https://www.youtube.com/watch?v=2",
+            "https://youtu.be/3",
+            "https://youtube-nocookie.com/embed/4",
+        ] {
+            assert_eq!(scope(url).unwrap(), "Youtube");
+        }
+        assert_eq!(scope("https://x.com/a").unwrap(), "Twitter");
+        assert_eq!(scope("https://twitter.com/b").unwrap(), "Twitter");
+        assert_eq!(
+            scope("https://CDN.example.org:8443/media").unwrap(),
+            "cdn.example.org"
+        );
+        assert_eq!(
+            scope("http://cdn.example.org:8080/other").unwrap(),
+            "cdn.example.org"
+        );
+        assert_ne!(
+            scope("https://cdn.example.org/media").unwrap(),
+            scope("https://other.example.org/media").unwrap()
+        );
+        for key in ["Youtube", "Twitter", "cdn.example.org", "1.1.1.1", "*"] {
+            assert!(valid_scope_key(key), "{key}");
+        }
+        for key in [
+            "",
+            "https://cdn.example.org",
+            "cdn.example.org/path",
+            "cdn.example.org?token=secret",
+            "cdn.example.org:8443",
+            "youtube.com",
+            "127.0.0.1",
+            "UPPER.example.org",
+        ] {
+            assert!(!valid_scope_key(key), "{key}");
+        }
+    }
 
     #[test]
     fn identifies_hosts_without_trusting_embedded_names() {

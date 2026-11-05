@@ -1,6 +1,6 @@
 # Evolución a nabnab
 
-Estado inicial: `7f533a8`, rama de trabajo `codex/nabnab`. El encargo completo está en `../artifacts/nabnab-spec.md` (copia local del encargo, excluida de Git). Las decisiones visuales de ese encargo sustituyen a los tratamientos históricos de `design-reference.md` y `OPTICAL-GLASS.md`.
+Estado inicial: `7f533a8`, rama inicial `codex/nabnab`. El usuario pidió después integrar y subir directamente a `main`; ese es el destino vigente. El encargo completo está en `../artifacts/nabnab-spec.md` (copia local del encargo, excluida de Git). La dirección visual vigente, incluida la petición posterior explícita de liquid glass, se registra en `design-reference.md`; las referencias de 0.1 se conservan como historia.
 
 ## Auditoría inicial
 
@@ -25,13 +25,13 @@ Estado inicial: `7f533a8`, rama de trabajo `codex/nabnab`. El encargo completo e
 ## Plan verificable
 
 - [x] Leer encargo, Git, configuración, motores, persistencia y referencia.
-- [ ] Registrar comprobaciones iniciales y capturar UI anterior donde sea ejecutable.
+- [x] Registrar comprobaciones iniciales y capturar UI anterior donde sea ejecutable.
 - [x] Marca, ventana, navegación y migración con pruebas de arranque repetido.
 - [x] Contratos de proveedores, lotes, perfiles y cola persistente con cancelación real.
 - [x] Biblioteca autorizada, importación, colecciones, etiquetas e inspector con fallback local.
 - [x] Convertir, extraer audio, recortar y comprimir conectados a cola y biblioteca.
 - [x] Motores, ajustes, sesiones y privacidad con errores accionables.
-- [ ] Extensión y transporte local protegido; pruebas de reenvío y clientes no autorizados.
+- [x] Extensión y transporte local protegido; pruebas reales en Edge de reenvío y clientes no autorizados. Chrome, Firefox y el clic nativo del menú contextual siguen sin certificar.
 - [ ] Compilación, pruebas nativas/JS, recorridos reales con archivos autorizados, revisión visual y empaquetado.
 - [ ] Matriz de plataformas y mediciones reales; separar comprobado y pendiente.
 

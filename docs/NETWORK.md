@@ -17,6 +17,8 @@ No telemetry, analytics, remote fonts, cloud AI, hosted extraction service, thir
 
 Engine repair has no startup download. The caller must obtain the user's consent before invoking it and prevent repair, rollback or updates while any job uses those engines. Local status checks only execute installed tools with version arguments. They do not contact a release service.
 
+A real HTTP 429 records a shared provider or host cooldown alongside the queue. YouTube/youtu.be and X/Twitter aliases share their provider's wait. Analysis and queued downloads check it before starting, and a manual retry cannot clear it. A supplied retry interval is bounded to 24 hours; a missing interval defaults to 120 seconds at the queue boundary. Later failures can extend an existing deadline, while blocked requests do not refresh it. The saved deadline survives restarts, with interrupted jobs still paused for review. Other sites, local tools, pause and cancel remain available. Expired entries are omitted on save. The map allows 4095 active scopes and one overflow deadline; if it fills, that overflow temporarily delays further network work instead of discarding a server's wait.
+
 The URL boundary parses schemes, credentials, hosts and IP addresses. Initial DNS resolution rejects private and reserved destinations. yt-dlp performs its own later DNS, redirect and manifest-resource requests. The initial check is not an isolation boundary for every CDN or HLS/DASH resource. Do not describe it as a complete SSRF sandbox or claim arbitrary manifests are proven safe. Platform verification is recorded separately from these validation checks.
 
 ## Engine provenance and repair

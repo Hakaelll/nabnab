@@ -1,4 +1,7 @@
-use crate::{engine, model::Progress};
+use crate::{
+    engine,
+    model::{Format, Progress},
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
@@ -240,21 +243,83 @@ fn encode_audio(args: &mut Vec<String>, codec: &str) {
     }
 }
 
+fn initial_plan(info: &Value) -> Result<Plan, String> {
+    Ok(Plan {
+        args: Vec::new(),
+        extension: "mp4",
+        container: "mp4",
+        suffix: "converted",
+        video: codec(track(info, "video")).map(str::to_owned),
+        audio: codec(track(info, "audio")).map(str::to_owned),
+        expected_duration: Some(duration(info)?),
+    })
+}
+
+fn configure_audio(p: &mut Plan, format: &str, stream: &Value) -> Result<(), String> {
+    p.suffix = "audio";
+    p.video = None;
+    map_track(&mut p.args, stream)?;
+    let source = stream["codec_name"]
+        .as_str()
+        .ok_or("FFprobe did not identify the audio codec.")?;
+    let encoder = match format {
+        "mp3" => {
+            p.extension = "mp3";
+            p.container = "mp3";
+            p.audio = Some("mp3".into());
+            if source == "mp3" {
+                "copy"
+            } else {
+                "mp3"
+            }
+        }
+        "m4a" => {
+            p.extension = "m4a";
+            p.container = "mp4";
+            p.audio = Some("aac".into());
+            if source == "aac" {
+                "copy"
+            } else {
+                "aac"
+            }
+        }
+        "opus" => {
+            p.extension = "opus";
+            p.container = "ogg";
+            p.audio = Some("opus".into());
+            if source == "opus" {
+                "copy"
+            } else {
+                "opus"
+            }
+        }
+        "original" => {
+            let (extension, container) = original_audio(source)?;
+            p.extension = extension;
+            p.container = container;
+            "copy"
+        }
+        _ => return Err("Unsupported audio output profile.".into()),
+    };
+    add(&mut p.args, &["-vn"]);
+    encode_audio(&mut p.args, encoder);
+    Ok(())
+}
+
+fn finish_plan(p: &mut Plan) {
+    add(&mut p.args, &["-sn", "-dn", "-map_metadata", "-1"]);
+    if p.container == "mp4" {
+        add(&mut p.args, &["-movflags", "+faststart"]);
+    }
+}
+
 fn plan(options: &ToolOptions, info: &Value) -> Result<Plan, String> {
     validate_options(options, info)?;
     let video_track = track(info, "video");
     let audio_track = track(info, "audio");
     let video = codec(video_track);
     let audio = codec(audio_track);
-    let mut p = Plan {
-        args: Vec::new(),
-        extension: "mp4",
-        container: "mp4",
-        suffix: "converted",
-        video: video.map(str::to_owned),
-        audio: audio.map(str::to_owned),
-        expected_duration: Some(duration(info)?),
-    };
+    let mut p = initial_plan(info)?;
     match options {
         ToolOptions::Convert {
             container,
@@ -290,43 +355,11 @@ fn plan(options: &ToolOptions, info: &Value) -> Result<Plan, String> {
             }
         }
         ToolOptions::ExtractAudio { format } => {
-            p.suffix = "audio";
-            p.video = None;
-            map_track(
-                &mut p.args,
+            configure_audio(
+                &mut p,
+                format,
                 audio_track.ok_or("The selected file has no audio track.")?,
             )?;
-            let source = audio.unwrap_or_default();
-            let encoder = match format.as_str() {
-                "mp3" => {
-                    p.extension = "mp3";
-                    p.container = "mp3";
-                    p.audio = Some("mp3".into());
-                    if source == "mp3" {
-                        "copy"
-                    } else {
-                        "mp3"
-                    }
-                }
-                "m4a" => {
-                    p.extension = "m4a";
-                    p.container = "mp4";
-                    p.audio = Some("aac".into());
-                    if source == "aac" {
-                        "copy"
-                    } else {
-                        "aac"
-                    }
-                }
-                _ => {
-                    let (extension, container) = original_audio(source)?;
-                    p.extension = extension;
-                    p.container = container;
-                    "copy"
-                }
-            };
-            add(&mut p.args, &["-vn"]);
-            encode_audio(&mut p.args, encoder);
         }
         ToolOptions::Trim {
             start,
@@ -406,10 +439,35 @@ fn plan(options: &ToolOptions, info: &Value) -> Result<Plan, String> {
             }
         }
     }
-    add(&mut p.args, &["-sn", "-dn", "-map_metadata", "-1"]);
-    if p.container == "mp4" {
-        add(&mut p.args, &["-movflags", "+faststart"]);
+    finish_plan(&mut p);
+    Ok(p)
+}
+
+fn download_audio_plan(format: Format, bitrate: Option<u16>, info: &Value) -> Result<Plan, String> {
+    let requested = match format {
+        Format::Mp3 => "mp3",
+        Format::M4a => "m4a",
+        Format::Opus => "opus",
+        Format::AudioOriginal => "original",
+        Format::Mp4 | Format::Source => return Err("Choose an audio output profile.".into()),
+    };
+    if bitrate
+        .is_some_and(|bitrate| format != Format::Mp3 || !matches!(bitrate, 128 | 192 | 256 | 320))
+    {
+        return Err("Choose a supported MP3 bitrate.".into());
     }
+    let mut p = initial_plan(info)?;
+    configure_audio(
+        &mut p,
+        requested,
+        track(info, "audio").ok_or("The selected file has no audio track.")?,
+    )?;
+    if format == Format::Mp3 {
+        if let Some(index) = p.args.iter().position(|argument| argument == "-b:a") {
+            p.args[index + 1] = format!("{}k", bitrate.unwrap_or(192));
+        }
+    }
+    finish_plan(&mut p);
     Ok(p)
 }
 
@@ -542,12 +600,82 @@ pub async fn execute(
     let (input, staging) = checked_paths(input, staging)?;
     let info = probe_local(root, &input, cancel.clone()).await?;
     let p = plan(options, &info)?;
-    let output = staging.join(format!(
-        "{}.{}.{}",
-        safe_stem(&input),
-        p.suffix,
-        p.extension
-    ));
+    let seek = match options {
+        ToolOptions::Trim { start, precise, .. } => Some((*start, *precise)),
+        _ => None,
+    };
+    execute_plan(root, input, staging, p, seek, cancel, run_id, emit).await
+}
+
+pub async fn execute_download_audio(
+    root: &Path,
+    input: &Path,
+    staging: &Path,
+    format: Format,
+    bitrate: Option<u16>,
+    cancel: watch::Receiver<bool>,
+    run_id: u64,
+    emit: impl Fn(Progress) + Send + Sync + Clone + 'static,
+) -> Result<PathBuf, String> {
+    if *cancel.borrow() {
+        return Err(engine::CANCELLED.into());
+    }
+    let (input, staging) = checked_paths(input, staging)?;
+    let info = probe_local(root, &input, cancel.clone()).await?;
+    let p = download_audio_plan(format, bitrate, &info)?;
+    let output = planned_output(&input, &staging, &p);
+    if output == input {
+        return Err("The audio output cannot replace its original input.".into());
+    }
+    if fs::symlink_metadata(&output).is_ok() {
+        let existing = crate::library::authorized_path(&output)?;
+        if existing.parent() != Some(staging.as_path()) {
+            return Err("The audio output escaped its job folder.".into());
+        }
+        phase(&emit, run_id, "verifying");
+        if probe_local(root, &existing, cancel.clone())
+            .await
+            .is_ok_and(|info| verify(&info, &p).is_ok())
+        {
+            if *cancel.borrow() {
+                return Err(engine::CANCELLED.into());
+            }
+            return Ok(existing);
+        }
+        if *cancel.borrow() {
+            return Err(engine::CANCELLED.into());
+        }
+        let archive = output.with_file_name(format!(
+            "{}.interrupted-{run_id}",
+            output.file_name().unwrap_or_default().to_string_lossy()
+        ));
+        if fs::symlink_metadata(&archive).is_ok() {
+            return Err(
+                "An interrupted audio archive already exists. No file was replaced.".into(),
+            );
+        }
+        fs::rename(&output, &archive).map_err(|_| {
+            "Could not preserve the interrupted audio result. No original file was replaced."
+        })?;
+    }
+    execute_plan(root, input, staging, p, None, cancel, run_id, emit).await
+}
+
+fn planned_output(input: &Path, staging: &Path, p: &Plan) -> PathBuf {
+    staging.join(format!("{}.{}.{}", safe_stem(input), p.suffix, p.extension))
+}
+
+async fn execute_plan(
+    root: &Path,
+    input: PathBuf,
+    staging: PathBuf,
+    p: Plan,
+    seek: Option<(f64, bool)>,
+    cancel: watch::Receiver<bool>,
+    run_id: u64,
+    emit: impl Fn(Progress) + Send + Sync + Clone + 'static,
+) -> Result<PathBuf, String> {
+    let output = planned_output(&input, &staging, &p);
     if output == input || fs::symlink_metadata(&output).is_ok() {
         return Err(
             "The output already exists. Start a new job to preserve the original file.".into(),
@@ -568,21 +696,11 @@ pub async fn execute(
             LOCAL_FORMATS,
         ],
     );
-    if let ToolOptions::Trim {
-        start,
-        precise: false,
-        ..
-    } = options
-    {
+    if let Some((start, false)) = seek {
         args.extend(["-ss".into(), format!("{start:.6}")]);
     }
     args.extend(["-i".into(), input.to_string_lossy().into_owned()]);
-    if let ToolOptions::Trim {
-        start,
-        precise: true,
-        ..
-    } = options
-    {
+    if let Some((start, true)) = seek {
         args.extend(["-ss".into(), format!("{start:.6}")]);
     }
     args.extend(p.args.iter().cloned());
@@ -701,6 +819,162 @@ mod tests {
             &info(None, Some("unknown"))
         )
         .is_err());
+    }
+
+    #[test]
+    fn download_audio_profiles_keep_codecs_containers_and_effective_bitrates_honest() {
+        let source = info(Some("h264"), Some("aac"));
+        for bitrate in [128, 192, 256, 320] {
+            let p = download_audio_plan(Format::Mp3, Some(bitrate), &source).unwrap();
+            assert_eq!(
+                (p.extension, p.container, p.audio.as_deref()),
+                ("mp3", "mp3", Some("mp3"))
+            );
+            assert!(p.args.windows(2).any(|pair| pair == ["-c:a", "libmp3lame"]));
+            assert!(p
+                .args
+                .windows(2)
+                .any(|pair| pair[0] == "-b:a" && pair[1] == format!("{bitrate}k")));
+        }
+        let copied = download_audio_plan(Format::Mp3, Some(320), &info(None, Some("mp3"))).unwrap();
+        assert!(copied.args.windows(2).any(|pair| pair == ["-c:a", "copy"]));
+        assert!(!copied.args.iter().any(|argument| argument == "-b:a"));
+        let opus = download_audio_plan(Format::Opus, None, &source).unwrap();
+        assert_eq!(
+            (opus.extension, opus.container, opus.audio.as_deref()),
+            ("opus", "ogg", Some("opus"))
+        );
+        assert!(opus.args.windows(2).any(|pair| pair == ["-c:a", "libopus"]));
+        let original =
+            download_audio_plan(Format::AudioOriginal, None, &info(None, Some("opus"))).unwrap();
+        assert_eq!((original.extension, original.container), ("opus", "ogg"));
+        assert!(original
+            .args
+            .windows(2)
+            .any(|pair| pair == ["-c:a", "copy"]));
+        assert!(download_audio_plan(Format::Mp4, None, &source).is_err());
+        assert!(download_audio_plan(Format::Mp3, Some(640), &source).is_err());
+        assert!(download_audio_plan(Format::M4a, Some(128), &source).is_err());
+        assert!(validate_options(
+            &ToolOptions::ExtractAudio {
+                format: "opus".into()
+            },
+            &source
+        )
+        .is_err());
+    }
+
+    #[tokio::test]
+    #[ignore = "Requires bundled FFmpeg/ffprobe; verifies direct-download audio profiles with synthetic local media"]
+    async fn real_engines_download_audio_profiles_preserve_input_and_recover_partial_results() {
+        let engines = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("engines");
+        let work = std::env::temp_dir().join(format!(
+            "nabnab-direct-audio-{}-{}",
+            std::process::id(),
+            crate::queue::now()
+        ));
+        fs::create_dir_all(&work).unwrap();
+        let input = work.join("Downloaded ñ original.wav");
+        let (_sender, cancel) = watch::channel(false);
+        let args = [
+            "-v",
+            "error",
+            "-nostdin",
+            "-n",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:sample_rate=48000:duration=2",
+            "-c:a",
+            "pcm_s16le",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .chain([input.to_string_lossy().into_owned()])
+        .collect();
+        engine::tool(&engines, "ffmpeg.exe", args, cancel.clone())
+            .await
+            .unwrap();
+        let original = fs::read(&input).unwrap();
+        for (index, (format, bitrate, extension, codec, container)) in [
+            (Format::Mp3, Some(128), "mp3", "mp3", "mp3"),
+            (Format::M4a, None, "m4a", "aac", "mp4"),
+            (Format::Opus, None, "opus", "opus", "ogg"),
+            (Format::AudioOriginal, None, "wav", "pcm_s16le", "wav"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let stage = work.join(format!("stage-{index}"));
+            fs::create_dir(&stage).unwrap();
+            let output = execute_download_audio(
+                &engines,
+                &input,
+                &stage,
+                format,
+                bitrate,
+                cancel.clone(),
+                index as u64 + 1,
+                |_| {},
+            )
+            .await
+            .unwrap();
+            assert_eq!(output.extension().unwrap(), extension);
+            let info = probe_local(&engines, &output, cancel.clone())
+                .await
+                .unwrap();
+            assert_eq!(info["streams"][0]["codec_name"], codec);
+            assert!(info["format"]["format_name"]
+                .as_str()
+                .unwrap()
+                .split(',')
+                .any(|actual| actual == container));
+            if format == Format::Mp3 {
+                assert_eq!(info["streams"][0]["bit_rate"], "128000");
+            }
+            let complete = fs::read(&output).unwrap();
+            let stamp = fs::metadata(&output).unwrap().modified().unwrap();
+            let reused = execute_download_audio(
+                &engines,
+                &input,
+                &stage,
+                format,
+                bitrate,
+                cancel.clone(),
+                index as u64 + 100,
+                |_| {},
+            )
+            .await
+            .unwrap();
+            assert_eq!(reused, output);
+            assert_eq!(fs::metadata(&output).unwrap().modified().unwrap(), stamp);
+            assert_eq!(fs::read(&output).unwrap(), complete);
+            fs::write(&output, b"partial interrupted audio").unwrap();
+            let run_id = index as u64 + 200;
+            let recovered = execute_download_audio(
+                &engines,
+                &input,
+                &stage,
+                format,
+                bitrate,
+                cancel.clone(),
+                run_id,
+                |_| {},
+            )
+            .await
+            .unwrap();
+            assert_eq!(recovered, output);
+            let archived = output.with_file_name(format!(
+                "{}.interrupted-{run_id}",
+                output.file_name().unwrap().to_string_lossy()
+            ));
+            assert_eq!(fs::read(archived).unwrap(), b"partial interrupted audio");
+            assert_eq!(fs::read(&input).unwrap(), original);
+            assert!(probe_local(&engines, &recovered, cancel.clone())
+                .await
+                .is_ok());
+        }
+        fs::remove_dir_all(work).unwrap();
     }
     #[test]
     fn trim_validates_bounds_and_distinguishes_precise_and_keyframe_cuts() {
