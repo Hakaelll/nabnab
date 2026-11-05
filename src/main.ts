@@ -87,11 +87,18 @@ function showError(error: unknown): void {
 function preserveFocus(render: () => void): void {
   const active = document.activeElement;
   const id = active instanceof HTMLElement ? active.id : "";
+  const focusKeys = ["selectJob", "selectMedia", "action", "id", "page", "filter", "kind", "layout", "section", "site", "sourceUrl", "toolInput"];
+  const attributes = active instanceof HTMLElement ? Object.entries(active.dataset).filter(([key]) => focusKeys.includes(key)) : [];
+  const wasInInspector = active instanceof HTMLElement && inspectorBody.contains(active);
   const selection = active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement ? [active.selectionStart, active.selectionEnd] : null;
   const scrollTop = required("#main").scrollTop;
   render();
-  const target = id ? document.getElementById(id) : null;
-  if (target instanceof HTMLElement) {
+  const target = id ? document.getElementById(id) : attributes.length
+    ? [...document.querySelectorAll<HTMLElement>("[data-select-job], [data-select-media], [data-action], [data-page], [data-source-url], [data-tool-input]")]
+      .find(element => inspectorBody.contains(element) === wasInInspector && attributes.every(([key, value]) => element.dataset[key] === value))
+    : null;
+  const dialog = required<HTMLDialogElement>("#detail-dialog");
+  if (target instanceof HTMLElement && !target.closest("[hidden], [inert]") && (!dialog.open || dialog.contains(target))) {
     target.focus({ preventScroll: true });
     if (selection && (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) && selection[0] !== null && selection[1] !== null && !["number", "checkbox"].includes(target.type)) {
       try { target.setSelectionRange(selection[0], selection[1]); } catch { /* Selection is unavailable for some native input types. */ }
@@ -129,14 +136,16 @@ function renderInspector(force=false): void {
   const aside=required("#inspector");const dialog=required<HTMLDialogElement>("#detail-dialog");
   if(!key){aside.hidden=true;if(dialog.open)dialog.close();inspectorKey="";required(".content-layout").classList.remove("has-inspector");return;}
   if(force||key!==inspectorKey){inspectorBody.innerHTML=job?jobInspector(job,snapshot,t):item?mediaInspector(item,snapshot,t):"";inspectorKey=key;}
-  if(window.innerWidth>=1120){if(dialog.open)dialog.close();aside.hidden=false;aside.append(inspectorBody);required(".content-layout").classList.add("has-inspector");}
-  else{aside.hidden=true;required(".content-layout").classList.remove("has-inspector");dialog.append(inspectorBody);if(!dialog.open)dialog.showModal();}
+  if(window.innerWidth>=1120){if(dialog.open)dialog.close();aside.hidden=false;if(inspectorBody.parentElement!==aside)aside.append(inspectorBody);required(".content-layout").classList.add("has-inspector");}
+  else{aside.hidden=true;required(".content-layout").classList.remove("has-inspector");if(inspectorBody.parentElement!==dialog)dialog.append(inspectorBody);if(!dialog.open)dialog.showModal();}
 }
 function renderCurrent(): void {
-  updateNavigation();required("#home-page").hidden=page!=="home";required("#page-content").hidden=page==='home';
-  if(page==='home')renderHome();
-  else {disposeGraphics?.();disposeGraphics=null;preserveFocus(()=>{required("#page-content").innerHTML=page==='downloads'?downloadsView(snapshot,downloads,t):page==='library'?libraryView(snapshot,library,t):page==='tools'?toolsView(snapshot,tools,t):settingsView(snapshot,preferences,t,desktop);});}
-  renderInspector();updateActivity();observeThumbnails();
+  preserveFocus(()=>{
+    updateNavigation();required("#home-page").hidden=page!=="home";required("#page-content").hidden=page==='home';
+    if(page==='home')renderHome();
+    else {disposeGraphics?.();disposeGraphics=null;required("#page-content").innerHTML=page==='downloads'?downloadsView(snapshot,downloads,t):page==='library'?libraryView(snapshot,library,t):page==='tools'?toolsView(snapshot,tools,t):settingsView(snapshot,preferences,t,desktop);}
+    renderInspector();updateActivity();observeThumbnails();
+  });
 }
 function observeThumbnails(): void {
   thumbnailObserver?.disconnect();thumbnailQueue.length=0;
@@ -349,7 +358,7 @@ async function submitForm(form: HTMLFormElement): Promise<void> {
     case 'download-settings':await saveSettings({...snapshot.settings,networkLimit:Number(inputValue('network-limit')),processingLimit:Number(inputValue('processing-limit'))});notify(t("Ajustes guardados.", "Settings saved."),'success');break;
     case 'appearance-settings':await saveSettings({...snapshot.settings,reducedMotion:checked('reduced-motion'),sidebarExpanded:checked('expanded-sidebar')});notify(t("Ajustes guardados.", "Settings saved."),'success');break;
     case 'organize-media':{const split=(value:string)=>[...new Set(value.split(',').map(value=>value.trim()).filter(Boolean))].slice(0,50);applySnapshot(await command<Snapshot>('update_library',{id:form.dataset.id??"",collections:split(inputValue('media-collections')),tags:split(inputValue('media-tags'))}));notify(t("Organización guardada.", "Organization saved."),'success');break;}
-    case 'session-form':await command('import_session',{site:inputValue('session-site')});await loadSettingsSection();notify(t("Sesión importada con protección de Windows.", "Session imported with Windows protection."),'success');break;
+    case 'session-form':{const site=inputValue('session-site');await command('import_session',{site});await loadSettingsSection();const saved=preferences.sessions?.some(session=>session.site===site);notify(saved?t("Sesión disponible con protección de Windows.", "Session available with Windows protection."):t("No se ha añadido ninguna sesión.", "No session was added."),saved?'success':'info');break;}
     case 'bridge-form':preferences.pairing=await command<{token:string;port:number}>('bridge_pair',{extensionId:inputValue('extension-id')});await loadSettingsSection();break;
   }
 }
@@ -364,7 +373,7 @@ document.addEventListener('keydown',event=>{
 required<HTMLDialogElement>('#detail-dialog').addEventListener('cancel',event=>{event.preventDefault();closeInspector();});
 required<HTMLDialogElement>('#detail-dialog').addEventListener('click',event=>{if(event.target===event.currentTarget)closeInspector();});
 document.addEventListener('error',event=>{const target=event.target;if(target instanceof HTMLElement&&target.dataset.localPlayer){const fallback=target.closest('.media-player')?.querySelector<HTMLElement>('#playback-error');if(fallback)fallback.hidden=false;}else if(target instanceof HTMLImageElement&&target.classList.contains('preview-image'))target.hidden=true;},true);
-window.addEventListener('resize',()=>renderInspector());
+window.addEventListener('resize',()=>preserveFocus(()=>renderInspector()));
 
 async function receivePaths(paths: string[]): Promise<void> {
   required('#drop-indicator').hidden=true;

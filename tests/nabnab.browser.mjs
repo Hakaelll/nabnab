@@ -89,14 +89,29 @@ try {
     await page.waitForFunction(()=>window.fixture.calls.some(call=>call.cmd==='queue_download'));
     assert.equal(await source.inputValue(),'');
     await page.locator('[data-page=downloads]').click();await page.locator('.job-row').waitFor();
+    const focusedJobId=await page.locator('[data-select-job]').first().getAttribute('data-select-job');
+    await page.locator('[data-select-job]').first().focus();
     await page.evaluate(async()=>{const {emit}=await import('/node_modules/@tauri-apps/api/event.js');const item=window.fixture.state.jobs[0];item.runId=2;item.state='processing';item.updatedAt=Date.now()+2;item.progress={phase:'processing',percent:100,speed:null,downloaded:null,total:null};await emit('job-update',structuredClone(item));});
     await page.waitForFunction(()=>document.querySelector('.job-row')?.dataset.state==='processing');
+    assert.equal(await page.evaluate(()=>document.activeElement?.getAttribute('data-select-job')),focusedJobId,'Progress rerenders preserve the focused queue checkbox');
     assert.doesNotMatch(await page.locator('.job-row').innerText(),/100(?:\.0)?%/);
+    await page.locator('.row-actions [data-action=cancel-job]').focus();
+    await page.locator('.row-actions [data-action=cancel-job]').evaluate(element=>window.fixture.focusedAction=element);
+    await page.evaluate(async()=>{const {emit}=await import('/node_modules/@tauri-apps/api/event.js');const item=window.fixture.state.jobs[0];item.updatedAt=Date.now()+20;await emit('job-update',structuredClone(item));});
+    await page.waitForFunction(()=>document.querySelector('.row-actions [data-action=cancel-job]')!==window.fixture.focusedAction);
+    assert.deepEqual(await page.evaluate(()=>[document.activeElement?.getAttribute('data-action'),document.activeElement?.getAttribute('data-id')]),['cancel-job',focusedJobId],'Progress rerenders preserve the focused row action');
     await page.evaluate(async()=>{const {emit}=await import('/node_modules/@tauri-apps/api/event.js');await emit('job-update',{...structuredClone(window.fixture.state.jobs[0]),runId:1,state:'completed',updatedAt:Date.now()+9999});});
     await page.waitForTimeout(150);assert.equal(await page.locator('.job-row').getAttribute('data-state'),'processing');
     await page.locator('[data-action=inspect-job]').click();
     if(width<1120){assert.equal(await page.locator('#detail-dialog').evaluate(dialog=>dialog.open),true);await page.keyboard.press('Escape');}
-    else await page.locator('#inspector [data-action=close-inspector]').click();
+    else {
+      await page.locator('[data-select-job]').first().focus();
+      await page.locator('[data-select-job]').first().evaluate(element=>window.fixture.focusedCheckbox=element);
+      await page.evaluate(async()=>{const {emit}=await import('/node_modules/@tauri-apps/api/event.js');const item=window.fixture.state.jobs[0];item.updatedAt=Date.now()+30;await emit('job-update',structuredClone(item));});
+      await page.waitForFunction(()=>document.querySelector('[data-select-job]')!==window.fixture.focusedCheckbox);
+      assert.equal(await page.evaluate(()=>document.activeElement?.getAttribute('data-select-job')),focusedJobId,'Refreshing the inspector does not steal focus from the queue');
+      await page.locator('#inspector [data-action=close-inspector]').click();
+    }
     await page.locator('.row-actions [data-action=cancel-job]').click();await page.waitForFunction(()=>document.querySelector('.job-row')?.dataset.state==='cancelled');
     await page.screenshot({path:`artifacts/nabnab/downloads-${width}-${scale}x.png`});
     if(width===1180&&scale===1){
@@ -143,7 +158,14 @@ try {
     assert.match(await page.locator('[data-page=downloads]').innerText(),/Downloads/);
     await page.locator('[data-action=settings-section][data-section=engines]').click();await page.locator('.engine-list li').first().waitFor();
     await assertNoOverflow(page);await page.screenshot({path:`artifacts/nabnab/settings-${width}-${scale}x.png`});
-    await page.locator('[data-action=settings-section][data-section=sessions]').click();await page.locator('[data-action=export-diagnostics]').click();
+    await page.locator('[data-action=settings-section][data-section=sessions]').click();
+    assert.equal(await page.locator('#session-site').inputValue(),'youtube');
+    await page.locator('#session-form button[type=submit]').click();
+    await page.waitForFunction(()=>window.fixture.calls.some(call=>call.cmd==='import_session'&&call.args.site==='youtube'));
+    await page.locator('#session-site').selectOption('twitter');await page.locator('#session-form button[type=submit]').click();
+    await page.waitForFunction(()=>window.fixture.calls.some(call=>call.cmd==='import_session'&&call.args.site==='twitter'));
+    assert.equal(await page.locator('#session-site option[value=pinterest]').count(),1);
+    await page.locator('[data-action=export-diagnostics]').click();
     assert(await page.evaluate(()=>window.fixture.calls.some(call=>call.cmd==='export_diagnostics')));
     await page.locator('[data-page=library]').click();
     if(width>=1120||!(await page.locator('#detail-dialog').evaluate(dialog=>dialog.open)))await page.locator('.media-open').nth(2).click();
