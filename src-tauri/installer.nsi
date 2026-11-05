@@ -796,7 +796,7 @@ Section Install
   ; Update existing legacy links even when /NS or /UPDATE disables new shortcuts.
   !insertmacro MigrateLegacyShortcut "$DESKTOP\ytnabber.lnk" "$DESKTOP\${PRODUCTNAME}.lnk"
   !insertmacro MigrateLegacyShortcut "$SMPROGRAMS\ytnabber.lnk" "$SMPROGRAMS\${PRODUCTNAME}.lnk"
-  !insertmacro MigrateLegacyShortcut "$SMPROGRAMS\ytnabber\ytnabber.lnk" "$SMPROGRAMS\ytnabber\${PRODUCTNAME}.lnk"
+  !insertmacro MigrateLegacyShortcut "$SMPROGRAMS\ytnabber\ytnabber.lnk" "$SMPROGRAMS\${PRODUCTNAME}.lnk"
 
   ; Save current MAINBINARYNAME for future updates
   WriteRegStr SHCTX "${UNINSTKEY}" "MainBinaryName" "${MAINBINARYNAME}.exe"

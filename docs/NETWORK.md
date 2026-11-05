@@ -63,3 +63,11 @@ At startup, after acquiring the repository lock and before launching jobs, `sess
 Revocation removes the protected session for future operations. An engine that already loaded cookies may continue using them until that operation exits; cancel that operation to stop it. Cookies cannot bypass access restrictions or DRM, and authentication challenges can still fail.
 
 Diagnostics must use the existing sanitizer and must never include cookies, tokens, authorization headers or signed URL parameters. No actual user cookies are required for the automated session tests; they use fictional local fixtures.
+
+## Download URL privacy
+
+All operational download URLs are protected for the current Windows user with DPAPI before a job can be saved or emitted. Their private `job-urls` directory has a current-user-only DACL. Plain job metadata contains only a public origin and an opaque job-derived reference; there is no credential-key denylist that can miss a new parameter spelling or a credential in a URL path or fragment.
+
+The engine receives the exact unlocked URL, including required query parameters and fragments, after normal URL/provider validation. It never receives a stripped public origin in place of the requested media URL. Protected records are validated before publication and are reused idempotently. Corrupt or mismatching records are retained and reported, not overwritten with a different request.
+
+Earlier schema-1 job repositories are backed up with the same current-user protection and migrated to schema 2 before use. Backups and operational references are outside the thumbnail cache and are not removed by cache cleanup. See `MIGRATION.md` for recovery details. This protects application persistence and public job events; it does not hide the request from the requested platform or remove credentials from an export file the user chose to keep.

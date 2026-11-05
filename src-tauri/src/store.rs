@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const SCHEMA_VERSION: u32 = 1;
+const SCHEMA_VERSION: u32 = 2;
 const STATE_FILE: &str = "state-v1.json";
 const MAX_STATE_BYTES: u64 = 64 * 1024 * 1024;
 
@@ -79,7 +79,11 @@ impl Data {
                 self.schema_version
             ));
         }
-        self.settings.validate()
+        self.settings.validate()?;
+        for job in &self.jobs {
+            job.validate_public_source()?;
+        }
+        Ok(())
     }
 }
 
@@ -98,7 +102,11 @@ fn read_data(path: &Path) -> Result<Data, String> {
     file.read_to_end(&mut bytes).map_err(|e| e.to_string())?;
     let data: Data = serde_json::from_slice(&bytes)
         .map_err(|e| format!("Saved data is invalid. Keep state-v1.json for recovery: {e}"))?;
-    data.validate()?;
+    if data.schema_version == 1 {
+        data.settings.validate()?;
+    } else {
+        data.validate()?;
+    }
     Ok(data)
 }
 
@@ -188,6 +196,15 @@ impl Repository {
                 collections: Vec::new(),
             }
         };
+        if data.schema_version == 1 {
+            let previous = fs::read(&path)
+                .map_err(|_| "Could not read the previous repository for backup.")?;
+            crate::sessions::protect_repository_backup(root, &previous)?;
+            for job in &mut data.jobs {
+                job.protect_source(root)?;
+            }
+            data.schema_version = SCHEMA_VERSION;
+        }
         data.validate()?;
         for job in &mut data.jobs {
             job.recover();
@@ -261,7 +278,7 @@ mod tests {
         let root = directory();
         let folder = root.join("media");
         let mut repository = Repository::open(&root, &folder).unwrap();
-        assert_eq!(repository.data.schema_version, 1);
+        assert_eq!(repository.data.schema_version, 2);
         assert_eq!(repository.data.settings.folder, folder);
         assert_eq!(repository.data.settings.network_limit, 3);
         repository.data.collections.push("Music".into());
@@ -363,6 +380,124 @@ mod tests {
         assert!(settings.validate().is_err());
         settings.tray_enabled = true;
         assert!(settings.validate().is_ok());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn schema_one_urls_migrate_with_a_protected_backup_and_idempotent_references() {
+        let root = directory();
+        let url = "https://example.org/LEGACY-PATH-SECRET?api_key=LEGACY-API-SECRET&accessToken=LEGACY-ACCESS-SECRET#LEGACY-FRAGMENT-SECRET";
+        let mut repository = Repository::open(&root, &root).unwrap();
+        crate::queue::enqueue_download(
+            &mut repository,
+            vec![url.into()],
+            vec![],
+            crate::model::Format::Mp4,
+            None,
+            None,
+            "legacy-migration",
+        )
+        .unwrap();
+        let mut legacy = repository.data.clone();
+        legacy.schema_version = 1;
+        let crate::queue::Source::Download {
+            url: source,
+            url_ref,
+            ..
+        } = &mut legacy.jobs[0].source
+        else {
+            panic!("expected download");
+        };
+        let reference = url_ref.take().unwrap();
+        *source = url.into();
+        let bytes = serde_json::to_vec(&legacy).unwrap();
+        drop(repository);
+        fs::remove_file(root.join("job-urls").join(format!("{reference}.bin"))).unwrap();
+        fs::write(root.join(STATE_FILE), &bytes).unwrap();
+
+        let migrated = Repository::open(&root, &root).unwrap();
+        assert_eq!(migrated.data.schema_version, 2);
+        assert_eq!(migrated.data.jobs.len(), 1);
+        assert_eq!(migrated.data.jobs[0].state, crate::queue::JobState::Paused);
+        let crate::queue::Source::Download {
+            url: public,
+            url_ref,
+            ..
+        } = &migrated.data.jobs[0].source
+        else {
+            panic!("expected download");
+        };
+        assert_eq!(public, "https://example.org");
+        assert_eq!(url_ref.as_deref(), Some(reference.as_str()));
+        assert_eq!(
+            crate::sessions::resolve_url(&root, &reference)
+                .unwrap()
+                .as_str(),
+            url
+        );
+        let saved = fs::read_to_string(root.join(STATE_FILE)).unwrap();
+        let backup = fs::read(root.join("migration-backups/state-v1.dpapi")).unwrap();
+        for secret in [
+            "LEGACY-PATH-SECRET",
+            "LEGACY-API-SECRET",
+            "LEGACY-ACCESS-SECRET",
+            "LEGACY-FRAGMENT-SECRET",
+        ] {
+            assert!(!saved.contains(secret));
+            assert!(!backup
+                .windows(secret.len())
+                .any(|part| part == secret.as_bytes()));
+        }
+        crate::sessions::protect_repository_backup(&root, &bytes).unwrap();
+        assert!(
+            crate::sessions::protect_repository_backup(&root, b"different prior repository")
+                .is_err()
+        );
+        let cipher = fs::read(root.join("job-urls").join(format!("{reference}.bin"))).unwrap();
+        drop(migrated);
+        let again = Repository::open(&root, &root).unwrap();
+        assert_eq!(again.data.schema_version, 2);
+        assert_eq!(again.data.jobs.len(), 1);
+        assert_eq!(fs::read_dir(root.join("job-urls")).unwrap().count(), 1);
+        assert_eq!(
+            fs::read(root.join("job-urls").join(format!("{reference}.bin"))).unwrap(),
+            cipher
+        );
+        assert_eq!(
+            fs::read(root.join("migration-backups/state-v1.dpapi")).unwrap(),
+            backup
+        );
+        drop(again);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn plaintext_operational_urls_cannot_be_written_back_into_schema_two() {
+        let root = directory();
+        let mut repository = Repository::open(&root, &root).unwrap();
+        crate::queue::enqueue_download(
+            &mut repository,
+            vec!["https://example.org/media?api_key=WRITE-GUARD-SECRET".into()],
+            vec![],
+            crate::model::Format::Mp4,
+            None,
+            None,
+            "write-guard",
+        )
+        .unwrap();
+        let before = fs::read(root.join(STATE_FILE)).unwrap();
+        let crate::queue::Source::Download { url, url_ref, .. } =
+            &mut repository.data.jobs[0].source
+        else {
+            panic!("expected download");
+        };
+        *url = "https://example.org/media?api_key=WRITE-GUARD-SECRET".into();
+        *url_ref = None;
+        assert!(repository.save().is_err());
+        assert_eq!(fs::read(root.join(STATE_FILE)).unwrap(), before);
+        assert!(!root.join("migration-backups").exists());
+        drop(repository);
         fs::remove_dir_all(root).unwrap();
     }
 }

@@ -62,6 +62,8 @@ impl JobState {
 pub enum Source {
     Download {
         url: String,
+        #[serde(default)]
+        url_ref: Option<String>,
         format: Format,
         height: Option<u32>,
         audio_bitrate: Option<u16>,
@@ -133,6 +135,39 @@ pub struct Job {
     pub next_retry_at: Option<u64>,
 }
 impl Job {
+    pub fn protect_source(&mut self, root: &Path) -> Result<(), String> {
+        if let Source::Download { url, url_ref, .. } = &mut self.source {
+            let origin = public_origin(url)?;
+            if url_ref.is_none() {
+                *url_ref = Some(crate::sessions::seal_url(root, &self.id, url)?);
+            }
+            if !url_ref
+                .as_deref()
+                .is_some_and(crate::sessions::valid_url_reference)
+            {
+                return Err("The protected download reference is invalid.".into());
+            }
+            *url = origin;
+        }
+        Ok(())
+    }
+
+    pub fn validate_public_source(&self) -> Result<(), String> {
+        if let Source::Download { url, url_ref, .. } = &self.source {
+            if public_origin(url)? != *url
+                || !url_ref
+                    .as_deref()
+                    .is_some_and(crate::sessions::valid_url_reference)
+            {
+                return Err(
+                    "The job must contain a public origin and a protected download reference."
+                        .into(),
+                );
+            }
+        }
+        Ok(())
+    }
+
     pub fn recover(&mut self) {
         if self.state.active() || self.state == JobState::Pending {
             self.state = JobState::Paused;
@@ -208,27 +243,10 @@ pub fn validate_request_id(id: &str) -> Result<(), String> {
     }
     Ok(())
 }
-fn persistent_url(url: &str) -> Result<String, String> {
-    let result = crate::model::validate_url(url)?;
-    let parsed = url::Url::parse(&result).map_err(|_| "Invalid URL.")?;
-    if parsed.query_pairs().any(|(k, _)| {
-        let key = k.to_ascii_lowercase();
-        [
-            "token",
-            "signature",
-            "password",
-            "authorization",
-            "access_token",
-            "sig",
-            "auth",
-            "key",
-        ]
-        .contains(&key.as_str())
-            || key.starts_with("x-amz-")
-    }) {
-        return Err("Signed or credential-bearing links cannot be stored in the queue. Use the public content page instead.".into());
-    }
-    Ok(result)
+fn public_origin(input: &str) -> Result<String, String> {
+    let normalized = crate::model::validate_url(input)?;
+    let parsed = url::Url::parse(&normalized).map_err(|_| "Invalid URL.")?;
+    Ok(parsed.origin().ascii_serialization())
 }
 
 pub fn enqueue_download(
@@ -265,7 +283,10 @@ pub fn enqueue_download(
         .into_iter()
         .enumerate()
         .map(|(i, url)| {
-            let url = persistent_url(&url)?;
+            if url.len() > 8192 {
+                return Err("Use a download URL of at most 8192 bytes.".into());
+            }
+            crate::model::validate_url(&url)?;
             let title = titles
                 .get(i)
                 .filter(|s| !s.trim().is_empty())
@@ -277,7 +298,8 @@ pub fn enqueue_download(
                 });
             Ok(Job::new(
                 Source::Download {
-                    url,
+                    url: url.trim().to_owned(),
+                    url_ref: None,
                     format,
                     height,
                     audio_bitrate,
@@ -289,6 +311,10 @@ pub fn enqueue_download(
             ))
         })
         .collect::<Result<_, String>>()?;
+    let mut jobs = jobs;
+    for job in &mut jobs {
+        job.protect_source(repo.root())?;
+    }
     let old_len = repo.data.jobs.len();
     repo.data.jobs.extend(jobs.clone());
     if let Err(error) = repo.save() {
@@ -468,6 +494,8 @@ fn phase(
 struct Owner {
     schema_version: u32,
     job_id: String,
+    #[serde(default)]
+    run_id: u64,
 }
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -540,29 +568,70 @@ fn owned_stage(job: &Job, staging: &Path) -> Result<PathBuf, String> {
     Ok(canonical)
 }
 fn stage(job: &Job) -> Result<PathBuf, String> {
-    let (_, staging) = stage_path(job)?;
-    match fs::create_dir(&staging) {
-        Ok(()) => {
-            let bytes = serde_json::to_vec(&Owner {
-                schema_version: 1,
-                job_id: job.id.clone(),
-            })
-            .map_err(|e| e.to_string())?;
-            let mut file = fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(staging.join(OWNER))
-                .map_err(|e| e.to_string())?;
-            file.write_all(&bytes)
-                .and_then(|_| file.sync_all())
-                .map_err(|e| e.to_string())?;
+    let (parent, staging) = stage_path(job)?;
+    let fresh = match fs::create_dir(&staging) {
+        Ok(()) => true,
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            let owned = owned_stage(job, &staging)?;
+            let owner: Owner = read_owned_json(&owned.join(OWNER), 4096)?;
+            let journaled = [JOURNAL, "publication.new"]
+                .iter()
+                .any(|name| fs::symlink_metadata(owned.join(name)).is_ok());
+            if matches!(job.source, Source::Transform { .. })
+                && owner.run_id != job.run_id
+                && !journaled
+            {
+                let archived =
+                    parent.join(format!(".nabnab-{}-interrupted-{}", job.id, owner.run_id));
+                if fs::symlink_metadata(&archived).is_ok() {
+                    return Err("This job's interrupted-results archive already exists. No files were replaced. Review its folder before retrying.".into());
+                }
+                #[cfg(windows)]
+                {
+                    use std::os::windows::ffi::OsStrExt;
+                    let from: Vec<u16> = owned.as_os_str().encode_wide().chain(Some(0)).collect();
+                    let to: Vec<u16> = archived.as_os_str().encode_wide().chain(Some(0)).collect();
+                    if unsafe {
+                        windows_sys::Win32::Storage::FileSystem::MoveFileExW(
+                            from.as_ptr(),
+                            to.as_ptr(),
+                            0,
+                        )
+                    } == 0
+                    {
+                        return Err("Could not preserve the interrupted transform output. No files were replaced.".into());
+                    }
+                }
+                #[cfg(not(windows))]
+                fs::rename(&owned, &archived)
+                    .map_err(|_| "Could not preserve the interrupted transform output.")?;
+                fs::create_dir(&staging).map_err(|_| "The interrupted output was preserved, but a fresh job folder could not be created.")?;
+                true
+            } else {
+                false
+            }
         }
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
         Err(e) => {
             return Err(format!(
                 "Could not write to the destination (check space and permissions): {e}"
             ))
         }
+    };
+    if fresh {
+        let bytes = serde_json::to_vec(&Owner {
+            schema_version: 1,
+            job_id: job.id.clone(),
+            run_id: job.run_id,
+        })
+        .map_err(|e| e.to_string())?;
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(staging.join(OWNER))
+            .map_err(|e| e.to_string())?;
+        file.write_all(&bytes)
+            .and_then(|_| file.sync_all())
+            .map_err(|e| e.to_string())?;
     }
     owned_stage(job, &staging)
 }
@@ -903,12 +972,12 @@ async fn run(
     let emit = move |update| progress(&handle, &shared, &id, run_id, update);
     let (file, source, parent) = match &job.source {
         Source::Download {
-            url,
+            url_ref,
             format,
             height,
             audio_bitrate,
+            ..
         } => {
-            let url = providers::validate_remote(url).await?;
             let cookie_root = {
                 let guard = state.repository.lock().unwrap();
                 guard
@@ -917,6 +986,13 @@ async fn run(
                     .root()
                     .to_owned()
             };
+            let operational = crate::sessions::resolve_url(
+                &cookie_root,
+                url_ref
+                    .as_deref()
+                    .ok_or("This download has no protected URL. Add its link again.")?,
+            )?;
+            let url = providers::validate_remote(operational.as_str()).await?;
             let cookies = crate::sessions::materialize(&cookie_root, &url)?;
             let mut args = engine::download_args(&root, *format, *height, staging, &url);
             if let Some(file) = &cookies {
@@ -1044,6 +1120,7 @@ mod tests {
     fn provider_aliases_share_the_network_limit() {
         let make = |url: &str| Source::Download {
             url: url.into(),
+            url_ref: None,
             format: Format::Mp4,
             height: None,
             audio_bitrate: None,
@@ -1106,7 +1183,7 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
     #[test]
-    fn enqueue_is_atomic_and_rejects_secrets() {
+    fn enqueue_is_atomic_and_accepts_only_valid_public_web_urls() {
         let (root, mut repo) = fixture();
         assert!(enqueue_download(
             &mut repo,
@@ -1119,8 +1196,74 @@ mod tests {
         )
         .is_err());
         assert!(repo.data.jobs.is_empty());
-        assert!(persistent_url("https://example.org/a?token=secret").is_err());
-        assert!(persistent_url("https://youtube.com/watch?v=a&list=b").is_ok());
+        assert!(public_origin("https://example.org/a?token=secret").is_ok());
+        assert_eq!(
+            public_origin("https://youtube.com/watch?v=a&list=b").unwrap(),
+            "https://youtube.com"
+        );
+        drop(repo);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn public_jobs_and_event_payloads_never_persist_operational_url_credentials() {
+        let (root, mut repo) = fixture();
+        let url = "https://example.org/PATH-SECRET-UNIQUE/media?api_key=API-SECRET-UNIQUE&accessToken=ACCESS-SECRET-UNIQUE&signature=SIGNATURE-SECRET-UNIQUE#FRAGMENT-SECRET-UNIQUE";
+        let jobs = enqueue_download(
+            &mut repo,
+            vec![url.into()],
+            vec![],
+            Format::Mp4,
+            None,
+            None,
+            "private-url",
+        )
+        .unwrap();
+        let payload = serde_json::to_string(&jobs[0]).unwrap();
+        let events =
+            serde_json::to_string(&serde_json::json!({"event":"job-update", "payload":jobs[0]}))
+                .unwrap();
+        let saved = fs::read_to_string(root.join("state-v1.json")).unwrap();
+        for secret in [
+            "PATH-SECRET-UNIQUE",
+            "API-SECRET-UNIQUE",
+            "ACCESS-SECRET-UNIQUE",
+            "SIGNATURE-SECRET-UNIQUE",
+            "FRAGMENT-SECRET-UNIQUE",
+        ] {
+            assert!(!payload.contains(secret));
+            assert!(!events.contains(secret));
+            assert!(!saved.contains(secret));
+        }
+        let Source::Download {
+            url: public,
+            url_ref,
+            ..
+        } = &jobs[0].source
+        else {
+            panic!("expected a download");
+        };
+        assert_eq!(public, "https://example.org");
+        let reference = url_ref.as_deref().unwrap();
+        assert_eq!(
+            crate::sessions::resolve_url(&root, reference)
+                .unwrap()
+                .as_str(),
+            url
+        );
+        let replay = enqueue_download(
+            &mut repo,
+            vec![url.into()],
+            vec![],
+            Format::Mp4,
+            None,
+            None,
+            "private-url",
+        )
+        .unwrap();
+        assert_eq!(replay[0].id, jobs[0].id);
+        assert_eq!(fs::read_dir(root.join("job-urls")).unwrap().count(), 1);
+        assert!(!root.join("migration-backups").exists());
         drop(repo);
         fs::remove_dir_all(root).unwrap();
     }
@@ -1129,6 +1272,7 @@ mod tests {
         let mut job = Job::new(
             Source::Download {
                 url: "https://example.org/a".into(),
+                url_ref: None,
                 format: Format::Mp4,
                 height: None,
                 audio_bitrate: None,
@@ -1287,6 +1431,134 @@ mod tests {
         };
         write_journal(job, &staging, &journal).unwrap();
         (staging, journal)
+    }
+
+    fn transform_fixture() -> (PathBuf, AppState, String, PathBuf) {
+        let (root, mut repo) = fixture();
+        let input = root.join("media").join("original.mp4");
+        fs::write(&input, b"unchanged original fixture").unwrap();
+        library::import_paths(&mut repo, &[input.clone()]).unwrap();
+        let id = repo.data.library[0].id.clone();
+        let job = enqueue_tool(
+            &mut repo,
+            vec![id],
+            ToolOptions::ExtractAudio {
+                format: "mp3".into(),
+            },
+            "transform-retry",
+        )
+        .unwrap()
+        .remove(0);
+        let state = AppState::default();
+        *state.repository.lock().unwrap() = Some(repo);
+        (root, state, job.id, input)
+    }
+
+    #[test]
+    fn failed_transform_retries_archive_partials_and_create_a_fresh_owned_stage() {
+        let (root, state, id, input) = transform_fixture();
+        let (first, _) = reserve(&state).unwrap();
+        let staging = stage(&first).unwrap();
+        fs::write(
+            staging.join("original.audio.mp3"),
+            b"incomplete first output",
+        )
+        .unwrap();
+        state.repository.lock().unwrap().as_mut().unwrap().data.jobs[0].state = JobState::Error;
+        state.runtime.active.lock().unwrap().remove(&id);
+        action(&state, &[id], "retry").unwrap();
+        let (retry, _) = reserve(&state).unwrap();
+        let fresh = stage(&retry).unwrap();
+        assert_eq!(fresh, staging);
+        assert!(!fresh.join("original.audio.mp3").exists());
+        let archive = first
+            .folder
+            .join(format!(".nabnab-{}-interrupted-{}", first.id, first.run_id));
+        assert_eq!(
+            fs::read(archive.join("original.audio.mp3")).unwrap(),
+            b"incomplete first output"
+        );
+        let owner: Owner = read_owned_json(&fresh.join(OWNER), 4096).unwrap();
+        assert_eq!(owner.run_id, retry.run_id);
+        assert_eq!(fs::read(input).unwrap(), b"unchanged original fixture");
+        drop(state);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn crashed_transform_restarts_fresh_while_download_retries_keep_resume_files() {
+        let (root, state, id, input) = transform_fixture();
+        let (first, _) = reserve(&state).unwrap();
+        let staging = stage(&first).unwrap();
+        fs::write(staging.join("partial.mp3"), b"interrupted conversion").unwrap();
+        drop(state);
+        let again = AppState::default();
+        *again.repository.lock().unwrap() = Some(Repository::open(&root, &first.folder).unwrap());
+        action(&again, &[id], "retry").unwrap();
+        let (retry, _) = reserve(&again).unwrap();
+        let fresh = stage(&retry).unwrap();
+        assert!(!fresh.join("partial.mp3").exists());
+        let archive = first
+            .folder
+            .join(format!(".nabnab-{}-interrupted-{}", first.id, first.run_id));
+        assert_eq!(
+            fs::read(archive.join("partial.mp3")).unwrap(),
+            b"interrupted conversion"
+        );
+        assert_eq!(fs::read(input).unwrap(), b"unchanged original fixture");
+        drop(again);
+        fs::remove_dir_all(root).unwrap();
+
+        let (root, state, id) = state_fixture();
+        let (first, _) = reserve(&state).unwrap();
+        let staging = stage(&first).unwrap();
+        fs::write(staging.join("download.part"), b"resumable download").unwrap();
+        state.repository.lock().unwrap().as_mut().unwrap().data.jobs[0].state = JobState::Error;
+        state.runtime.active.lock().unwrap().remove(&id);
+        action(&state, &[id], "retry").unwrap();
+        let (retry, _) = reserve(&state).unwrap();
+        assert_eq!(stage(&retry).unwrap(), staging);
+        assert_eq!(
+            fs::read(staging.join("download.part")).unwrap(),
+            b"resumable download"
+        );
+        drop(state);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn journaled_transform_retries_adopt_the_result_without_archiving_its_record() {
+        let (root, state, id, input) = transform_fixture();
+        let (first, cancel) = reserve(&state).unwrap();
+        let (staging, journal) = journal_fixture(&first, &cancel);
+        crate::publish(
+            &staging,
+            &journal.source_file.to_string_lossy(),
+            journal.target.parent().unwrap(),
+        )
+        .unwrap();
+        let record = fs::read(staging.join(JOURNAL)).unwrap();
+        drop(state);
+        drop(cancel);
+        let again = AppState::default();
+        *again.repository.lock().unwrap() = Some(Repository::open(&root, &first.folder).unwrap());
+        action(&again, &[id], "retry").unwrap();
+        let (retry, cancel) = reserve(&again).unwrap();
+        assert_eq!(stage(&retry).unwrap(), staging);
+        assert_eq!(fs::read(staging.join(JOURNAL)).unwrap(), record);
+        let result = recover_publication(&again, &retry, &staging, cancel)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(result.0, journal.target);
+        assert_eq!(fs::read(result.0).unwrap(), b"verified fixture bytes");
+        assert_eq!(fs::read(input).unwrap(), b"unchanged original fixture");
+        assert!(!first
+            .folder
+            .join(format!(".nabnab-{}-interrupted-{}", first.id, first.run_id))
+            .exists());
+        drop(again);
+        fs::remove_dir_all(root).unwrap();
     }
     #[tokio::test]
     async fn crash_after_publication_recovers_owned_output_without_redownloading_or_replacing() {

@@ -1,5 +1,6 @@
 use crate::providers::{self, ProviderId};
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use std::{
     fs::{self, OpenOptions},
     io::{Read, Write},
@@ -9,6 +10,10 @@ use std::{
 
 const MAX_COOKIE_BYTES: usize = 2 * 1024 * 1024;
 const HEADER: &[u8] = b"nabnab-cookie-v1\n";
+const URL_HEADER: &[u8] = b"nabnab-operational-url-v1\n";
+const BACKUP_HEADER: &[u8] = b"nabnab-repository-backup-v1\n";
+const MAX_URL_BYTES: usize = 8192;
+const MAX_BACKUP_BYTES: usize = 64 * 1024 * 1024;
 pub const SITES: [&str; 8] = [
     "youtube",
     "twitter",
@@ -353,6 +358,153 @@ fn replace(from: &Path, to: &Path) -> Result<(), String> {
     fs::rename(from, to).map_err(|_| "Could not commit the protected session.".into())
 }
 
+pub struct OperationalUrl(Secret);
+impl OperationalUrl {
+    pub fn as_str(&self) -> &str {
+        std::str::from_utf8(&self.0 .0).expect("operational URL validated when unlocked")
+    }
+}
+
+pub fn valid_url_reference(reference: &str) -> bool {
+    reference.len() == 64
+        && reference
+            .bytes()
+            .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+}
+
+fn validate_operational_url(bytes: &[u8]) -> Result<&str, String> {
+    if bytes.is_empty() || bytes.len() > MAX_URL_BYTES {
+        return Err("Use a download URL of at most 8192 bytes.".into());
+    }
+    let value = std::str::from_utf8(bytes).map_err(|_| "The protected download URL is invalid.")?;
+    crate::model::validate_url(value)?;
+    Ok(value)
+}
+
+fn read_protected(
+    path: &Path,
+    header: &[u8],
+    purpose: &str,
+    limit: usize,
+) -> Result<Secret, String> {
+    let path = crate::library::authorized_path(path).map_err(|_| {
+        "Protected download data is unavailable. Restore its backup or add the link again."
+    })?;
+    let metadata = fs::metadata(&path).map_err(|_| "Protected download data is unavailable.")?;
+    if !metadata.is_file() || metadata.len() > (limit + 64 * 1024) as u64 {
+        return Err("Protected download data is invalid. Its files were left untouched.".into());
+    }
+    let bytes = fs::read(path).map_err(|_| "Protected download data could not be read.")?;
+    let ciphertext = bytes
+        .strip_prefix(header)
+        .ok_or("Protected download data has an unsupported format.")?;
+    let secret = Secret(crypt(ciphertext, purpose, true)
+        .map_err(|_| "Windows could not unlock protected download data for this user. Restore its backup or add the link again.")?);
+    if secret.0.len() > limit {
+        return Err("Protected download data exceeds its size limit.".into());
+    }
+    Ok(secret)
+}
+
+fn write_protected(path: &Path, header: &[u8], purpose: &str, bytes: &[u8]) -> Result<(), String> {
+    let protected = crypt(bytes, purpose, false)
+        .map_err(|_| "Windows could not protect download data. No plaintext record was written.")?;
+    let directory = path.parent().ok_or("Invalid protected data directory.")?;
+    let temporary = directory.join(format!("protected-{}.new", nonce()));
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary)
+        .map_err(|_| "Could not create protected download data.")?;
+    let written = file
+        .write_all(header)
+        .and_then(|_| file.write_all(&protected))
+        .and_then(|_| file.sync_all());
+    drop(file);
+    let result = (|| {
+        written.map_err(|_| "Could not flush protected download data.")?;
+        if read_protected(&temporary, header, purpose, bytes.len())?.0 != bytes {
+            return Err(
+                "Protected download data did not validate. The prior record was kept.".into(),
+            );
+        }
+        replace(&temporary, path).map_err(|_| {
+            "Could not commit protected download data. The prior record was kept.".into()
+        })
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
+}
+
+pub fn seal_url(root: &Path, job_id: &str, url: &str) -> Result<String, String> {
+    if job_id.is_empty() || job_id.len() > 160 {
+        return Err("Invalid job identifier for protected download data.".into());
+    }
+    let value = validate_operational_url(url.trim().as_bytes())?;
+    // The reference identifies the job, never a hash or fragment of its secret URL.
+    let reference = format!(
+        "{:x}",
+        Sha256::digest(format!("nabnab-operational-url-v1\0{job_id}").as_bytes())
+    );
+    let directory = private_directory(root, "job-urls")?;
+    let path = directory.join(format!("{reference}.bin"));
+    if path.exists() {
+        if resolve_url(root, &reference)?.as_str() != value {
+            return Err("This job's protected URL differs from its original request. No record was replaced.".into());
+        }
+        return Ok(reference);
+    }
+    write_protected(
+        &path,
+        URL_HEADER,
+        &format!("operational-url:{reference}"),
+        value.as_bytes(),
+    )?;
+    Ok(reference)
+}
+
+pub fn resolve_url(root: &Path, reference: &str) -> Result<OperationalUrl, String> {
+    if !valid_url_reference(reference) {
+        return Err("The protected download reference is invalid.".into());
+    }
+    let path = root.join("job-urls").join(format!("{reference}.bin"));
+    let secret = read_protected(
+        &path,
+        URL_HEADER,
+        &format!("operational-url:{reference}"),
+        MAX_URL_BYTES,
+    )?;
+    validate_operational_url(&secret.0)?;
+    Ok(OperationalUrl(secret))
+}
+
+pub fn protect_repository_backup(root: &Path, bytes: &[u8]) -> Result<(), String> {
+    if bytes.len() > MAX_BACKUP_BYTES {
+        return Err(
+            "The previous repository exceeds the supported backup size. It was not modified."
+                .into(),
+        );
+    }
+    let directory = private_directory(root, "migration-backups")?;
+    let path = directory.join("state-v1.dpapi");
+    if path.exists() {
+        if read_protected(
+            &path,
+            BACKUP_HEADER,
+            "repository-schema1-backup",
+            MAX_BACKUP_BYTES,
+        )?
+        .0 != bytes
+        {
+            return Err("The protected schema-1 backup differs from the previous repository. Keep both records and resolve this before retrying migration.".into());
+        }
+        return Ok(());
+    }
+    write_protected(&path, BACKUP_HEADER, "repository-schema1-backup", bytes)
+}
+
 pub fn list(root: &Path) -> Result<Vec<SessionInfo>, String> {
     let directory = root.join("sessions");
     if !directory.exists() {
@@ -552,6 +704,47 @@ mod tests {
         cleanup(&root).unwrap();
         assert!(!directory.join("cookie-previous-run.txt").exists());
         assert_eq!(fs::read(directory.join("keep.txt")).unwrap(), b"unrelated");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn operational_urls_round_trip_exactly_without_plaintext_or_duplicate_records() {
+        let root = std::env::temp_dir().join(format!("nabnab-protected-url-{}", nonce()));
+        let url = "https://example.org/private-path-credential?api_key=API-SECRET-UNIQUE&accessToken=ACCESS-SECRET-UNIQUE&signature=SIGNATURE-SECRET-UNIQUE&part=1%2F2#FRAGMENT-SECRET-UNIQUE";
+        let reference = seal_url(&root, "1234-1", url).unwrap();
+        assert!(valid_url_reference(&reference));
+        assert_eq!(resolve_url(&root, &reference).unwrap().as_str(), url);
+        let path = root.join("job-urls").join(format!("{reference}.bin"));
+        let encrypted = fs::read(&path).unwrap();
+        for secret in [
+            "private-path-credential",
+            "API-SECRET-UNIQUE",
+            "ACCESS-SECRET-UNIQUE",
+            "SIGNATURE-SECRET-UNIQUE",
+            "FRAGMENT-SECRET-UNIQUE",
+        ] {
+            assert!(!encrypted
+                .windows(secret.len())
+                .any(|bytes| bytes == secret.as_bytes()));
+            assert!(!reference.contains(secret));
+        }
+        assert_eq!(seal_url(&root, "1234-1", url).unwrap(), reference);
+        assert_eq!(fs::read(&path).unwrap(), encrypted);
+        assert_eq!(fs::read_dir(root.join("job-urls")).unwrap().count(), 1);
+        assert!(seal_url(&root, "1234-1", "https://example.org/different").is_err());
+        assert_eq!(fs::read(&path).unwrap(), encrypted);
+        assert!(resolve_url(&root, "../outside").is_err());
+        assert!(seal_url(
+            &root,
+            "1234-2",
+            &format!("https://example.org/{}", "x".repeat(8192))
+        )
+        .is_err());
+        fs::write(&path, b"corrupted protected record").unwrap();
+        assert!(resolve_url(&root, &reference).is_err());
+        assert!(seal_url(&root, "1234-1", url).is_err());
+        assert_eq!(fs::read(path).unwrap(), b"corrupted protected record");
         fs::remove_dir_all(root).unwrap();
     }
 }
