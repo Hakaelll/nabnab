@@ -32,7 +32,7 @@ HTTP parsing rejects duplicate headers, transfer encoding, unexpected extra body
 
 ## Protocol version 1
 
-`GET /health` returns an authenticated response:
+The extension uses `POST /health` with `Content-Type: application/json` and body `{"version":1}`. Edge omits `Origin` from extension GET requests; POST supplies the actual extension origin, which the native server still validates exactly. An authenticated GET with an explicit valid Origin and no body remains accepted for native diagnostics. Both return:
 
 ```json
 {"version":1,"product":"nabnab","connected":true}
@@ -57,5 +57,9 @@ The extension rejects a receipt for another request, an unsupported version or a
 ## Verification and limits
 
 Run `node --test tests/browser-extension.test.mjs` for extension protocol behavior, stable retry IDs, receipt validation and the packaged permission boundary. Native `browser::tests` exercise host/origin/token rejection, bounded HTTP parsing, message validation, exact CORS and hash-only storage. These tests do not substitute for loading the extension and pairing it in a real browser.
+
+On 5 November 2026, `tests/native-extension.browser.mjs` passed six checks in an isolated Edge 156.0.4314.58 profile with the real native application. It loaded the unpacked service worker, paired through the options UI, sent the active tab after a browser-action permission grant, verified receipt deduplication, rejected an invalid token and confirmed that revocation blocked the extension. The public sample page used a local HTML fixture; this checks extension permissions and transport, not a platform download. No token was logged. The result is `artifacts/native-extension/run-QsqYqO/results.json`.
+
+The actual Windows context-menu click remains unverified. The computer-use controller refused that input because it could not confidently identify the current browser URL. No alternate native input method bypassed that refusal. Chrome and Firefox were not certified by this run.
 
 The extension performs no session import. A platform requiring login is handled by the desktop application's explicit session workflow. Sending a link does not authorize bypassing DRM or access controls.

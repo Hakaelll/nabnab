@@ -427,6 +427,27 @@ fn authenticated(request: &HttpRequest, expected: &str) -> bool {
             .fold(0u8, |different, (a, b)| different | (a ^ b))
             == 0
 }
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HealthRequest {
+    version: u32,
+}
+fn validate_health(request: &HttpRequest) -> Result<(), u16> {
+    match request.method.as_str() {
+        "GET" if request.body.is_empty() => Ok(()),
+        "POST" => {
+            if request.headers.get("content-type").map(String::as_str) != Some("application/json") {
+                return Err(415);
+            }
+            let body: HealthRequest = serde_json::from_slice(&request.body).map_err(|_| 400u16)?;
+            if body.version != 1 {
+                return Err(400);
+            }
+            Ok(())
+        }
+        _ => Err(405),
+    }
+}
 fn validate_message(mut request: BrowserRequest, client: &str) -> Result<BrowserRequest, String> {
     if request.version != 1 {
         return Err("This extension protocol version is unsupported.".into());
@@ -536,17 +557,18 @@ fn serve(app: &AppHandle, state: &Shared, stream: &mut TcpStream) {
         return;
     }
     if request.method == "OPTIONS" {
-        let expected = if request.path == "/health" {
-            "GET"
-        } else {
-            "POST"
-        };
+        let allowed_method = matches!(
+            (
+                request.path.as_str(),
+                request
+                    .headers
+                    .get("access-control-request-method")
+                    .map(String::as_str)
+            ),
+            ("/health", Some("GET" | "POST")) | ("/enqueue", Some("POST"))
+        );
         let valid = request.body.is_empty()
-            && request
-                .headers
-                .get("access-control-request-method")
-                .map(String::as_str)
-                == Some(expected)
+            && allowed_method
             && request
                 .headers
                 .get("access-control-request-headers")
@@ -579,12 +601,12 @@ fn serve(app: &AppHandle, state: &Shared, stream: &mut TcpStream) {
         return;
     }
     if request.path == "/health" {
-        if request.method != "GET" || !request.body.is_empty() {
+        if let Err(status) = validate_health(&request) {
             write_response(
                 stream,
-                405,
+                status,
                 Some(&origin),
-                &json!({"error":"Use GET for connection status."}),
+                &json!({"error":"Use POST with the supported JSON protocol version for connection status."}),
             );
             return;
         }
@@ -754,5 +776,29 @@ mod tests {
         })
         .unwrap()
         .contains(&secret));
+    }
+    #[test]
+    fn browser_health_post_is_versioned_and_get_compatibility_stays_strict() {
+        let mut probe = request(HOST, &format!("chrome-extension://{ID}"), TOKEN);
+        assert!(validate_health(&probe).is_ok());
+        probe.method = "POST".into();
+        probe
+            .headers
+            .insert("content-type".into(), "application/json".into());
+        probe.body = br#"{"version":1}"#.to_vec();
+        assert!(validate_health(&probe).is_ok());
+        for body in [
+            br#"{"version":2}"#.as_slice(),
+            br#"{"version":1,"token":"untrusted"}"#.as_slice(),
+            b"".as_slice(),
+        ] {
+            probe.body = body.to_vec();
+            assert_eq!(validate_health(&probe), Err(400));
+        }
+        probe.body = br#"{"version":1}"#.to_vec();
+        probe.headers.remove("content-type");
+        assert_eq!(validate_health(&probe), Err(415));
+        probe.method = "DELETE".into();
+        assert_eq!(validate_health(&probe), Err(405));
     }
 }

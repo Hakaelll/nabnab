@@ -23,10 +23,10 @@ export function createClient({ token, fetcher = globalThis.fetch }) {
     let response;
     try {
       response = await fetcher(base + path, {
-        method: body ? "POST" : "GET",
+        method: "POST",
         mode: "cors", credentials: "omit", cache: "no-store", redirect: "error",
-        headers: body ? { Authorization: "Bearer " + token, "Content-Type": "application/json" } : { Authorization: "Bearer " + token },
-        ...(body ? { body: JSON.stringify(body) } : {}),
+        headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
         signal: AbortSignal.timeout(10000),
       });
     } catch { throw new Error("Abre nabnab y comprueba el emparejamiento en Ajustes > Navegador."); }
@@ -38,7 +38,7 @@ export function createClient({ token, fetcher = globalThis.fetch }) {
   }
   return {
     async health() {
-      const response = await call("/health");
+      const response = await call("/health", { version: 1 });
       if (response?.version !== 1 || response.product !== "nabnab" || response.connected !== true) throw new Error("La versión del enlace con nabnab no es compatible.");
       return true;
     },

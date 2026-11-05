@@ -55,6 +55,8 @@ test("connection state requires an authenticated compatible nabnab response", as
     calls++;
     assert.equal(url, "http://127.0.0.1:49587/health");
     assert.equal(options.headers.Authorization, "Bearer " + token);
+    assert.equal(options.method,"POST");
+    assert.deepEqual(JSON.parse(options.body),{version:1});
     return new Response(JSON.stringify({ version: 1, product: "nabnab", connected: true }), { status: 200 });
   } });
   assert.equal(await client.health(), true);
