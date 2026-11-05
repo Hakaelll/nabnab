@@ -18,12 +18,16 @@ let debounce: ReturnType<typeof setTimeout> | undefined;
 let pendingRender: ReturnType<typeof setTimeout> | undefined;
 let disposeGraphics: (() => void) | null = null;
 let inspectorKey = "";
+let compactHome = false;
+let renderedPreviewRequest = 0;
+let pointerInput = false;
+const surfaceAnimations = new Map<HTMLElement, Animation>();
 const scrollPositions = new Map<Page, number>();
 const thumbnailUrls = new Map<string,string>();
 let thumbnailObserver: IntersectionObserver | null = null;
 const thumbnailQueue: HTMLElement[] = [];
 let thumbnailWorkers=0;
-const home: HomeState = { input: "", media: null, loading: false, selectedUrls: new Set(), format: "mp4", quality: "", audioBitrate: "192", submitting: false };
+const home: HomeState = { input: "", media: null, loading: false, selectedUrls: new Set(), format: "mp4", quality: "", audioBitrate: "192", subtitleLanguage: "", submitting: false };
 const downloads: DownloadView = { query: "", filter: "all", selected: new Set(), detailId: null };
 const library: LibraryView = { query: "", filter: "all", sort: "newest", layout: "grid", collection: "", offset: 0, selected: new Set(), detailId: null };
 const tools: ToolsView = { kind: "convert", ids: new Set(), options: defaultToolOptions("convert"), picking: false };
@@ -36,6 +40,20 @@ function required<T extends HTMLElement = HTMLElement>(selector: string): T {
   return element;
 }
 function inputValue(id: string): string { const element = document.getElementById(id); return element instanceof HTMLInputElement || element instanceof HTMLSelectElement ? element.value : ""; }
+function cancelSurfaceMotion(): void {
+  for (const animation of surfaceAnimations.values()) animation.cancel();
+  surfaceAnimations.clear();
+}
+function enterSurface(element: HTMLElement, axis: "x" | "y" = "y"): void {
+  surfaceAnimations.get(element)?.cancel();
+  if (!pointerInput || snapshot.settings.reducedMotion || matchMedia("(prefers-reduced-motion: reduce), (forced-colors: active)").matches) return;
+  const animation = element.animate([
+    { opacity: 0, transform: axis === "x" ? "translateX(12px)" : "translateY(6px)" },
+    { opacity: 1, transform: "none" },
+  ], { duration: 200, easing: "cubic-bezier(.23, 1, .32, 1)" });
+  surfaceAnimations.set(element, animation);
+  void animation.finished.catch(() => {}).then(() => { if (surfaceAnimations.get(element) === animation) surfaceAnimations.delete(element); });
+}
 function checked(id: string): boolean { const element = document.getElementById(id); return element instanceof HTMLInputElement && element.checked; }
 function isPage(value: string | undefined): value is Page { return value === "home" || value === "downloads" || value === "library" || value === "tools" || value === "settings"; }
 function isTool(value: string | undefined): value is ToolKind { return value === "convert" || value === "extractAudio" || value === "trim" || value === "compress"; }
@@ -45,12 +63,12 @@ async function command<T>(name: string, args?: Record<string, unknown>): Promise
   return invoke<T>(name, args);
 }
 
-required("#app").innerHTML = `<header class="titlebar" data-tauri-drag-region><span class="titlebar-context" data-tauri-drag-region></span><div class="window-actions">
+required("#app").innerHTML = `<canvas id="field" aria-hidden="true"></canvas><header class="titlebar" data-tauri-drag-region><span class="titlebar-context" data-tauri-drag-region></span><div class="window-actions">
   <button id="minimize" aria-label="Minimizar" title="Minimizar"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10"/></svg></button>
   <button id="maximize" aria-label="Maximizar" title="Maximizar"><svg class="maximize-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="3.5" width="9" height="9" rx=".5"/></svg><svg class="restore-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 5.5v-2h7v7h-2"/><rect x="3.5" y="5.5" width="7" height="7" rx=".5"/></svg></button>
   <button id="close" aria-label="Cerrar" title="Cerrar"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg></button>
-  </div></header><div class="app-shell"><nav class="sidebar" aria-label="Navegación principal"><button id="toggle-sidebar" class="sidebar-toggle icon-button" data-action="toggle-sidebar" title="Contraer navegación" aria-label="Contraer navegación">${icon("menu")}</button><div class="nav-primary"></div><div class="nav-secondary"></div><div class="sidebar-caption">${icon("info")}<span class="nav-label">Local · nabnab</span></div></nav>
-  <main id="main"><div id="notification" class="notification" hidden><span id="notification-icon"></span><div><span id="notification-text"></span><details id="notification-details" hidden><summary>Detalles técnicos</summary><pre></pre></details></div><button class="icon-button" data-action="dismiss-message" aria-label="Cerrar aviso">${icon("close")}</button></div><section id="home-page" class="home-page"><canvas id="field" aria-hidden="true"></canvas><div id="home-content"></div></section><div class="content-layout"><section id="page-content" class="page-content" hidden></section><aside id="inspector" class="inspector" aria-label="Detalles" hidden></aside></div><button id="activity" class="activity" data-action="show-activity" hidden><span class="activity-dot"></span><span id="activity-text"></span>${icon("arrow")}</button></main></div><dialog id="detail-dialog" class="detail-dialog" aria-label="Detalles"></dialog><div id="drop-indicator" class="drop-indicator" hidden>${icon("add")}<span></span></div>`;
+  </div></header><div class="app-shell"><nav class="sidebar" aria-label="Navegación principal"><button id="toggle-sidebar" class="sidebar-toggle icon-button" data-action="toggle-sidebar" title="Contraer navegación" aria-label="Contraer navegación">${icon("menu")}</button><div class="nav-primary"></div><div class="nav-secondary"></div></nav>
+  <main id="main"><div id="notification" class="notification" hidden><span id="notification-icon"></span><div><span id="notification-text"></span><details id="notification-details" hidden><summary>Detalles técnicos</summary><pre></pre></details></div><button class="icon-button" data-action="dismiss-message" aria-label="Cerrar aviso">${icon("close")}</button></div><section id="home-page" class="home-page"><div id="home-content"></div></section><div class="content-layout"><section id="page-content" class="page-content" hidden></section><aside id="inspector" class="inspector" aria-label="Detalles" hidden></aside></div><button id="activity" class="activity" data-action="show-activity" hidden><span class="activity-dot"></span><span id="activity-text"></span>${icon("arrow")}</button></main></div><dialog id="detail-dialog" class="detail-dialog" aria-label="Detalles"></dialog><div id="drop-indicator" class="drop-indicator" hidden>${icon("add")}<span></span></div>`;
 const inspectorBody = document.createElement("div");
 inspectorBody.className = "inspector-body";
 
@@ -75,6 +93,7 @@ function showError(error: unknown): void {
     javascript: ["No se pudo resolver la verificación de JavaScript. Revisa los motores.", "JavaScript verification failed. Review the engines."],
     format_unavailable: ["La calidad ya no está disponible. Analiza el enlace de nuevo.", "This quality is no longer available. Analyze the link again."],
     processing: ["No se pudo procesar o verificar el archivo. Revisa el diagnóstico.", "The file could not be processed or verified. Review the diagnostic."],
+    subtitles: ["No se pudieron integrar los subtítulos. Elige otro idioma manual o descarga sin subtítulos.", "Subtitles could not be embedded. Choose another manual language or download without subtitles."],
     disk_full: ["No hay espacio suficiente. Libera espacio o elige otro destino.", "There is not enough disk space. Free space or choose another destination."],
     permission: ["No se puede escribir en el destino. Elige otra carpeta.", "The destination is not writable. Choose another folder."],
     file_exists: ["El archivo ya existe. Elige otro destino o cambia su nombre.", "The file already exists. Choose another destination or rename it."],
@@ -107,8 +126,10 @@ function preserveFocus(render: () => void): void {
   required("#main").scrollTop = scrollTop;
 }
 function updateNavigation(): void {
+  required('#app').classList.toggle('is-home',page==='home');
   document.documentElement.lang = snapshot.settings.language;
   document.documentElement.classList.toggle("reduced-motion", snapshot.settings.reducedMotion);
+  document.documentElement.classList.toggle("reduced-transparency", snapshot.settings.reducedTransparency);
   document.documentElement.classList.toggle("sidebar-collapsed", !snapshot.settings.sidebarExpanded);
   required(".sidebar").setAttribute("aria-label", t("Navegación principal", "Main navigation"));
   const names: [Page,string,Parameters<typeof icon>[0]][] = [["home",t("Inicio", "Home"),"home"],["downloads",t("Descargas", "Downloads"),"downloads"],["library",t("Biblioteca", "Library"),"library"],["tools",t("Herramientas", "Tools"),"tools"]];
@@ -123,25 +144,48 @@ function updateNavigation(): void {
   required("#drop-indicator span").textContent=t("Suelta para importar", "Drop to import");
 }
 function graphics(): void {
+  if(page==='home'&&disposeGraphics&&!snapshot.settings.reducedMotion)return;
   disposeGraphics?.(); disposeGraphics=null;
   if (page!=="home") return;
   disposeGraphics=startGraphics(required<HTMLCanvasElement>("#field"),required<HTMLCanvasElement>("#emblem"));
   if(snapshot.settings.reducedMotion){disposeGraphics();disposeGraphics=null;}
 }
-function renderHome(): void { preserveFocus(()=>{required("#home-content").innerHTML=homeView(home,snapshot,enginesReady,desktop,t);}); graphics(); }
+function sizeSourceInput(): void {
+  const input=document.getElementById('url');if(!(input instanceof HTMLTextAreaElement))return;
+  input.style.height='0px';const height=Math.min(126,Math.max(52,input.scrollHeight));input.style.height=`${height}px`;input.style.overflowY=input.scrollHeight>126?'auto':'hidden';
+}
+function updateHomeLayout(): void {
+  if(home.media||sourceUrls(home.input).urls.length>1)compactHome=true;
+  else if(!home.input.trim())compactHome=false;
+  required('#home-page').classList.toggle('has-media',compactHome);
+}
+function bindPreviewImage(): void {
+  const image=document.querySelector<HTMLImageElement>('.preview-image');if(!image)return;
+  const frame=image.closest<HTMLElement>('.preview-media');if(!frame)return;
+  const size=()=>{if(!image.naturalWidth||!image.naturalHeight)return;frame.style.setProperty('--preview-ratio',String(image.naturalWidth/image.naturalHeight));frame.dataset.orientation=image.naturalHeight>image.naturalWidth?'portrait':'landscape';};
+  image.addEventListener('load',size);image.addEventListener('error',()=>{const heading=frame.closest<HTMLElement>('.preview-heading');if(!heading)return;const fallback=document.createElement('div');fallback.className='preview-placeholder';fallback.innerHTML=icon(home.media?.hasVideo?'video':'audio');frame.replaceWith(fallback);heading.classList.remove('with-thumbnail');heading.classList.add('is-fallback');});
+  if(image.complete)size();
+}
+function renderHome(): void {
+  preserveFocus(()=>{const emblem=document.getElementById('emblem');const status=document.getElementById('source-status');updateHomeLayout();required("#home-content").innerHTML=homeView(home,snapshot,enginesReady,desktop,t);const replacement=document.getElementById('emblem');if(emblem instanceof HTMLCanvasElement&&replacement)replacement.replaceWith(emblem);const nextStatus=document.getElementById('source-status');if(status&&nextStatus){const text=nextStatus.textContent;nextStatus.replaceWith(status);status.textContent=text;}sizeSourceInput();bindPreviewImage();});graphics();
+  const previewRequest=home.media?.requestId??0;
+  if(previewRequest&&previewRequest!==renderedPreviewRequest){const preview=document.querySelector<HTMLElement>('.source-preview');if(preview)enterSurface(preview);}
+  renderedPreviewRequest=previewRequest;
+}
 function renderInspector(force=false): void {
   const job=page==='downloads'?snapshot.jobs.find(item=>item.id===downloads.detailId):null;
   const item=page==='library'?snapshot.library.find(item=>item.id===library.detailId):null;
   const key=job?`job:${job.id}:${job.runId}:${job.updatedAt}:${job.state}`:item?`media:${item.id}:${item.path}:${item.collections.join(',')}:${item.tags.join(',')}`:"";
-  const aside=required("#inspector");const dialog=required<HTMLDialogElement>("#detail-dialog");
+  const aside=required("#inspector");const dialog=required<HTMLDialogElement>("#detail-dialog");const opening=!inspectorKey&&!!key;
   if(!key){aside.hidden=true;if(dialog.open)dialog.close();inspectorKey="";required(".content-layout").classList.remove("has-inspector");return;}
   if(force||key!==inspectorKey){inspectorBody.innerHTML=job?jobInspector(job,snapshot,t):item?mediaInspector(item,snapshot,t):"";inspectorKey=key;}
   if(window.innerWidth>=1120){if(dialog.open)dialog.close();aside.hidden=false;if(inspectorBody.parentElement!==aside)aside.append(inspectorBody);required(".content-layout").classList.add("has-inspector");}
   else{aside.hidden=true;required(".content-layout").classList.remove("has-inspector");if(inspectorBody.parentElement!==dialog)dialog.append(inspectorBody);if(!dialog.open)dialog.showModal();}
+  if(opening)enterSurface(window.innerWidth>=1120?aside:dialog,"x");
 }
 function renderCurrent(): void {
   preserveFocus(()=>{
-    updateNavigation();required("#home-page").hidden=page!=="home";required("#page-content").hidden=page==='home';
+    updateNavigation();required('#field').hidden=page!=='home';required("#home-page").hidden=page!=="home";required("#page-content").hidden=page==='home';
     if(page==='home')renderHome();
     else {disposeGraphics?.();disposeGraphics=null;required("#page-content").innerHTML=page==='downloads'?downloadsView(snapshot,downloads,t):page==='library'?libraryView(snapshot,library,t):page==='tools'?toolsView(snapshot,tools,t):settingsView(snapshot,preferences,t,desktop);}
     renderInspector();updateActivity();observeThumbnails();
@@ -175,9 +219,11 @@ function applySnapshot(next: Snapshot): void {
 }
 async function refresh(): Promise<void> { applySnapshot(await command<Snapshot>("get_snapshot")); }
 function navigate(next: Page): void {
+  const changed=page!==next;cancelSurfaceMotion();
   if(page==='tools'){try{tools.options=readToolOptions();}catch{/* Keep the last valid options while a draft is incomplete. */}}
   scrollPositions.set(page,required("#main").scrollTop);page=next;inspectorKey="";
   renderCurrent();required("#main").scrollTop=scrollPositions.get(next)??0;
+  if(changed)enterSurface(required(next==='home'?'#home-content':'#page-content'));
   if(next==='settings')void loadSettingsSection().catch(showError);
 }
 function scheduleJobsRender(): void {
@@ -187,13 +233,13 @@ function scheduleJobsRender(): void {
 function invalidateAnalysis(): void {
   clearTimeout(debounce);++generation;
   if(analysisRequest)void command("cancel_job",{kind:"metadata",requestId:analysisRequest}).catch(()=>{});
-  analysisRequest=0;analysisUrl="";home.loading=false;home.media=null;
+  analysisRequest=0;analysisUrl="";home.loading=false;home.media=null;home.subtitleLanguage="";
 }
 function updateSourceInput(value: string, render=true): void {
   invalidateAnalysis();home.input=value;home.quality="";const parsed=sourceUrls(value);
   home.selectedUrls=new Set(parsed.urls.length>1?parsed.urls:[]);
   if(render)renderHome();
-  else {required("#source-form").classList.remove("is-loading");required("#source-form").setAttribute("aria-busy","false");required("#source-status").textContent="";const load=document.getElementById("load");if(load instanceof HTMLButtonElement)load.disabled=!desktop;document.querySelector(".source-preview")?.remove();}
+  else {updateHomeLayout();sizeSourceInput();required("#source-form").classList.remove("is-loading");required("#source-form").setAttribute("aria-busy","false");required("#source-status").textContent="";const load=document.getElementById("load");if(load instanceof HTMLButtonElement)load.disabled=!desktop;document.querySelector(".source-preview")?.remove();}
   if(desktop&&enginesReady&&!parsed.invalid&&parsed.urls.length===1)debounce=setTimeout(()=>void inspect(),500);
   else if(parsed.urls.length>1&&!render)renderHome();
 }
@@ -215,7 +261,7 @@ async function queueDownload(): Promise<void> {
   if(!urls.length||parsed.invalid||parsed.truncated||(!batch&&!home.media))return;
   const titles=urls.map(url=>home.media?.entries.find(entry=>entry.url===url)?.title??(urls.length===1?home.media?.title??"":""));
   home.submitting=true;renderHome();
-  try{const jobs=await command<Job[]>("queue_download",{urls,titles,format:home.format,height:home.quality?Number(home.quality):null,audioBitrate:home.format==='mp3'?Number(home.audioBitrate):null,clientRequest:crypto.randomUUID()});const ids=new Set(jobs.map(job=>job.id));snapshot.jobs=[...snapshot.jobs.filter(job=>!ids.has(job.id)),...jobs];invalidateAnalysis();home.input="";home.selectedUrls.clear();notify(t("Añadido a Descargas. Ya puedes pegar otro enlace.", "Added to Downloads. You can paste another link now."),"success");}
+  try{const jobs=await command<Job[]>("queue_download",{urls,titles,format:home.format,height:home.quality?Number(home.quality):null,audioBitrate:home.format==='mp3'?Number(home.audioBitrate):null,subtitleLanguage:!batch&&(home.format==='mp4'||home.format==='source')?(home.subtitleLanguage||null):null,clientRequest:crypto.randomUUID()});const ids=new Set(jobs.map(job=>job.id));snapshot.jobs=[...snapshot.jobs.filter(job=>!ids.has(job.id)),...jobs];invalidateAnalysis();home.input="";home.selectedUrls.clear();notify(t("Añadido a Descargas. Ya puedes pegar otro enlace.", "Added to Downloads. You can paste another link now."),"success");}
   catch(error){showError(error);}finally{home.submitting=false;renderHome();updateActivity();required<HTMLTextAreaElement>("#url").focus({preventScroll:true});}
 }
 async function saveSettings(settings: Settings): Promise<void> { applySnapshot(await command<Snapshot>("save_settings",{settings})); }
@@ -257,9 +303,16 @@ function closeInspector(): void {
   const source=[...document.querySelectorAll<HTMLButtonElement>('[data-action="inspect-job"], [data-action="inspect-media"]')].find(button=>button.dataset.id===id);
   source?.focus({preventScroll:true});
 }
+function focusLibraryPage(): void {
+  required('#main').scrollTop=0;
+  document.querySelector<HTMLButtonElement>('.media-open')?.focus({preventScroll:true});
+}
 async function copyText(text: string): Promise<void> {await navigator.clipboard.writeText(text);notify(t("Copiado al portapapeles.", "Copied to clipboard."),"success");}
 function setToolInput(ids: string[]): void {tools.ids=new Set(ids.filter(id=>snapshot.library.some(item=>item.id===id&&item.kind!=='image')));tools.picking=false;navigate('tools');}
 
+document.addEventListener("pointerdown",()=>{pointerInput=true;document.documentElement.dataset.input="pointer";},{passive:true});
+document.addEventListener("keydown",()=>{pointerInput=false;document.documentElement.dataset.input="keyboard";cancelSurfaceMotion();},true);
+matchMedia("(prefers-reduced-motion: reduce)").addEventListener("change",()=>cancelSurfaceMotion());
 document.addEventListener("click",event=>{
   const target=event.target instanceof Element?event.target.closest<HTMLButtonElement>('button'):null;
   if(!target||target.disabled)return;const destination=target.dataset.page;
@@ -289,8 +342,8 @@ async function handleAction(action: string, button: HTMLButtonElement): Promise<
     case 'copy-job-error':{const job=snapshot.jobs.find(job=>job.id===id);if(job?.error)await copyText(job.error.technical);break;}
     case 'library-filter':{const value=button.dataset.filter;if(value==='all'||value==='video'||value==='audio'||value==='image'){library.filter=value;library.offset=0;renderCurrent();}break;}
     case 'library-layout':if(button.dataset.layout==='grid'||button.dataset.layout==='list'){library.layout=button.dataset.layout;renderCurrent();}break;
-    case 'library-next':library.offset+=60;renderCurrent();required('#main').scrollTop=0;break;
-    case 'library-previous':library.offset=Math.max(0,library.offset-60);renderCurrent();required('#main').scrollTop=0;break;
+    case 'library-next':library.offset+=60;renderCurrent();focusLibraryPage();break;
+    case 'library-previous':library.offset=Math.max(0,library.offset-60);renderCurrent();focusLibraryPage();break;
     case 'import-files':await importMedia(false);break;
     case 'import-folder':await importMedia(true);break;
     case 'inspect-media':library.detailId=id;if(page!=='library')navigate('library');else renderCurrent();break;
@@ -345,6 +398,7 @@ document.addEventListener('change',event=>{
     if(target.id==='output-format'&&(value==='mp4'||value==='source'||value==='mp3'||value==='m4a'||value==='audio'||value==='opus')){home.format=value;home.quality="";renderHome();}
     else if(target.id==='quality')home.quality=value;
     else if(target.id==='audio-bitrate')home.audioBitrate=value;
+    else if(target.id==='subtitles')home.subtitleLanguage=value;
     else if(target.id==='collection-filter'){library.collection=value;library.offset=0;renderCurrent();}
     else if(target.id==='library-sort'&&(value==='newest'||value==='name'||value==='duration'||value==='size')){library.sort=value;library.offset=0;renderCurrent();}
   }
@@ -356,7 +410,7 @@ async function submitForm(form: HTMLFormElement): Promise<void> {
     case 'tool-form':{const button=form.querySelector<HTMLButtonElement>('button[type=submit]');if(button?.disabled)return;if(button)button.disabled=true;try{await queueTool();}finally{if(button)button.disabled=false;}break;}
     case 'general-settings':{const language=inputValue('language');if(language==='es'||language==='en')await saveSettings({...snapshot.settings,language,trayEnabled:checked('tray-enabled'),closeToTray:checked('tray-enabled')&&checked('close-to-tray'),startWithWindows:checked('start-with-windows')});notify(t("Ajustes guardados.", "Settings saved."),'success');break;}
     case 'download-settings':await saveSettings({...snapshot.settings,networkLimit:Number(inputValue('network-limit')),processingLimit:Number(inputValue('processing-limit'))});notify(t("Ajustes guardados.", "Settings saved."),'success');break;
-    case 'appearance-settings':await saveSettings({...snapshot.settings,reducedMotion:checked('reduced-motion'),sidebarExpanded:checked('expanded-sidebar')});notify(t("Ajustes guardados.", "Settings saved."),'success');break;
+    case 'appearance-settings':cancelSurfaceMotion();await saveSettings({...snapshot.settings,reducedMotion:checked('reduced-motion'),reducedTransparency:checked('reduced-transparency'),sidebarExpanded:checked('expanded-sidebar')});notify(t("Ajustes guardados.", "Settings saved."),'success');break;
     case 'organize-media':{const split=(value:string)=>[...new Set(value.split(',').map(value=>value.trim()).filter(Boolean))].slice(0,50);applySnapshot(await command<Snapshot>('update_library',{id:form.dataset.id??"",collections:split(inputValue('media-collections')),tags:split(inputValue('media-tags'))}));notify(t("Organización guardada.", "Organization saved."),'success');break;}
     case 'session-form':{const site=inputValue('session-site');await command('import_session',{site});await loadSettingsSection();const saved=preferences.sessions?.some(session=>session.site===site);notify(saved?t("Sesión disponible con protección de Windows.", "Session available with Windows protection."):t("No se ha añadido ninguna sesión.", "No session was added."),saved?'success':'info');break;}
     case 'bridge-form':preferences.pairing=await command<{token:string;port:number}>('bridge_pair',{extensionId:inputValue('extension-id')});await loadSettingsSection();break;

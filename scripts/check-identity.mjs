@@ -1,0 +1,16 @@
+import assert from "node:assert/strict";
+import {readFile} from "node:fs/promises";
+const packageInfo=JSON.parse(await readFile(new URL('../package.json',import.meta.url),'utf8'));
+const config=JSON.parse(await readFile(new URL('../src-tauri/tauri.conf.json',import.meta.url),'utf8'));
+const cargo=await readFile(new URL('../src-tauri/Cargo.toml',import.meta.url),'utf8');
+const packageSection=cargo.split('[package]')[1]?.split(/\r?\n\[/)[0];
+assert.equal(packageInfo.name,'nabnab');
+assert.match(packageInfo.version,/^\d+\.\d+\.\d+$/);
+assert.equal(config.productName,packageInfo.name);
+assert.equal(config.mainBinaryName,packageInfo.name);
+assert.equal(config.version,packageInfo.version);
+assert.equal(config.app.windows[0].title,packageInfo.name);
+assert.equal(packageSection?.match(/^name\s*=\s*"([^"]+)"/m)?.[1],packageInfo.name);
+assert.equal(packageSection?.match(/^version\s*=\s*"([^"]+)"/m)?.[1],packageInfo.version);
+assert.equal(config.identifier,'com.ytnabber.desktop','The compatibility identifier must not change during a visible rebrand.');
+console.log(`Verified ${packageInfo.name} ${packageInfo.version} identity and legacy data continuity.`);

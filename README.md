@@ -4,6 +4,16 @@ Aplicación local para Windows para descargar, organizar y transformar multimedi
 
 Los cambios de `main` corresponden a 0.2.0. El instalador nuevo se genera al compilar; este trabajo no publica una release automáticamente.
 
+## Interfaz
+
+El acabado glass integra la navegación con el campo de caracteres original. Incluye preferencias para reducir movimiento y transparencias. Estas capturas muestran la interfaz con datos de prueba; los recorridos nativos y de plataformas se registran por separado.
+
+![Inicio de nabnab](docs/nabnab-after.png)
+
+![Previsualización y opciones](docs/nabnab-preview.png)
+
+[Sidebar contraída](docs/nabnab-sidebar.png) · [Biblioteca](docs/nabnab-library.png) · [Referencia anterior](docs/nabnab-before.png)
+
 ## Uso
 
 1. Pega uno o varios enlaces en Inicio, o importa una lista `.txt`. El análisis no inicia descargas.
@@ -50,6 +60,7 @@ Las sesiones se importan por sitio desde un archivo Netscape elegido por el usua
 - [Pruebas y límites observados](docs/NABNAB-VERIFICATION.md).
 - [Matriz de plataformas](docs/PLATFORMS.md). Que yt-dlp tenga un extractor no certifica cada sitio o contenido.
 - [Arquitectura](docs/IMPLEMENTATION.md), [migración](docs/MIGRATION.md) y [herramientas](docs/TOOLS.md).
+- [HTTP directo](docs/DIRECT.md) y [subtítulos](docs/SUBTITLES.md).
 - [Red, motores y privacidad](docs/NETWORK.md), [diseño](docs/design-reference.md) y [plan de trabajo](docs/PLAN.md).
 - [Licencias y avisos](THIRD_PARTY_NOTICES.md).
 

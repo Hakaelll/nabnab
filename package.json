@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "build": "tsc --noEmit && vite build",
-    "check": "tsc --noEmit",
+    "build": "node scripts/check-identity.mjs && tsc --noEmit && vite build",
+    "check": "node scripts/check-identity.mjs && tsc --noEmit",
     "tauri": "tauri",
     "engines:prepare": "node scripts/prepare-engines.mjs",
     "engines:verify": "node scripts/verify-engines.mjs",
