@@ -1,0 +1,61 @@
+{
+  "attribution": "Blender Foundation / www.bigbuckbunny.org",
+  "engines": [
+    {
+      "filename": "yt-dlp.exe",
+      "name": "yt-dlp",
+      "sha256": "f5389d3698ecde4ef06f4e6b1ce0294fe9ac1396228c8990b8d3416d6d177a7d",
+      "url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp.exe",
+      "version": "2026.10.26"
+    },
+    {
+      "filename": "deno.zip",
+      "name": "deno",
+      "sha256": "cba84b26e0df5ae7f74fc66b86a95b866872a86292ebd84fa1e959927edd93bf",
+      "url": "https://github.com/denoland/deno/releases/download/v2.9.8/deno-x86_64-pc-windows-msvc.zip",
+      "version": "2.9.8"
+    },
+    {
+      "build": "vcpkg",
+      "name": "ffmpeg",
+      "recipe": "scripts/ffmpeg/vcpkg.json",
+      "version": "9.0.2"
+    }
+  ],
+  "license": "CC BY 3.0",
+  "licenseSource": "https://peach.blender.org/about/",
+  "results": [
+    {
+      "duration": 635.0,
+      "hasAudio": true,
+      "hasVideo": true,
+      "heights": [
+        2160,
+        1440,
+        1080,
+        720,
+        480,
+        360,
+        240,
+        144
+      ],
+      "mediaDownloaded": false,
+      "platform": "YouTube",
+      "sessionsUsed": false,
+      "status": "metadata_verified",
+      "title": "Big Buck Bunny 60fps 4K - Official Blender Foundation Short Film",
+      "url": "https://www.youtube.com/watch?v=aqz-KE-bpKQ"
+    },
+    {
+      "code": "extraction",
+      "mediaDownloaded": false,
+      "message": "The operation failed. Open the technical details for recovery information.",
+      "platform": "Vimeo",
+      "sessionsUsed": false,
+      "status": "blocked",
+      "technical": "[Sensitive diagnostic redacted]",
+      "url": "https://vimeo.com/1084537"
+    }
+  ],
+  "testedAtUnixMs": 1793913438734
+}

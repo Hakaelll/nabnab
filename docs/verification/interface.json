@@ -1,0 +1,32 @@
+[
+  {
+    "width": 1280,
+    "height": 800,
+    "scale": 1,
+    "checks": "IPC UI fixtures: metadata/subtitle reset races, explicit subtitle enqueue, audio/batch exclusions, keyboard focus, phases, stale run, cancel, 1000-item pagination, library organization, tool options, language, session IDs, diagnostics, safe removal"
+  },
+  {
+    "width": 1180,
+    "height": 780,
+    "scale": 1,
+    "checks": "IPC UI fixtures: metadata/subtitle reset races, explicit subtitle enqueue, audio/batch exclusions, keyboard focus, phases, stale run, cancel, 1000-item pagination, library organization, tool options, language, session IDs, diagnostics, safe removal"
+  },
+  {
+    "width": 900,
+    "height": 620,
+    "scale": 1,
+    "checks": "IPC UI fixtures: metadata/subtitle reset races, explicit subtitle enqueue, audio/batch exclusions, keyboard focus, phases, stale run, cancel, 1000-item pagination, library organization, tool options, language, session IDs, diagnostics, safe removal"
+  },
+  {
+    "width": 1180,
+    "height": 780,
+    "scale": 1.25,
+    "checks": "IPC UI fixtures: metadata/subtitle reset races, explicit subtitle enqueue, audio/batch exclusions, keyboard focus, phases, stale run, cancel, 1000-item pagination, library organization, tool options, language, session IDs, diagnostics, safe removal"
+  },
+  {
+    "width": 1180,
+    "height": 780,
+    "scale": 1.5,
+    "checks": "IPC UI fixtures: metadata/subtitle reset races, explicit subtitle enqueue, audio/batch exclusions, keyboard focus, phases, stale run, cancel, 1000-item pagination, library organization, tool options, language, session IDs, diagnostics, safe removal"
+  }
+]

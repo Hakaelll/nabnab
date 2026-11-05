@@ -1,0 +1,193 @@
+{
+  "version": "0.2.0",
+  "installerBytes": 67546998,
+  "payloadBytes": 163471648,
+  "nativeBytes": 10255872,
+  "engineBytes": 152903506,
+  "licenseBytes": 312270,
+  "note": "Logical payload bytes; excludes uninstaller, shared WebView2, filesystem allocation and user data. This is not a clean-machine installed-size measurement.",
+  "largest": [
+    {
+      "name": "engines/deno.exe",
+      "bytes": 98081568
+    },
+    {
+      "name": "engines/yt-dlp.exe",
+      "bytes": 23575744
+    },
+    {
+      "name": "engines/avcodec-63.dll",
+      "bytes": 15924224
+    },
+    {
+      "name": "nabnab.exe",
+      "bytes": 10255872
+    },
+    {
+      "name": "engines/avfilter-12.dll",
+      "bytes": 4251648
+    },
+    {
+      "name": "engines/avformat-63.dll",
+      "bytes": 2822656
+    },
+    {
+      "name": "engines/dav1d.dll",
+      "bytes": 1991680
+    },
+    {
+      "name": "engines/swscale-10.dll",
+      "bytes": 1272832
+    },
+    {
+      "name": "engines/avutil-61.dll",
+      "bytes": 1158144
+    },
+    {
+      "name": "engines/openh264-8.dll",
+      "bytes": 965120
+    }
+  ],
+  "files": [
+    {
+      "name": "nabnab.exe",
+      "bytes": 10255872
+    },
+    {
+      "name": "engines/.gitkeep",
+      "bytes": 1
+    },
+    {
+      "name": "engines/avcodec-63.dll",
+      "bytes": 15924224
+    },
+    {
+      "name": "engines/avdevice-63.dll",
+      "bytes": 199168
+    },
+    {
+      "name": "engines/avfilter-12.dll",
+      "bytes": 4251648
+    },
+    {
+      "name": "engines/avformat-63.dll",
+      "bytes": 2822656
+    },
+    {
+      "name": "engines/avutil-61.dll",
+      "bytes": 1158144
+    },
+    {
+      "name": "engines/checksums.json",
+      "bytes": 2204
+    },
+    {
+      "name": "engines/dav1d.dll",
+      "bytes": 1991680
+    },
+    {
+      "name": "engines/deno.exe",
+      "bytes": 98081568
+    },
+    {
+      "name": "engines/ffmpeg-build.json",
+      "bytes": 4473
+    },
+    {
+      "name": "engines/ffmpeg.exe",
+      "bytes": 580608
+    },
+    {
+      "name": "engines/ffprobe.exe",
+      "bytes": 337408
+    },
+    {
+      "name": "engines/libmp3lame.dll",
+      "bytes": 554496
+    },
+    {
+      "name": "engines/licenses/dav1d.txt",
+      "bytes": 63866
+    },
+    {
+      "name": "engines/licenses/ffmpeg.txt",
+      "bytes": 31536
+    },
+    {
+      "name": "engines/licenses/libvpx.txt",
+      "bytes": 2775
+    },
+    {
+      "name": "engines/licenses/mp3lame.txt",
+      "bytes": 25284
+    },
+    {
+      "name": "engines/licenses/openh264.txt",
+      "bytes": 1295
+    },
+    {
+      "name": "engines/licenses/opus.txt",
+      "bytes": 1945
+    },
+    {
+      "name": "engines/licenses/zlib.txt",
+      "bytes": 1002
+    },
+    {
+      "name": "engines/openh264-8.dll",
+      "bytes": 965120
+    },
+    {
+      "name": "engines/opus.dll",
+      "bytes": 595456
+    },
+    {
+      "name": "engines/swresample-7.dll",
+      "bytes": 232960
+    },
+    {
+      "name": "engines/swscale-10.dll",
+      "bytes": 1272832
+    },
+    {
+      "name": "engines/versions.json",
+      "bytes": 645
+    },
+    {
+      "name": "engines/yt-dlp.exe",
+      "bytes": 23575744
+    },
+    {
+      "name": "engines/z.dll",
+      "bytes": 224768
+    },
+    {
+      "name": "licenses/deno.txt",
+      "bytes": 1074
+    },
+    {
+      "name": "licenses/ffmpeg-lgpl.txt",
+      "bytes": 26517
+    },
+    {
+      "name": "licenses/GPL-3.0.txt",
+      "bytes": 35149
+    },
+    {
+      "name": "licenses/SOURCES.md",
+      "bytes": 3110
+    },
+    {
+      "name": "licenses/yt-dlp-third-party.txt",
+      "bytes": 243550
+    },
+    {
+      "name": "licenses/yt-dlp.txt",
+      "bytes": 1211
+    },
+    {
+      "name": "THIRD_PARTY_NOTICES.md",
+      "bytes": 1659
+    }
+  ]
+}

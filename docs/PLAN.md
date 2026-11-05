@@ -32,8 +32,8 @@ Estado inicial: `7f533a8`, rama inicial `codex/nabnab`. El usuario pidió despu�
 - [x] Convertir, extraer audio, recortar y comprimir conectados a cola y biblioteca.
 - [x] Motores, ajustes, sesiones y privacidad con errores accionables.
 - [x] Extensión y transporte local protegido; pruebas reales en Edge de reenvío y clientes no autorizados. Chrome, Firefox y el clic nativo del menú contextual siguen sin certificar.
-- [ ] Compilación, pruebas nativas/JS, recorridos reales con archivos autorizados, revisión visual y empaquetado.
-- [ ] Matriz de plataformas y mediciones reales; separar comprobado y pendiente.
+- [x] Compilación, pruebas nativas/JS, recorridos reales con archivos autorizados, revisión visual y empaquetado. Las pruebas de instalación/actualización/desinstalación en VM se aplazaron expresamente.
+- [x] Matriz de plataformas y mediciones reales; separar comprobado y pendiente.
 
 Cada unidad se verifica antes de commit y push. No se certifica una plataforma mediante fixtures. Las pruebas de códecs usan archivos sintéticos locales autorizados; las de plataformas requieren fuentes autorizadas y se registran por separado.
 
@@ -46,4 +46,10 @@ Cada unidad se verifica antes de commit y push. No se certifica una plataforma m
 5. Biblioteca grande, archivos desaparecidos, ventana pequeña, escalado y teclado.
 
 La evidencia y las limitaciones se actualizarán en `NABNAB-VERIFICATION.md`; el registro de decisiones está en `decisions.tsv`.
+
+## Validaciones aplazadas
+
+El usuario pidió dejar pendientes los recorridos de VM y después informó de que había probado la aplicación en otro dispositivo y funcionaba bien. Se registra como evidencia aportada por el usuario; no se atribuye al agente ni a un hash concreto del instalador.
+
+La continuación manual es: instalar el paquete final en un Windows de pruebas sin herramientas de desarrollo; comprobar motores y un archivo autorizado; actualizar una instalación 0.1.1 con destino y medios de prueba; abrir por segunda vez y revisar recuperación pausada; desinstalar comprobando que conserva medios y que solo elimina ajustes/caché si se selecciona esa opción. Quedan además las plataformas y los recorridos de navegador identificados como no certificados en sus matrices.
 

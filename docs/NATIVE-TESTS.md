@@ -30,6 +30,16 @@ The Deno executable hash identifies the extracted binary. Its official ZIP has a
 
 ## Reproduce
 
+Three additional real-engine groups passed during the direct-media and subtitle work:
+
+| Test filter | Observed behavior |
+| --- | --- |
+| `tools::tests::real_engines_download_audio_profiles_preserve_input_and_recover_partial_results` | Direct-download MP3 bitrate choices, AAC/M4A, Opus and original audio produced the expected codecs and containers. A partial audio result was retained safely before retry; the source bytes remained unchanged. |
+| `queue::direct_tests::real_engines_direct_http_profiles_publish_real_containers_without_losing_cached_input` | A synthetic QuickTime file served with a misleading audio MIME type produced six valid profile outputs in a shared destination. Processing aliases followed the probed container, raw completed input stayed intact, and a valid local receipt avoided another HTTP request. |
+| `media::tests::real_engines_subtitles_survive_copy_and_compatible_video_conversion` | Synthetic Spanish captions survived compatible stream copying and VP9/Opus/SubRip conversion to H.264/AAC/MP4 timed text. A valid-looking cache containing English instead of Spanish was regenerated; extracted Spanish text and original input bytes matched literal expected values. |
+
+These three groups also use local synthetic media. Their filters can be substituted in the commands below. The separate, explicitly networked YouTube and HTTP open-license checks are recorded in [PLATFORMS.md](PLATFORMS.md); they are not included in this offline report.
+
 Prepare and verify the pinned Windows x64 engine bundle first. The default path is `src-tauri/engines`. Run from the repository root:
 
 ```powershell

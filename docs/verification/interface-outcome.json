@@ -1,0 +1,46 @@
+{
+  "matrixCompleted": true,
+  "scenarios": [
+    [
+      1280,
+      800,
+      1
+    ],
+    [
+      1180,
+      780,
+      1
+    ],
+    [
+      900,
+      620,
+      1
+    ],
+    [
+      1180,
+      780,
+      1.25
+    ],
+    [
+      1180,
+      780,
+      1.5
+    ]
+  ],
+  "matrixEvidence": "The final five-scenario loop completed and reached captureWalkthrough. Its subsequent optional Playwright video initialization failed because its private ffmpeg executable was absent. Video was rerun separately through Edge CDP and the already-prepared repository FFmpeg.",
+  "sourceFrozen": true,
+  "checks": [
+    "CTA fits fully at standard heights",
+    "landscape and portrait ratios",
+    "full-window background and off-Home disposal",
+    "subtitle/reset/stale result guards",
+    "queue checkbox and row-action focus",
+    "persistent polite analysis completion",
+    "last-page61-item focus visible",
+    "bounded1000-item pagination",
+    "tool forms and actual IPC payloads",
+    "session provider IDs",
+    "reduced motion and transparency persistence",
+    "index-only removal"
+  ]
+}
