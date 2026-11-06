@@ -371,6 +371,8 @@ async fn inspect_with_network(
         has_video: kind.video,
         entries: Vec::new(),
         subtitle_languages: Vec::new(),
+        chapters: Vec::new(),
+        subtitle_tracks: Vec::new(),
         capabilities: Capabilities {
             video: kind.video,
             audio: true,

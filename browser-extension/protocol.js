@@ -1,7 +1,7 @@
 const base = "http://127.0.0.1:49587";
 const profiles = new Set(["mp4", "mp3", "source", "audio"]);
 
-export function makeRequest({ url, profile, requestId }) {
+export function makeRequest({ url, profile, requestId, intent, urls, presetId }) {
   if (typeof url !== "string" || url.length > 8192) throw new Error("El enlace no es válido.");
   let parsed;
   try { parsed = new URL(url); } catch { throw new Error("Abre una página con un enlace HTTP o HTTPS."); }
@@ -10,7 +10,11 @@ export function makeRequest({ url, profile, requestId }) {
   }
   if (!profiles.has(profile)) throw new Error("El perfil no es válido.");
   if (typeof requestId !== "string" || !/^[a-zA-Z0-9_.-]{8,128}$/.test(requestId)) throw new Error("El identificador de solicitud no es válido.");
-  return { version: 1, requestId, url: parsed.href, profile };
+  const request={ version: 1, requestId, url: parsed.href, profile };
+  if(intent!==undefined){if(!['download','prepare','save'].includes(intent))throw new Error('El destino no es válido.');request.intent=intent;}
+  if(urls!==undefined){if(!Array.isArray(urls)||!urls.length||urls.length>200||intent==='download')throw new Error('Envía una selección de hasta 200 enlaces al preparador.');request.urls=[...new Set(urls.map(value=>makeRequest({url:value,profile,requestId}).url))];}
+  if(presetId!==undefined&&presetId!==null){if(typeof presetId!=='string'||!/^[a-zA-Z0-9_.:-]{1,192}$/.test(presetId))throw new Error('Elige un ajuste local válido.');request.presetId=presetId;}
+  return request;
 }
 
 export function validToken(token) {
@@ -45,11 +49,17 @@ export function createClient({ token, fetcher = globalThis.fetch }) {
     async enqueue(request) {
       const outgoing = makeRequest(request);
       const response = await call("/enqueue", outgoing);
+      const draft=outgoing.intent==='prepare'||outgoing.intent==='save';
       if (response?.version !== 1 || response.requestId !== outgoing.requestId || !Array.isArray(response.acceptedJobIds)
-        || !response.acceptedJobIds.length || !response.acceptedJobIds.every(id => typeof id === "string" && id.length > 0 && id.length <= 128)) {
+        || (draft ? response.intent!==outgoing.intent||response.acceptedJobIds.length!==0||typeof response.acceptedDraftId!=='string'||!response.acceptedDraftId.length||response.acceptedDraftId.length>192 : !response.acceptedJobIds.length || !response.acceptedJobIds.every(id => typeof id === "string" && id.length > 0 && id.length <= 128))) {
         throw new Error("nabnab no ha confirmado la recepción. Reintenta la misma solicitud.");
       }
       return response;
+    },
+    async presets(){
+      const response=await call('/presets',{version:1});
+      if(response?.version!==1||!Array.isArray(response.presets)||response.presets.length>1000||!response.presets.every(preset=>preset&&typeof preset.id==='string'&&/^[a-zA-Z0-9_.:-]{1,192}$/.test(preset.id)&&typeof preset.name==='string'&&preset.name.length<=120&&Number.isInteger(preset.revision)&&preset.revision>0))throw new Error('La lista de ajustes recibida no es válida.');
+      return response.presets.map(({id,name,revision})=>({id,name,revision}));
     },
   };
 }

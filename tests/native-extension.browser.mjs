@@ -128,6 +128,18 @@ try {
   const popup = await waitFor(() => context.pages().find(page => page.url().endsWith("/popup.html")),10000);
   popup.on("pageerror", error => errors.push(error.message));
   await popup.getByText("Conectado a nabnab", { exact: true }).waitFor();
+  await popup.locator('option[value="preset:reference"]').waitFor({state:'attached'});
+  const beforePreparation=(await rpc('get_snapshot')).jobs.length;
+  await popup.locator('#collect').click();await popup.locator('#candidate-links input').first().waitFor();
+  assert.equal(await popup.locator('#candidate-links input').count(),1);assert.equal(await popup.locator('#candidate-links input').first().inputValue(),contextLink);
+  await popup.locator('#candidate-links input').first().check();await popup.locator('#profile').selectOption('preset:reference');
+  await popup.locator('#send').click();await popup.getByText('Recibido en el preparador de nabnab. Revisa los enlaces antes de añadirlos a la cola.',{exact:true}).waitFor();
+  const preparedState=await rpc('get_snapshot');assert.equal(preparedState.jobs.length,beforePreparation);assert.ok(preparedState.drafts.some(draft=>draft.presetId==='reference'&&draft.items.length===1));
+  await nativePage.locator('.batch-workspace').waitFor();await popup.screenshot({path:path.join(data,'popup-collected-prepared.png')});
+  await popup.locator('#intent').selectOption('save');await popup.locator('#send').click();await popup.getByText('Guardado en Biblioteca > Para después. No se inició ninguna descarga.',{exact:true}).waitFor();
+  const savedState=await rpc('get_snapshot');assert.equal(savedState.jobs.length,beforePreparation);assert.ok(savedState.drafts.some(draft=>draft.savedForLater));
+  results.push({case:'real activeTab link collection, local presets, preparation and save intents create drafts without download jobs',status:'passed'});
+  await popup.locator('#candidate-links input').first().uncheck();await popup.locator('#intent').selectOption('download');await popup.locator('#profile').selectOption('mp4');
   const before = (await rpc("get_snapshot")).jobs.length;
   await popup.getByRole("button", { name: "Enviar pestaña actual", exact: true }).click();
   await popup.getByText("Recibido en nabnab. Consulta Descargas en la aplicación.", { exact: true }).waitFor({ timeout: 15000 });

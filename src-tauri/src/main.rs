@@ -1,21 +1,27 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+mod batch;
 mod browser;
+mod captions;
 mod dependencies;
 mod direct;
 mod engine;
 mod failure;
 mod library;
+mod library_features;
 mod local_media;
 mod media;
 mod model;
+mod options;
 #[cfg(test)]
 mod platform_checks;
 mod preferences;
 mod providers;
 mod queue;
+mod scheduling;
 mod sessions;
 #[cfg(test)]
 mod smoke;
+mod sources;
 mod store;
 mod support;
 mod tools;
@@ -58,6 +64,11 @@ struct Snapshot {
     jobs: Vec<queue::Job>,
     library: Vec<LibraryView>,
     collections: Vec<String>,
+    presets: Vec<options::Preset>,
+    rules: Vec<options::Rule>,
+    drafts: Vec<batch::Draft>,
+    sources: Vec<sources::FollowedSource>,
+    smart_collections: Vec<library_features::SmartCollection>,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -84,6 +95,11 @@ fn snapshot(state: &AppState) -> Result<Snapshot, String> {
             })
             .collect(),
         collections: repo.data.collections.clone(),
+        presets: repo.data.presets.clone(),
+        rules: repo.data.rules.clone(),
+        drafts: repo.data.drafts.clone(),
+        sources: repo.data.sources.clone(),
+        smart_collections: repo.data.smart_collections.clone(),
     })
 }
 fn config_root(state: &AppState) -> Result<PathBuf, String> {
@@ -131,6 +147,7 @@ async fn startup(app: AppHandle, state: State<'_, Arc<AppState>>) -> Result<Star
             .add_permits(settings.processing_limit - 1);
     }
     queue::start(app.clone(), state.inner().clone());
+    sources::start(app.clone(), state.inner().clone());
     if let Err(error) = browser::start(&app, &state.bridge) {
         let _ = app.emit("app-warning", error);
     }
@@ -173,6 +190,7 @@ async fn inspect_media(
         receiver
     };
     let result = async {
+        let _metadata_permit = batch::metadata_permit(&url).await?;
         let url = providers::validate_remote(&url).await?;
         if providers::identify(&url)?.id == providers::ProviderId::Generic {
             let metadata = direct::inspect(&url, request_id, receiver).await?;
@@ -238,6 +256,58 @@ fn cancel_job(state: State<Arc<AppState>>, kind: String, request_id: u64) -> Res
     Ok(())
 }
 #[tauri::command]
+fn prepare_download(
+    state: State<Arc<AppState>>,
+    url: String,
+    title: String,
+    creator: String,
+    preset_id: Option<String>,
+) -> Result<options::PreparedDownload, String> {
+    let content_id = options::content_identity(&url)?;
+    let provider = providers::identify(&url)?;
+    let context = options::Context {
+        url: url.clone(),
+        title: title.clone(),
+        creator,
+        content_id: content_id.rsplit(':').next().unwrap_or(&content_id).into(),
+        platform: provider.name,
+        content_type: "video".into(),
+        ..Default::default()
+    };
+    let guard = state.repository.lock().unwrap();
+    let repo = guard.as_ref().ok_or("Open the app first.")?;
+    let options = options::resolve(repo, &context, preset_id.as_deref(), None)?;
+    Ok(options::PreparedDownload {
+        url,
+        title,
+        content_id,
+        options,
+        source_id: None,
+        group_id: None,
+    })
+}
+#[tauri::command]
+fn queue_prepared(
+    app: AppHandle,
+    state: State<Arc<AppState>>,
+    items: Vec<options::PreparedDownload>,
+    request: String,
+) -> Result<Vec<queue::Job>, String> {
+    let jobs = {
+        let mut guard = state.repository.lock().unwrap();
+        queue::enqueue_prepared(
+            guard.as_mut().ok_or("Open the app first.")?,
+            items,
+            &request,
+        )?
+    };
+    for job in &jobs {
+        let _ = app.emit("job-update", job);
+    }
+    state.runtime.notify.notify_one();
+    Ok(jobs)
+}
+#[tauri::command]
 fn queue_download(
     app: AppHandle,
     state: State<Arc<AppState>>,
@@ -292,6 +362,108 @@ fn queue_tool(
     Ok(jobs)
 }
 #[tauri::command]
+fn configure_jobs(
+    state: State<Arc<AppState>>,
+    ids: Vec<String>,
+    priority: scheduling::Priority,
+    schedule: scheduling::Schedule,
+    order_action: Option<String>,
+) -> Result<Snapshot, String> {
+    schedule.validate()?;
+    if order_action
+        .as_deref()
+        .is_some_and(|value| !matches!(value, "next" | "up" | "down"))
+    {
+        return Err("Unsupported queue order action.".into());
+    }
+    {
+        let mut guard = state.repository.lock().unwrap();
+        let repo = guard.as_mut().ok_or("Open the app first.")?;
+        if ids.is_empty()
+            || ids.iter().any(|id| {
+                !repo.data.jobs.iter().any(|j| {
+                    j.id == *id
+                        && matches!(j.state, queue::JobState::Pending | queue::JobState::Paused)
+                })
+            })
+        {
+            return Err(
+                "Select pending jobs. Active jobs keep their current priority and schedule.".into(),
+            );
+        }
+        let previous = repo.data.jobs.clone();
+        let minimum = repo
+            .data
+            .jobs
+            .iter()
+            .map(|j| j.manual_order)
+            .min()
+            .unwrap_or(0);
+        for job in &mut repo.data.jobs {
+            if ids.contains(&job.id) {
+                job.priority = priority;
+                job.schedule = schedule.clone();
+                job.updated_at = queue::now();
+                match order_action.as_deref() {
+                    Some("next") => {
+                        job.run_next = true;
+                        job.manual_order = minimum.saturating_sub(1);
+                    }
+                    Some("up" | "down") => {}
+                    Some(_) => unreachable!(),
+                    None => {}
+                }
+            } else if order_action.as_deref() == Some("next") {
+                job.run_next = false;
+            }
+        }
+        if let Some(direction @ ("up" | "down")) = order_action.as_deref() {
+            let mut ordered: Vec<_> = repo
+                .data
+                .jobs
+                .iter()
+                .enumerate()
+                .filter(|(_, job)| {
+                    matches!(
+                        job.state,
+                        queue::JobState::Pending | queue::JobState::Paused
+                    ) && job.priority == priority
+                        && serde_json::to_string(&job.schedule).ok()
+                            == serde_json::to_string(&schedule).ok()
+                })
+                .map(|(index, _)| index)
+                .collect();
+            ordered.sort_by_key(|index| {
+                (
+                    repo.data.jobs[*index].manual_order,
+                    repo.data.jobs[*index].created_at,
+                )
+            });
+            for id in &ids {
+                if let Some(index) = ordered.iter().position(|i| repo.data.jobs[*i].id == *id) {
+                    let next = if direction == "up" {
+                        index.checked_sub(1)
+                    } else {
+                        (index + 1 < ordered.len()).then_some(index + 1)
+                    };
+                    if let Some(next) = next {
+                        ordered.swap(index, next);
+                    }
+                }
+            }
+            for (order, index) in ordered.into_iter().enumerate() {
+                repo.data.jobs[index].manual_order = order as i64;
+            }
+        }
+        if let Err(e) = repo.save() {
+            repo.data.jobs = previous;
+            return Err(e);
+        }
+    }
+    state.runtime.notify.notify_one();
+    snapshot(&state)
+}
+#[tauri::command]
 fn job_action(
     state: State<Arc<AppState>>,
     ids: Vec<String>,
@@ -303,9 +475,36 @@ fn job_action(
 pub(crate) async fn accept_browser(
     app: AppHandle,
     request: browser::BrowserRequest,
-) -> Result<Vec<String>, String> {
+) -> Result<browser::Receipt, String> {
     if request.version != 1 {
         return Err("Unsupported bridge version.".into());
+    }
+    let state = app.state::<Arc<AppState>>();
+    let request_id = format!("{}:{}", request.client_id, request.request_id);
+    if request.intent != browser::BrowserIntent::Download {
+        let text = if request.urls.is_empty() {
+            request.url.clone()
+        } else {
+            request.urls.join("\n")
+        };
+        let draft = {
+            let mut guard = state.repository.lock().unwrap();
+            batch::create_for_request(
+                guard.as_mut().ok_or("Open nabnab first.")?,
+                &text,
+                request.preset_id,
+                &request_id,
+                request.intent == browser::BrowserIntent::Save,
+            )?
+        };
+        let _ = app.emit("browser-draft", &draft.id);
+        return Ok(browser::Receipt {
+            version: 1,
+            request_id: request.request_id,
+            accepted_job_ids: vec![],
+            accepted_draft_id: Some(draft.id),
+            intent: request.intent,
+        });
     }
     let format = match request.profile.as_str() {
         "mp4" => Format::Mp4,
@@ -314,26 +513,54 @@ pub(crate) async fn accept_browser(
         "audio" => Format::AudioOriginal,
         _ => return Err("Unknown profile.".into()),
     };
-    let state = app.state::<Arc<AppState>>();
-    let request_id = format!("{}:{}", request.client_id, request.request_id);
     let jobs = {
         let mut guard = state.repository.lock().unwrap();
-        queue::enqueue_download(
-            guard.as_mut().ok_or("Open nabnab first.")?,
-            vec![request.url],
-            vec![],
-            format,
-            None,
-            None,
-            None,
-            &request_id,
-        )?
+        let repo = guard.as_mut().ok_or("Open nabnab first.")?;
+        if let Some(preset) = request.preset_id {
+            let content_id = options::content_identity(&request.url)?;
+            let context = options::Context {
+                url: request.url.clone(),
+                title: providers::identify(&request.url)?.name,
+                content_id: content_id.rsplit(':').next().unwrap_or(&content_id).into(),
+                ..Default::default()
+            };
+            let resolved = options::resolve(repo, &context, Some(&preset), None)?;
+            queue::enqueue_prepared(
+                repo,
+                vec![options::PreparedDownload {
+                    url: request.url,
+                    title: context.title,
+                    content_id,
+                    options: resolved,
+                    source_id: None,
+                    group_id: None,
+                }],
+                &request_id,
+            )?
+        } else {
+            queue::enqueue_download(
+                repo,
+                vec![request.url],
+                vec![],
+                format,
+                None,
+                None,
+                None,
+                &request_id,
+            )?
+        }
     };
     for job in &jobs {
         let _ = app.emit("job-update", job);
     }
     state.runtime.notify.notify_one();
-    Ok(jobs.into_iter().map(|j| j.id).collect())
+    Ok(browser::Receipt {
+        version: 1,
+        request_id: request.request_id,
+        accepted_job_ids: jobs.into_iter().map(|j| j.id).collect(),
+        accepted_draft_id: None,
+        intent: request.intent,
+    })
 }
 #[tauri::command]
 fn save_settings(
@@ -449,7 +676,7 @@ async fn import_selected(
                 .data
                 .library
                 .iter()
-                .filter(|i| i.duration.is_none() && i.kind != "image")
+                .filter(|i| i.duration.is_none() && matches!(i.kind.as_str(), "video" | "audio"))
                 .take(200)
                 .map(|i| (i.id.clone(), i.path.clone()))
                 .collect::<Vec<_>>()
@@ -470,6 +697,12 @@ async fn import_selected(
                             metadata.added_at = item.added_at;
                             metadata.collections = item.collections.clone();
                             metadata.tags = item.tags.clone();
+                            let chapters = metadata.details.chapters.clone();
+                            metadata.details = item.details.clone();
+                            if metadata.details.chapters.is_empty() {
+                                metadata.details.chapters = chapters;
+                            }
+                            metadata.content_hash = item.content_hash.clone();
                             *item = metadata;
                         }
                     }
@@ -540,14 +773,13 @@ async fn import_url_file(app: AppHandle, path: Option<PathBuf>) -> Result<Vec<St
     let text = fs::read_to_string(path).map_err(|_| "Use a UTF-8 text file.")?;
     let lines: Vec<_> = text
         .trim_start_matches('\u{feff}')
-        .lines()
-        .map(str::trim)
+        .split_whitespace()
         .filter(|s| !s.is_empty())
         .collect();
-    if lines.len() > 200 {
-        return Err("The URL list contains more than 200 links.".into());
+    if lines.len() > 10_000 {
+        return Err("The URL list contains more than 10000 entries. Split the file to keep drafts responsive.".into());
     }
-    lines.into_iter().map(model::validate_url).collect()
+    Ok(lines.into_iter().map(str::to_owned).collect())
 }
 #[tauri::command]
 fn update_library(
@@ -703,6 +935,7 @@ fn with_engine_update(state: &AppState) -> Result<(), String> {
         .is_some_and(|r| r.data.jobs.iter().any(|j| j.state.active()))
         || !state.runtime.active.lock().unwrap().is_empty()
         || state.metadata.lock().unwrap().is_some()
+        || batch::metadata_busy()
     {
         return Err("Wait for active jobs and link analysis before updating engines.".into());
     }
@@ -853,8 +1086,11 @@ fn main() {
             inspect_media,
             cancel_job,
             queue_download,
+            prepare_download,
+            queue_prepared,
             queue_tool,
             job_action,
+            configure_jobs,
             save_settings,
             choose_folder,
             import_media,
@@ -877,7 +1113,33 @@ fn main() {
             revoke_session,
             bridge_status,
             bridge_pair,
-            bridge_revoke
+            bridge_revoke,
+            options::save_preset,
+            options::delete_preset,
+            options::save_rules,
+            options::test_rule,
+            batch::batch_create,
+            batch::batch_save,
+            batch::batch_inspect,
+            batch::batch_cancel,
+            batch::batch_enqueue,
+            batch::batch_remove,
+            batch::batch_chapters,
+            scheduling::local_timezone,
+            sources::add_source,
+            sources::check_source,
+            sources::save_source,
+            sources::source_item_action,
+            sources::remove_source,
+            library_features::library_search,
+            library_features::library_playback,
+            library_features::library_favorite,
+            library_features::library_bookmark,
+            library_features::smart_collection_save,
+            library_features::smart_collection_remove,
+            library_features::subtitle_import,
+            library_features::subtitle_export,
+            library_features::subtitle_rebuild
         ])
         .build(tauri::generate_context!())
         .expect("Could not start nabnab")

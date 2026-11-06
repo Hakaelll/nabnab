@@ -121,6 +121,7 @@ pub async fn probe(
         "-format_whitelist",
         "mov,matroska,webm,mp3,ogg,wav,flac,aac,avi,asf,flv,mpeg,mpegts,nut,ac3,eac3,aiff,ape",
         "-show_streams",
+        "-show_chapters",
         "-show_format",
         "-of",
         "json",

@@ -72,9 +72,28 @@ test("connection state requires an authenticated compatible nabnab response", as
 
 test("the extension package requests no global browsing or cookie access", async () => {
   const manifest = JSON.parse(await readFile(new URL("../browser-extension/manifest.json", import.meta.url), "utf8"));
-  assert.deepEqual(new Set(manifest.permissions), new Set(["activeTab", "contextMenus", "storage"]));
+  assert.deepEqual(new Set(manifest.permissions), new Set(["activeTab", "contextMenus", "storage", "scripting"]));
   assert.deepEqual(manifest.host_permissions, ["http://127.0.0.1:49587/*"]);
   assert.equal(manifest.content_scripts, undefined);
   assert.equal(manifest.externally_connectable, undefined);
   assert.equal(manifest.manifest_version, 3);
+});
+
+test('a selected page batch carries a preparation intent and needs a draft receipt without download jobs',async()=>{
+  const selected={...request,intent:'prepare',urls:['https://www.youtube.com/watch?v=one&list=keep','https://vimeo.com/123'],presetId:'reference'};
+  const outgoing=makeRequest(selected);
+  assert.deepEqual(outgoing.urls,selected.urls);
+  assert.equal(outgoing.intent,'prepare');assert.equal(outgoing.presetId,'reference');
+  for(const receipt of [{version:1,requestId:request.requestId,intent:'prepare',acceptedJobIds:['unwanted-download'],acceptedDraftId:'draft-1'},{version:1,requestId:request.requestId,intent:'download',acceptedJobIds:[],acceptedDraftId:'draft-1'},{version:1,requestId:request.requestId,intent:'prepare',acceptedJobIds:[]}]){
+    const client=createClient({token,fetcher:async()=>new Response(JSON.stringify(receipt),{status:200})});await assert.rejects(()=>client.enqueue(selected),/confirmado/);
+  }
+  const receipt={version:1,requestId:request.requestId,intent:'prepare',acceptedJobIds:[],acceptedDraftId:'draft-1'};
+  const client=createClient({token,fetcher:async()=>new Response(JSON.stringify(receipt),{status:200})});assert.deepEqual(await client.enqueue(selected),receipt);
+  assert.throws(()=>makeRequest({...selected,intent:'download'}));
+  assert.throws(()=>makeRequest({...selected,presetId:'../arbitrary-command'}));
+});
+
+test('preset discovery exposes only local identifiers and labels',async()=>{
+  const client=createClient({token,fetcher:async(url,options)=>{assert.equal(url,'http://127.0.0.1:49587/presets');assert.deepEqual(JSON.parse(options.body),{version:1});return new Response(JSON.stringify({version:1,presets:[{id:'audio',name:'Audio',revision:2,cookies:'must not be copied'}]}),{status:200});}});
+  assert.deepEqual(await client.presets(),[{id:'audio',name:'Audio',revision:2}]);
 });

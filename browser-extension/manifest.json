@@ -3,7 +3,7 @@
   "name": "nabnab",
   "version": "0.2.0",
   "description": "Envía enlaces a nabnab para descargarlos en tu ordenador.",
-  "permissions": ["activeTab", "contextMenus", "storage"],
+  "permissions": ["activeTab", "contextMenus", "storage", "scripting"],
   "host_permissions": ["http://127.0.0.1:49587/*"],
   "background": { "service_worker": "background.js", "type": "module" },
   "action": { "default_popup": "popup.html", "default_title": "Enviar a nabnab" },

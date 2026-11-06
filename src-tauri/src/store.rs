@@ -74,6 +74,16 @@ pub struct Data {
     pub collections: Vec<String>,
     #[serde(default, serialize_with = "serialize_live_cooldowns")]
     pub cooldowns: BTreeMap<String, u64>,
+    #[serde(default = "crate::options::examples")]
+    pub presets: Vec<crate::options::Preset>,
+    #[serde(default)]
+    pub rules: Vec<crate::options::Rule>,
+    #[serde(default)]
+    pub drafts: Vec<crate::batch::Draft>,
+    #[serde(default)]
+    pub sources: Vec<crate::sources::FollowedSource>,
+    #[serde(default)]
+    pub smart_collections: Vec<crate::library_features::SmartCollection>,
 }
 
 fn serialize_live_cooldowns<S: serde::Serializer>(
@@ -109,6 +119,12 @@ impl Data {
         }
         for job in &self.jobs {
             job.validate_public_source()?;
+        }
+        for source in &self.sources {
+            source.validate()?;
+        }
+        for preset in &self.presets {
+            crate::options::validate(&preset.options)?;
         }
         Ok(())
     }
@@ -222,6 +238,11 @@ impl Repository {
                 library: Vec::new(),
                 collections: Vec::new(),
                 cooldowns: BTreeMap::new(),
+                presets: crate::options::examples(),
+                rules: Vec::new(),
+                drafts: Vec::new(),
+                sources: Vec::new(),
+                smart_collections: Vec::new(),
             }
         };
         if data.schema_version == 1 {
@@ -233,9 +254,20 @@ impl Repository {
             }
             data.schema_version = SCHEMA_VERSION;
         }
+        crate::batch::protect_drafts(root, &mut data.drafts)?;
+        for job in &mut data.jobs {
+            if let Some(options) = &mut job.options {
+                options.context.url = crate::options::display_url(&options.context.url);
+                options.context.source_url =
+                    crate::options::display_url(&options.context.source_url);
+            }
+        }
         data.validate()?;
         for job in &mut data.jobs {
             job.recover();
+        }
+        for source in &mut data.sources {
+            source.recover();
         }
         let now = crate::queue::now();
         data.cooldowns.retain(|_, until| *until > now);

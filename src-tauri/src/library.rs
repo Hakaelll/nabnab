@@ -32,6 +32,8 @@ pub struct LibraryItem {
     pub tags: Vec<String>,
     #[serde(default)]
     pub content_hash: Option<String>,
+    #[serde(default)]
+    pub details: crate::library_features::LibraryDetails,
 }
 
 fn extension_kind(path: &Path) -> Option<&'static str> {
@@ -42,6 +44,7 @@ fn extension_kind(path: &Path) -> Option<&'static str> {
         | "alac" => Some("audio"),
         "png" | "jpg" | "jpeg" | "webp" | "gif" | "bmp" | "tiff" | "tif" | "avif" | "heic"
         | "heif" => Some("image"),
+        "srt" | "vtt" => Some("subtitle"),
         _ => None,
     }
 }
@@ -138,6 +141,29 @@ pub fn index(
             .filter(|v| *v > 0 && *v <= 65_536)
     };
     let id = format!("{:x}", Sha256::digest(path_key(&path).as_bytes()));
+    let mut details = crate::library_features::LibraryDetails {
+        chapters: info
+            .map(crate::model::chapters_from_value)
+            .unwrap_or_default(),
+        ..crate::library_features::LibraryDetails::default()
+    };
+    if kind == "subtitle" {
+        if metadata.len() > 16 * 1024 * 1024 {
+            return Err("Import subtitle files of at most 16 MB.".into());
+        }
+        let text =
+            fs::read_to_string(&path).map_err(|e| format!("Could not read subtitles: {e}"))?;
+        details.tracks.push(crate::captions::LocalTrack {
+            id: id.clone(),
+            language: "und".into(),
+            origin: crate::captions::TrackOrigin::Imported,
+            path: Some(path.clone()),
+            segments: crate::captions::parse(&text)?,
+            formatting_lost: text.contains('<')
+                || text.contains("STYLE")
+                || text.contains("align:"),
+        });
+    }
     Ok(LibraryItem {
         id,
         name: path
@@ -170,6 +196,7 @@ pub fn index(
         collections: Vec::new(),
         tags: Vec::new(),
         content_hash: None,
+        details,
     })
 }
 
@@ -348,6 +375,7 @@ pub fn locate(repository: &mut Repository, id: &str, path: &Path) -> Result<(), 
     replacement.added_at = previous.added_at;
     replacement.collections = previous.collections.clone();
     replacement.tags = previous.tags.clone();
+    replacement.details = previous.details.clone();
     repository.data.library[position] = replacement;
     if let Err(error) = repository.save() {
         repository.data.library[position] = previous;
@@ -359,6 +387,45 @@ pub fn locate(repository: &mut Repository, id: &str, path: &Path) -> Result<(), 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn subtitle_files_index_real_timestamps_and_removal_retires_their_search_entries() {
+        let root = directory();
+        let path = root.join("reference.srt");
+        fs::write(
+            &path,
+            "1\n00:02:14,500 --> 00:02:17,000\nThe camera transition\n",
+        )
+        .unwrap();
+        let mut repository = Repository::open(&root.join("data"), &root).unwrap();
+        import_paths(&mut repository, &[path.clone()]).unwrap();
+        assert_eq!(repository.data.library[0].kind, "subtitle");
+        assert_eq!(
+            repository.data.library[0].details.tracks[0].segments[0].start,
+            134.5
+        );
+        assert_eq!(
+            crate::library_features::search(
+                &repository.data.library,
+                "camera transition",
+                None,
+                None
+            )
+            .len(),
+            1
+        );
+        let id = repository.data.library[0].id.clone();
+        remove(&mut repository, &id).unwrap();
+        assert!(crate::library_features::search(
+            &repository.data.library,
+            "camera transition",
+            None,
+            None
+        )
+        .is_empty());
+        assert!(path.is_file());
+        drop(repository);
+        fs::remove_dir_all(root).unwrap();
+    }
     #[test]
     fn probed_tracks_determine_audio_and_video_filters() {
         let root = std::env::temp_dir().join(format!(

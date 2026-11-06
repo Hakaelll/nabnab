@@ -19,6 +19,20 @@ async function handle(message) {
       return { connected: true };
     case "enqueue":
       return send(message.request);
+    case 'presets':return (await client()).presets();
+    case 'collect':{
+      const [tab]=await chrome.tabs.query({active:true,currentWindow:true});
+      if(!tab?.id)throw new Error('No hay una página activa.');
+      const result=await chrome.scripting.executeScript({target:{tabId:tab.id},func:()=>{
+        const found=new Map();
+        for(const anchor of document.querySelectorAll('a[href]')){
+          try{const parsed=new URL(anchor.href);if(['http:','https:'].includes(parsed.protocol)&&!parsed.username&&!parsed.password&&!found.has(parsed.href))found.set(parsed.href,{url:parsed.href,title:(anchor.textContent||parsed.hostname).trim().slice(0,160)});}catch{}
+          if(found.size>=200)break;
+        }
+        return [...found.values()];
+      }});
+      return result[0]?.result??[];
+    }
     case "retry": {
       const { pendingRequest } = await chrome.storage.session.get("pendingRequest");
       if (!pendingRequest) throw new Error("No hay ninguna solicitud pendiente de confirmar.");
@@ -52,12 +66,14 @@ async function menus() {
   await chrome.contextMenus.removeAll();
   chrome.contextMenus.create({ id: "nabnab-video", title: "Enviar vídeo a nabnab", contexts: ["link", "page"] });
   chrome.contextMenus.create({ id: "nabnab-audio", title: "Enviar audio a nabnab", contexts: ["link", "page"] });
+  chrome.contextMenus.create({ id: "nabnab-prepare", title: "Preparar enlace en nabnab", contexts: ["link", "page"] });
+  chrome.contextMenus.create({ id: "nabnab-save", title: "Guardar para después en nabnab", contexts: ["link", "page"] });
 }
 chrome.runtime.onInstalled.addListener(() => { void menus(); });
 chrome.runtime.onStartup.addListener(() => { void menus(); });
 chrome.contextMenus.onClicked.addListener((info, tab) => {
-  if (!["nabnab-video", "nabnab-audio"].includes(String(info.menuItemId))) return;
+  if (!["nabnab-video", "nabnab-audio",'nabnab-prepare','nabnab-save'].includes(String(info.menuItemId))) return;
   const url = info.linkUrl || info.pageUrl || tab?.url;
-  void send({ url, profile: info.menuItemId === "nabnab-audio" ? "mp3" : "mp4", requestId: crypto.randomUUID() })
+  void send({ url, profile: info.menuItemId === "nabnab-audio" ? "mp3" : "mp4", requestId: crypto.randomUUID(),intent:info.menuItemId==='nabnab-prepare'?'prepare':info.menuItemId==='nabnab-save'?'save':'download' })
     .catch(async () => { await chrome.action.setBadgeText({ text: "!" }); await chrome.action.setBadgeBackgroundColor({ color: "#7e4b42" }); });
 });

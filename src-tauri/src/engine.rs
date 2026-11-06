@@ -45,6 +45,72 @@ pub fn subtitle_args(
     ])
 }
 
+pub fn advanced_subtitle_args(
+    languages: &[String],
+    mode: &str,
+    automatic: bool,
+    format: crate::model::Format,
+) -> Result<Vec<String>, String> {
+    if mode == "none" {
+        return Ok(Vec::new());
+    }
+    if !matches!(mode, "sidecar" | "embed" | "only") || languages.is_empty() || languages.len() > 8
+    {
+        return Err("Choose one to eight available subtitle tracks and their output mode.".into());
+    }
+    if mode == "embed" && !format.is_video() {
+        return Err("Embed subtitles with a compatible video container.".into());
+    }
+    if languages
+        .iter()
+        .any(|language| crate::model::normalized_subtitle_language(language).is_none())
+    {
+        return Err("Choose available subtitle language codes.".into());
+    }
+    let mut args = vec![
+        if automatic {
+            "--write-auto-subs"
+        } else {
+            "--write-subs"
+        }
+        .into(),
+        if automatic {
+            "--no-write-subs"
+        } else {
+            "--no-write-auto-subs"
+        }
+        .into(),
+        "--sub-langs".into(),
+        languages
+            .iter()
+            .map(|language| format!("^{language}$"))
+            .collect::<Vec<_>>()
+            .join(","),
+        "--sub-format".into(),
+        "srt/vtt/best".into(),
+        "--convert-subs".into(),
+        "srt".into(),
+    ];
+    if mode == "embed" {
+        args.push("--embed-subs".into());
+    }
+    if mode == "only" {
+        args.push("--skip-download".into());
+    }
+    Ok(args)
+}
+
+pub fn section_args(start: f64, end: f64, precise: bool) -> Result<Vec<String>, String> {
+    if !start.is_finite() || !end.is_finite() || start < 0.0 || end <= start {
+        return Err("Choose a valid fragment interval.".into());
+    }
+    let mut args = vec!["--download-sections".into(), format!("*{start}-{end}")];
+    if precise {
+        args.push("--force-keyframes-at-cuts".into());
+    }
+    Ok(args)
+}
+
 pub fn base_args(root: &Path) -> Vec<String> {
     vec![
         "--ignore-config".into(),
@@ -370,6 +436,27 @@ pub fn download_args(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn subtitle_outputs_and_sections_keep_provenance_and_real_engine_options() {
+        let automatic =
+            advanced_subtitle_args(&["es".into()], "only", true, crate::model::Format::Source)
+                .unwrap();
+        assert!(automatic.contains(&"--write-auto-subs".into()));
+        assert!(automatic.contains(&"--no-write-subs".into()));
+        assert!(automatic.contains(&"--skip-download".into()));
+        assert!(
+            advanced_subtitle_args(&["es".into()], "embed", false, crate::model::Format::Mp3)
+                .is_err()
+        );
+        assert_eq!(
+            section_args(134.5, 150.0, false).unwrap(),
+            vec!["--download-sections", "*134.5-150"]
+        );
+        assert!(section_args(134.5, 150.0, true)
+            .unwrap()
+            .contains(&"--force-keyframes-at-cuts".into()));
+        assert!(section_args(150.0, 134.5, false).is_err());
+    }
 
     #[test]
     fn subtitles_are_one_exact_manual_language_and_never_an_audio_profile() {

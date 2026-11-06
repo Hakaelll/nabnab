@@ -19,6 +19,61 @@ pub struct Media {
     pub entries: Vec<MediaEntry>,
     #[serde(default)]
     pub capabilities: crate::providers::Capabilities,
+    #[serde(default)]
+    pub chapters: Vec<Chapter>,
+    #[serde(default)]
+    pub subtitle_tracks: Vec<SubtitleTrack>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Chapter {
+    pub title: String,
+    pub start: f64,
+    pub end: f64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubtitleTrack {
+    pub language: String,
+    pub origin: crate::captions::TrackOrigin,
+    pub formats: Vec<String>,
+}
+
+pub fn chapters_from_value(value: &Value) -> Vec<Chapter> {
+    let Some(chapters) = value["chapters"].as_array() else {
+        return Vec::new();
+    };
+    chapters
+        .iter()
+        .enumerate()
+        .take(1000)
+        .filter_map(|(i, chapter)| {
+            let start = chapter["start_time"]
+                .as_f64()
+                .or_else(|| chapter["start_time"].as_str()?.parse::<f64>().ok())?;
+            let end = chapter["end_time"]
+                .as_f64()
+                .or_else(|| chapter["end_time"].as_str()?.parse::<f64>().ok())
+                .or_else(|| chapters.get(i + 1)?["start_time"].as_f64())
+                .or_else(|| value["duration"].as_f64())?;
+            if !start.is_finite() || !end.is_finite() || start < 0.0 || end <= start {
+                return None;
+            }
+            Some(Chapter {
+                title: chapter["title"]
+                    .as_str()
+                    .or_else(|| chapter["tags"]["title"].as_str())
+                    .unwrap_or("Chapter")
+                    .chars()
+                    .take(512)
+                    .collect(),
+                start,
+                end,
+            })
+        })
+        .collect()
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -281,6 +336,39 @@ pub fn parse_media(raw: &str, request_id: u64) -> Result<Media, String> {
             .collect()
     };
     let has_subtitles = !subtitle_languages.is_empty();
+    let mut subtitle_tracks = Vec::new();
+    if !batch {
+        for (field, origin) in [
+            ("subtitles", crate::captions::TrackOrigin::Creator),
+            (
+                "automatic_captions",
+                crate::captions::TrackOrigin::Automatic,
+            ),
+        ] {
+            if let Some(tracks) = value[field].as_object() {
+                for (language, formats) in tracks
+                    .iter()
+                    .filter(|(language, _)| normalized_subtitle_language(language).is_some())
+                    .take(100)
+                {
+                    let formats: Vec<String> = formats
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter(|f| f.is_object() && f["has_drm"] != true)
+                        .filter_map(|f| f["ext"].as_str().map(str::to_owned))
+                        .collect();
+                    if !formats.is_empty() {
+                        subtitle_tracks.push(SubtitleTrack {
+                            language: language.clone(),
+                            origin: origin.clone(),
+                            formats,
+                        });
+                    }
+                }
+            }
+        }
+    }
     Ok(Media {
         request_id,
         title: value["title"]
@@ -307,6 +395,12 @@ pub fn parse_media(raw: &str, request_id: u64) -> Result<Media, String> {
             verified: false,
         },
         entries,
+        chapters: if batch {
+            Vec::new()
+        } else {
+            chapters_from_value(&value)
+        },
+        subtitle_tracks,
     })
 }
 
@@ -395,6 +489,26 @@ pub fn parse_progress(line: &str, request_id: u64) -> Option<Progress> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn chapters_and_caption_origins_come_from_real_metadata() {
+        let media=parse_media(r#"{"duration":30,"formats":[{"vcodec":"h264","acodec":"aac"}],"chapters":[{"title":"Opening","start_time":0,"end_time":12},{"title":"Camera","start_time":12,"end_time":30},{"title":"Invalid","start_time":40,"end_time":20}],"subtitles":{"es":[{"ext":"vtt"}]},"automatic_captions":{"en":[{"ext":"vtt"}]}}"#,1).unwrap();
+        assert_eq!(media.chapters.len(), 2);
+        assert_eq!(media.chapters[1].title, "Camera");
+        assert_eq!(media.chapters[1].start, 12.0);
+        assert_eq!(media.subtitle_languages, vec!["es"]);
+        assert_eq!(media.subtitle_tracks.len(), 2);
+        assert_eq!(
+            media.subtitle_tracks[0].origin,
+            crate::captions::TrackOrigin::Creator
+        );
+        assert_eq!(
+            media.subtitle_tracks[1].origin,
+            crate::captions::TrackOrigin::Automatic
+        );
+        let legacy:Media=serde_json::from_value(serde_json::json!({"requestId":1,"title":"Legacy","duration":null,"thumbnail":null,"uploader":null,"heights":[],"hasAudio":true,"hasVideo":true})).unwrap();
+        assert!(legacy.chapters.is_empty());
+        assert!(legacy.subtitle_tracks.is_empty());
+    }
     #[test]
     fn subtitle_language_tags_normalize_official_iso_aliases_without_guessing() {
         for (codes, expected) in [

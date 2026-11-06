@@ -5,11 +5,13 @@
   <main>
     <header><h1>nabnab</h1><button id="settings" class="quiet" title="Ajustes de la extensión">Ajustes</button></header>
     <p id="connection" role="status">Comprobando conexión…</p>
+    <label for="intent">Destino</label><select id="intent"><option value="download">Descargar</option><option value="prepare">Preparar en nabnab</option><option value="save">Guardar para después</option></select>
     <label for="profile">Perfil de descarga</label>
     <select id="profile"><option value="mp4">Vídeo compatible · MP4</option><option value="source">Vídeo · calidad original</option><option value="mp3">Audio compatible · MP3</option><option value="audio">Audio · códec original</option></select>
     <button id="send" class="primary">Enviar pestaña actual</button>
+    <button id="collect">Recoger enlaces de esta página</button><p class="hint">Solo tras pulsar. Muestra hasta 200 enlaces, sin detectar todos los medios ni explorar otras pestañas.</p><div id="candidates" hidden><label class="candidate-all"><input type="checkbox" id="select-visible">Seleccionar candidatos</label><ul id="candidate-links"></ul></div>
     <button id="retry" hidden>Reintentar la solicitud pendiente</button>
-    <p id="message" role="status" aria-live="polite">La descarga se añade a la cola de la aplicación.</p>
+    <p id="message" role="status" aria-live="polite">Descargar añade a la cola. Preparar y Guardar para después no inician descargas.</p>
   </main>
   <script type="module" src="popup.js"></script>
 </body>

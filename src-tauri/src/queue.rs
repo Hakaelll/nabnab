@@ -177,6 +177,13 @@ impl From<Failure> for JobError {
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct OutputAssociation {
+    pub source_id: Option<String>,
+    pub collection: Option<String>,
+    pub tags: Vec<String>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Job {
     pub id: String,
     pub run_id: u64,
@@ -196,6 +203,22 @@ pub struct Job {
     pub group_id: Option<String>,
     #[serde(default)]
     pub next_retry_at: Option<u64>,
+    #[serde(default)]
+    pub priority: crate::scheduling::Priority,
+    #[serde(default)]
+    pub schedule: crate::scheduling::Schedule,
+    #[serde(default)]
+    pub manual_order: i64,
+    #[serde(default)]
+    pub options: Option<crate::options::ResolvedOptions>,
+    #[serde(default)]
+    pub content_id: Option<String>,
+    #[serde(default)]
+    pub source_id: Option<String>,
+    #[serde(default)]
+    pub run_next: bool,
+    #[serde(default)]
+    pub associations: Vec<OutputAssociation>,
 }
 impl Job {
     pub fn protect_source(&mut self, root: &Path) -> Result<(), String> {
@@ -232,7 +255,10 @@ impl Job {
     }
 
     pub fn recover(&mut self) {
-        if self.state.active() || self.state == JobState::Pending {
+        if self.state.active()
+            || self.state == JobState::Pending
+                && (self.options.is_none() || self.schedule.needs_review(now()))
+        {
             self.state = JobState::Paused;
             self.progress = None;
             self.next_retry_at = None;
@@ -272,6 +298,14 @@ impl Job {
             attempt: 0,
             group_id,
             next_retry_at: None,
+            priority: Default::default(),
+            schedule: Default::default(),
+            manual_order: 0,
+            options: None,
+            content_id: None,
+            source_id: None,
+            run_next: false,
+            associations: Vec::new(),
         }
     }
 }
@@ -280,6 +314,7 @@ pub struct Runtime {
     pub active: Mutex<HashMap<String, watch::Sender<bool>>>,
     pub started: AtomicBool,
     pub updating: AtomicBool,
+    changed: AtomicBool,
     pub notify: Notify,
     pub processing: Arc<Semaphore>,
     publication: Arc<tokio::sync::Mutex<()>>,
@@ -290,6 +325,7 @@ impl Default for Runtime {
             active: Mutex::new(HashMap::new()),
             started: AtomicBool::new(false),
             updating: AtomicBool::new(false),
+            changed: AtomicBool::new(false),
             notify: Notify::new(),
             processing: Arc::new(Semaphore::new(1)),
             publication: Arc::new(tokio::sync::Mutex::new(())),
@@ -397,6 +433,255 @@ pub fn enqueue_download(
     Ok(jobs)
 }
 
+fn operation_key(options: &crate::options::WorkOptions) -> String {
+    serde_json::json!({"format":options.format,"height":options.height,"audioBitrate":options.audio_bitrate,"subtitleMode":options.subtitle_mode,"languages":options.subtitle_languages,"automatic":options.automatic_subtitles,"clip":options.clip}).to_string()
+}
+
+pub fn prepared_status(
+    repo: &Repository,
+    item: &crate::options::PreparedDownload,
+) -> Option<&'static str> {
+    let mut available = true;
+    let mut active = false;
+    for options in output_options(&item.options) {
+        let key = operation_key(&options.values);
+        let matching = |job: &&Job| {
+            job.content_id.as_deref() == Some(&item.content_id)
+                && job
+                    .options
+                    .as_ref()
+                    .is_some_and(|o| operation_key(&o.values) == key)
+        };
+        active |= repo.data.jobs.iter().filter(matching).any(|job| {
+            job.state.active() || matches!(job.state, JobState::Pending | JobState::Paused)
+        });
+        available &= repo.data.jobs.iter().filter(matching).any(|job| {
+            job.state == JobState::Completed
+                && !job.outputs.is_empty()
+                && job.outputs.iter().all(|p| p.is_file())
+        });
+    }
+    if active {
+        Some("active")
+    } else if available {
+        Some("available")
+    } else {
+        None
+    }
+}
+
+fn output_options(
+    resolved: &crate::options::ResolvedOptions,
+) -> Vec<crate::options::ResolvedOptions> {
+    use crate::options::SubtitleMode;
+    let mut outputs = vec![resolved.clone()];
+    if let Some(format) = resolved.values.additional_audio {
+        let mut audio = resolved.clone();
+        audio.values.format = format;
+        audio.values.height = None;
+        audio.values.audio_bitrate = (format == Format::Mp3).then_some(192);
+        audio.values.subtitle_mode = SubtitleMode::None;
+        audio.values.subtitle_languages.clear();
+        outputs.push(audio);
+    }
+    if resolved.values.subtitle_mode == SubtitleMode::Sidecar {
+        outputs[0].values.subtitle_mode = SubtitleMode::None;
+        outputs[0].values.subtitle_languages.clear();
+    }
+    if matches!(
+        resolved.values.subtitle_mode,
+        SubtitleMode::Sidecar | SubtitleMode::Only
+    ) {
+        if resolved.values.subtitle_mode == SubtitleMode::Only {
+            outputs.clear();
+        }
+        for language in &resolved.values.subtitle_languages {
+            let mut subtitle = resolved.clone();
+            subtitle.values.subtitle_mode = SubtitleMode::Only;
+            subtitle.values.subtitle_languages = vec![language.clone()];
+            outputs.push(subtitle);
+        }
+    }
+    for output in &mut outputs {
+        output.values.additional_audio = None;
+    }
+    outputs
+}
+
+pub fn enqueue_prepared(
+    repo: &mut Repository,
+    items: Vec<crate::options::PreparedDownload>,
+    request: &str,
+) -> Result<Vec<Job>, String> {
+    use crate::options::{Context, SubtitleMode};
+    validate_request_id(request)?;
+    let previous: Vec<_> = repo
+        .data
+        .jobs
+        .iter()
+        .filter(|j| j.client_request == request)
+        .cloned()
+        .collect();
+    if !previous.is_empty() {
+        return Ok(previous);
+    }
+    if items.is_empty() || items.len() > 5000 {
+        return Err("Choose between 1 and 5000 prepared items.".into());
+    }
+    let mut pending = Vec::new();
+    let mut accepted: Vec<Job> = Vec::new();
+    let mut associations: Vec<(String, OutputAssociation)> = Vec::new();
+    for item in items {
+        let url = crate::model::validate_url(&item.url)?;
+        let content_id = crate::options::content_identity(&url)?;
+        if content_id != item.content_id {
+            return Err("The prepared content identity does not match its source.".into());
+        }
+        crate::options::validate(&item.options.values)?;
+        let provider = providers::identify(&url)?;
+        if provider.id == providers::ProviderId::Generic
+            && (item.options.values.clip.is_some()
+                || item.options.values.subtitle_mode != SubtitleMode::None)
+        {
+            return Err("Direct files support full media downloads. Provider subtitles and remote sections are unavailable.".into());
+        }
+        let outputs = output_options(&item.options);
+        let group = item.group_id.clone().unwrap_or_else(|| request.into());
+        for mut options in outputs {
+            options.values.additional_audio = None;
+            let candidate = crate::options::PreparedDownload {
+                options: options.clone(),
+                url: url.clone(),
+                title: item.title.clone(),
+                content_id: content_id.clone(),
+                source_id: item.source_id.clone(),
+                group_id: Some(group.clone()),
+            };
+            let key = operation_key(&options.values);
+            if prepared_status(repo, &candidate).is_some() {
+                if let Some(existing) = repo.data.jobs.iter().find(|j| {
+                    j.content_id.as_deref() == Some(&content_id)
+                        && j.options
+                            .as_ref()
+                            .is_some_and(|o| operation_key(&o.values) == key)
+                        && (j.state.active()
+                            || matches!(j.state, JobState::Pending | JobState::Paused)
+                            || j.state == JobState::Completed
+                                && j.outputs.iter().all(|p| p.is_file()))
+                }) {
+                    associations.push((
+                        existing.id.clone(),
+                        OutputAssociation {
+                            source_id: item.source_id.clone(),
+                            collection: options.values.collection.clone(),
+                            tags: options.values.tags.clone(),
+                        },
+                    ));
+                    if !accepted.iter().any(|j| j.id == existing.id) {
+                        accepted.push(existing.clone());
+                    }
+                }
+                continue;
+            }
+            if let Some(existing) = pending.iter_mut().find(|j: &&mut Job| {
+                j.content_id.as_deref() == Some(&content_id)
+                    && j.options
+                        .as_ref()
+                        .is_some_and(|o| operation_key(&o.values) == key)
+            }) {
+                existing.associations.push(OutputAssociation {
+                    source_id: item.source_id.clone(),
+                    collection: options.values.collection.clone(),
+                    tags: options.values.tags.clone(),
+                });
+                continue;
+            }
+            let context = Context {
+                url: url.clone(),
+                title: item.title.clone(),
+                platform: provider.name.clone(),
+                content_id: content_id.rsplit(':').next().unwrap_or(&content_id).into(),
+                ..options.context.clone()
+            };
+            let path = crate::options::preview_path(
+                &repo.data.settings.folder,
+                &context,
+                &options.values,
+            )?;
+            let folder = path.parent().ok_or("Invalid destination.")?;
+            let destination =
+                crate::options::create_destination(&repo.data.settings.folder, folder)?;
+            // Keep a literal filename snapshot so later metadata or preset edits cannot rename a queued output.
+            options.values.filename_template = path
+                .file_name()
+                .ok_or("Invalid filename.")?
+                .to_string_lossy()
+                .into_owned();
+            options.context.url = crate::options::display_url(&url);
+            options.context.source_url = crate::options::display_url(&options.context.source_url);
+            let mut job = Job::new(
+                Source::Download {
+                    url: url.clone(),
+                    url_ref: None,
+                    format: options.values.format,
+                    height: options.values.height,
+                    audio_bitrate: options.values.audio_bitrate,
+                    subtitle_language: None,
+                },
+                item.title.clone(),
+                destination,
+                request.into(),
+                Some(group.clone()),
+            );
+            job.priority = options.values.priority;
+            job.schedule = options.values.schedule.clone();
+            job.content_id = Some(content_id.clone());
+            job.source_id = item.source_id.clone();
+            job.associations.push(OutputAssociation {
+                source_id: item.source_id.clone(),
+                collection: options.values.collection.clone(),
+                tags: options.values.tags.clone(),
+            });
+            job.options = Some(options);
+            job.manual_order = repo.data.jobs.len().saturating_add(pending.len()) as i64;
+            job.protect_source(repo.root())?;
+            pending.push(job);
+        }
+    }
+    let old_jobs = repo.data.jobs.clone();
+    let old_library = repo.data.library.clone();
+    let old_collections = repo.data.collections.clone();
+    for (id, association) in associations {
+        if let Some(job) = repo.data.jobs.iter_mut().find(|job| job.id == id) {
+            job.associations.push(association.clone());
+            for item in repo
+                .data
+                .library
+                .iter_mut()
+                .filter(|item| job.outputs.contains(&item.path))
+            {
+                merge_association(item, &association);
+            }
+        }
+    }
+    for item in &repo.data.library {
+        for collection in &item.collections {
+            if !repo.data.collections.contains(collection) {
+                repo.data.collections.push(collection.clone());
+            }
+        }
+    }
+    repo.data.jobs.extend(pending.clone());
+    if let Err(e) = repo.save() {
+        repo.data.jobs = old_jobs;
+        repo.data.library = old_library;
+        repo.data.collections = old_collections;
+        return Err(e);
+    }
+    accepted.extend(pending);
+    Ok(accepted)
+}
+
 pub fn enqueue_tool(
     repo: &mut Repository,
     ids: Vec<String>,
@@ -502,6 +787,9 @@ pub fn action(state: &AppState, ids: &[String], action: &str) -> Result<(), Stri
                 job.attempt = 0;
                 job.progress = None;
                 job.next_retry_at = None;
+                if job.schedule.needs_review(now()) {
+                    job.schedule = Default::default();
+                }
             }
             _ => {}
         }
@@ -813,6 +1101,13 @@ async fn reusable_output(
                             && previous.state == JobState::Completed
                             && previous.outputs.contains(&item.path)
                             && same_profile(&previous.source, &job.source)
+                            && match (&previous.options, &job.options) {
+                                (Some(left), Some(right)) => {
+                                    operation_key(&left.values) == operation_key(&right.values)
+                                }
+                                (None, None) => true,
+                                _ => false,
+                            }
                     })
             })
             .cloned()
@@ -1012,7 +1307,11 @@ pub fn start(app: AppHandle, state: Arc<AppState>) {
     tauri::async_runtime::spawn(async move {
         loop {
             if !state.runtime.updating.load(Ordering::SeqCst) {
-                if let Some((job, receiver)) = reserve(&state) {
+                let reserved = reserve(&state);
+                if state.runtime.changed.swap(false, Ordering::SeqCst) {
+                    let _ = app.emit("queue-changed", ());
+                }
+                if let Some((job, receiver)) = reserved {
                     let handle = app.clone();
                     let shared = state.clone();
                     tauri::async_runtime::spawn(async move {
@@ -1029,6 +1328,20 @@ pub fn start(app: AppHandle, state: Arc<AppState>) {
 fn reserve(state: &AppState) -> Option<(Job, watch::Receiver<bool>)> {
     let mut guard = state.repository.lock().unwrap();
     let repo = guard.as_mut()?;
+    let mut missed = false;
+    for job in &mut repo.data.jobs {
+        if job.state == JobState::Pending && job.schedule.needs_review(now()) {
+            job.state = JobState::Paused;
+            job.updated_at = now();
+            missed = true;
+        }
+    }
+    if missed && repo.save().is_err() {
+        return None;
+    }
+    if missed {
+        state.runtime.changed.store(true, Ordering::SeqCst);
+    }
     let mut active = state.runtime.active.lock().unwrap();
     if state.runtime.updating.load(Ordering::SeqCst) {
         return None;
@@ -1041,27 +1354,40 @@ fn reserve(state: &AppState) -> Option<(Job, watch::Receiver<bool>)> {
         .collect();
     let network = running.iter().filter(|j| j.source.network()).count();
     let local = running.iter().filter(|j| !j.source.network()).count();
-    let next = repo.data.jobs.iter().position(|j| {
-        j.state == JobState::Pending
-            && !active.contains_key(&j.id)
-            && j.next_retry_at.is_none_or(|time| time <= now())
-            && if j.source.network() {
-                cooldown_remaining(repo, &j.source.domain(), now()).is_none()
-                    && network < repo.data.settings.network_limit
-                    && !running
-                        .iter()
-                        .any(|a| a.source.network() && a.source.domain() == j.source.domain())
-            } else {
-                local < repo.data.settings.processing_limit
-            }
-    });
-    let index = next?;
+    let next = repo
+        .data
+        .jobs
+        .iter()
+        .enumerate()
+        .filter(|(_, j)| {
+            j.state == JobState::Pending
+                && j.schedule.eligible(now())
+                && !active.contains_key(&j.id)
+                && j.next_retry_at.is_none_or(|time| time <= now())
+                && if j.source.network() {
+                    cooldown_remaining(repo, &j.source.domain(), now()).is_none()
+                        && network < repo.data.settings.network_limit
+                        && !running
+                            .iter()
+                            .any(|a| a.source.network() && a.source.domain() == j.source.domain())
+                } else {
+                    local < repo.data.settings.processing_limit
+                }
+        })
+        .min_by(|(_, left), (_, right)| {
+            right
+                .run_next
+                .cmp(&left.run_next)
+                .then_with(|| crate::scheduling::compare(left, right, now()))
+        });
+    let index = next?.0;
     let previous = repo.data.jobs[index].clone();
     let job = &mut repo.data.jobs[index];
     job.state = JobState::Analyzing;
     job.run_id = now().max(job.run_id + 1);
     job.attempt += 1;
     job.next_retry_at = None;
+    job.run_next = false;
     job.error = None;
     job.updated_at = now();
     let selected = job.clone();
@@ -1112,13 +1438,32 @@ async fn execute(app: AppHandle, state: Arc<AppState>, job: Job, cancel: watch::
                 current.progress = None;
                 current.updated_at = now();
                 match result {
-                    Ok((path, item)) => {
+                    Ok((path, mut item)) => {
+                        for association in &current.associations {
+                            merge_association(&mut item, association);
+                        }
                         current.outputs = vec![path];
                         current.error = None;
                         current.state = JobState::Completed;
                         success = true;
                         if !repo.data.library.iter().any(|old| old.path == item.path) {
                             repo.data.library.push(item);
+                        } else if let Some(existing) = repo
+                            .data
+                            .library
+                            .iter_mut()
+                            .find(|old| old.path == item.path)
+                        {
+                            for association in &repo.data.jobs[index].associations {
+                                merge_association(existing, association);
+                            }
+                        }
+                        for item in &repo.data.library {
+                            for collection in &item.collections {
+                                if !repo.data.collections.contains(collection) {
+                                    repo.data.collections.push(collection.clone());
+                                }
+                            }
                         }
                     }
                     Err(ref e)
@@ -1211,7 +1556,7 @@ async fn run(
     let id = job.id.clone();
     let run_id = job.run_id;
     let emit = move |update| progress(&handle, &shared, &id, run_id, update);
-    let (file, source, parent) = match &job.source {
+    let (mut file, source, parent) = match &job.source {
         Source::Download {
             url_ref,
             format,
@@ -1235,6 +1580,9 @@ async fn run(
                     .ok_or("This download has no protected URL. Add its link again.")?,
             )?;
             let url = validate_download_url(operational.as_str()).await?;
+            let work = job.options.as_ref().map(|o| &o.values);
+            let subtitle_only =
+                work.is_some_and(|o| o.subtitle_mode == crate::options::SubtitleMode::Only);
             let audio_permit = if !format.is_video() && !direct_download {
                 Some(processing_permit(state, cancel.clone()).await?)
             } else {
@@ -1246,6 +1594,40 @@ async fn run(
             } else {
                 let cookies = crate::sessions::materialize(&cookie_root, &url)?;
                 let mut args = engine::download_args(&root, *format, *height, staging, &url);
+                if let Some(options) = work {
+                    let suffix = options
+                        .clip
+                        .as_ref()
+                        .map(|c| format!(" [{:.3}-{:.3}]", c.start, c.end))
+                        .unwrap_or_default();
+                    let template = format!("{}{}.%(ext)s", options.filename_template, suffix);
+                    if let Some(index) = args.iter().position(|s| s == "-o" || s == "--output") {
+                        args[index + 1] = staging.join(template).to_string_lossy().into_owned();
+                    }
+                    let mode = match options.subtitle_mode {
+                        crate::options::SubtitleMode::None => "none",
+                        crate::options::SubtitleMode::Sidecar => "sidecar",
+                        crate::options::SubtitleMode::Embed if options.clip.is_some() => "sidecar",
+                        crate::options::SubtitleMode::Embed => "embed",
+                        crate::options::SubtitleMode::Only => "only",
+                    };
+                    let advanced = engine::advanced_subtitle_args(
+                        &options.subtitle_languages,
+                        mode,
+                        options.automatic_subtitles,
+                        *format,
+                    )?;
+                    args.splice(0..0, advanced);
+                    args.splice(0..0, ["--write-info-json".into()]);
+                    if !subtitle_only {
+                        if let Some(clip) = &options.clip {
+                            args.splice(
+                                0..0,
+                                engine::section_args(clip.start, clip.end, clip.precise)?,
+                            );
+                        }
+                    }
+                }
                 let subtitle_args = engine::subtitle_args(subtitle_language.as_deref(), *format)?;
                 args.splice(0..0, subtitle_args);
                 if let Some(file) = &cookies {
@@ -1271,6 +1653,34 @@ async fn run(
                     emit.clone(),
                 )
                 .await?;
+                if subtitle_only {
+                    let file = fs::read_dir(staging).map_err(|e| e.to_string())?.flatten().map(|e| e.path()).find(|p| p.extension().is_some_and(|e| e == "srt" || e == "vtt")).ok_or("The selected subtitle track is not available. No video was downloaded.")?;
+                    let options = work.ok_or("Subtitle options are missing.")?;
+                    let language = options
+                        .subtitle_languages
+                        .first()
+                        .ok_or("Choose a subtitle language.")?
+                        .clone();
+                    let origin = if options.automatic_subtitles {
+                        crate::captions::TrackOrigin::Automatic
+                    } else {
+                        crate::captions::TrackOrigin::Creator
+                    };
+                    let mut track =
+                        crate::library_features::read_track(file.clone(), language, origin)?;
+                    if let Some(clip) = &options.clip {
+                        track.segments =
+                            crate::captions::rebase(&track.segments, clip.start, clip.end)?;
+                        fs::write(&file, crate::captions::to_srt(&track.segments))
+                            .map_err(|e| e.to_string())?;
+                    }
+                    let mut item = library::index(&file, None, Some(public_origin(&url)?), None)?;
+                    track.path = None;
+                    item.details.tracks = vec![track];
+                    annotate_output(&mut item, job, staging);
+                    phase(app, state, &job.id, run_id, JobState::Verifying)?;
+                    return publish_verified_output(state, job, staging, &file, item, cancel).await;
+                }
                 crate::checked_output(staging, raw.trim())?
             };
             phase(app, state, &job.id, run_id, JobState::Processing)?;
@@ -1295,6 +1705,14 @@ async fn run(
                 )
                 .await?
             } else {
+                let file = if let Some(options) = work.filter(|options| {
+                    options.clip.is_some()
+                        && options.subtitle_mode == crate::options::SubtitleMode::Embed
+                }) {
+                    embed_clip_subtitles(&root, &file, staging, options, cancel.clone()).await?
+                } else {
+                    file
+                };
                 media::prepare(&root, &file, *format, cancel.clone()).await?
             };
             (file, Some(public_origin(&url)?), None)
@@ -1335,6 +1753,29 @@ async fn run(
             (file, None, Some(library_id.clone()))
         }
     };
+    if let Some(options) = job.options.as_ref().map(|options| &options.values) {
+        let extension = file
+            .extension()
+            .and_then(|s| s.to_str())
+            .ok_or("The verified output has no extension.")?;
+        let suffix = options
+            .clip
+            .as_ref()
+            .map(|clip| format!(" [{:.3}-{:.3}]", clip.start, clip.end))
+            .unwrap_or_default();
+        let target = staging.join(format!(
+            "{}{}.{extension}",
+            crate::options::safe_segment(&options.filename_template),
+            suffix
+        ));
+        if target != file {
+            if target.exists() {
+                return Err("The requested output filename already exists in this job.".into());
+            }
+            fs::rename(&file, &target).map_err(|e| e.to_string())?;
+            file = target;
+        }
+    }
     phase(app, state, &job.id, run_id, JobState::Verifying)?;
     let info = media::probe(&root, &file, cancel.clone()).await?;
     if let Source::Download {
@@ -1344,11 +1785,212 @@ async fn run(
     {
         media::validate_subtitle(&info, language)?;
     }
+    if let Some(options) = job
+        .options
+        .as_ref()
+        .map(|o| &o.values)
+        .filter(|o| o.subtitle_mode == crate::options::SubtitleMode::Embed)
+    {
+        for language in &options.subtitle_languages {
+            media::validate_subtitle(&info, language)?;
+        }
+    }
     if *cancel.borrow() {
         return Err(engine::CANCELLED.into());
     }
-    let item = library::index(&file, Some(&info), source, parent)?;
+    let mut item = library::index(&file, Some(&info), source, parent)?;
+    if let Source::Transform {
+        library_id,
+        options,
+    } = &job.source
+    {
+        let guard = state.repository.lock().unwrap();
+        if let Some(parent) = guard
+            .as_ref()
+            .and_then(|repo| repo.data.library.iter().find(|item| item.id == *library_id))
+        {
+            item.details = crate::library_features::transform_details(parent, options)?;
+        }
+    }
+    annotate_output(&mut item, job, staging);
     publish_verified_output(state, job, staging, &file, item, cancel).await
+}
+
+async fn embed_clip_subtitles(
+    root: &Path,
+    file: &Path,
+    staging: &Path,
+    options: &crate::options::WorkOptions,
+    cancel: watch::Receiver<bool>,
+) -> Result<PathBuf, String> {
+    let clip = options.clip.as_ref().ok_or("Clip interval unavailable.")?;
+    let mut tracks = Vec::new();
+    for language in &options.subtitle_languages {
+        let path = fs::read_dir(staging)
+            .map_err(|e| e.to_string())?
+            .flatten()
+            .map(|e| e.path())
+            .find(|p| {
+                p.extension().is_some_and(|e| e == "srt" || e == "vtt")
+                    && p.file_stem().is_some_and(|name| {
+                        name.to_string_lossy().ends_with(&format!(".{language}"))
+                    })
+            })
+            .ok_or("The selected subtitle track is unavailable.")?;
+        let text = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+        let segments =
+            crate::captions::rebase(&crate::captions::parse(&text)?, clip.start, clip.end)?;
+        fs::write(&path, crate::captions::to_srt(&segments)).map_err(|e| e.to_string())?;
+        tracks.push(path);
+    }
+    let extension = file
+        .extension()
+        .and_then(|s| s.to_str())
+        .ok_or("The output container is unknown.")?;
+    let target = staging.join(format!(
+        "{}.subtitled.{extension}",
+        file.file_stem().unwrap_or_default().to_string_lossy()
+    ));
+    let mut args = vec![
+        "-nostdin".into(),
+        "-v".into(),
+        "error".into(),
+        "-n".into(),
+        "-protocol_whitelist".into(),
+        "file".into(),
+        "-i".into(),
+        file.to_string_lossy().into_owned(),
+    ];
+    for track in &tracks {
+        args.extend([
+            "-f".into(),
+            "srt".into(),
+            "-i".into(),
+            track.to_string_lossy().into_owned(),
+        ]);
+    }
+    args.extend(["-map".into(), "0:v?".into(), "-map".into(), "0:a?".into()]);
+    for index in 0..tracks.len() {
+        args.extend(["-map".into(), format!("{}:0", index + 1)]);
+    }
+    args.extend([
+        "-c".into(),
+        "copy".into(),
+        "-c:s".into(),
+        if extension == "mp4" {
+            "mov_text"
+        } else {
+            "srt"
+        }
+        .into(),
+    ]);
+    for (index, language) in options.subtitle_languages.iter().enumerate() {
+        args.extend([
+            format!("-metadata:s:s:{index}"),
+            format!(
+                "language={}",
+                crate::model::normalized_subtitle_language(language)
+                    .ok_or("Invalid subtitle language.")?
+            ),
+        ]);
+    }
+    args.push(target.to_string_lossy().into_owned());
+    engine::tool(root, "ffmpeg.exe", args, cancel).await?;
+    crate::checked_output(staging, &target.to_string_lossy())
+}
+
+fn merge_association(item: &mut library::LibraryItem, association: &OutputAssociation) {
+    if let Some(source) = &association.source_id {
+        if !item.details.source_ids.contains(source) {
+            item.details.source_ids.push(source.clone());
+        }
+    }
+    if let Some(collection) = &association.collection {
+        if !item
+            .collections
+            .iter()
+            .any(|c| c.eq_ignore_ascii_case(collection))
+        {
+            item.collections.push(collection.clone());
+        }
+    }
+    for tag in &association.tags {
+        if !item.tags.iter().any(|t| t.eq_ignore_ascii_case(tag)) {
+            item.tags.push(tag.clone());
+        }
+    }
+}
+fn annotate_output(item: &mut library::LibraryItem, job: &Job, staging: &Path) {
+    let Some(resolved) = &job.options else {
+        return;
+    };
+    item.details.content_id = job.content_id.clone();
+    item.details.creator =
+        (!resolved.context.creator.is_empty()).then(|| resolved.context.creator.clone());
+    item.details.platform = Some(job.provider.clone());
+    item.details.source_ids = job.source_id.iter().cloned().collect();
+    item.collections = resolved.values.collection.iter().cloned().collect();
+    item.tags = resolved.values.tags.clone();
+    if let Some(clip) = &resolved.values.clip {
+        item.details.clip = Some(crate::library_features::ClipReference {
+            requested_start: clip.start,
+            requested_end: clip.end,
+            actual_start: None,
+            actual_end: None,
+        });
+    }
+    if let Ok(files) = fs::read_dir(staging) {
+        for path in files.flatten().map(|entry| entry.path()) {
+            if path.extension().is_some_and(|e| e == "json")
+                && path.to_string_lossy().ends_with(".info.json")
+            {
+                if let Ok(raw) = fs::read_to_string(path) {
+                    if let Ok(metadata) = crate::model::parse_media(&raw, 0) {
+                        item.details.chapters = if let Some(clip) = &resolved.values.clip {
+                            metadata
+                                .chapters
+                                .into_iter()
+                                .filter_map(|chapter| {
+                                    let start = chapter.start.max(clip.start);
+                                    let end = chapter.end.min(clip.end);
+                                    (end > start).then(|| crate::model::Chapter {
+                                        title: chapter.title,
+                                        start: start - clip.start,
+                                        end: end - clip.start,
+                                    })
+                                })
+                                .collect()
+                        } else {
+                            metadata.chapters
+                        };
+                    }
+                }
+            } else if resolved.values.subtitle_mode == crate::options::SubtitleMode::Embed
+                && path.extension().is_some_and(|e| e == "srt" || e == "vtt")
+            {
+                let origin = if resolved.values.automatic_subtitles {
+                    crate::captions::TrackOrigin::Automatic
+                } else {
+                    crate::captions::TrackOrigin::Creator
+                };
+                let language = resolved
+                    .values
+                    .subtitle_languages
+                    .iter()
+                    .find(|language| {
+                        path.file_stem().is_some_and(|name| {
+                            name.to_string_lossy().ends_with(&format!(".{language}"))
+                        })
+                    })
+                    .cloned()
+                    .unwrap_or_else(|| "und".into());
+                if let Ok(mut track) = crate::library_features::read_track(path, language, origin) {
+                    track.path = None;
+                    item.details.tracks.push(track);
+                }
+            }
+        }
+    }
 }
 
 async fn validate_download_url(input: &str) -> Result<String, String> {
@@ -1558,6 +2200,9 @@ async fn prepare_direct_download(
 #[cfg(test)]
 #[path = "queue_direct_tests.rs"]
 mod direct_tests;
+#[cfg(test)]
+#[path = "queue_productivity_tests.rs"]
+mod productivity_tests;
 #[cfg(test)]
 #[path = "queue_publication_tests.rs"]
 mod publication_tests;

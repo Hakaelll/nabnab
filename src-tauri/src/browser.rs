@@ -54,8 +54,31 @@ pub struct BrowserRequest {
     pub request_id: String,
     pub url: String,
     pub profile: String,
+    #[serde(default)]
+    pub intent: BrowserIntent,
+    #[serde(default)]
+    pub urls: Vec<String>,
+    #[serde(default)]
+    pub preset_id: Option<String>,
     #[serde(skip)]
     pub client_id: String,
+}
+#[derive(Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum BrowserIntent {
+    #[default]
+    Download,
+    Prepare,
+    Save,
+}
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Receipt {
+    pub version: u32,
+    pub request_id: String,
+    pub accepted_job_ids: Vec<String>,
+    pub accepted_draft_id: Option<String>,
+    pub intent: BrowserIntent,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -475,6 +498,24 @@ fn validate_message(mut request: BrowserRequest, client: &str) -> Result<Browser
         return Err("The browser URL is too long.".into());
     }
     request.url = crate::model::validate_url(&request.url)?;
+    if request.urls.len() > 200 {
+        return Err("Send at most 200 selected links.".into());
+    }
+    request.urls = request
+        .urls
+        .iter()
+        .map(|url| crate::model::validate_url(url))
+        .collect::<Result<_, _>>()?;
+    if request
+        .preset_id
+        .as_ref()
+        .is_some_and(|id| crate::queue::validate_request_id(id).is_err())
+    {
+        return Err("Choose a valid local preset.".into());
+    }
+    if request.intent == BrowserIntent::Download && !request.urls.is_empty() {
+        return Err("Send selections to the preparer before downloading.".into());
+    }
     request.client_id = client.into();
     Ok(request)
 }
@@ -554,7 +595,7 @@ fn serve(app: &AppHandle, state: &Shared, stream: &mut TcpStream) {
             return;
         }
     };
-    if request.path != "/health" && request.path != "/enqueue" {
+    if !matches!(request.path.as_str(), "/health" | "/enqueue" | "/presets") {
         write_response(
             stream,
             404,
@@ -572,7 +613,7 @@ fn serve(app: &AppHandle, state: &Shared, stream: &mut TcpStream) {
                     .get("access-control-request-method")
                     .map(String::as_str)
             ),
-            ("/health", Some("GET" | "POST")) | ("/enqueue", Some("POST"))
+            ("/health" | "/presets", Some("GET" | "POST")) | ("/enqueue", Some("POST"))
         );
         let valid = request.body.is_empty()
             && allowed_method
@@ -607,7 +648,7 @@ fn serve(app: &AppHandle, state: &Shared, stream: &mut TcpStream) {
         );
         return;
     }
-    if request.path == "/health" {
+    if request.path == "/health" || request.path == "/presets" {
         if let Err(status) = validate_health(&request) {
             write_response(
                 stream,
@@ -615,6 +656,32 @@ fn serve(app: &AppHandle, state: &Shared, stream: &mut TcpStream) {
                 Some(&origin),
                 &json!({"error":"Use POST with the supported JSON protocol version for connection status."}),
             );
+            return;
+        }
+        if request.path == "/presets" {
+            let shared = app.state::<Arc<crate::AppState>>();
+            let guard = shared.repository.lock().unwrap();
+            if let Some(repo) = guard.as_ref() {
+                let presets: Vec<_> = repo
+                    .data
+                    .presets
+                    .iter()
+                    .map(|p| json!({"id":p.id,"name":p.name,"revision":p.revision}))
+                    .collect();
+                write_response(
+                    stream,
+                    200,
+                    Some(&origin),
+                    &json!({"version":1,"presets":presets}),
+                );
+            } else {
+                write_response(
+                    stream,
+                    503,
+                    Some(&origin),
+                    &json!({"error":"Open nabnab first."}),
+                );
+            }
             return;
         }
         write_response(
@@ -653,13 +720,13 @@ fn serve(app: &AppHandle, state: &Shared, stream: &mut TcpStream) {
             return;
         }
     };
-    let request_id = message.request_id.clone();
     match tauri::async_runtime::block_on(crate::accept_browser(app.clone(), message)) {
-        Ok(ids) => write_response(
+        Ok(receipt) => write_response(
             stream,
             200,
             Some(&origin),
-            &json!({"version":1,"requestId":request_id,"acceptedJobIds":ids}),
+            &serde_json::to_value(receipt)
+                .unwrap_or_else(|_| json!({"error":"Could not acknowledge the request."})),
         ),
         Err(error) => write_response(
             stream,

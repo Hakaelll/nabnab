@@ -17,17 +17,19 @@ export interface Job {
   id: string; runId: number; title: string; createdAt: number; updatedAt: number; state: JobState;
   source: JobSource; folder: string; provider: string; thumbnail: string | null;
   progress: Progress | null; outputs: string[]; error: Failure | null; attempt: number; groupId: string | null;
+  priority?: import('./scheduling-types').Priority; schedule?: import('./scheduling-types').Schedule; manualOrder?: number; runNext?:boolean; options?: import('./options').ResolvedOptions | null; contentId?:string|null; sourceId?:string|null;
 }
 export interface LibraryItem {
-  id: string; path: string; name: string; kind: "video" | "audio" | "image"; size: number; duration: number | null;
+  id: string; path: string; name: string; kind: "video" | "audio" | "image" | "subtitle"; size: number; duration: number | null;
   width: number | null; height: number | null; videoCodec: string | null; audioCodec: string | null;
   container: string | null; addedAt: number; source: string | null; parentId: string | null; collections: string[]; tags: string[]; missing?: boolean;
+  details?: import('./library-types').LibraryDetails;
 }
-export interface Snapshot { settings: Settings; jobs: Job[]; library: LibraryItem[]; collections: string[] }
+export interface Snapshot { settings: Settings; jobs: Job[]; library: LibraryItem[]; collections: string[]; presets?: import('./options').Preset[]; rules?: import('./options').Rule[]; drafts?:import('./batch-types').Draft[]; sources?:import('./source-types').FollowedSource[]; smartCollections?:import('./library-types').SmartCollection[] }
 export interface Startup extends Snapshot { folder: string; enginesReady: boolean; engineError: string | null }
 export interface Capabilities { video: boolean; audio: boolean; images: boolean; batches: boolean; subtitles: boolean; verified: boolean }
 export interface MediaEntry { id: string; title: string; url: string; thumbnail: string | null; duration: number | null }
-export interface Media { requestId: number; title: string; duration: number | null; thumbnail: string | null; uploader: string | null; heights: number[]; hasAudio: boolean; hasVideo: boolean; entries: MediaEntry[]; subtitleLanguages?: string[]; capabilities: Capabilities }
+export interface Media { requestId: number; title: string; duration: number | null; thumbnail: string | null; uploader: string | null; heights: number[]; hasAudio: boolean; hasVideo: boolean; entries: MediaEntry[]; subtitleLanguages?: string[]; chapters?:import('./library-types').Chapter[]; subtitleTracks?:import('./library-types').RemoteSubtitleTrack[]; capabilities: Capabilities }
 export interface EngineStatus { name: string; version: string | null; path: string | null; size: number; status: "installed" | "missing" | "broken"; source: string }
 export interface SessionStatus { site: string }
 export interface BridgeStatus { enabled: boolean; clients: string[]; port: number }
@@ -37,9 +39,9 @@ export interface HomeState {
   format: OutputFormat; quality: string; audioBitrate: string; subtitleLanguage: string; submitting: boolean;
 }
 export interface DownloadView { query: string; filter: "activity" | "pending" | "completed" | "error" | "all"; selected: Set<string>; detailId: string | null }
-export interface LibraryView { query: string; filter: "all" | "video" | "audio" | "image"; sort: "newest" | "name" | "duration" | "size"; layout: "grid" | "list"; collection: string; offset: number; selected: Set<string>; detailId: string | null }
+export interface LibraryView { query: string; filter: "all" | "video" | "audio" | "image" | "subtitle"; sort: "newest" | "name" | "duration" | "size"; layout: "grid" | "list"; collection: string; offset: number; selected: Set<string>; detailId: string | null }
 export interface ToolsView { kind: ToolKind; ids: Set<string>; options: ToolOptions; picking: boolean }
-export type SettingsSection = "general" | "downloads" | "formats" | "engines" | "sessions" | "appearance" | "browser" | "about";
+export type SettingsSection = "general" | "downloads" | "formats" | "organization" | "engines" | "sessions" | "appearance" | "browser" | "about";
 export interface SettingsView { section: SettingsSection; engines: EngineStatus[] | null; sessions: SessionStatus[] | null; bridge: BridgeStatus | null; pairing: { token: string; port: number } | null; cache: { bytes: number; files: number } | null; working: boolean }
 
 export const initialSettings: Settings = { folder: "", language: "es", networkLimit: 3, processingLimit: 1, reducedMotion: false, reducedTransparency: false, sidebarExpanded: true, trayEnabled: false, closeToTray: false, startWithWindows: false };
