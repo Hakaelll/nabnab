@@ -283,7 +283,7 @@ function observeThumbnails(): void {
 }
 async function pumpThumbnails(): Promise<void> {
   while(thumbnailWorkers<2&&thumbnailQueue.length){const element=thumbnailQueue.shift();if(!element||!element.isConnected)continue;const id=element.dataset.thumbnailId;if(!id)continue;thumbnailWorkers++;
-    void(async()=>{try{const url=thumbnailUrls.get(id)??await command<string>('thumbnail',{id});if(thumbnailUrls.size>=120)thumbnailUrls.delete(thumbnailUrls.keys().next().value??'');thumbnailUrls.set(id,url);if(!element.isConnected)return;const image=document.createElement('img');image.alt='';image.loading='lazy';image.onload=()=>{if(element.isConnected)element.replaceChildren(image);};image.src=url;}catch{/* Missing or unsupported thumbnails retain their file-type icon. */}finally{thumbnailWorkers--;void pumpThumbnails();}})();
+    void(async()=>{try{const url=thumbnailUrls.get(id)??await command<string>('thumbnail',{id});if(thumbnailUrls.size>=120)thumbnailUrls.delete(thumbnailUrls.keys().next().value??'');thumbnailUrls.set(id,url);if(!element.isConnected)return;const image=document.createElement('img');image.alt='';image.decoding='async';image.onload=()=>{if(element.isConnected)element.replaceChildren(image);};image.src=url;}catch{/* Missing or unsupported thumbnails retain their file-type icon. */}finally{thumbnailWorkers--;void pumpThumbnails();}})();
   }
 }
 function updateActivity(): void {
@@ -462,7 +462,7 @@ async function handleAction(action: string, button: HTMLButtonElement): Promise<
     case 'retry-selected':await actOnJobs(snapshot.jobs.filter(job=>downloads.selected.has(job.id)&&['error','cancelled'].includes(job.state)).map(job=>job.id),'retry');break;
     case 'clear-job-selection':downloads.selected.clear();renderCurrent();break;
     case 'copy-job-error':{const job=snapshot.jobs.find(job=>job.id===id);if(job?.error)await copyText(job.error.technical);break;}
-    case 'library-filter':{const value=button.dataset.filter;if(value==='all'||value==='video'||value==='audio'||value==='image'||value==='subtitle'){library.filter=value;library.offset=0;renderCurrent();}break;}
+    case 'library-filter':{const value=button.dataset.filter;if(value==='all'||value==='video'||value==='audio'||value==='image'||value==='subtitle'||value==='document'||value==='file'){library.filter=value;library.offset=0;renderCurrent();}break;}
     case 'library-layout':if(button.dataset.layout==='grid'||button.dataset.layout==='list'){library.layout=button.dataset.layout;renderCurrent();}break;
     case 'library-next':library.offset+=60;renderCurrent();focusLibraryPage();break;
     case 'library-previous':library.offset=Math.max(0,library.offset-60);renderCurrent();focusLibraryPage();break;

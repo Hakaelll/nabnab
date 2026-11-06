@@ -1,0 +1,110 @@
+{
+  "date": "2026-11-06T15:25:16.077Z",
+  "native": true,
+  "publicApis": true,
+  "isolatedData": true,
+  "maxBytesPerDownload": 524288,
+  "oauthAccountsTested": false,
+  "checks": [
+    {
+      "case": "public metadata",
+      "provider": "github",
+      "sourceUrl": "https://github.com/cli/cli",
+      "assets": 0,
+      "entries": 50,
+      "partial": true
+    },
+    {
+      "case": "public metadata",
+      "provider": "github",
+      "sourceUrl": "https://github.com/cli/cli/releases/tag/v2.103.3",
+      "assets": 22,
+      "entries": 0,
+      "partial": false
+    },
+    {
+      "case": "native queued public file",
+      "status": "passed",
+      "provider": "github",
+      "sourceUrl": "https://github.com/cli/cli/releases/tag/v2.103.3",
+      "filename": "gh_2.103.3_checksums.txt",
+      "bytes": 1971,
+      "sha256": "f756e7859d90dbb5e85aae5194206c37da220bec9bac23d3d659078a8e766fdc",
+      "publishedHashVerified": true,
+      "libraryKind": "document",
+      "collection": "Native release verification",
+      "idempotentReceipt": true
+    },
+    {
+      "case": "public metadata",
+      "provider": "commons",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:Example.jpg",
+      "assets": 1,
+      "entries": 0,
+      "partial": false
+    },
+    {
+      "case": "native queued public file",
+      "status": "passed",
+      "provider": "commons",
+      "sourceUrl": "https://commons.wikimedia.org/wiki/File:Example.jpg",
+      "filename": "Example.jpg",
+      "bytes": 9022,
+      "sha256": "99bd915a3819b1fee3722328ae904dde5459e9b15d56abd98b903c770a2f582c",
+      "publishedHashVerified": false,
+      "libraryKind": "image",
+      "collection": "Native Commons verification",
+      "idempotentReceipt": true
+    },
+    {
+      "case": "Commons attribution",
+      "status": "passed",
+      "author": null,
+      "license": "Public domain",
+      "queueResults": 2,
+      "signedUrlsExported": false
+    },
+    {
+      "case": "public metadata",
+      "provider": "archive",
+      "sourceUrl": "https://archive.org/details/BigBuckBunny_328",
+      "assets": 29,
+      "entries": 0,
+      "partial": false
+    },
+    {
+      "case": "native queued public file",
+      "status": "passed",
+      "provider": "archive",
+      "sourceUrl": "https://archive.org/details/BigBuckBunny_328",
+      "filename": "__ia_thumb.jpg",
+      "bytes": 9692,
+      "sha256": "6d325e7a97b7297e0a1e64fd6b6e0d9bf9a97dd1545bd71b58b868979f1efa52",
+      "publishedHashVerified": false,
+      "libraryKind": "image",
+      "collection": "Native Archive verification",
+      "idempotentReceipt": true
+    },
+    {
+      "case": "Archive provenance",
+      "status": "passed",
+      "rightsAsReported": "http://creativecommons.org/licenses/by/3.0/us/",
+      "original": true,
+      "noDefaultBulkDownload": true
+    },
+    {
+      "case": "native inspection cancellation",
+      "status": "passed"
+    },
+    {
+      "case": "persistence privacy and isolation",
+      "status": "passed",
+      "libraryItems": 4,
+      "jobs": 4,
+      "credentialsConfigured": false,
+      "backgroundStartupEnabled": false
+    }
+  ],
+  "providerFailures": [],
+  "browserErrors": []
+}

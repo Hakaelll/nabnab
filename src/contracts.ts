@@ -62,7 +62,7 @@ export interface HomeState {
   format: OutputFormat; quality: string; audioBitrate: string; subtitleLanguage: string; submitting: boolean;
 }
 export interface DownloadView { query: string; filter: "activity" | "pending" | "completed" | "error" | "all"; selected: Set<string>; detailId: string | null }
-export interface LibraryView { query: string; filter: "all" | "video" | "audio" | "image" | "subtitle"; sort: "newest" | "name" | "duration" | "size"; layout: "grid" | "list"; collection: string; offset: number; selected: Set<string>; detailId: string | null }
+export interface LibraryView { query: string; filter: "all" | "video" | "audio" | "image" | "subtitle" | "document" | "file"; sort: "newest" | "name" | "duration" | "size"; layout: "grid" | "list"; collection: string; offset: number; selected: Set<string>; detailId: string | null }
 export interface ToolsView { kind: ToolKind; ids: Set<string>; options: ToolOptions; picking: boolean }
 export type SettingsSection = "connections" | "general" | "downloads" | "formats" | "organization" | "engines" | "sessions" | "appearance" | "browser" | "about";
 export interface SettingsView { section: SettingsSection; engines: EngineStatus[] | null; sessions: SessionStatus[] | null; bridge: BridgeStatus | null; pairing: { token: string; port: number } | null; cache: { bytes: number; files: number } | null; working: boolean }

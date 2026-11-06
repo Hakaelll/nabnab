@@ -36,6 +36,12 @@ La verificación de navegador cubre 1180 × 780 y 900 × 620, selección, pagina
 
 Los informes de cada ejecución quedan en `artifacts/file-sources/`. Las restricciones de red, cuentas y hardware se mantienen separadas de los resultados con fixtures. No se obtuvo una captura anterior equivalente de la nueva pantalla, por lo que estas imágenes documentan el resultado final.
 
+`tests/native-file-sources.browser.mjs` verificó también el recorrido completo en la aplicación real con datos aislados: tres descargas públicas y la ficha de Commons, cuatro trabajos completados y cuatro archivos indexados. Comprobó SHA-256 publicado de GitHub, metadatos de Commons incluidos los ausentes, colecciones, repetición idempotente y cancelación. El resultado está en [evidencia nativa](verification/online-file-sources-native.json). Se corrigieron las etiquetas de documento/archivo y la carga de miniaturas, y se reabrieron esos mismos resultados sin llamadas remotas para comprobar la corrección.
+
+![Biblioteca nativa con archivos realmente descargados](online-library-native.png)
+
+El test permite repetir solo la comprobación local con `NABNAB_NATIVE_REUSE_DATA` apuntando a una carpeta `artifacts/file-sources/native-run-*` generada por él. Una repetición de las APIs encontró errores 504 de GitHub; se registraron como fallos temporales y no se confundieron con trabajos completados.
+
 ## Entregas siguientes
 
 B, archivo web/OCR/documentos; C, organización e imágenes; D, captura/voz; E, CLI/MCP y permisos siguen pendientes de implementación. Esta guía se actualizará al cerrar sus recorridos. Las funciones de fases anteriores no se contabilizan como novedades.
