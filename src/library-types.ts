@@ -6,7 +6,7 @@ export interface LocalTrack { id: string; language: string; origin: TrackOrigin;
 export interface Bookmark { id: string; name: string; time: number }
 export interface ClipReference { requestedStart: number; requestedEnd: number; actualStart: number | null; actualEnd: number | null }
 export interface LibraryDetails {
-  contentId: string | null; creator: string | null; platform: string | null; sourceIds: string[];
+  contentId: string | null; creator: string | null; platform: string | null; sourceIds: string[];sourceUrl?:string|null;
   chapters: Chapter[]; tracks: LocalTrack[]; playbackPosition: number; favorite: boolean;
   bookmarks: Bookmark[]; clip: ClipReference | null;
 }

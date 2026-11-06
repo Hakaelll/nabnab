@@ -22,6 +22,16 @@ export type ToolOptions =
 export type ToolKind = ToolOptions["kind"];
 export type JobSource = { kind: "download"; url: string; format: OutputFormat; height: number | null; audioBitrate: number | null; subtitleLanguage?: string | null }
   | { kind: "transform"; libraryId: string; options: ToolOptions }
+  | {kind:'advancedFile';url:string;connections:number;checksum:string|null}
+  | {kind:'palette';libraryIds:string[];colors:number;format:string}
+  | {kind:'audioPreview';libraryId:string;options:ToolOptions}
+  | {kind:'providerExport';url:string;operation:string;format:string}
+  | {kind:'captionEdit';libraryId:string;trackId:string;options:import('./captions-editor-ui').CaptionEditOptions}
+  | {kind:'mediaEdit';libraryIds:string[];options:{kind:string}}
+  | {kind:'document';libraryIds:string[];options:{operation:string;pages:string;rotation:number;dpi:number}}
+  | {kind:'galleryExport';libraryIds:string[];exportKind:string}
+  | {kind:'telegram';attachment:import('./telegram-ui').TelegramAttachment}
+  | {kind:'live';url:string;minutes:number;maxMb:number|null}
   | { kind:"torrent";reference:string;manifestId:string;index:number;options:import("./torrents-ui").TorrentOptions };
 export interface Job {
   id: string; runId: number; title: string; createdAt: number; updatedAt: number; state: JobState;

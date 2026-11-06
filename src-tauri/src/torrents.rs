@@ -41,7 +41,7 @@ pub fn torrent_status(app: AppHandle) -> Result<TorrentStatus, String> {
     let root = crate::components::root(&app)?;
     Ok(TorrentStatus {
         enabled: root.join("torrent.enabled").is_file(),
-        installed: root.join("aria2c.exe").is_file(),
+        installed: crate::component_archives::installed(&root,"torrent"),
     })
 }
 
@@ -50,7 +50,7 @@ pub fn set_torrent_enabled(app: AppHandle, enabled: bool) -> Result<TorrentStatu
     let root = crate::components::root(&app)?;
     fs::create_dir_all(&root).map_err(|e| e.to_string())?;
     if enabled {
-        if !root.join("aria2c.exe").is_file() {
+        if !crate::component_archives::installed(&root,"torrent") {
             return Err(
                 "Install the optional Files/BitTorrent component before activating P2P.".into(),
             );

@@ -2,6 +2,8 @@
 mod batch;
 mod browser;
 mod captions;
+mod captions_editor;
+mod media_edits;
 mod components;
 mod component_archives;
 mod courses;
@@ -10,7 +12,20 @@ mod dependencies;
 mod direct;
 mod engine;
 mod failure;
+mod source_exports;
+mod danmaku;
+mod advanced_files;
+mod palettes;
+mod audio_preview;
 mod galleries;
+mod gallery_sources;
+mod gallery_auth;
+mod gallery_exports;
+mod documents;
+mod telegram;
+mod live;
+mod federated;
+mod federated_auth;
 mod library;
 mod library_features;
 mod local_media;
@@ -181,6 +196,7 @@ async fn inspect_media(
     request_id: u64,
 ) -> Result<Media, Failure> {
     let url = model::validate_url(&url)?;
+    if providers::course_page(&url){return Err("Open this course in Platforms → Courses to select authorized materials.".into());}
     let receiver = {
         let repository = state.repository.lock().unwrap();
         queue::check_cooldown(repository.as_ref().ok_or("Open the app first.")?, &url)?;
@@ -203,11 +219,11 @@ async fn inspect_media(
         let _metadata_permit = batch::metadata_permit(&url).await?;
         let url = providers::validate_remote(&url).await?;
         if providers::identify(&url)?.id == providers::ProviderId::Generic {
-            let metadata = direct::inspect(&url, request_id, receiver).await?;
-            if state.latest_metadata.load(Ordering::SeqCst) != request_id {
-                return Err(engine::CANCELLED.into());
+            match direct::inspect(&url, request_id, receiver.clone()).await {
+                Ok(metadata)=>{if state.latest_metadata.load(Ordering::SeqCst)!=request_id{return Err(engine::CANCELLED.into());}return Ok(metadata);},
+                Err(error) if direct::engine_fallback(&error)=>{},
+                Err(error)=>return Err(error),
             }
-            return Ok(metadata);
         }
         let root = engine::engine_dir(&app)?;
         let cookies = sessions::materialize(&config_root(&state)?, &url)?;
@@ -1104,13 +1120,17 @@ fn main() {
             local_media::serve(context.app_handle(), request)
         })
         .invoke_handler(tauri::generate_handler![
-            transcription::transcription_models, transcription::install_transcription_model,
+            transcription::remove_transcription_model, transcription::transcription_models, transcription::install_transcription_model,
             courses::members::save_course_token, courses::members::inspect_member_course, courses::inspect_course, courses::queue_course_assets, courses::list_courses, courses::import_local_course, courses::course_learned, courses::save_course_note,
             queue_torrent, torrents::torrent_status, torrents::set_torrent_enabled, torrents::open_torrent, torrents::inspect_torrent_magnet, torrents::cancel_torrent_inspection,
+            queue::modules::queue_advanced_file, queue::modules::queue_palette, queue::modules::queue_audio_preview, palettes::palette_preview, advanced_files::inspect_advanced_file,
+            queue::modules::queue_source_export, queue::modules::queue_caption_edit, queue::modules::queue_media_edit, queue::modules::queue_document, queue::modules::queue_gallery_export, queue::modules::queue_telegram, queue::modules::queue_live, live::stop_recording,
+            media_edits::media_edit_capabilities, documents::document_info, documents::document_page, documents::document_search, federated::inspect_federated, federated_auth::set_federated_token, federated_auth::federated_auth_status,
+            telegram::telegram_status, telegram::telegram_connect, telegram::telegram_authorization, telegram::telegram_authorize, telegram::telegram_disconnect, telegram::telegram_chats, telegram::telegram_media, telegram::telegram_message_link,
             components::optional_components,
             components::install_component,
-            components::enable_component,
-            galleries::gallery_preview, galleries::inspect_gallery,
+            components::enable_component, components::remove_component,
+            gallery_auth::set_gallery_token, gallery_auth::gallery_auth_status, galleries::gallery_preview, galleries::inspect_gallery,
             galleries::queue_gallery,
             startup,
             get_snapshot,
@@ -1195,6 +1215,7 @@ fn main() {
                 }
             }
             tauri::RunEvent::Exit => {
+                telegram::shutdown();
                 let state = app.state::<Arc<AppState>>();
                 {
                     let _guard = state.repository.lock().unwrap();

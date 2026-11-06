@@ -1,4 +1,13 @@
 import "./style.css";
+import {createAdvancedFilesController} from "./advanced-files-ui";
+import {createPalettes,palettesPanel} from "./palettes-ui";
+import {createMediaEdits,mediaEditsPanel} from "./media-edits-ui";
+import {createCaptionEditor} from "./captions-editor-ui";
+import {createSourceExportsController} from "./source-exports-ui";
+import {createLiveController} from "./live-ui";
+import {createTelegramController} from "./telegram-ui";
+import {createDocuments,documentToolsPanel} from "./documents-ui";
+import {createGalleryExports} from "./gallery-exports-ui";
 import {createCoursesController} from "./courses-ui";
 import {createTranscriptionManager} from "./transcription-ui";
 import {createTorrentsController} from "./torrents-ui";
@@ -7,7 +16,7 @@ import {readExpandedToolOptions} from "./views-tools";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { startGraphics } from "./graphics";
+import { startGraphics,handleEmblemClick } from "./graphics";
 import { errorLabel, errorDetails, isCancelled } from "./presentation";
 import { activeStates, cancellableStates, defaultToolOptions, initialSettings, sourceUrls, type BridgeStatus, type Copy, type DownloadView, type EngineStatus, type HomeState, type Job, type LibraryView, type Page, type SessionStatus, type Settings, type SettingsSection, type SettingsView, type Snapshot, type Startup, type ToolKind, type ToolOptions, type ToolsView, type Media } from "./contracts";
 import { downloadsView, homeView, icon, jobInspector, libraryView, mediaInspector, settingsView, stateLabel, toolsView } from "./views";
@@ -56,9 +65,18 @@ let quickPrepared:QuickPrepared|null=null;
 let localTimezone='UTC';
 const transcriptionManager=createTranscriptionManager({command,render:renderCurrent});
 const torrents=createTorrentsController({command,refresh,notify,showError,t,render:renderCurrent,settings:()=>{preferences.section='engines';navigate('settings');void loadSettingsSection().catch(showError);},folder:()=>snapshot.settings.folder});
-let platformModule:'catalog'|'torrent'|'courses'='catalog';
-const courses=createCoursesController({command,getSnapshot:()=>snapshot,refresh,render:renderCurrent,notify,showError,t,openLibrary:id=>{librarySection='files';library.detailId=id;navigate('library');}});
-const platforms=createPlatformsController({command,snapshot:()=>snapshot,refresh,notify,render:renderCurrent,t,openLink:url=>{navigate('home');updateSourceInput(url);void inspect().catch(showError);}});
+let platformModule:'catalog'|'torrent'|'courses'|'telegram'|'live'|'exports'|'files'='catalog';
+const mediaEdits=createMediaEdits({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t});
+const palettes=createPalettes({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t});
+const advancedFiles=createAdvancedFilesController({command,refresh,render:renderCurrent,notify,showError,t,settings:()=>{preferences.section='engines';navigate('settings');void loadSettingsSection().catch(showError);},folder:()=>snapshot.settings.folder});
+const captionEditor=createCaptionEditor({command,snapshot:()=>snapshot,refresh,render:renderLibraryModules,notify,t});
+const sourceExports=createSourceExportsController({command,refresh,render:renderCurrent,notify,showError,t});
+const live=createLiveController({command,refresh,render:renderCurrent,notify,t});
+const telegram=createTelegramController({command,refresh,render:renderCurrent,notify,showError,t,settings:()=>{preferences.section='engines';navigate('settings');void loadSettingsSection().catch(showError);},folder:()=>snapshot.settings.folder});
+const documents=createDocuments({command,snapshot:()=>snapshot,refresh,render:renderLibraryModules,t});
+const galleryExports=createGalleryExports({command,selected:()=>[...library.selected],refresh,notify,t});
+const courses=createCoursesController({command,getSnapshot:()=>snapshot,refresh,render:renderCurrent,notify,showError,t,openLibrary:id=>{librarySection='files';library.detailId=id;navigate('library');if(snapshot.library.some(i=>i.id===id&&i.kind==='document'))void documents.open(id);}});
+const platforms=createPlatformsController({command,snapshot:()=>snapshot,refresh,notify,showError,render:renderCurrent,t,openLink:url=>{navigate('home');updateSourceInput(url);void inspect().catch(showError);}});
 const sources=createSourcesController({command,getSnapshot:()=>snapshot,refresh,notify,showError,t,render:renderCurrent});
 const batches=createBatchController({command,snapshot:()=>snapshot,refresh,notify,showError,t,render:renderCurrent,onFollowSource:url=>{librarySection='sources';sources.openAdd(url);navigate('library');}});
 const libraryFeatures=createLibraryFeatures({command,snapshot:()=>snapshot,refresh,notify,showError,t,render:()=>{renderCurrent();renderInspector(true);libraryFeatures.bind();},inspect:(id)=>{librarySection='files';library.detailId=id;navigate('library');}});
@@ -149,7 +167,9 @@ function preserveFocus(render: () => void): void {
   const wasInInspector = active instanceof HTMLElement && inspectorBody.contains(active);
   const selection = active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement ? [active.selectionStart, active.selectionEnd] : null;
   const scrollTop = required("#main").scrollTop;
+  const detailsState=new Map([...document.querySelectorAll('details')].map(detail=>[detail.id||detail.className+'|'+detail.querySelector('summary')?.textContent,detail.open]));
   render();
+  for(const detail of document.querySelectorAll('details')){const open=detailsState.get(detail.id||detail.className+'|'+detail.querySelector('summary')?.textContent);if(open!==undefined)detail.open=open;}
   const target = id ? document.getElementById(id) : attributes.length
     ? [...document.querySelectorAll<HTMLElement>("[data-select-job], [data-select-media], [data-action], [data-page], [data-source-url], [data-tool-input]")]
       .find(element => inspectorBody.contains(element) === wasInInspector && attributes.every(([key, value]) => element.dataset[key] === value))
@@ -230,11 +250,12 @@ function renderInspector(force=false): void {
   else{aside.hidden=true;required(".content-layout").classList.remove("has-inspector");if(inspectorBody.parentElement!==dialog)dialog.append(inspectorBody);if(!dialog.open)dialog.showModal();}
   if(opening)enterSurface(window.innerWidth>=1120?aside:dialog,"x");
 }
+function renderLibraryModules():void{preserveFocus(()=>{renderCurrent();renderInspector(true);libraryFeatures.bind();});}
 function renderCurrent(): void {
   preserveFocus(()=>{
     updateNavigation();required('#field').hidden=page!=='home';required("#home-page").hidden=page!=="home";required("#page-content").hidden=page==='home';
     if(page==='home')renderHome();
-    else {disposeGraphics?.();disposeGraphics=null;required("#page-content").innerHTML=page==='downloads'?downloadsView(snapshot,downloads,t):page==='library'?libraryView(snapshot,library,t):page==='tools'?toolsView(snapshot,tools,t):page==='platforms'?(platformModule==='torrent'?torrents.render():platformModule==='courses'?courses.render():platforms.render()):settingsView(snapshot,preferences,t,desktop);}
+    else {disposeGraphics?.();disposeGraphics=null;required("#page-content").innerHTML=page==='downloads'?downloadsView(snapshot,downloads,t):page==='library'?libraryView(snapshot,library,t):page==='tools'?toolsView(snapshot,tools,t):page==='platforms'?(platformModule==='torrent'?torrents.render():platformModule==='courses'?courses.render():platformModule==='telegram'?telegram.render():platformModule==='live'?live.render():platformModule==='exports'?sourceExports.render():platformModule==='files'?advancedFiles.render():platforms.render()):settingsView(snapshot,preferences,t,desktop);}
     if(page==='library'){
       const container=required('#page-content');
       const navigation=`<nav class="library-navigation filter-tabs" aria-label="${t('Vistas de Biblioteca','Library views')}">${[['files',t('Archivos','Files')],['collections',t('Colecciones','Collections')],['sources',t('Fuentes','Sources')],['later',t('Para después','For later')]].map(([section,label])=>`<button data-action="library-section" data-section="${section}" aria-current="${librarySection===section?'page':'false'}">${label}</button>`).join('')}</nav>`;
@@ -242,6 +263,7 @@ function renderCurrent(): void {
       container.insertAdjacentHTML('afterbegin',navigation);
     }
     if(page==='settings'&&(preferences.section==='formats'||preferences.section==='organization'))required('.settings-content').innerHTML=`<h2 id="settings-title">${preferences.section==='formats'?t('Ajustes reutilizables','Reusable presets'):t('Organización','Organization')}</h2>${preferences.section==='formats'?batches.renderPresets():organization.render()}`;
+    if(page==='tools')required('#page-content').insertAdjacentHTML('beforeend',documentToolsPanel(snapshot,t)+mediaEditsPanel(snapshot,t)+palettesPanel(snapshot,t));
     if(page==='settings'&&preferences.section==='engines')required('.settings-content').insertAdjacentHTML('beforeend',platforms.renderComponents());
     renderInspector();libraryFeatures.bind();if(page==='platforms'&&platformModule==='catalog')platforms.bind();if(page==='platforms'&&platformModule==='courses')courses.bind();updateActivity();observeThumbnails();
   });
@@ -279,6 +301,7 @@ function navigate(next: Page): void {
   if(page==='tools'){try{tools.options=readToolOptions();}catch{/* Keep the last valid options while a draft is incomplete. */}}
   scrollPositions.set(page,required("#main").scrollTop);page=next;inspectorKey="";
   renderCurrent();required("#main").scrollTop=scrollPositions.get(next)??0;
+  if(changed&&next==='tools')void mediaEdits.load();
   if(changed)enterSurface(required(next==='home'?'#home-content':'#page-content'));
   if(next==='settings')void loadSettingsSection().catch(showError);
 }
@@ -293,6 +316,7 @@ function invalidateAnalysis(): void {
   analysisRequest=0;analysisUrl="";home.loading=false;home.media=null;home.subtitleLanguage="";
 }
 function updateSourceInput(value: string, render=true): void {
+  if(/^magnet:\?/i.test(value.trim())){invalidateAnalysis();home.input=value;platformModule='torrent';navigate('platforms');torrents.openMagnet(value.trim());return;}
   invalidateAnalysis();home.input=value;home.quality="";const parsed=sourceUrls(value);
   home.selectedUrls=new Set(parsed.urls.length>1?parsed.urls:[]);
   if(render)renderHome();
@@ -303,6 +327,11 @@ function updateSourceInput(value: string, render=true): void {
 async function inspect(): Promise<void> {
   clearTimeout(debounce);const parsed=sourceUrls(home.input);
   const inputUrl=parsed.urls[0]?new URL(parsed.urls[0]):null;
+  if(inputUrl&&parsed.urls.length===1){const host=inputUrl.hostname;
+    if(['t.me','telegram.me'].includes(host)){platformModule='telegram';navigate('platforms');telegram.openLink(inputUrl.href);return;}
+    if(['udemy.com','hotmart.com','kiwify.com'].some(domain=>host===domain||host.endsWith('.'+domain))){platformModule='courses';navigate('platforms');await courses.open(inputUrl.href);return;}
+    if(/\.(?:zip|7z|rar|iso|pdf|epub|torrent|exe|msi)$/i.test(inputUrl.pathname)){platformModule='files';navigate('platforms');advancedFiles.openUrl(inputUrl.href);return;}
+  }
   if(batches.active||parsed.urls.length>1||parsed.invalid||inputUrl&&(/youtube\.com$/.test(inputUrl.hostname))&&(inputUrl.pathname.startsWith('/playlist')||inputUrl.pathname.startsWith('/@')||inputUrl.pathname.startsWith('/channel/'))){await batches.prepare(home.input);return;}
   if(parsed.invalid||parsed.urls.length===0){notify(t("Pega uno o varios enlaces HTTP o HTTPS completos.", "Paste one or more complete HTTP or HTTPS links."),"error");return;}
   if(parsed.truncated){notify(t("Divide el lote en grupos de hasta 100 enlaces.", "Split the batch into groups of up to 100 links."),"error");return;}
@@ -311,7 +340,7 @@ async function inspect(): Promise<void> {
   if(home.loading&&analysisUrl===parsed.urls[0])return;
   if(!enginesReady){notify(t("Prepara los motores en Ajustes para analizar enlaces.", "Prepare engines in Settings to analyze links."));return;}
   invalidateAnalysis();const requestId=++generation;analysisRequest=requestId;analysisUrl=parsed.urls[0];home.loading=true;notify("");renderHome();
-  try{const result=await command<Media>("inspect_media",{url:parsed.urls[0],requestId});if(requestId!==generation)return;if(result.entries.length){await batches.prepare(home.input);return;}home.media=result;home.selectedUrls=new Set(result.entries.map(entry=>entry.url));home.format=result.capabilities.images?"source":result.entries.length||result.hasVideo?"mp4":"audio";}
+  try{const result=await command<Media>("inspect_media",{url:parsed.urls[0],requestId});if(requestId!==generation)return;if(result.entries.length){await batches.prepare(home.input);return;}if(!result.hasAudio&&!result.hasVideo&&!result.capabilities.images){platformModule='files';navigate('platforms');advancedFiles.openUrl(parsed.urls[0]);return;}home.media=result;home.selectedUrls=new Set(result.entries.map(entry=>entry.url));home.format=result.capabilities.images?"source":result.entries.length||result.hasVideo?"mp4":"audio";}
   catch(error){if(requestId===generation)showError(error);}
   finally{if(requestId===generation){home.loading=false;analysisRequest=0;analysisUrl="";renderHome();}}
 }
@@ -385,11 +414,18 @@ document.addEventListener("click",event=>{
 async function handleAction(action: string, button: HTMLButtonElement): Promise<void> {
   const id=button.dataset.id??"";
   if(action==='batch-open'||action==='batch-new')navigate('home');
-  if(action==='open-courses'){platformModule='courses';navigate('platforms');await courses.open();renderCurrent();return;}
+  if(action==='emblem-activate'){const color=handleEmblemClick();if(color.toggled)renderHome();return;}
+  if(action==='open-files'){platformModule='files';navigate('platforms');await advancedFiles.load();return;}
+  if(action==='tool-audio-preview'){tools.options=readToolOptions();const libraryId=[...tools.ids][0];if(libraryId){await command('queue_audio_preview',{libraryId,options:tools.options,clientRequest:crypto.randomUUID()});await refresh();notify(t('Escucha previa añadida a Descargas. El resultado aparecerá en Biblioteca.','Audio preview added to Downloads. The result will appear in Library.'));}return;}
+  if(action==='open-source-exports'){platformModule='exports';navigate('platforms');sourceExports.open();return;}
+  if(action==='open-live'){platformModule='live';navigate('platforms');return;}
+  if(action==='open-telegram'){platformModule='telegram';navigate('platforms');await telegram.load();return;}
+  if(action==='stop-recording'){await command('stop_recording',{id});notify(t('Finalizando la grabación…','Finalizing recording…'));return;}
+  if(action==='open-courses'){platformModule='courses';navigate('platforms');await courses.open('',id);renderCurrent();return;}
   if(action==='open-podcasts'){librarySection='sources';navigate('library');sources.openAdd('', 'podcast');return;}
-  if(action==='open-torrents'){platformModule='torrent';navigate('platforms');await torrents.load();renderCurrent();return;}
-  if(action==='platform-back'&&platformModule==='torrent'){platformModule='catalog';renderCurrent();return;}
-  if(await courses.handleClick(action,button)||await transcriptionManager.click(action,button)||await torrents.handleClick(action)||await platforms.handleClick(action,button)||await batches.handleClick(action,button)||await sources.handleClick(action,button)||await organization.handleClick(action,button)||await libraryFeatures.handleClick(button))return;
+  if(action==='open-torrents'||action==='open-torrent'){platformModule='torrent';navigate('platforms');await torrents.load();renderCurrent();return;}
+  if(action==='platform-back'&&platformModule!=='catalog'){platformModule='catalog';renderCurrent();return;}
+  if(await palettes.click(action)||await advancedFiles.handleClick(action)||await mediaEdits.click(action,button)||await sourceExports.handleClick(action)||await galleryExports.click(action)||await documents.click(action,button)||await telegram.handleClick(action)||await courses.handleClick(action,button)||await transcriptionManager.click(action,button)||await torrents.handleClick(action)||await platforms.handleClick(action,button)||await batches.handleClick(action,button)||await sources.handleClick(action,button)||await organization.handleClick(action,button)||await libraryFeatures.handleClick(button))return;
   switch(action){
     case 'open-library-collection':librarySection='files';library.collection=button.dataset.collection??'';library.offset=0;renderCurrent();break;
     case 'job-next':case 'job-up':case 'job-down':{const job=snapshot.jobs.find(j=>j.id===id);if(job)applySnapshot(await command<Snapshot>('configure_jobs',{ids:[id],priority:job.priority??'normal',schedule:job.schedule??{kind:'immediate'},orderAction:action.slice(4)}));break;}
@@ -420,7 +456,7 @@ async function handleAction(action: string, button: HTMLButtonElement): Promise<
     case 'library-previous':library.offset=Math.max(0,library.offset-60);renderCurrent();focusLibraryPage();break;
     case 'import-files':await importMedia(false);break;
     case 'import-folder':await importMedia(true);break;
-    case 'inspect-media':library.detailId=id;if(page!=='library')navigate('library');else renderCurrent();break;
+    case 'inspect-media':library.detailId=id;if(page!=='library')navigate('library');else renderCurrent();if(snapshot.library.some(item=>item.id===id&&item.kind==='document'))await documents.open(id);break;
     case 'close-inspector':closeInspector();break;
     case 'open-media':await command('open_media',{id,folder:false});break;
     case 'reveal-media':await command('open_media',{id,folder:true});break;
@@ -450,7 +486,7 @@ async function handleAction(action: string, button: HTMLButtonElement): Promise<
   }
 }
 document.addEventListener('input',event=>{
-  if(event.target instanceof HTMLElement&&(courses.handleInput(event.target)||torrents.handleInput(event.target)||platforms.handleInput(event.target)||batches.handleInput(event.target)||sources.handleInput(event.target)||libraryFeatures.handleInput(event.target)))return;
+  if(event.target instanceof HTMLElement&&(advancedFiles.handleInput(event.target)||sourceExports.handleInput(event.target)||live.input(event.target)||telegram.handleInput(event.target)||courses.handleInput(event.target)||torrents.handleInput(event.target)||platforms.handleInput(event.target)||batches.handleInput(event.target)||sources.handleInput(event.target)||libraryFeatures.handleInput(event.target)))return;
   const target=event.target;if(!(target instanceof HTMLInputElement||target instanceof HTMLTextAreaElement))return;
   if(target.id==='url')updateSourceInput(target.value,false);
   else if(target.id==='job-search'){downloads.query=target.value;renderCurrent();}
@@ -460,7 +496,8 @@ document.addEventListener('input',event=>{
 });
 document.addEventListener('change',event=>{
   const target=event.target;
-  if(target instanceof HTMLElement){if(courses.handleInput(target)||torrents.handleInput(target)||platforms.handleInput(target)||sources.handleInput(target)||libraryFeatures.handleChange(target))return;void batches.handleChange(target).catch(showError);}
+  if(target instanceof HTMLElement){if((target instanceof HTMLInputElement||target instanceof HTMLSelectElement)&&(palettes.change(target)||mediaEdits.change(target)||captionEditor.change(target)||documents.change(target)))return;
+  if(advancedFiles.handleInput(target)||sourceExports.handleInput(target)||telegram.handleInput(target)||live.input(target)||courses.handleInput(target)||torrents.handleInput(target)||platforms.handleInput(target)||sources.handleInput(target)||libraryFeatures.handleChange(target))return;void batches.handleChange(target).catch(showError);}
   if(target instanceof HTMLSelectElement&&target.id==='job-schedule-kind'){for(const field of target.closest('form')?.querySelectorAll<HTMLElement>('[data-schedule-fields]')??[])field.hidden=field.dataset.scheduleFields!==target.value;return;}
   if(target instanceof HTMLInputElement){
     const job=target.dataset.selectJob;const media=target.dataset.selectMedia;const tool=target.dataset.toolInput;const url=target.dataset.sourceUrl;
@@ -485,7 +522,7 @@ document.addEventListener('change',event=>{
 document.addEventListener('submit',event=>{const form=event.target;if(form instanceof HTMLFormElement){event.preventDefault();void submitForm(form).catch(showError);}});
 async function submitForm(form: HTMLFormElement): Promise<void> {
   if(await sources.handleSubmit(form)||await organization.handleSubmit(form)||await libraryFeatures.handleSubmit(form))return;
-  if(await courses.handleSubmit(form)||await torrents.handleSubmit(form)||await platforms.handleSubmit(form))return;
+  if(await palettes.submit(form)||await advancedFiles.handleSubmit(form)||await mediaEdits.submit(form)||await captionEditor.submit(form)||await sourceExports.handleSubmit(form)||await documents.submit(form)||await live.submit(form)||await telegram.handleSubmit(form)||await courses.handleSubmit(form)||await torrents.handleSubmit(form)||await platforms.handleSubmit(form))return;
   switch(form.id){
     case 'job-scheduling':{const values=readScheduling('job',localTimezone);applySnapshot(await command<Snapshot>('configure_jobs',{ids:[form.dataset.id??''],...values,orderAction:null}));break;}
     case 'source-form':await inspect();break;

@@ -22,7 +22,7 @@ The upstream Windows binary is a GPLv3+ combined work; the source repository alo
 
 The LGPL 2.1+ shared build uses replaceable DLLs and the static Microsoft CRT. GPL/nonfree features, FFplay and external GPU/filter packages are not enabled; none are called by YTNabber's download or conversion profiles. Core decoders, containers, native device inputs including lavfi, HTTPS via Windows Schannel, MP3/AAC/Opus encoding and OpenH264 remain enabled. Run engines/ffmpeg.exe -buildconf to inspect the exact configuration. The installed engines/ffmpeg-build.json records the recipe, configuration and binary hashes; engines/checksums.json records every distributed engine resource.
 
-The pinned registry also contains the exact source URLs, cryptographic hashes and build patches for LAME, Opus, OpenH264, libvpx, dav1d and zlib. Their target-package copyright files are distributed in engines/licenses/. All source/build materials above are available without charge. Build tools and source caches are not part of the installed application.
+The pinned registry also contains the exact source URLs, cryptographic hashes and build patches for LAME, Opus, OpenH264, libvpx, dav1d, zlib, libwebp and libass (including their transitive dependencies when enabled). Their target-package copyright files are distributed in engines/licenses/. All source/build materials above are available without charge. Build tools and source caches are not part of the installed application.
 
 ## Deno 2.9.8
 

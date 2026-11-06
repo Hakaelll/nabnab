@@ -75,7 +75,7 @@ export function createTorrentsController(hooks: TorrentHooks) {
   }
   function handleInput(element: HTMLElement): boolean {
     if (element instanceof HTMLInputElement) {
-      if (element.id === "torrent-magnet") { magnet = element.value; return true; }
+      if (element.id === "torrent-magnet") { magnet = element.value; hooks.render(); return true; }
       if (element.id === "torrent-search") { query = element.value; hooks.render(); return true; }
       if (element.id === "torrent-consent") { consent = element.checked; hooks.render(); return true; }
       if (element.id === "torrent-download-limit") { downloadLimitKib = element.valueAsNumber; return true; }

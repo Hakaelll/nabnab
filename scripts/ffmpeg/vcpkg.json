@@ -20,7 +20,9 @@
         "openh264",
         "vpx",
         "dav1d",
-        "zlib"
+        "zlib",
+        "webp",
+        "ass"
       ]
     }
   ]

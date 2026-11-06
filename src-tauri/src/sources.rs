@@ -18,6 +18,7 @@ pub enum SourceKind {
     Channel,
     Playlist,
     Podcast,
+    Gallery,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -170,9 +171,14 @@ pub struct FollowedSource {
 
 impl FollowedSource {
     pub fn validate(&self) -> Result<(), String> {
-        if self.kind == SourceKind::Podcast {
+        if matches!(self.kind, SourceKind::Podcast | SourceKind::Gallery) {
             crate::model::validate_url(&self.url)?;
-            if !crate::podcasts::valid_episode_id(&self.id)
+            let valid_source = if self.kind == SourceKind::Gallery {
+                crate::gallery_sources::valid_source_id(&self.id)
+            } else {
+                crate::podcasts::valid_episode_id(&self.id)
+            };
+            if !valid_source
                 || !self
                     .url_ref
                     .as_deref()
@@ -187,7 +193,12 @@ impl FollowedSource {
             self.settings.validate()?;
             let mut identities = HashSet::new();
             for item in &self.items {
-                if !crate::podcasts::valid_episode_id(&item.content_id)
+                let valid_item = if self.kind == SourceKind::Gallery {
+                    crate::gallery_sources::valid_asset_id(&item.content_id)
+                } else {
+                    crate::podcasts::valid_episode_id(&item.content_id)
+                };
+                if !valid_item
                     || !identities.insert(&item.content_id)
                     || !item
                         .url_ref
@@ -303,6 +314,30 @@ pub(crate) fn trusted_podcast_identity(
         .sources
         .iter()
         .find(|source| Some(source.id.as_str()) == source_id && source.kind == SourceKind::Podcast)
+        .and_then(|source| {
+            source
+                .items
+                .iter()
+                .find(|item| item.content_id == content_id)
+        })
+        .and_then(|item| item.url_ref.as_ref())
+        .and_then(|reference| crate::sessions::resolve_url(repo.root(), reference).ok())
+        .is_some_and(|protected| protected.as_str() == url)
+}
+
+pub(crate) fn trusted_gallery_identity(
+    repo: &crate::store::Repository,
+    source_id: Option<&str>,
+    content_id: &str,
+    url: &str,
+) -> bool {
+    if !crate::gallery_sources::valid_asset_id(content_id) {
+        return false;
+    }
+    repo.data
+        .sources
+        .iter()
+        .find(|source| Some(source.id.as_str()) == source_id && source.kind == SourceKind::Gallery)
         .and_then(|source| {
             source
                 .items
@@ -586,15 +621,17 @@ fn queue_items(
             },
             list: source.name.clone(),
             content_id: item.content_id.clone(),
-            platform: if source.kind == SourceKind::Podcast {
+            platform: if source.kind == SourceKind::Gallery {
+                "Gallery"
+            } else if source.kind == SourceKind::Podcast {
                 "Podcast"
             } else {
                 "YouTube"
             }
             .into(),
-            content_type: if source.kind == SourceKind::Podcast
-                && !item.media_type.starts_with("video/")
-            {
+            content_type: if source.kind == SourceKind::Gallery {
+                item.media_type.as_str()
+            } else if source.kind == SourceKind::Podcast && !item.media_type.starts_with("video/") {
                 "audio"
             } else {
                 "video"
@@ -608,6 +645,19 @@ fn queue_items(
             resolved.values.format = crate::model::Format::AudioOriginal;
             resolved.values.height = None;
             resolved.values.audio_bitrate = None;
+        }
+        if source.kind == SourceKind::Gallery {
+            resolved.values.format = crate::model::Format::Source;
+            resolved.values.height = None;
+            resolved.values.audio_bitrate = None;
+            resolved.values.additional_audio = None;
+            resolved.values.subtitle_mode = crate::options::SubtitleMode::None;
+            resolved.values.subtitle_languages.clear();
+            resolved.values.clip = None;
+            resolved.values.collection = Some(source.name.chars().take(80).collect());
+            if !resolved.values.filename_template.contains("{id}") {
+                resolved.values.filename_template.push_str(" [{id}]");
+            }
         }
         if !source.settings.relative_folder.is_empty() {
             resolved.values.relative_folder = source.settings.relative_folder.clone();
@@ -675,6 +725,68 @@ async fn inspect_page(
     mut cancel: watch::Receiver<bool>,
 ) -> Result<Page, String> {
     source.validate()?;
+    if source.kind == SourceKind::Gallery {
+        let config = crate::config_root(state)?;
+        let operational = crate::podcasts::protected_url(&config, &source.url_ref, &source.url)?;
+        let offset = if continuation {
+            source.baseline.cursor
+        } else {
+            0
+        };
+        let count = source
+            .settings
+            .page_size
+            .min(source.settings.exploration_limit.saturating_sub(offset));
+        if count == 0 {
+            return Err("Increase the exploration limit to continue this gallery.".into());
+        }
+        let gallery =
+            crate::gallery_sources::inspect(app, state, &operational, offset, count, cancel)
+                .await?;
+        let mut items = Vec::new();
+        for asset in gallery.assets {
+            let reference = crate::sessions::seal_url(
+                &config,
+                &format!(
+                    "source-{:x}",
+                    Sha256::digest(format!("{}\0{}", asset.id, asset.url).as_bytes())
+                ),
+                &asset.url,
+            )?;
+            let display = url::Url::parse(&asset.url)
+                .map_err(|_| "Invalid gallery attachment URL.")?
+                .origin()
+                .ascii_serialization();
+            let published_at = asset
+                .date
+                .as_deref()
+                .and_then(crate::gallery_sources::published_at);
+            items.push(SourceItem {
+                content_id: asset.id,
+                title: format!("{:04} {}", asset.position, asset.title),
+                creator: asset.author.unwrap_or_default(),
+                url: display,
+                url_ref: Some(reference),
+                size: None,
+                media_type: asset.kind,
+                thumbnail: None,
+                duration: None,
+                published_at,
+                discovered_at: queue::now(),
+                state: SourceItemState::Review,
+                discovery: Discovery::Ambiguous,
+                reason: None,
+                job_ids: Vec::new(),
+            });
+        }
+        return Ok(Page {
+            name: gallery.name,
+            items,
+            inspected: gallery.inspected,
+            has_more: gallery.has_more,
+            total: None,
+        });
+    }
     if source.kind == SourceKind::Podcast {
         let config = crate::config_root(state)?;
         let feed_url = crate::podcasts::protected_url(&config, &source.url_ref, &source.url)?;
@@ -966,7 +1078,13 @@ async fn check(
                 queue::now(),
             );
             let source = repo.data.sources[index].clone();
-            let jobs = queue_items(repo, &source, &ids, false);
+            let jobs = if source.kind == SourceKind::Gallery
+                && !crate::gallery_sources::enabled(app)
+            {
+                Err("The Galleries component was disabled. Discovered files remain for manual review.".into())
+            } else {
+                queue_items(repo, &source, &ids, false)
+            };
             match jobs {
                 Ok(jobs) => {
                     for item in &mut repo.data.sources[index].items {
@@ -1063,6 +1181,17 @@ pub async fn add_source(
             .origin()
             .ascii_serialization();
         (display, SourceKind::Podcast, Some(reference), public, id)
+    } else if kind == Some(SourceKind::Gallery) {
+        crate::components::executable(&app, "gallery")?;
+        let normalized = crate::gallery_sources::normalized_url(&url)?;
+        let id = crate::gallery_sources::source_id(&normalized)?;
+        let config = crate::config_root(&state)?;
+        let reference = crate::sessions::seal_url(&config, &id, &normalized)?;
+        let display = url::Url::parse(&normalized)
+            .map_err(|_| "Invalid gallery URL.")?
+            .origin()
+            .ascii_serialization();
+        (display, SourceKind::Gallery, Some(reference), None, id)
     } else {
         let (url, kind) = source_url(&url)?;
         let id = source_id(&url);
@@ -1197,6 +1326,18 @@ pub fn source_item_action(
     content_ids: Vec<String>,
     action: String,
 ) -> Result<FollowedSource, String> {
+    let gallery = {
+        let guard = state.repository.lock().unwrap();
+        guard.as_ref().is_some_and(|repo| {
+            repo.data
+                .sources
+                .iter()
+                .any(|source| source.id == id && source.kind == SourceKind::Gallery)
+        })
+    };
+    if gallery && action == "queue" {
+        crate::components::executable(&app, "gallery")?;
+    }
     if content_ids.is_empty() || content_ids.len() > 1000 {
         return Err("Select between 1 and 1000 source items.".into());
     }
@@ -1320,6 +1461,10 @@ pub fn start(app: AppHandle, state: Arc<AppState>) {
                                 && source.next_check.unwrap_or(0) <= queue::now()
                         })
                         .filter(|source| !running_checks().lock().unwrap().contains_key(&source.id))
+                        .filter(|source| {
+                            source.kind != SourceKind::Gallery
+                                || crate::gallery_sources::enabled(&app)
+                        })
                         .filter(|_| {
                             !repo
                                 .data
@@ -1684,6 +1829,39 @@ mod tests {
         ] {
             assert!(source_url(url).is_err(), "{url}");
         }
+    }
+    #[test]
+    fn gallery_sources_validate_protected_per_file_identities() {
+        let mut source = source();
+        source.kind = SourceKind::Gallery;
+        source.id =
+            crate::gallery_sources::source_id("https://pinterest.com/author/board/").unwrap();
+        source.url = "https://pinterest.com".into();
+        source.url_ref = Some("a".repeat(64));
+        let mut item = page(&[("one", None)], false).items.remove(0);
+        item.content_id = format!("gallery:{}", "b".repeat(64));
+        item.url = "https://i.pinimg.com".into();
+        item.url_ref = Some("c".repeat(64));
+        item.media_type = "image".into();
+        source.items.push(item);
+        source.validate().unwrap();
+        source.items[0].content_id = "youtube:one".into();
+        assert!(source.validate().is_err());
+    }
+    #[test]
+    fn gallery_history_and_unconfirmed_dates_never_download_automatically() {
+        let mut source = source();
+        source.kind = SourceKind::Gallery;
+        assert!(apply_page(
+            &mut source,
+            page(&[("first", Some(30))], false),
+            false,
+            40000
+        )
+        .is_empty());
+        assert!(apply_page(&mut source, page(&[("new", None)], false), false, 50000).is_empty());
+        assert_eq!(source.items[1].state, SourceItemState::Review);
+        assert_eq!(source.items[1].discovery, Discovery::Ambiguous);
     }
 
     #[test]

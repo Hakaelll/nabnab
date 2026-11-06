@@ -50,7 +50,7 @@ export function createCoursesController(hooks: CourseHooks) {
     catch (error) { hooks.showError(error); }
     finally { busy = false; hooks.render(); }
   }
-  async function open(url = ""): Promise<void> { input = url; if (url.includes("hotmart.com")) provider = "hotmart"; else if (url.includes("kiwify.com")) provider = "kiwify"; await reload(); hooks.render(); }
+  async function open(url = "", initialProvider?:string): Promise<void> { if(initialProvider==="udemy"||initialProvider==="hotmart"||initialProvider==="kiwify")provider=initialProvider; input = url; if (url.includes("hotmart.com")) provider = "hotmart"; else if (url.includes("kiwify.com")) provider = "kiwify"; await reload(); hooks.render(); }
 
   function render(): string {
     const oldPlayer = document.getElementById("course-player");

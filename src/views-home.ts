@@ -1,6 +1,7 @@
 import { durationLabel } from "./presentation";
 import { escapeHtml as h, sourceUrls, type Copy, type HomeState, type Snapshot } from "./contracts";
 import { action, icon, option, unknownDuration } from "./views-common";
+import { isFullColor } from "./graphics-color";
 
 export function homeView(home: HomeState, snapshot: Snapshot, ready: boolean, desktop: boolean, t: Copy): string {
   const parsed = sourceUrls(home.input);
@@ -8,7 +9,7 @@ export function homeView(home: HomeState, snapshot: Snapshot, ready: boolean, de
   const entries = media?.entries.length ? media.entries : parsed.urls.length > 1 ? parsed.urls.map(url => ({ id: url, url, title: new URL(url).hostname, thumbnail: null, duration: null })) : [];
   const batch = entries.length > 0;
   const canSubmit = ready && !home.loading && !home.submitting && !parsed.invalid && (batch ? home.selectedUrls.size > 0 : media !== null);
-  return `<div class="home-identity"><canvas id="emblem" aria-hidden="true"></canvas><span>nabnab</span></div>
+  return `<div class="home-identity"><button type="button" id="emblem-activate" class="emblem-control" data-action="emblem-activate" aria-pressed="${isFullColor()}" aria-label="${t("Emblema nabnab. Pulsa diez veces para cambiar el color.","nabnab emblem. Activate ten times to change the color.")}"><canvas id="emblem" aria-hidden="true"></canvas></button></div>
     <div class="home-workspace">
       <form id="source-form" autocomplete="off" aria-busy="${home.loading}" class="source-form ${home.loading ? "is-loading" : ""}">
         <label class="sr-only" for="url">${t("Enlaces", "Links")}</label>

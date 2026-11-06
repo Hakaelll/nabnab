@@ -1,8 +1,11 @@
 import sourcePoints from "./emblem-points.json";
 import { createFieldRenderer, type Glyph, type Wave } from "./field";
-type Point = { x: number; y: number; z: number; edge: boolean; face: number };
+import { COLOR_CYCLE_SECONDS, COLOR_WAVE_SECONDS, isFullColor, onColorModeChange, spectrumAt, tintPacked } from "./graphics-color";
+export { handleEmblemClick } from "./graphics-color";
+type Point = { x: number; y: number; z: number; edge: boolean; face: number; hue: number };
 const TAU = Math.PI * 2;
 const alphabet = "01aexz{}[]<>/+=:;*";
+let graphicsTime=0;
 
 export function startGraphics(background: HTMLCanvasElement, emblem: HTMLCanvasElement): () => void {
   let gpu: ReturnType<typeof createFieldRenderer> = null;
@@ -16,6 +19,8 @@ export function startGraphics(background: HTMLCanvasElement, emblem: HTMLCanvasE
   const mark = emblem.getContext("2d", { willReadFrequently: true });
   if ((!gpu && !field) || !mark) return () => {};
   const reduced = matchMedia("(prefers-reduced-motion: reduce)");
+  const forcedColors = matchMedia("(forced-colors: active)");
+  const motionReduced = () => reduced.matches || forcedColors.matches || document.documentElement.classList.contains("reduced-motion");
   const atlas = document.createElement("canvas");
   const ink = atlas.getContext("2d", { willReadFrequently: true })!;
   const masks: { x: number; y: number; coverage: number }[][] = [];
@@ -52,21 +57,23 @@ export function startGraphics(background: HTMLCanvasElement, emblem: HTMLCanvasE
   let fieldPixels: Uint32Array;
   const markImage = mark.createImageData(360, 360);
   const markPixels = new Uint32Array(markImage.data.buffer);
+  const markColors = new Uint32Array(512);
   // Front and rear surfaces share the original mask; edge layers give the rays actual thickness.
   const points: Point[] = [];
   for (const [x, y, edge] of sourcePoints) {
     const radius = Math.hypot(x, y);
     const thickness = 0.085 + Math.max(0, 0.5 - radius) * 0.1;
-    points.push({ x, y, z: -thickness, edge: Boolean(edge), face: -1 });
-    points.push({ x, y, z: thickness, edge: Boolean(edge), face: 1 });
+    const hue=Math.floor(((Math.atan2(y,x)/TAU+1)%1)*512);
+    points.push({ x, y, z: -thickness, edge: Boolean(edge), face: -1, hue });
+    points.push({ x, y, z: thickness, edge: Boolean(edge), face: 1, hue });
     if (edge) for (const fraction of [-0.5, 0, 0.5]) {
-      points.push({ x, y, z: thickness * fraction, edge: true, face: 0 });
+      points.push({ x, y, z: thickness * fraction, edge: true, face: 0, hue });
     }
   }
-  let width = 0, height = 0, frame = 0, previous = 0, elapsed = 0;
+  let width = 0, height = 0, frame = 0, previous = 0, elapsed = graphicsTime;
   let ratio = 0, pixelWidth = 0, pixelHeight = 0;
   let fieldInterval = 1 / 20;
-  let nextWave = 1.5;
+  let nextWave = elapsed + 1.5;
   let lastField = -1;
   let glyphs: Glyph[] = [];
   let waves: Wave[] = [];
@@ -75,7 +82,8 @@ export function startGraphics(background: HTMLCanvasElement, emblem: HTMLCanvasE
   function random() { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; }
 
   function drawField(time: number) {
-    if (gpu) { gpu.draw(time, waves); return; }
+    const reducedMotion=motionReduced(),fullColor=isFullColor();
+    if (gpu) { gpu.draw(time, reducedMotion?[]:waves, fullColor); return; }
     if (!field) return;
     fieldPixels.fill(0xff090909);
     const span = 680;
@@ -116,6 +124,10 @@ export function startGraphics(background: HTMLCanvasElement, emblem: HTMLCanvasE
       if (opacity < 0.025) continue;
       const level = Math.min(63, Math.round(opacity * 128));
       const palette = level * 16;
+      const spectrum = fullColor||(!reducedMotion&&waves.length)?spectrumAt(time,x,y,width,height,waves,fullColor,reducedMotion):null;
+      const tinted = spectrum!==null&&spectrum.saturation>.001;
+      const tint = spectrum&&tinted?tintPacked(spectrum.hue,spectrum.saturation):0xffffff;
+      const redInk=(tint&255)/255,greenInk=((tint>>>8)&255)/255,blueInk=((tint>>>16)&255)/255;
       const mask = masks[g.glyph + (g.depth > 0.55 ? alphabet.length : 0)];
       const left = Math.round(x * ratio), top = Math.round(y * ratio);
       for (const pixel of mask) {
@@ -123,7 +135,14 @@ export function startGraphics(background: HTMLCanvasElement, emblem: HTMLCanvasE
         if (px < 0 || py < 0 || px >= pixelWidth || py >= pixelHeight) continue;
         const index = py * pixelWidth + px;
         const color = colors[palette + pixel.coverage];
-        if ((color & 255) > (fieldPixels[index] & 255)) fieldPixels[index] = color;
+        if (!tinted) { if ((color & 255) > (fieldPixels[index] & 255)) fieldPixels[index] = color; }
+        else {
+          const ink=(color&255)-9,previous=fieldPixels[index];
+          const red=Math.max(previous&255,Math.round(9+ink*redInk));
+          const green=Math.max((previous>>>8)&255,Math.round(9+ink*greenInk));
+          const blue=Math.max((previous>>>16)&255,Math.round(9+ink*blueInk));
+          fieldPixels[index]=(255<<24)|(blue<<16)|(green<<8)|red;
+        }
       }
     }
     field.putImageData(fieldImage, 0, 0);
@@ -133,10 +152,15 @@ export function startGraphics(background: HTMLCanvasElement, emblem: HTMLCanvasE
     if (!mark) return;
     markPixels.fill(0);
     // Negative yaw moves the front face to the right through a continuous full turn.
-    const angle = reduced.matches ? -0.28 : -0.28 - time * 0.15;
+    const angle = -0.28 - time * 0.15;
     const cy = Math.cos(angle), sy = Math.sin(angle);
     const tilt = -0.3 + Math.sin(time * 0.32) * 0.07;
     const cx = Math.cos(tilt), sx = Math.sin(tilt);
+    const fullColor=isFullColor();
+    const bounds=emblem.getBoundingClientRect();
+    const spectrum=spectrumAt(time,bounds.left+bounds.width/2,bounds.top+bounds.height/2,width,height,waves,false,motionReduced());
+    const monochrome=tintPacked(spectrum.hue,spectrum.saturation,235);
+    if(fullColor)for(let index=0;index<markColors.length;index++)markColors[index]=tintPacked(time/COLOR_CYCLE_SECONDS+index/markColors.length,.8,235);
 
     for (const p of points) {
       const rx = p.x * cy + p.z * sy;
@@ -151,19 +175,20 @@ export function startGraphics(background: HTMLCanvasElement, emblem: HTMLCanvasE
       const y = 180 + (ry * 0.985 + rx * 0.17) * 163 * perspective;
       const left = Math.floor(x), top = Math.floor(y);
       const fx = x - left, fy = y - top;
+      const color=fullColor?markColors[p.hue]:monochrome;
       // Bilinear coverage keeps subpixel rotation smooth at the emblem's compact display size.
       for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) {
         const px = left + dx, py = top + dy;
         if (px < 0 || py < 0 || px >= symbolSize || py >= symbolSize) continue;
         const index = py * symbolSize + px;
         const alpha = Math.min(255, Math.round(opacity * (dx ? fx : 1 - fx) * (dy ? fy : 1 - fy) * 460));
-        if (alpha > (markPixels[index] >>> 24)) markPixels[index] = (alpha << 24) | 0x00ebebeb;
+        if (alpha > (markPixels[index] >>> 24)) markPixels[index] = (alpha << 24) | color;
       }
     }
     mark.putImageData(markImage, 0, 0);
   }
   function draw() {
-    if (lastField < 0 || elapsed - lastField >= fieldInterval || reduced.matches) {
+    if (lastField < 0 || elapsed - lastField >= fieldInterval || motionReduced()) {
       const start = performance.now();
       drawField(elapsed);
       // Adapt cadence rather than scaling the bitmap or enlarging the characters.
@@ -204,23 +229,24 @@ export function startGraphics(background: HTMLCanvasElement, emblem: HTMLCanvasE
     draw();
   }
   function tick(now: number) {
-    if (document.hidden || reduced.matches) { frame = 0; previous = 0; return; }
+    if (document.hidden || motionReduced()) { frame = 0; previous = 0; return; }
     frame = requestAnimationFrame(tick);
     if (now - previous < 1000 / 30) return;
     if (previous) elapsed += Math.min(0.1, (now - previous) / 1000);
+    graphicsTime=elapsed;
     previous = now;
     if (elapsed > nextWave) {
       waves.push({ x: width * (0.12 + random() * 0.76), y: height * random(),
         born: elapsed, strength: 0.55 + random() * 0.3, ellipse: 0.7 + random() * 0.5 });
       nextWave = elapsed + 6 + random() * 5;
     }
-    waves = waves.filter(wave => elapsed - wave.born < 13);
+    waves = waves.filter(wave => elapsed - wave.born < COLOR_WAVE_SECONDS);
     draw();
   }
   function resume() {
     if (frame) cancelAnimationFrame(frame);
     frame = 0; previous = 0;
-    if (!document.hidden && !reduced.matches) frame = requestAnimationFrame(tick);
+    if (!document.hidden && !motionReduced()) frame = requestAnimationFrame(tick);
     else if (!document.hidden) draw();
   }
   const observer = new ResizeObserver(resize);
@@ -232,6 +258,8 @@ export function startGraphics(background: HTMLCanvasElement, emblem: HTMLCanvasE
   window.addEventListener("resize", resize);
   document.addEventListener("visibilitychange", resume);
   reduced.addEventListener("change", resume);
+  forcedColors.addEventListener("change", resume);
+  const unsubscribeColor=onColorModeChange(()=>{lastField=-1;if(!document.hidden)draw();});
   resize(); resume();
   return () => {
     cancelAnimationFrame(frame); observer.disconnect();
@@ -241,5 +269,7 @@ export function startGraphics(background: HTMLCanvasElement, emblem: HTMLCanvasE
     window.removeEventListener("resize", resize);
     document.removeEventListener("visibilitychange", resume);
     reduced.removeEventListener("change", resume);
+    forcedColors.removeEventListener("change", resume);
+    unsubscribeColor();
   };
 }

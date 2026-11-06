@@ -1,0 +1,13 @@
+# Acceso autorizado a Mastodon
+
+Las publicaciones públicas y no listadas continúan usando la API pública. Para una publicación privada o directa accesible a tu cuenta, puedes importar un token OAuth de usuario ya autorizado para esa instancia. No se comparte una sesión entre instancias ni se usan cookies de otra plataforma.
+
+En Mastodon, abre Preferencias → Desarrollo y crea o selecciona una aplicación autorizada con el permiso `read:statuses`. Copia el token de acceso de usuario. Si utilizas otra aplicación OAuth, completa su autorización legítima y utiliza el token que haya emitido tu instancia. nabnab no registra aplicaciones, inicia sesión, sigue cuentas, se une a grupos ni obtiene permisos adicionales automáticamente. El [API oficial de estados](https://docs.joinmastodon.org/methods/statuses/#get) exige un token de usuario con ese permiso para estados privados; el [flujo OAuth documentado](https://docs.joinmastodon.org/client/authorized/) explica la emisión de tokens.
+
+Introduce el origen HTTPS exacto, sin ruta de publicación, parámetros ni fragmento, y autoriza su uso. El origen incluye el puerto cuando no es el predeterminado. El token se guarda mediante DPAPI, en el almacén privado existente, bajo una clave derivada de la huella del origen. El estado devuelto al formulario contiene únicamente el origen y si existe un token guardado. No significa que sus permisos estén verificados hasta que se consulte la API.
+
+La consulta del estado vuelve a resolver y comprobar direcciones públicas y fija esas direcciones para la solicitud. Las redirecciones son manuales, limitadas y restringidas al mismo origen. El encabezado Authorization se marca como sensible y solo se construye para ese origen HTTPS. No se reenvía a otra instancia, a un CDN, a los archivos adjuntos ni al preparador de lotes. Si una instancia exige autorización separada para el archivo multimedia, esa descarga puede fallar; no se amplían permisos ni se copia el token a su host para resolverlo.
+
+Eliminar el token local conserva los archivos descargados. No revoca la autorización emitida en el servidor; esa revocación se gestiona desde la instancia. Los errores de acceso no muestran el token ni el cuerpo de error del servidor.
+
+Los fixtures comprueban aislamiento por origen y puerto, rechazo de HTTP y credenciales en la URL, encabezados sensibles, ausencia del token en el estado público y la distinción entre un estado privado sin autorización y la respuesta de una consulta autorizada. Falta comprobar una cuenta e instancia autorizadas en vivo. No se importó ningún token real durante la implementación.

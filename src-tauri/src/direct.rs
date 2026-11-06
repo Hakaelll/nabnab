@@ -23,6 +23,7 @@ const PREFIX_LIMIT: usize = 4096;
 #[derive(Clone, Copy)]
 enum Network {
     Public,
+    Pixiv,
     #[cfg(test)]
     Fixture(SocketAddr),
 }
@@ -163,6 +164,7 @@ async fn fetch(
             if let Some(range) = range.filter(|_| etag.is_none() || hop == 0) {
                 request = request.header(header::RANGE, range);
             }
+            if matches!(network,Network::Pixiv){request=request.header(header::REFERER,"https://www.pixiv.net/");}
             if let Some(etag) = etag.filter(|_| hop == 0) {
                 request = request.header(header::IF_RANGE, etag);
             }
@@ -195,9 +197,13 @@ async fn fetch(
     tokio::select! { _ = cancellation(cancel) => Err(crate::engine::CANCELLED.into()), result = operation => result }
 }
 
-pub async fn image_preview(input: &str) -> Result<(String,Vec<u8>),String> {
+pub fn engine_fallback(error:&str)->bool{error.starts_with("The direct source is not a supported media file.")||error=="Binary direct responses require a supported media extension."||error=="Remote HLS/DASH and playlist manifests are not supported by the safe direct provider."}
+
+pub async fn image_preview(input:&str)->Result<(String,Vec<u8>),String>{image_preview_with_referer(input,None).await}
+pub async fn image_preview_with_referer(input: &str,referer:Option<&str>) -> Result<(String,Vec<u8>),String> {
     let (_sender,cancel)=watch::channel(false);
-    let mut response=fetch(input,None,None,true,cancel,Network::Public).await?;
+    let network=match referer{None=>Network::Public,Some("https://www.pixiv.net/")=>Network::Pixiv,_=>return Err("Unsupported gallery preview context.".into())};
+    let mut response=fetch(input,None,None,true,cancel,network).await?;
     successful(&response)?;
     let kind=media_type(&response)?;
     let mime=match kind.extension {"jpg"=>"image/jpeg","png"=>"image/png","gif"=>"image/gif","webp"=>"image/webp","avif"=>"image/avif",_=>return Err("No image preview is available.".into())};
@@ -384,7 +390,7 @@ async fn inspect_with_network(
         thumbnail: None,
         uploader: response.url().host_str().map(str::to_owned),
         heights: Vec::new(),
-        has_audio: !matches!(kind.extension, "jpg" | "png" | "gif" | "webp" | "avif"),
+        has_audio: !matches!(kind.extension, "jpg" | "png" | "gif" | "webp" | "avif" | "pdf" | "epub" | "zip" | "srt" | "vtt"),
         has_video: kind.video,
         entries: Vec::new(),
         subtitle_languages: Vec::new(),
@@ -710,6 +716,11 @@ pub(crate) async fn download_fixture(
         Network::Fixture(address),
     )
     .await
+}
+
+pub async fn download_with_referer(url:&str,staging:&Path,referer:Option<&str>,cancel:watch::Receiver<bool>,run_id:u64,emit:impl Fn(Progress)+Send+Sync+Clone+'static)->Result<PathBuf,String>{
+    let network=match referer{None=>Network::Public,Some("https://www.pixiv.net/")=>Network::Pixiv,_=>return Err("This gallery requests an unsupported download context.".into())};
+    download_with_network(url,staging,cancel,run_id,emit,network).await
 }
 
 async fn download_with_network(

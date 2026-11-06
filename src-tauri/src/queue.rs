@@ -1,3 +1,5 @@
+#[path="queue_modules.rs"]
+pub(crate) mod modules;
 use crate::{
     engine,
     failure::Failure,
@@ -143,6 +145,16 @@ pub enum Source {
         library_id: String,
         options: ToolOptions,
     },
+    AdvancedFile {url:String,url_ref:Option<String>,connections:u8,checksum:Option<String>},
+    Palette {library_ids:Vec<String>,colors:u8,format:String},
+    AudioPreview {library_id:String,options:ToolOptions},
+    ProviderExport {url:String,url_ref:Option<String>,operation:String,format:String},
+    CaptionEdit {library_id:String,track_id:String,options:crate::captions_editor::CaptionEditOptions},
+    MediaEdit {library_ids:Vec<String>,options:crate::media_edits::MediaEditOptions},
+    Document { library_ids: Vec<String>, options: crate::documents::DocumentOptions },
+    GalleryExport { library_ids: Vec<String>, export_kind: String },
+    Telegram { attachment: crate::telegram::TelegramAttachment },
+    Live { url: String, url_ref: Option<String>, minutes: u32, max_mb: Option<u32> },
     Torrent {
         reference: String,
         manifest_id: String,
@@ -152,12 +164,16 @@ pub enum Source {
 }
 impl Source {
     fn network(&self) -> bool {
-        matches!(self, Self::Download { .. } | Self::Torrent { .. })
+        matches!(self, Self::Download { .. } | Self::Torrent { .. } | Self::Telegram { .. } | Self::Live { .. } | Self::ProviderExport {..} | Self::AdvancedFile {..})
     }
     fn domain(&self) -> String {
         match self {
             Self::Download { url, .. } => providers::scope(url).unwrap_or_default(),
             Self::Torrent { .. } => "BitTorrent".into(),
+            Self::AdvancedFile{url,..}=>providers::scope(url).unwrap_or_default(),
+            Self::ProviderExport {url,..}=>providers::scope(url).unwrap_or_default(),
+            Self::Live {url,..} => providers::scope(url).unwrap_or_default(),
+            Self::Telegram {attachment} => format!("Telegram:{}",attachment.account_id),
             _ => String::new(),
         }
     }
@@ -189,6 +205,10 @@ pub struct OutputAssociation {
     pub collection: Option<String>,
     pub tags: Vec<String>,
 }
+#[derive(Clone,Debug,Serialize,Deserialize)]
+#[serde(rename_all="camelCase")]
+pub struct DownloadProvenance {pub creator:Option<String>,pub source_url:Option<String>,pub referer:Option<String>,pub position:usize}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Job {
@@ -226,10 +246,12 @@ pub struct Job {
     pub run_next: bool,
     #[serde(default)]
     pub associations: Vec<OutputAssociation>,
+    #[serde(default)]
+    pub provenance:Option<DownloadProvenance>,
 }
 impl Job {
     pub fn protect_source(&mut self, root: &Path) -> Result<(), String> {
-        if let Source::Download { url, url_ref, .. } = &mut self.source {
+        if let Source::Download { url, url_ref, .. } | Source::Live {url,url_ref,..} | Source::ProviderExport {url,url_ref,..} | Source::AdvancedFile{url,url_ref,..} = &mut self.source {
             let origin = public_origin(url)?;
             if url_ref.is_none() {
                 *url_ref = Some(crate::sessions::seal_url(root, &self.id, url)?);
@@ -246,7 +268,8 @@ impl Job {
     }
 
     pub fn validate_public_source(&self) -> Result<(), String> {
-        if let Source::Download { url, url_ref, .. } = &self.source {
+        if let Some(provenance)=&self.provenance{if provenance.referer.as_deref().is_some_and(|r|r!="https://www.pixiv.net/"){return Err("Invalid gallery download context.".into());}if let Some(link)=&provenance.source_url{let parsed=url::Url::parse(&crate::model::validate_url(link)?).map_err(|_|"Invalid gallery source.")?;if parsed.query().is_some()||parsed.fragment().is_some(){return Err("Gallery backlinks must not contain access parameters.".into());}}}
+        if let Source::Download { url, url_ref, .. } | Source::Live {url,url_ref,..} | Source::ProviderExport {url,url_ref,..} | Source::AdvancedFile{url,url_ref,..} = &self.source {
             if public_origin(url)? != *url
                 || !url_ref
                     .as_deref()
@@ -288,6 +311,16 @@ impl Job {
                 providers::identify(url).map(|p| p.name).unwrap_or_default()
             }
             Source::Torrent { .. } => "BitTorrent".into(),
+            Source::Telegram { .. } => "Telegram".into(),
+            Source::AdvancedFile{..}=>"HTTP / aria2".into(),
+            Source::Palette{..}=>"nabnab".into(),
+            Source::AudioPreview{..}=>"FFmpeg".into(),
+            Source::ProviderExport {url,..}=>providers::identify(url).map(|p|p.name).unwrap_or_default(),
+            Source::CaptionEdit {..}=>"nabnab".into(),
+            Source::MediaEdit {..}=>"FFmpeg".into(),
+            Source::Document { .. } => "MuPDF".into(),
+            Source::GalleryExport { .. } => "nabnab".into(),
+            Source::Live { url, .. } => providers::identify(url).map(|p|p.name).unwrap_or_default(),
             _ => "FFmpeg".into(),
         };
         Self {
@@ -316,6 +349,7 @@ impl Job {
             source_id: None,
             run_next: false,
             associations: Vec::new(),
+            provenance:None,
         }
     }
 }
@@ -400,6 +434,7 @@ pub fn enqueue_download(
                 return Err("Use a download URL of at most 8192 bytes.".into());
             }
             crate::model::validate_url(&url)?;
+            if providers::course_page(&url){return Err("Open this course in Platforms → Courses to select only authorized downloadable materials.".into());}
             if subtitle_language.is_some()
                 && providers::identify(&url)?.id == providers::ProviderId::Generic
             {
@@ -549,7 +584,8 @@ pub fn enqueue_prepared(
             &item.content_id,
             &url,
         );
-        let content_id = if trusted_podcast {
+        let trusted_gallery=crate::sources::trusted_gallery_identity(repo,item.source_id.as_deref(),&item.content_id,&url);
+        let content_id = if trusted_podcast||trusted_gallery {
             item.content_id.clone()
         } else {
             crate::options::content_identity(&url)?
@@ -662,6 +698,11 @@ pub fn enqueue_prepared(
                 collection: options.values.collection.clone(),
                 tags: options.values.tags.clone(),
             });
+            if trusted_gallery {
+                if let Some(source)=repo.data.sources.iter().find(|source|item.source_id.as_deref()==Some(source.id.as_str())){
+                    if let Some(reference)=&source.url_ref{let original=crate::sessions::resolve_url(repo.root(),reference)?;let mut backlink=url::Url::parse(original.as_str()).map_err(|_|"Invalid gallery source.")?;backlink.set_query(None);backlink.set_fragment(None);let pixiv=backlink.host_str().is_some_and(|h|h=="pixiv.net"||h.ends_with(".pixiv.net"));job.provenance=Some(DownloadProvenance{creator:(!options.context.creator.is_empty()).then(||options.context.creator.clone()),source_url:Some(backlink.to_string()),referer:pixiv.then(||"https://www.pixiv.net/".into()),position:0});job.provider=options.context.platform.clone();}
+                }
+            }
             job.options = Some(options);
             job.manual_order = repo.data.jobs.len().saturating_add(pending.len()) as i64;
             job.protect_source(repo.root())?;
@@ -700,6 +741,16 @@ pub fn enqueue_prepared(
     }
     accepted.extend(pending);
     Ok(accepted)
+}
+
+pub fn enqueue_tasks(repo:&mut Repository,tasks:Vec<(Source,String)>,request:&str)->Result<Vec<Job>,String>{
+    validate_request_id(request)?;
+    let previous:Vec<_>=repo.data.jobs.iter().filter(|j|j.client_request==request).cloned().collect();
+    if !previous.is_empty(){return Ok(previous);}
+    if tasks.is_empty()||tasks.len()>200{return Err("Choose 1–200 tasks.".into());}
+    let mut jobs=Vec::new();
+    for(source,title)in tasks{let mut job=Job::new(source,title,repo.data.settings.folder.clone(),request.into(),Some(request.into()));job.protect_source(repo.root())?;jobs.push(job);}
+    let len=repo.data.jobs.len();repo.data.jobs.extend(jobs.clone());if let Err(error)=repo.save(){repo.data.jobs.truncate(len);return Err(error);}Ok(jobs)
 }
 
 pub fn enqueue_torrent(repo: &mut Repository, reference: String, manifest: &crate::torrents::TorrentManifest, options: crate::torrents::TorrentOptions, request: &str) -> Result<Vec<Job>, String> {
@@ -823,6 +874,7 @@ pub fn action(state: &AppState, ids: &[String], action: &str) -> Result<(), Stri
                 cancellations.push(job.id.clone());
             }
             "pause" if job.state == JobState::Pending => job.state = JobState::Paused,
+            "pause" if job.state==JobState::Downloading&&matches!(job.source,Source::Torrent{..}|Source::AdvancedFile{..})=>{job.state=JobState::Paused;job.progress=None;job.next_retry_at=None;cancellations.push(job.id.clone());},
             "retry"
                 if matches!(
                     job.state,
@@ -1516,7 +1568,7 @@ async fn execute(app: AppHandle, state: Arc<AppState>, job: Job, cancel: watch::
                     Err(ref e)
                         if e == engine::CANCELLED || current.state == JobState::Cancelled =>
                     {
-                        current.state = JobState::Cancelled;
+                        if current.state!=JobState::Paused {current.state = JobState::Cancelled;}
                         current.error = None;
                     }
                     Err(ref e) => {
@@ -1587,6 +1639,7 @@ async fn run(
     if let Some(recovered) = recover_publication(state, job, staging, cancel.clone()).await? {
         return Ok(recovered);
     }
+    if let Some(output)=modules::run(app,state,job,staging,cancel.clone()).await? {return Ok(output);}
     if let Source::Torrent { reference, manifest_id, index, options } = &job.source {
         let executable = crate::components::executable(app, "torrent")?;
         let torrent = crate::torrents::resolve_reference(app, reference)?;
@@ -1603,11 +1656,11 @@ async fn run(
         annotate_output(&mut item, job, staging);
         return publish_verified_output(state, job, staging, &flat, item, cancel).await;
     }
-    let direct_download = match &job.source {
+    let mut direct_download = match &job.source {
         Source::Download { url, .. } => {
             providers::identify(url)?.id == providers::ProviderId::Generic
         }
-        Source::Transform { .. } | Source::Torrent { .. } => false,
+        _ => false,
     };
     let root = if job.source.network() && !direct_download {
         engine::engine_dir(app)?
@@ -1620,7 +1673,7 @@ async fn run(
     let run_id = job.run_id;
     let emit = move |update| progress(&handle, &shared, &id, run_id, update);
     let (mut file, source, parent) = match &job.source {
-        Source::Torrent { .. } => return Err("Torrent execution was not dispatched.".into()),
+        Source::AdvancedFile{..} | Source::Palette{..} | Source::AudioPreview{..} | Source::ProviderExport {..} | Source::CaptionEdit {..} | Source::MediaEdit {..} | Source::Torrent { .. } | Source::Document { .. } | Source::GalleryExport { .. } | Source::Telegram { .. } | Source::Live { .. } => return Err("Module execution was not dispatched.".into()),
         Source::Download {
             url_ref,
             format,
@@ -1653,9 +1706,8 @@ async fn run(
                 None
             };
             phase(app, state, &job.id, run_id, JobState::Downloading)?;
-            let file = if direct_download {
-                crate::direct::download(&url, staging, cancel.clone(), run_id, emit.clone()).await?
-            } else {
+            let direct_input=if direct_download {match crate::direct::download_with_referer(&url,staging,job.provenance.as_ref().and_then(|p|p.referer.as_deref()),cancel.clone(),run_id,emit.clone()).await{Ok(file)=>Some(file),Err(error) if crate::direct::engine_fallback(&error)=>{direct_download=false;None},Err(error)=>return Err(error)}}else{None};
+            let file = if let Some(file)=direct_input {file} else {
                 let cookies = crate::sessions::materialize(&cookie_root, &url)?;
                 let mut args = engine::download_args(&root, *format, *height, staging, &url);
                 if let Some(options) = work {
@@ -1859,10 +1911,7 @@ async fn run(
             file = target;
         }
     }
-    if job
-        .content_id
-        .as_deref()
-        .is_some_and(|id| id.starts_with("gallery:"))
+    if job.options.is_none() && (job.provenance.is_some()||job.content_id.as_deref().is_some_and(|id|id.starts_with("gallery:")))
     {
         let extension = file
             .extension()
@@ -2026,6 +2075,9 @@ fn merge_association(item: &mut library::LibraryItem, association: &OutputAssoci
     }
 }
 fn annotate_output(item: &mut library::LibraryItem, job: &Job, staging: &Path) {
+    if let Some(id)=&job.content_id{item.details.content_id=Some(id.clone());}if job.source.network(){item.details.platform=Some(job.provider.clone());}
+    if let Some(provenance)=&job.provenance{item.details.creator=provenance.creator.clone();item.details.source_url=provenance.source_url.clone();}
+    for id in job.associations.iter().filter_map(|a|a.source_id.clone()){if !item.details.source_ids.contains(&id){item.details.source_ids.push(id);}}
     let Some(resolved) = &job.options else {
         return;
     };
@@ -3167,4 +3219,17 @@ mod tests {
         drop(held);
         assert_eq!(state.runtime.processing.available_permits(), 1);
     }
+    #[test]
+    fn active_file_pause_preserves_resume_state_and_waits_for_the_worker_to_stop(){
+        let (root,state,id)=state_fixture();
+        {let mut guard=state.repository.lock().unwrap();let job=&mut guard.as_mut().unwrap().data.jobs[0];let Source::Download{url,url_ref,..}=&job.source else{panic!("fixture download")};job.source=Source::AdvancedFile{url:url.clone(),url_ref:url_ref.clone(),connections:4,checksum:None};job.state=JobState::Downloading;}
+        let(sender,receiver)=watch::channel(false);state.runtime.active.lock().unwrap().insert(id.clone(),sender);
+        action(&state,std::slice::from_ref(&id),"pause").unwrap();
+        assert!(*receiver.borrow());assert_eq!(state.repository.lock().unwrap().as_ref().unwrap().data.jobs[0].state,JobState::Paused);
+        assert!(action(&state,std::slice::from_ref(&id),"retry").is_err());
+        state.runtime.active.lock().unwrap().remove(&id);action(&state,std::slice::from_ref(&id),"retry").unwrap();
+        assert_eq!(state.repository.lock().unwrap().as_ref().unwrap().data.jobs[0].state,JobState::Pending);
+        drop(state);fs::remove_dir_all(root).unwrap();
+    }
+
 }

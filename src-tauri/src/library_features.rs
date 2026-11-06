@@ -16,6 +16,7 @@ pub struct LibraryDetails {
     pub creator: Option<String>,
     pub platform: Option<String>,
     pub source_ids: Vec<String>,
+    pub source_url:Option<String>,
     pub chapters: Vec<Chapter>,
     pub tracks: Vec<LocalTrack>,
     pub playback_position: f64,
@@ -48,6 +49,7 @@ pub fn transform_details(
         creator: parent.details.creator.clone(),
         platform: parent.details.platform.clone(),
         source_ids: parent.details.source_ids.clone(),
+        source_url:parent.details.source_url.clone(),
         chapters: parent.details.chapters.clone(),
         tracks: parent.details.tracks.clone(),
         ..LibraryDetails::default()

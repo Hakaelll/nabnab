@@ -40,7 +40,8 @@ export async function buildFFmpeg() {
   }
   const run = args => execFileSync(path.join(output, "ffmpeg.exe"), ["-hide_banner", ...args], { encoding: "utf8", windowsHide: true, maxBuffer: 1024 * 1024 });
   const encoders = run(["-encoders"]);
-  for (const codec of ["libmp3lame", "aac", "libopus", "libopenh264", "libvpx-vp9"]) assert(encoders.includes(codec), "Missing encoder: " + codec);
+  for (const codec of ["libmp3lame", "aac", "libopus", "libopenh264", "libvpx-vp9", "libwebp", "libwebp_anim"]) assert(encoders.includes(codec), "Missing encoder: " + codec);
+  assert(run(["-filters"]).includes("subtitles"), "FFmpeg must retain local subtitle burning.");
   const decoders = run(["-decoders"]);
   for (const codec of ["h264", "aac", "opus", "vp9", "libdav1d"]) assert(decoders.includes(codec), "Missing decoder: " + codec);
   assert(run(["-protocols"]).includes("https"), "FFmpeg must retain HTTPS.");

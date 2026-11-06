@@ -17,10 +17,21 @@ Cada entrega debe pasar comprobación TypeScript, pruebas Rust relevantes y reco
 
 ## Estado
 
-Primera entrega integrada: catálogo y explorador de galerías con selección por archivo, proveedores adicionales de vídeo/audio, RSS en Fuentes con OPML/M3U, selector BitTorrent con consentimiento, cursos locales y adaptadores de acceso autorizado, herramientas FFmpeg y transcripción opcional. Telegram, documentos y directos continúan en implementación.
+Los seis bloques tienen módulos integrados en la cola y biblioteca existentes. Además del primer bloque se añadieron Telegram, directos con límite y parada guardando el resultado, descargas HTTP con aria2, documentos PDF/EPUB, exportaciones de fuentes, seguimiento de galerías, autenticación acotada de Pixiv/Mastodon, edición de subtítulos, unión de clips, sustitución de audio, paletas y preescucha de audio.
 
-Verificación del primer bloque: TypeScript, build Vite y comprobación de identidad correctos; 22 pruebas JavaScript y 165 pruebas Rust correctas. Otras 17 pruebas Rust requieren motores, contenido o servicios y permanecen marcadas como ignoradas. La prueba sintética de herramientas FFmpeg se ejecutó expresamente y pasó con entradas locales generadas. La suite nativa usa temporales del repositorio y necesita permiso para archivos y sockets de loopback, restringidos por el sandbox.
+La interfaz conserva la identidad monocromática. La navegación llega al borde superior; los controles de herramientas se agrupan con separadores en lugar de tarjetas repetidas. Se eliminó el nombre bajo el emblema. Diez activaciones del símbolo alternan el multicolor, también con teclado. El modo normal recibe oleadas suaves de tonos vecinos. La reducción de movimiento desactiva las oleadas y el desplazamiento del color.
 
-No se han iniciado sesiones, instalado componentes opcionales ni descargado archivos personales. Los extractores de galerías y las cuentas online requieren comprobación en vivo. Las capturas [Plataformas](expansion-platforms.png) y [Herramientas](expansion-tools.png) muestran el render de navegador, no una certificación de los servicios externos.
+## Evidencia
 
-Consulta [PODCASTS.md](PODCASTS.md), [COURSES.md](COURSES.md), [TORRENTS.md](TORRENTS.md), [TRANSCRIPTION.md](TRANSCRIPTION.md) y [TOOLS.md](TOOLS.md) para los recorridos y límites.
+- TypeScript, build Vite y comprobación de identidad correctos; 26 pruebas JavaScript y 224 pruebas Rust correctas. Otras 23 pruebas nativas requieren motores o servicios y están marcadas como ignoradas por defecto.
+- Se ejecutaron expresamente las pruebas con archivos sintéticos reales de herramientas FFmpeg, PDF con MuPDF, galería HTML/hoja de contacto, unión y audio de vídeo, paletas, preescucha y descarga HTTP con aria2. Los originales se conservaron.
+- El recorrido de navegador con fixtures IPC pasó a 1280×800, 1180×780 y 900×620, y con escalados 125 % y 150 %. Incluye navegación, formularios, biblioteca de 1000 elementos, foco, reducción de movimiento/transparencia y estados de descarga. No certifica servicios externos.
+- La barra lateral y el easter egg se comprobaron además en la interfaz renderizada con puntero y teclado. Capturas actuales: [Inicio](interface-monochrome.png), [Multicolor](interface-color-egg.png), [Herramientas](interface-tools-refined.png). Las capturas expansion-* conservan el primer bloque como referencia anterior.
+
+## Límites comprobables
+
+No se han iniciado sesiones, instalado componentes en el sistema ni descargado archivos personales. Los motores utilizados en las pruebas están dentro del repositorio ignorado y se verificaron contra sus paquetes oficiales. No se declara verificado un proveedor que no se haya utilizado con una cuenta real.
+
+Telegram contiene el cliente y sus controles de permisos, pero necesita una DLL TDLib compatible suministrada por separado; no se ofrece una descarga automática sin un paquete verificado. Las cuentas de cursos, Pixiv y Mastodon necesitan autorización propia y validación en vivo. Los directos no se han grabado contra un servicio real. La transcripción necesita un modelo multilingüe opcional, cuya descarga e inferencia no se han ejecutado durante estas pruebas. Los extractores externos pueden cambiar o rechazar fuentes; las limitaciones aparecen como errores, nunca como resultados fabricados.
+
+Consulta los documentos de cada módulo en este directorio para los formatos, recorridos, permisos y límites concretos. La compilación de FFmpeg comprueba las capacidades requeridas por su receta; una instalación antigua puede necesitar actualizar ese motor para WebP e incrustación de subtítulos.

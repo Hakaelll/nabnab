@@ -8,11 +8,24 @@ use std::{
 };
 use tauri::{AppHandle, Emitter};
 use tokio::sync::watch;
+use tauri_plugin_dialog::{DialogExt,MessageDialogButtons};
 
 struct Model {
     id: &'static str,
     bytes: u64,
     sha256: &'static str,
+}
+
+#[tauri::command]
+pub async fn remove_transcription_model(app:AppHandle,state:tauri::State<'_,std::sync::Arc<crate::AppState>>,id:String)->Result<bool,String>{
+    let selected=model(&id)?;
+    let idle=||{let guard=state.repository.lock().unwrap();if guard.as_ref().is_some_and(|repo|repo.data.jobs.iter().any(|j|j.state.active()&&matches!(&j.source,crate::queue::Source::Transform{options:ToolOptions::Transcribe{model,..},..}if model==&id))){Err("This model is in use. Wait for its transcription to finish.".to_owned())}else{Ok(())}};
+    idle()?;
+    let directory=crate::components::root(&app)?.join("models");let path=directory.join(filename(selected));if !path.exists(){return Ok(false);}
+    let dialog=app.clone();let approved=tauri::async_runtime::spawn_blocking(move||dialog.dialog().message("Remove this downloaded speech model? Existing transcripts and original media will be kept.").title("nabnab · Remove model").buttons(MessageDialogButtons::OkCancel).blocking_show()).await.map_err(|_|"The model confirmation could not be shown.")?;
+    if !approved{return Ok(false);}idle()?;
+    let directory=crate::library::authorized_path(&directory)?;let path=crate::library::authorized_path(&path)?;if path.parent()!=Some(directory.as_path()){return Err("The model path changed. Files were kept.".into());}
+    fs::remove_file(path).map_err(|e|e.to_string())?;Ok(true)
 }
 const MODELS: [Model; 2] = [
     Model {
@@ -126,12 +139,12 @@ pub async fn install_transcription_model(app: AppHandle, id: String) -> Result<(
         filename(selected),
         std::process::id()
     ));
+    let pending = Pending(pending_path);
     let mut file = OpenOptions::new()
         .create_new(true)
         .write(true)
-        .open(&pending_path)
+        .open(&pending.0)
         .map_err(|_| "The temporary model file could not be created.")?;
-    let pending = Pending(pending_path);
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(1800))
         .build()

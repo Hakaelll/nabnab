@@ -116,7 +116,7 @@ pub fn base_args(root: &Path) -> Vec<String> {
         "--ignore-config".into(),
         "--no-plugin-dirs".into(),
         "--use-extractors".into(),
-        "default,-generic".into(),
+        "default,-udemy.*".into(),
         "--no-remote-components".into(),
         "--no-playlist".into(),
         "--no-color".into(),
@@ -163,10 +163,10 @@ pub fn inspect_args(root: &Path, url: &str) -> Vec<String> {
 }
 
 #[cfg(windows)]
-struct ProcessTree(isize);
+pub(crate) struct ProcessTree(isize);
 #[cfg(windows)]
 impl ProcessTree {
-    fn attach(child: &tokio::process::Child) -> Result<Self, String> {
+    pub(crate) fn attach(child: &tokio::process::Child) -> Result<Self, String> {
         use windows_sys::Win32::{Foundation::CloseHandle, System::JobObjects::*};
         unsafe {
             let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());

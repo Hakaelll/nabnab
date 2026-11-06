@@ -16,8 +16,10 @@ export function createFieldRenderer(canvas: HTMLCanvasElement) {
     uniform int waveCount;
     uniform vec4 waves[3];
     uniform vec3 ellipses;
+    uniform float fullColor;
     out float opacity;
     flat out vec2 cell;
+    flat out vec3 ink;
     void main() {
       vec2 uv = (origin - size * vec2(.5, .48)) / 680.;
       float turn = sin(time*.027)*.14;
@@ -31,11 +33,13 @@ export function createFieldRenderer(canvas: HTMLCanvasElement) {
       vec2 p = origin + vec2(sin(v*4.8+fold*1.6+drift)*23.,cos(u*5.4+cross*1.3-drift*.7)*19.)*depth;
       p += vec2(fold*cross*15.,sin(u*6.+v*3.+drift*.4)*11.);
       float light = 0.;
+      float chroma = 0.;
       for (int i=0;i<3;i++) {
         if (i>=waveCount) break;
         vec2 delta = (p-waves[i].xy)/vec2(1.,ellipses[i]);
         float distance = length(delta), age = time-waves[i].z;
         float offset = distance-age*47.;
+        chroma = max(chroma,exp(-offset*offset/11000.)*sin(3.14159265*clamp(age/${COLOR_WAVE_SECONDS.toFixed(1)},0.,1.))*waves[i].w);
         float envelope = exp(-offset*offset/1500.)*pow(max(0.,1.-age/13.),1.5);
         float displacement = sin(offset*.065)*envelope*waves[i].w;
         p += delta/max(1.,distance)*displacement*vec2(17.,12.);
@@ -44,6 +48,10 @@ export function createFieldRenderer(canvas: HTMLCanvasElement) {
       float breathe = .85+sin(time*.14+detail.x)*.15;
       float quiet = 1.-.38*exp(-pow((p.x-size.x*.5)/(readingWidth*.7),4.));
       opacity = min(.46,((.045+ribbon*.32)*depth*hollow*breathe+light*.2)*quiet);
+      float hue = time/${COLOR_CYCLE_SECONDS.toFixed(1)} + dot(p/size,mix(vec2(.025,.02),vec2(.55,.45),fullColor));
+      float saturation = mix(min(.62,chroma*.72),.85,fullColor);
+      vec3 spectrum = clamp(abs(fract(hue+vec3(0.,2./3.,1./3.))*6.-3.)-1.,0.,1.);
+      ink = mix(vec3(1.),spectrum,saturation);
       cell = vec2(detail.z,detail.y>.55 ? 1. : 0.);
       vec2 position = (floor(p*ratio+.5)/ratio+7.)/size;
       gl_Position = vec4(position.x*2.-1.,1.-position.y*2.,0.,1.);
@@ -55,14 +63,14 @@ export function createFieldRenderer(canvas: HTMLCanvasElement) {
     uniform float letters;
     in float opacity;
     flat in vec2 cell;
+    flat in vec3 ink;
     out vec4 color;
     void main() {
       vec2 p = gl_PointCoord*14.;
       if (p.x>=12. || opacity<.025) discard;
       vec2 uv = (cell*vec2(12.,14.)+p)/vec2(letters*12.,28.);
       float coverage = texture(atlas,uv).a;
-      float value = mix(9./255.,203./255.,opacity*coverage);
-      color = vec4(vec3(value),1.);
+      color = vec4(vec3(9./255.)+ink*(194./255.)*opacity*coverage,1.);
     }`;
   function compile(type: number, source: string) {
     const shader = gl!.createShader(type)!;
@@ -90,7 +98,7 @@ export function createFieldRenderer(canvas: HTMLCanvasElement) {
     if (!gl.getProgramParameter(program,gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program) || "Character field could not link.");
   } catch (error) { dispose(); throw error; }
   const uniform = (name: string) => gl.getUniformLocation(program,name);
-  const uniforms = {size:uniform("size"),ratio:uniform("ratio"),time:uniform("time"),readingWidth:uniform("readingWidth"),waveCount:uniform("waveCount"),waves:uniform("waves[0]"),ellipses:uniform("ellipses"),letters:uniform("letters")};
+  const uniforms = {size:uniform("size"),ratio:uniform("ratio"),time:uniform("time"),readingWidth:uniform("readingWidth"),waveCount:uniform("waveCount"),waves:uniform("waves[0]"),ellipses:uniform("ellipses"),letters:uniform("letters"),fullColor:uniform("fullColor")};
   const waveData = new Float32Array(12), ellipseData = new Float32Array(3);
   let count = 0;
   return {
@@ -115,7 +123,7 @@ export function createFieldRenderer(canvas: HTMLCanvasElement) {
       gl.enable(gl.BLEND); gl.blendEquation(gl.MAX); gl.blendFunc(gl.ONE,gl.ONE);
       count = glyphs.length;
     },
-    draw(time: number, waves: Wave[]) {
+    draw(time: number, waves: Wave[], fullColor: boolean) {
       if (gl.isContextLost()) return;
       for (let i = 0; i < Math.min(3, waves.length); i++) {
         const wave = waves[i];
@@ -124,6 +132,7 @@ export function createFieldRenderer(canvas: HTMLCanvasElement) {
         ellipseData[i] = wave.ellipse;
       }
       gl.uniform1f(uniforms.time,time); gl.uniform1i(uniforms.waveCount,Math.min(3,waves.length));
+      gl.uniform1f(uniforms.fullColor,fullColor?1:0);
       gl.uniform4fv(uniforms.waves,waveData); gl.uniform3fv(uniforms.ellipses,ellipseData);
       gl.clearColor(9/255,9/255,9/255,1); gl.clear(gl.COLOR_BUFFER_BIT);
       gl.drawArrays(gl.POINTS,0,count);
@@ -131,3 +140,4 @@ export function createFieldRenderer(canvas: HTMLCanvasElement) {
     dispose,
   };
 }
+import { COLOR_CYCLE_SECONDS, COLOR_WAVE_SECONDS } from "./graphics-color";
