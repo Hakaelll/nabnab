@@ -243,6 +243,8 @@ pub fn examples() -> Vec<Preset> {
             revision: 1,
             options: WorkOptions {
                 collection: Some("Referencias".into()),
+                subtitle_languages: vec!["es".into()],
+                subtitle_mode: SubtitleMode::Sidecar,
                 ..WorkOptions::default()
             },
         },

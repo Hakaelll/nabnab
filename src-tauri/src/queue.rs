@@ -257,7 +257,9 @@ impl Job {
     pub fn recover(&mut self) {
         if self.state.active()
             || self.state == JobState::Pending
-                && (self.options.is_none() || self.schedule.needs_review(now()))
+                && ((self.options.is_none()
+                    && self.schedule == crate::scheduling::Schedule::Immediate)
+                    || self.schedule.needs_review(now()))
         {
             self.state = JobState::Paused;
             self.progress = None;

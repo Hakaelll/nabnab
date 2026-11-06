@@ -199,6 +199,35 @@ fn invalid_second_item_never_partially_enqueues_the_first() {
 }
 
 #[test]
+fn scheduled_local_tools_keep_their_pending_schedule_on_restart() {
+    let mut job = Job::new(
+        Source::Transform {
+            library_id: "local-fixture".into(),
+            options: ToolOptions::Trim {
+                start: 0.0,
+                end: 1.0,
+                precise: false,
+            },
+        },
+        "Local clip".into(),
+        std::env::temp_dir(),
+        "scheduled-tool-fixture".into(),
+        None,
+    );
+    job.schedule = crate::scheduling::Schedule::Once {
+        at: now() + 86_400_000,
+        timezone: "UTC".into(),
+        missed: crate::scheduling::MissedPolicy::RunWhenPossible,
+        grace_minutes: 15,
+    };
+    job.recover();
+    assert_eq!(job.state, JobState::Pending);
+    job.schedule = crate::scheduling::Schedule::Immediate;
+    job.recover();
+    assert_eq!(job.state, JobState::Paused);
+}
+
+#[test]
 fn protected_operational_urls_do_not_leak_through_prepared_context_or_identity() {
     let mut repo = repository("private-context");
     let url = "https://cdn.example.org/private-path?accessToken=SECRET#PRIVATE";

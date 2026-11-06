@@ -1294,6 +1294,28 @@ mod tests {
     }
 
     #[test]
+    fn explicit_queue_after_failure_creates_only_the_missing_attempt() {
+        let root = std::env::temp_dir().join(format!(
+            "nabnab-source-retry-{}-{}",
+            std::process::id(),
+            queue::now()
+        ));
+        std::fs::create_dir_all(root.join("media")).unwrap();
+        let mut repo = crate::store::Repository::open(&root, &root.join("media")).unwrap();
+        let mut source = source();
+        source.settings.preset_id = Some("compatible".into());
+        apply_page(&mut source, page(&[("one", Some(1))], false), false, 20_000);
+        let ids = vec!["youtube:one".into()];
+        let first = queue_items(&mut repo, &source, &ids, true).unwrap();
+        repo.data.jobs[0].state = queue::JobState::Error;
+        let second = queue_items(&mut repo, &source, &ids, true).unwrap();
+        assert_ne!(second[0].id, first[0].id);
+        assert_eq!(repo.data.jobs.len(), 2);
+        let repeated = queue_items(&mut repo, &source, &ids, true).unwrap();
+        assert_eq!(repeated[0].id, second[0].id);
+        assert_eq!(repo.data.jobs.len(), 2);
+    }
+    #[test]
     fn discovery_is_not_download_success_and_failed_outputs_return_to_review() {
         let mut source = source();
         apply_page(&mut source, page(&[("one", Some(1))], false), false, 20_000);

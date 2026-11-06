@@ -1,6 +1,6 @@
 # Browser extension and local bridge
 
-`browser-extension/` is a Manifest V3 extension for Chrome and Edge. It sends the active tab or a link chosen from the context menu to the desktop queue. It does not extract, download or convert media. There are no content scripts, cookie permissions, navigation listeners or external-message entry points. Firefox has not been validated.
+`browser-extension/` is a Manifest V3 extension for Chrome and Edge. It sends the active tab, a context-menu link, or an explicitly selected page batch to the desktop. Destinations are Download, Prepare and Save for later. It does not download or convert media. There are no persistent content scripts, cookie permissions, navigation listeners or external-message entry points. `scripting` and `activeTab` read candidate anchors only after the user selects Collect links. No global page access is requested. Firefox has not been validated.
 
 This implementation uses one authenticated loopback HTTP transport. The extension has no predetermined store ID and the existing installer has no Native Messaging host registration. Manual pairing permits an unpacked extension in either browser without inventing an authorized extension ID or installing another host. Native Messaging can replace this transport if packaging later supplies stable extension IDs and host registration. There is no second transport.
 
@@ -12,7 +12,7 @@ This implementation uses one authenticated loopback HTTP transport. The extensio
 4. Paste the token in the extension's settings and select `Guardar y comprobar conexión`.
 5. Open a public media page, choose a profile from the popup and select `Enviar pestaña actual`. The link's context menu also offers video and audio actions.
 
-nabnab must be running to receive links. The popup confirms an authenticated connection and displays reception only after the native app returns job IDs. A failed request can be retried with the same request ID. Pending requests remain in the browser's in-memory session storage until receipt or forgetting the pairing. Closing the browser discards this retry state.
+nabnab must be running to receive links. The popup displays reception only after the native app returns job IDs for Download or a draft ID for Prepare and Save. A failed request can be retried with the same request ID. Pending requests remain in the browser's in-memory session storage until receipt or forgetting the pairing. Closing the browser discards this retry state.
 
 The extension stores its bearer token in its own local extension storage, not sync storage. nabnab displays the token once and persists only its SHA-256 hash. Forgetting a token in the extension removes its copy. Revoking the client in nabnab invalidates that token, including copies; removing the last client closes the listener.
 
@@ -52,7 +52,11 @@ An accepted request returns:
 {"version":1,"requestId":"stable-request-id","acceptedJobIds":["native-job-id"]}
 ```
 
-The extension rejects a receipt for another request, an unsupported version or an empty list of jobs. Tokens appear only in the Authorization header, never in URLs, job records or receipts. Errors returned by the native queue pass through the diagnostic sanitizer.
+Optional fields extend the same version 1 protocol: `intent` is `download`, `prepare` or `save`; `presetId` references a local preset; `urls` contains at most 200 selected links and is accepted only for preparation or saving. The 16 KiB request-body limit also applies. Paths, commands and unrecognized fields remain rejected. `POST /presets` with `{"version":1}` returns only local IDs, names and revisions, through the same authentication and origin checks.
+
+Prepare and Save return `acceptedDraftId`, the matching `intent` and an empty `acceptedJobIds` array. Repeating the request returns the same saved draft. Download requires at least one job ID. The extension rejects receipts with a different request, version, intent or output kind. Tokens appear only in the Authorization header, never in URLs, job records or receipts.
+
+See [local productivity](PRODUCTIVITY.md) for the new flows, screenshots and validation performed on 6 November 2026.
 
 ## Verification and limits
 

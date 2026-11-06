@@ -1,5 +1,7 @@
 # Embedded manual subtitles
 
+This page describes the quick single-link flow and its verification. The [local productivity guide](PRODUCTIVITY.md) covers batch creator or automatic tracks, standalone subtitle outputs, local imports, synchronized text, search and clip rebasing. Those outputs use the same queue and have independent identities.
+
 The video download flow offers one manual subtitle language when the inspected item reports an available manual track. The selection is optional and applies to the compatible MP4 and original video profiles. Audio profiles, batches and direct HTTP files do not advertise this option.
 
 `Media.subtitleLanguages` contains at most 50 language keys from yt-dlp's `subtitles` object. Empty format lists, protected tracks, malformed entries, automatic captions and batch metadata are excluded. Language keys have a recognized two- or three-letter ISO primary component and optional alphanumeric components separated by `-` or `_`, up to 24 characters. Reserved `all` and `live_chat` values, undefined language codes and regular expressions are rejected.

@@ -128,6 +128,7 @@ try {
   const popup = await waitFor(() => context.pages().find(page => page.url().endsWith("/popup.html")),10000);
   popup.on("pageerror", error => errors.push(error.message));
   await popup.getByText("Conectado a nabnab", { exact: true }).waitFor();
+  await popup.setViewportSize({width:360,height:640});
   await popup.locator('option[value="preset:reference"]').waitFor({state:'attached'});
   const beforePreparation=(await rpc('get_snapshot')).jobs.length;
   await popup.locator('#collect').click();await popup.locator('#candidate-links input').first().waitFor();

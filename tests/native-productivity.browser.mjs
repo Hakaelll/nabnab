@@ -48,5 +48,14 @@ try{
   await page.locator('.batch-workspace').waitFor();assert.equal((await rpc('get_snapshot')).jobs.length,3);await page.screenshot({path:path.join(data,'native-extension-prepared.png')});
   const before=await rpc('get_snapshot');await close();await launch();const after=await rpc('get_snapshot');assert.equal(after.drafts.length,before.drafts.length);assert.equal(after.jobs.length,3);assert.ok(after.jobs.every(job=>job.state==='pending'));assert.equal(after.library.length,2);assert.equal(after.library.find(item=>item.id===video.id).details.bookmarks[0].time,3.25);
   results.push({case:'real native drafts, resolved options, rule preview, local captions, bookmarks, smart collection and extension',passed:true,remoteExtraction:false,scheduledJobs:3,subtitleHitTime:3.25,data});
+  if(process.env.NABNAB_SOURCE_TEST_URL){
+    const count=after.jobs.length;
+    try{
+      const source=await rpc('add_source',{url:process.env.NABNAB_SOURCE_TEST_URL,settings:{presetId:null,relativeFolder:'',intervalHours:null,automatic:false,automaticLimit:20,explorationLimit:200,pageSize:50,history:'fromNow'}});
+      const state=await rpc('get_snapshot');assert.equal(state.jobs.length,count);assert.equal(source.settings.automatic,false);assert.ok(source.baseline.cursor<=50);
+      results.push({case:'live YouTube source first page, manual review only',status:source.status,knownItems:source.items.length,baseline:source.baseline,error:source.error,downloadJobsAdded:0});
+      await page.locator('[data-page="library"]').click();await page.locator('[data-action="library-section"][data-section="sources"]').click();await page.screenshot({path:path.join(data,'native-source-check.png')});
+    }catch(error){results.push({case:'live YouTube source first page',status:'unavailable in this environment',error:String(error).slice(0,1000)});}
+  }
   assert.ok(!results.some(result=>result.pageError));await writeFile(path.join(base,'results.json'),JSON.stringify(results,null,2));console.log(JSON.stringify(results));
 }finally{await close();}

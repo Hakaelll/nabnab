@@ -54,9 +54,9 @@ pub fn advanced_subtitle_args(
     if mode == "none" {
         return Ok(Vec::new());
     }
-    if !matches!(mode, "sidecar" | "embed" | "only") || languages.is_empty() || languages.len() > 8
+    if !matches!(mode, "sidecar" | "embed" | "only") || languages.is_empty() || languages.len() > 10
     {
-        return Err("Choose one to eight available subtitle tracks and their output mode.".into());
+        return Err("Choose one to ten available subtitle tracks and their output mode.".into());
     }
     if mode == "embed" && !format.is_video() {
         return Err("Embed subtitles with a compatible video container.".into());
@@ -438,6 +438,18 @@ mod tests {
     use super::*;
     #[test]
     fn subtitle_outputs_and_sections_keep_provenance_and_real_engine_options() {
+        let languages =
+            ["es", "en", "fr", "de", "it", "pt", "ja", "ko", "zh", "nl"].map(str::to_owned);
+        let arguments =
+            advanced_subtitle_args(&languages, "embed", false, crate::model::Format::Mp4).unwrap();
+        let index = arguments
+            .iter()
+            .position(|value| value == "--sub-langs")
+            .unwrap();
+        assert_eq!(
+            arguments[index + 1],
+            "^es$,^en$,^fr$,^de$,^it$,^pt$,^ja$,^ko$,^zh$,^nl$"
+        );
         let automatic =
             advanced_subtitle_args(&["es".into()], "only", true, crate::model::Format::Source)
                 .unwrap();

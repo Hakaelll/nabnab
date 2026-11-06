@@ -4,6 +4,8 @@ Aplicación local para Windows para descargar, organizar y transformar multimedi
 
 Los cambios de `main` corresponden a 0.2.0. El instalador nuevo se genera al compilar; este trabajo no publica una release automáticamente.
 
+La ampliación de [productividad local](docs/PRODUCTIVITY.md) añade preparación de lotes, ajustes y reglas, programación, fuentes de YouTube, colecciones inteligentes, subtítulos con búsqueda temporal y una paleta Ctrl+K. La guía incluye capturas y el alcance de las comprobaciones.
+
 ## Interfaz
 
 El acabado glass integra la navegación con el campo de caracteres original. Incluye preferencias para reducir movimiento y transparencias. Estas capturas muestran la interfaz con datos de prueba; los recorridos nativos y de plataformas se registran por separado.
