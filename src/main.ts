@@ -256,6 +256,7 @@ function renderCurrent(): void {
     updateNavigation();required('#field').hidden=page!=='home';required("#home-page").hidden=page!=="home";required("#page-content").hidden=page==='home';
     if(page==='home')renderHome();
     else {disposeGraphics?.();disposeGraphics=null;required("#page-content").innerHTML=page==='downloads'?downloadsView(snapshot,downloads,t):page==='library'?libraryView(snapshot,library,t):page==='tools'?toolsView(snapshot,tools,t):page==='platforms'?(platformModule==='torrent'?torrents.render():platformModule==='courses'?courses.render():platformModule==='telegram'?telegram.render():platformModule==='live'?live.render():platformModule==='exports'?sourceExports.render():platformModule==='files'?advancedFiles.render():platforms.render()):settingsView(snapshot,preferences,t,desktop);}
+    if(page==='platforms'&&platformModule!=='catalog')required('#page-content').insertAdjacentHTML('afterbegin',`<button type="button" class="button quiet" data-action="platform-back">${t('← Plataformas','← Platforms')}</button>`);
     if(page==='library'){
       const container=required('#page-content');
       const navigation=`<nav class="library-navigation filter-tabs" aria-label="${t('Vistas de Biblioteca','Library views')}">${[['files',t('Archivos','Files')],['collections',t('Colecciones','Collections')],['sources',t('Fuentes','Sources')],['later',t('Para después','For later')]].map(([section,label])=>`<button data-action="library-section" data-section="${section}" aria-current="${librarySection===section?'page':'false'}">${label}</button>`).join('')}</nav>`;
@@ -304,6 +305,11 @@ function navigate(next: Page): void {
   if(changed&&next==='tools')void mediaEdits.load();
   if(changed)enterSurface(required(next==='home'?'#home-content':'#page-content'));
   if(next==='settings')void loadSettingsSection().catch(showError);
+}
+function showPlatformsCatalog():void{
+  if(page==='platforms'&&platformModule==='courses')courses.savePlayback();
+  platformModule='catalog';platforms.showCatalog();navigate('platforms');
+  required('#main').scrollTop=0;required<HTMLInputElement>('#platform-search').focus({preventScroll:true});
 }
 function scheduleJobsRender(): void {
   updateActivity();if(page!=='downloads'||pendingRender)return;
@@ -408,7 +414,7 @@ matchMedia("(prefers-reduced-motion: reduce)").addEventListener("change",()=>can
 document.addEventListener("click",event=>{
   const target=event.target instanceof Element?event.target.closest<HTMLButtonElement>('button'):null;
   if(!target||target.disabled)return;const destination=target.dataset.page;
-  if(isPage(destination)){navigate(destination);[...document.querySelectorAll<HTMLButtonElement>('.nav-item')].find(button=>button.dataset.page===destination)?.focus({preventScroll:true});return;}const action=target.dataset.action;
+  if(isPage(destination)){if(destination==='platforms')showPlatformsCatalog();else navigate(destination);[...document.querySelectorAll<HTMLButtonElement>('.nav-item')].find(button=>button.dataset.page===destination)?.focus({preventScroll:true});return;}const action=target.dataset.action;
   if(action)void handleAction(action,target).catch(showError);
 });
 async function handleAction(action: string, button: HTMLButtonElement): Promise<void> {
@@ -424,7 +430,7 @@ async function handleAction(action: string, button: HTMLButtonElement): Promise<
   if(action==='open-courses'){platformModule='courses';navigate('platforms');await courses.open('',id);renderCurrent();return;}
   if(action==='open-podcasts'){librarySection='sources';navigate('library');sources.openAdd('', 'podcast');return;}
   if(action==='open-torrents'||action==='open-torrent'){platformModule='torrent';navigate('platforms');await torrents.load();renderCurrent();return;}
-  if(action==='platform-back'&&platformModule!=='catalog'){platformModule='catalog';renderCurrent();return;}
+  if(action==='platform-back'){showPlatformsCatalog();return;}
   if(await palettes.click(action)||await advancedFiles.handleClick(action)||await mediaEdits.click(action,button)||await sourceExports.handleClick(action)||await galleryExports.click(action)||await documents.click(action,button)||await telegram.handleClick(action)||await courses.handleClick(action,button)||await transcriptionManager.click(action,button)||await torrents.handleClick(action)||await platforms.handleClick(action,button)||await batches.handleClick(action,button)||await sources.handleClick(action,button)||await organization.handleClick(action,button)||await libraryFeatures.handleClick(button))return;
   switch(action){
     case 'open-library-collection':librarySection='files';library.collection=button.dataset.collection??'';library.offset=0;renderCurrent();break;
@@ -436,7 +442,6 @@ async function handleAction(action: string, button: HTMLButtonElement): Promise<
     case 'dismiss-message':notify("");break;
     case 'go-home':navigate('home');required<HTMLTextAreaElement>('#url').focus();break;
     case 'show-activity':downloads.filter='all';navigate('downloads');break;
-    case 'paste':{const value=await navigator.clipboard.readText();if(value.trim()){updateSourceInput(value);required<HTMLTextAreaElement>('#url').focus();}break;}
     case 'url-file':await importUrlFile();break;
     case 'queue-download':await queueDownload();break;
     case 'choose-folder':await chooseFolder();break;

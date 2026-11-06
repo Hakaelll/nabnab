@@ -207,7 +207,6 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 24px 0; }
 .source-actions { display: flex; align-items: center; gap: 4px; margin: 6px 0 16px; }
 .source-actions .button { min-height: 32px; padding: 6px 10px; font-size: 11px; }
 .has-media .source-actions { margin: 4px 0 4px; }
-.source-actions > span { color: var(--auxiliary); font-size: 11px; margin-left: auto; }
 .button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 38px; padding: 8px 13px; border: 1px solid var(--edge); border-radius: 8px; font-size: 13px; font-weight: 500; white-space: nowrap; }
 .button svg { width: 17px; height: 17px; }
 .button.primary { background: var(--action); color: #101114; border-color: #ffffff40; box-shadow: inset 0 1px 0 #fff8, 0 1px 2px #0005; }

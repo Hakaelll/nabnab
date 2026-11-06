@@ -36,6 +36,9 @@ const setup = `
     if(cmd==="save_settings"){state.settings=args.settings;return copy(state);}
     if(cmd==="engine_status")return ["yt-dlp","FFmpeg","ffprobe","Deno"].map(name=>({name,version:"fixture",path:"C:/Engines/"+name,size:1024,status:"installed",source:"UI fixture"}));
     if(cmd==="sessions_status")return [];
+    if(cmd==="optional_components"||cmd==="list_courses")return [];
+    if(cmd==="telegram_status")return {installed:false,accounts:[]};
+    if(cmd==="torrent_status")return {installed:false,enabled:false,version:null};
     if(cmd==="bridge_status")return {enabled:false,clients:[],port:47883};
     if(cmd==="cache_status"||cmd==="clear_cache")return {bytes:0,files:0};
     if(cmd==="thumbnail")return "data:image/svg+xml,"+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="160" height="90"><rect width="160" height="90" fill="#22252b"/></svg>');
@@ -120,8 +123,41 @@ async function captureWalkthrough() {
   await page.emulateMedia({forcedColors:'active'});assert.equal(await page.locator('#field').evaluate(element=>getComputedStyle(element).display),'none');assert.equal(await page.locator('.url-control').evaluate(element=>getComputedStyle(element).backdropFilter),'none');
   await page.close();
 }
+async function checkPlatformNavigation(){
+  const page=await browser.newPage({viewport:{width:1180,height:780}});
+  const errors=[];page.on('pageerror',error=>errors.push(error.message));
+  await mockPage(page);await page.goto(base);await page.locator('#url').waitFor();
+  await page.locator('[data-page="platforms"]').click();
+  for(const id of ['http','telegram','udemy','torrent','youtube','pinterest']){
+    await page.locator(`.platform-row[data-id="${id}"]`).click();
+    assert.equal(await page.locator('[data-action="platform-back"]').count(),1,`${id} needs one route back to the catalog`);
+    await page.locator('[data-action="platform-back"]').click();
+    await page.locator('#platform-search').waitFor();
+    assert.equal(await page.locator('#platform-search').evaluate(element=>document.activeElement===element),true);
+  }
+  for(const action of ['open-live','open-source-exports']){
+    await page.locator(`[data-action="${action}"]`).click();
+    assert.equal(await page.locator('[data-action="platform-back"]').count(),1,`${action} needs one return control`);
+    await page.locator('[data-action="platform-back"]').click();
+    await page.locator('#platform-search').waitFor();
+  }
+  await page.locator('#platform-search').fill('YouTube');
+  await page.locator('.platform-row[data-id="youtube"]').click();
+  await page.locator('[data-page="platforms"]').click();
+  assert.equal(await page.locator('#platform-search').inputValue(),'YouTube');
+  await page.locator('[data-page="home"]').click();
+  assert.equal(await page.locator('[data-action="paste"]').count(),0);
+  assert.equal(await page.locator('.source-actions').innerText(),'Importar');
+  assert.equal(await page.locator('.source-actions button').count(),1);
+  await page.screenshot({path:'artifacts/nabnab/home-actions-refined.png'});
+  await page.locator('[data-action="url-file"]').click();
+  assert.ok(await page.evaluate(()=>window.fixture.calls.some(call=>call.cmd==='import_url_file')));
+  assert.deepEqual(errors,[]);
+  await page.close();
+}
 try {
-  if(process.env.NABNAB_UI_VIDEO_ONLY==='1'){await captureWalkthrough();console.log('Glass walkthrough and pointer/keyboard/forced-colors checks passed.');}
+  if(process.env.NABNAB_UI_NAV_ONLY==='1'){await checkPlatformNavigation();console.log('Platform return routes, catalog reset and simplified import action passed.');}
+  else if(process.env.NABNAB_UI_VIDEO_ONLY==='1'){await captureWalkthrough();console.log('Glass walkthrough and pointer/keyboard/forced-colors checks passed.');}
   else {
   const plain=await browser.newPage({viewport:{width:1180,height:780}});
   await plain.goto(base);await plain.locator('#url').waitFor();
