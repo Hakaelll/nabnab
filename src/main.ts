@@ -76,7 +76,7 @@ const telegram=createTelegramController({command,refresh,render:renderCurrent,no
 const documents=createDocuments({command,snapshot:()=>snapshot,refresh,render:renderLibraryModules,t});
 const galleryExports=createGalleryExports({command,selected:()=>[...library.selected],refresh,notify,t});
 const courses=createCoursesController({command,getSnapshot:()=>snapshot,refresh,render:renderCurrent,notify,showError,t,openLibrary:id=>{librarySection='files';library.detailId=id;navigate('library');if(snapshot.library.some(i=>i.id===id&&i.kind==='document'))void documents.open(id);}});
-const platforms=createPlatformsController({command,snapshot:()=>snapshot,refresh,notify,showError,render:renderCurrent,t,openLink:url=>{navigate('home');updateSourceInput(url);void inspect().catch(showError);}});
+const platforms=createPlatformsController({command,snapshot:()=>snapshot,refresh,notify,showError,render:renderCurrent,t,openLink:url=>{navigate('home');updateSourceInput(url);clearTimeout(debounce);void inspect(true).catch(showError);}});
 const sources=createSourcesController({command,getSnapshot:()=>snapshot,refresh,notify,showError,t,render:renderCurrent});
 const batches=createBatchController({command,snapshot:()=>snapshot,refresh,notify,showError,t,render:renderCurrent,onFollowSource:url=>{librarySection='sources';sources.openAdd(url);navigate('library');}});
 const libraryFeatures=createLibraryFeatures({command,snapshot:()=>snapshot,refresh,notify,showError,t,render:()=>{renderCurrent();renderInspector(true);libraryFeatures.bind();},inspect:(id)=>{librarySection='files';library.detailId=id;navigate('library');}});
@@ -324,7 +324,7 @@ function updateSourceInput(value: string, render=true): void {
   if(desktop&&enginesReady&&!parsed.invalid&&parsed.urls.length===1)debounce=setTimeout(()=>void inspect(),500);
   else if(parsed.urls.length>1&&!render)renderHome();
 }
-async function inspect(): Promise<void> {
+async function inspect(skipGallery=false): Promise<void> {
   clearTimeout(debounce);const parsed=sourceUrls(home.input);
   const inputUrl=parsed.urls[0]?new URL(parsed.urls[0]):null;
   if(inputUrl&&parsed.urls.length===1){const host=inputUrl.hostname;
@@ -335,7 +335,7 @@ async function inspect(): Promise<void> {
   if(batches.active||parsed.urls.length>1||parsed.invalid||inputUrl&&(/youtube\.com$/.test(inputUrl.hostname))&&(inputUrl.pathname.startsWith('/playlist')||inputUrl.pathname.startsWith('/@')||inputUrl.pathname.startsWith('/channel/'))){await batches.prepare(home.input);return;}
   if(parsed.invalid||parsed.urls.length===0){notify(t("Pega uno o varios enlaces HTTP o HTTPS completos.", "Paste one or more complete HTTP or HTTPS links."),"error");return;}
   if(parsed.truncated){notify(t("Divide el lote en grupos de hasta 100 enlaces.", "Split the batch into groups of up to 100 links."),"error");return;}
-  if(parsed.urls.length===1&&["pinterest.com","pin.it","artstation.com","deviantart.com","pixiv.net","flickr.com","tumblr.com","imgur.com"].some(host=>{try{const actual=new URL(parsed.urls[0]).hostname;return actual===host||actual.endsWith('.'+host);}catch{return false;}})&&platforms.openGallery(parsed.urls[0])){navigate('platforms');return;}
+  if(!skipGallery&&parsed.urls.length===1&&platforms.openGallery(parsed.urls[0])){platformModule='catalog';navigate('platforms');return;}
   if(parsed.urls.length>1){home.selectedUrls=new Set(parsed.urls);renderHome();return;}
   if(home.loading&&analysisUrl===parsed.urls[0])return;
   if(!enginesReady){notify(t("Prepara los motores en Ajustes para analizar enlaces.", "Prepare engines in Settings to analyze links."));return;}

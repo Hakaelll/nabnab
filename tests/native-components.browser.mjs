@@ -33,6 +33,15 @@ try{
   browser=await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
   page=await wait(()=>browser.contexts()[0]?.pages().find(page=>page.url().includes(':1420')));
   await wait(async()=>{try{return (await rpc('get_snapshot')).settings.folder;}catch{return false;}});
+  for(const url of ['https://www.instagram.com/p/native-fixture/','https://x.com/native/status/123456','https://www.reddit.com/gallery/nativefixture','https://bsky.app/profile/native.example/post/nativefixture']){
+    await page.locator('[data-page="home"]').click();
+    await page.locator('#url').fill(url);
+    await page.locator('#load').click();
+    await page.locator('#platform-url').waitFor();
+    assert.equal(await page.locator('#platform-url').inputValue(),url);
+    assert.equal(await page.locator('[data-action="gallery-video"]').count(),1);
+    assert.deepEqual((await rpc('get_snapshot')).jobs,[]);
+  }
   const before=(await rpc('optional_components')).find(item=>item.id==='telegram');
   assert.equal(before.installed,false);assert.equal(before.available,true);
   assert.equal(before.version,'1.8.69');assert.equal(before.size,13998492);

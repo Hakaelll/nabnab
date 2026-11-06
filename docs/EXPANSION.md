@@ -68,3 +68,5 @@ En Inicio se mantiene el flujo de pegar y descargar. Plataformas permite elegir 
 Las herramientas y sus componentes se detallan en [TOOLS.md](TOOLS.md), [DOCUMENTS.md](DOCUMENTS.md), [TRANSCRIPTION.md](TRANSCRIPTION.md), [MEDIA-EDITS.md](MEDIA-EDITS.md), [CAPTION-EDITOR.md](CAPTION-EDITOR.md), [GALLERY-EXPORTS.md](GALLERY-EXPORTS.md), [PALETTES.md](PALETTES.md) y [AUDIO-PREVIEW.md](AUDIO-PREVIEW.md).
 
 El componente Telegram se probó además desde Ajustes en una instancia nativa con datos aislados: instalación, inventario, estado instalado y desactivación; sin cuentas ni trabajos añadidos. Las pruebas locales cargaron realmente TDLib 1.8.69 y verificaron el rechazo de un paquete alterado. Captura: [Componente Telegram](telegram-components.png).
+
+Pegar publicaciones de Instagram, X, Reddit y Bluesky en Inicio se comprobó en la aplicación nativa: abre el formulario de selección de adjuntos, conserva la URL y no añade trabajos ni consulta el origen hasta explorar. El selector de redes conserva una acción explícita «Solo vídeo en Inicio» para el flujo existente de yt-dlp.
