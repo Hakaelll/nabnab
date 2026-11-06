@@ -2,15 +2,17 @@
 
 Aplicación local para Windows para descargar, organizar y transformar multimedia. Tauri 2, Rust y TypeScript. Conserva el emblema y el campo de caracteres de YTNabber.
 
-Los cambios de `main` corresponden a 0.2.0. El instalador nuevo se genera al compilar; este trabajo no publica una release automáticamente.
+[Descargar nabnab 0.2.0 para Windows x64](https://github.com/Hakaelll/nabnab/releases/tag/v0.2.0). La actualización conserva la carpeta y los datos de la instalación anterior de ytnabber. WebView2 es necesario; el instalador no tiene firma digital.
 
 La ampliación de [productividad local](docs/PRODUCTIVITY.md) añade preparación de lotes, ajustes y reglas, programación, fuentes de YouTube, colecciones inteligentes, subtítulos con búsqueda temporal y una paleta Ctrl+K. La guía incluye capturas y el alcance de las comprobaciones.
+
+La [ampliación de fuentes y herramientas](docs/EXPANSION.md) añade selección de galerías y adjuntos, RSS, archivos avanzados y BitTorrent, Telegram opcional, cursos y herramientas locales de documentos, imágenes, vídeo, audio y transcripción. La guía distingue capacidades implementadas, componentes necesarios y recorridos pendientes con cuentas autorizadas.
 
 ## Interfaz
 
 El acabado glass integra la navegación con el campo de caracteres original. Incluye preferencias para reducir movimiento y transparencias. Estas capturas muestran la interfaz con datos de prueba; los recorridos nativos y de plataformas se registran por separado.
 
-![Inicio de nabnab](docs/nabnab-after.png)
+![Inicio de nabnab](docs/interface-monochrome.png)
 
 ![Previsualización y opciones](docs/nabnab-preview.png)
 
