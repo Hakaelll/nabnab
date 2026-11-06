@@ -19,5 +19,5 @@ gallery-dl 1.31.10 is an optional standalone component from https://github.com/m
 
 The Rust RSS parser uses quick-xml under MIT and the local Telegram QR generator uses qrcodegen under MIT. Course API behavior was studied from OpenSelena/omniget as a reference; no source code, assets or credentials were copied.
 
-MuPDF 1.28.5 is an optional standalone component from https://mupdf.com/releases, distributed under AGPL-3.0-or-later; its archive license files are retained. TDLib is licensed under the Boost Software License 1.0. No TDLib binary is bundled or automatically downloaded: Telegram requires a compatible, separately provisioned TDLib component. See docs/TELEGRAM.md for the supported versions and deployment limitation.
+MuPDF 1.28.5 is an optional standalone component from https://mupdf.com/releases, distributed under AGPL-3.0-or-later; its archive license files are retained. TDLib 1.8.69 is optional, provided by the ForNeVeR tdlib.native.win-x64 NuGet package, with its OpenSSL and zlib DLLs under BSL-1.0, Apache-2.0 and Zlib. It is downloaded only by an explicit component installation. See licenses/tdlib-native.txt for notices and source/build materials, and docs/TELEGRAM.md for runtime requirements. The package installs native DLLs without a .NET runtime.
 

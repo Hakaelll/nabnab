@@ -23,7 +23,7 @@ La interfaz conserva la identidad monocromática. La navegación llega al borde 
 
 ## Evidencia
 
-- TypeScript, build Vite y comprobación de identidad correctos; 27 pruebas JavaScript y 224 pruebas Rust correctas. Otras 23 pruebas nativas requieren motores o servicios y están marcadas como ignoradas por defecto.
+- TypeScript, build Vite y comprobación de identidad correctos; 27 pruebas JavaScript y 224 pruebas Rust correctas. Otras 25 pruebas nativas requieren motores o servicios y están marcadas como ignoradas por defecto.
 - Se ejecutaron expresamente las pruebas con archivos sintéticos reales de herramientas FFmpeg (incluidos WebP estático y animado), incrustación real de subtítulos con libass, PDF con MuPDF, galería HTML/hoja de contacto, unión y audio de vídeo, paletas, preescucha y descarga HTTP con aria2. Los originales se conservaron.
 - El recorrido de navegador con fixtures IPC pasó a 1280×800, 1180×780 y 900×620, y con escalados 125 % y 150 %. Incluye navegación, formularios, biblioteca de 1000 elementos, foco, reducción de movimiento/transparencia y estados de descarga. No certifica servicios externos.
 - La barra lateral y el easter egg se comprobaron además en la interfaz renderizada con puntero y teclado. Capturas actuales: [Inicio](interface-monochrome.png), [Multicolor](interface-color-egg.png), [Herramientas](interface-tools-refined.png). Las capturas expansion-* conservan el primer bloque como referencia anterior.
@@ -32,7 +32,7 @@ La interfaz conserva la identidad monocromática. La navegación llega al borde 
 
 No se han iniciado sesiones, instalado componentes en el sistema ni descargado archivos personales. Los motores utilizados en las pruebas están dentro del repositorio ignorado y se verificaron contra sus paquetes oficiales. No se declara verificado un proveedor que no se haya utilizado con una cuenta real.
 
-Telegram contiene el cliente y sus controles de permisos, pero necesita una DLL TDLib compatible suministrada por separado; no se ofrece una descarga automática sin un paquete verificado. Las cuentas de cursos, Pixiv y Mastodon necesitan autorización propia y validación en vivo. Los directos no se han grabado contra un servicio real. La transcripción necesita un modelo multilingüe opcional, cuya descarga e inferencia no se han ejecutado durante estas pruebas. Los extractores externos pueden cambiar o rechazar fuentes; las limitaciones aparecen como errores, nunca como resultados fabricados.
+Telegram ofrece TDLib como componente opcional verificado de NuGet, con instalación atómica y prueba local del esquema; la autorización de una cuenta sigue pendiente. Las cuentas de cursos, Pixiv y Mastodon necesitan autorización propia y validación en vivo. Los directos no se han grabado contra un servicio real. La transcripción se probó con Tiny multilingüe y una frase sintética en español, incluido su paso por la cola y búsqueda en Biblioteca; no certifica precisión general. Los extractores externos pueden cambiar o rechazar fuentes; las limitaciones aparecen como errores, nunca como resultados fabricados.
 
 Consulta los documentos de cada módulo en este directorio para los formatos, recorridos, permisos y límites concretos. La compilación de FFmpeg comprueba las capacidades requeridas por su receta; una instalación antigua puede necesitar actualizar ese motor para WebP e incrustación de subtítulos.
 
@@ -61,8 +61,10 @@ En Inicio se mantiene el flujo de pegar y descargar. Plataformas permite elegir 
 | RSS | Enclosures de episodios, OPML y M3U | Feeds privados protegidos; importación no descarga episodios por sí sola |
 | HTTP/HTTPS | Archivo original, rangos, reanudación y SHA-256 | aria2 opcional; URL pública validada, sin compartir cookies entre orígenes |
 | BitTorrent | Magnet v1 y archivos torrent; selección de archivos | aria2 opcional y consentimiento P2P; sin seeding posterior por defecto |
-| Telegram | Adjuntos de chats/mensajes autorizados | TDLib compatible y cuenta propia; no contenido protegido ni efímero; pendiente prueba real |
+| Telegram | Adjuntos de chats/mensajes autorizados | TDLib opcional de NuGet y cuenta propia; no contenido protegido ni efímero; pendiente prueba de cuenta real |
 | Udemy | Estructura y materiales marcados descargables | Sesión propia, solo consultas; no matrícula automática ni DRM |
 | Hotmart, Kiwify | Lecciones y adjuntos explícitamente descargables | Adaptadores separados, token de alumno propio; un stream no implica permiso de descarga |
 
 Las herramientas y sus componentes se detallan en [TOOLS.md](TOOLS.md), [DOCUMENTS.md](DOCUMENTS.md), [TRANSCRIPTION.md](TRANSCRIPTION.md), [MEDIA-EDITS.md](MEDIA-EDITS.md), [CAPTION-EDITOR.md](CAPTION-EDITOR.md), [GALLERY-EXPORTS.md](GALLERY-EXPORTS.md), [PALETTES.md](PALETTES.md) y [AUDIO-PREVIEW.md](AUDIO-PREVIEW.md).
+
+El componente Telegram se probó además desde Ajustes en una instancia nativa con datos aislados: instalación, inventario, estado instalado y desactivación; sin cuentas ni trabajos añadidos. Las pruebas locales cargaron realmente TDLib 1.8.69 y verificaron el rechazo de un paquete alterado. Captura: [Componente Telegram](telegram-components.png).

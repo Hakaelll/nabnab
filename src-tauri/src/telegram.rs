@@ -1027,11 +1027,7 @@ fn dll_path(app: &AppHandle) -> Result<PathBuf, String> {
         }
         return Ok(path);
     }
-    let path = crate::components::root(app)?.join("tdjson.dll");
-    if !path.is_file() {
-        return Err("Telegram requires a TDLib 1.8.0 or 1.8.69 JSON DLL with the documented API schema. No verified distributable is bundled; configure a legitimate development build as documented in TELEGRAM.md.".into());
-    }
-    crate::library::authorized_path(&path)
+    crate::component_archives::verify(&crate::components::root(app)?, "telegram")
 }
 
 #[cfg(windows)]
@@ -1078,6 +1074,12 @@ extern "system" {
 #[cfg(windows)]
 impl Native {
     fn open(dll: &Path, directory: &Path, config: Configuration) -> Result<Self, String> {
+        let mut native=Self::unconfigured(dll)?;
+        native.encryption_key=config.encryption_key.clone();
+        native.send(&initialization(native.schema,directory,&config))?;
+        Ok(native)
+    }
+    fn unconfigured(dll: &Path) -> Result<Self, String> {
         use std::{ffi::CString, os::windows::ffi::OsStrExt};
         let path: Vec<u16> = dll.as_os_str().encode_wide().chain(Some(0)).collect();
         let library = unsafe { LoadLibraryExW(path.as_ptr(), std::ptr::null_mut(), 0x100 | 0x800) };
@@ -1132,15 +1134,13 @@ impl Native {
                 receive,
                 destroy,
                 schema: TdSchema::Legacy180,
-                encryption_key: config.encryption_key.clone(),
+                encryption_key: String::new(),
                 sequence: 0,
                 authorization: Authorization::Initializing,
             };
             let version = checked(native.request(json!({"@type":"getOption","name":"version"}))?)?;
             let schema = TdSchema::parse(version["value"].as_str().ok_or("TDLib did not return its API version. Initialization was stopped before authorization.")?)?;
             native.schema = schema;
-            let parameters = initialization(schema, directory, &config);
-            native.send(&parameters)?;
             Ok(native)
         })();
         loaded
@@ -1277,6 +1277,15 @@ pub fn shutdown() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "Requires NABNAB_TEST_TDLIB_DLL from the pinned package; checks version locally without account initialization."]
+    fn real_tdlib_reports_pinned_schema_without_credentials() {
+        let path=std::env::var_os("NABNAB_TEST_TDLIB_DLL").map(PathBuf::from).expect("Set pinned TDLib path");
+        let native=Native::unconfigured(&path).unwrap();
+        assert_eq!(native.schema,TdSchema::Current1869);
+        assert!(native.encryption_key.is_empty());
+    }
     fn message() -> Value {
         json!({"id":1234567890123i64,"chat_id":-1000000012345i64,"date":1700000000,"can_be_saved":true,"content":{"@type":"messageVideo","caption":{"text":"A permitted clip"},"video":{"file_name":"clip.mp4","video":{"id":41,"size":512,"remote":{"unique_id":"remote-stable"}}}}})
     }

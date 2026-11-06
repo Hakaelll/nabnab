@@ -39,6 +39,7 @@ pub fn executable(app: &AppHandle, id: &str) -> Result<PathBuf, String> {
         "torrent" | "files" => "aria2c.exe",
         "transcription" => "whisper-cli.exe",
         "documents" => "mutool.exe",
+        "telegram" => "tdjson.dll",
         _ => return Err("Unknown component.".into()),
     };
     let root = root(app)?;
@@ -79,8 +80,7 @@ pub fn optional_components(app: AppHandle) -> Result<Vec<Component>, String> {
         available: cfg!(target_os = "windows") && cfg!(target_arch = "x86_64"),
         note: None,
     }];
-    entries.extend(crate::component_archives::PACKAGES.iter().map(|p|{let id=if p.id=="torrent"{"files"}else{p.id};Component{id,name:p.name,version:p.version,size:p.bytes as u64,license:p.license,source:p.url,installed:crate::component_archives::installed(&root,p.id),enabled:root.join(format!("{id}.enabled")).exists(),available:cfg!(target_os="windows")&&cfg!(target_arch="x86_64"),note:if p.id=="torrent"{Some("Instalar Archivos no activa BitTorrent; P2P requiere consentimiento en su selector.")}else{None}}}));
-    entries.push(Component{id:"telegram",name:"Telegram · TDLib",version:"1.8.0 / 1.8.69",size:0,license:"BSL-1.0",source:"https://github.com/tdlib/td",installed:crate::telegram::telegram_status(app.clone()).is_ok_and(|s|s.installed),enabled:root.join("telegram.enabled").exists(),available:false,note:Some("Necesita un binario TDLib verificado y credenciales propias. Consulta docs/TELEGRAM.md; no hay un paquete automático certificado.")});
+    entries.extend(crate::component_archives::PACKAGES.iter().map(|p|{let id=if p.id=="torrent"{"files"}else{p.id};Component{id,name:p.name,version:p.version,size:p.bytes as u64,license:p.license,source:p.url,installed:crate::component_archives::installed(&root,p.id),enabled:root.join(format!("{id}.enabled")).exists(),available:cfg!(target_os="windows")&&cfg!(target_arch="x86_64"),note:if p.id=="torrent"{Some("Instalar Archivos no activa BitTorrent; P2P requiere consentimiento en su selector.")}else if p.id=="telegram"{Some("Paquete tdlib.native de ForNeVeR en NuGet. Requiere Microsoft Visual C++ Redistributable 2019 o posterior; no inicia sesión.")}else{None}}}));
     Ok(entries)
 }
 #[tauri::command]
@@ -153,10 +153,10 @@ fn idle(state:&crate::AppState,id:&str)->Result<(),String>{
 
 #[tauri::command]
 pub async fn remove_component(app:AppHandle,state:tauri::State<'_,Arc<crate::AppState>>,id:String)->Result<bool,String>{
-    if !matches!(id.as_str(),"gallery"|"files"|"torrent"|"transcription"|"documents"){return Err("This component cannot be removed by the package manager.".into());}
+    if !matches!(id.as_str(),"gallery"|"files"|"torrent"|"transcription"|"documents"|"telegram"){return Err("This component cannot be removed by the package manager.".into());}
     idle(&state,&id)?;
     let dialog=app.clone();let approved=tauri::async_runtime::spawn_blocking(move||dialog.dialog().message("Remove this optional engine? Downloaded files, models and account sessions will be kept.").title("nabnab · Remove component").buttons(MessageDialogButtons::OkCancel).blocking_show()).await.map_err(|_|"The component confirmation could not be shown.")?;
-    if !approved{return Ok(false);}idle(&state,&id)?;
+    if !approved{return Ok(false);}idle(&state,&id)?;if id=="telegram"{crate::telegram::shutdown();}
     let root=root(&app)?;
     if id=="gallery"{let file=root.join("gallery-dl.exe");if file.exists(){let file=crate::library::authorized_path(&file)?;fs::remove_file(file).map_err(|e|e.to_string())?;}}else{crate::component_archives::remove(&root,if id=="files"{"torrent"}else{&id})?;}
     for marker in [format!("{id}.enabled"),if id=="files"{"torrent.enabled".into()}else{format!("{id}.enabled")}] {let path=root.join(marker);if path.exists(){fs::remove_file(path).map_err(|e|e.to_string())?;}}
