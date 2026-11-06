@@ -74,6 +74,12 @@ try{
     assert.equal(await page.locator(".tool-inputs li").count(),1);
     assert.equal(await page.locator("#tool-form button[type=submit]").isEnabled(),true);
     checks.push("Tool navigation, library input selection and options remain connected.");
+    for(const module of ['imageAssets','fileOrganization','portable']){
+      await page.locator('[data-action="tool-module"][data-id="'+module+'"]').click();
+      const heading=page.locator('.tool-workspace h2').first();
+      assert.ok(await heading.evaluate(element=>Number.parseFloat(getComputedStyle(element).fontSize))>=18,'Module titles must keep their visual hierarchy.');
+    }
+    checks.push("Specialized tool titles preserve their hierarchy in the actual application shell.");
     await page.locator('[data-page="platforms"]').click();
     await page.locator("[data-action='platform-group'][data-id='files']").click();
     assert.equal(await page.locator(".platform-row[data-id='github']").count(),1);

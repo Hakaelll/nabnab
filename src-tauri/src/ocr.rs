@@ -624,7 +624,7 @@ pub async fn execute(
     Ok(OcrResult { file, index })
 }
 
-fn validate_index(index: &OcrDocument) -> Result<(), String> {
+pub(crate) fn validate_index(index: &OcrDocument) -> Result<(), String> {
     if index.schema_version != 1
         || index.source_fingerprint.len() != 64
         || !index

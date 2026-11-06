@@ -1,0 +1,44 @@
+{
+  "scope": "Generated local fixtures, real native IPC/engines/queue/filesystem; no provider or account access",
+  "checks": [
+    {
+      "case": "Exact SHA-256 vs perceptual similarity, review collection and queued report",
+      "passed": true
+    },
+    {
+      "case": "Overlap suggestion and corrected stitch, preview binding, atlas JSON and transparent icon package",
+      "passed": true,
+      "stitchDimensions": [
+        96,
+        140
+      ],
+      "atlasFiles": [
+        "atlas.png",
+        "atlas.json"
+      ],
+      "iconFiles": [
+        "icon-16.png",
+        "icon-32.png",
+        "icon-256.png",
+        "favicon.ico",
+        "manifest.json"
+      ]
+    },
+    {
+      "case": "Rename collision refusal, durable queued rename, preserved stable ID and undo",
+      "passed": true,
+      "externalCollisionPreserved": true
+    },
+    {
+      "case": "Portable ZIP manifest, duplicate preview and queued idempotent library import",
+      "passed": true,
+      "files": 4,
+      "duplicateBytes": 102880
+    },
+    {
+      "case": "Original hashes unchanged and rendered native workspaces",
+      "passed": true
+    }
+  ],
+  "errors": []
+}

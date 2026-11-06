@@ -50,6 +50,12 @@ fn extension_kind(path: &Path) -> Option<&'static str> {
     }
 }
 
+pub fn can_open(item: &LibraryItem) -> bool {
+    item.kind != "file" && (extension_kind(&item.path).is_some()
+        || (item.kind == "article" && item.details.web_archive_ref.is_some()
+            && item.path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("html"))))
+}
+
 fn is_link(metadata: &fs::Metadata) -> bool {
     if metadata.file_type().is_symlink() {
         return true;
@@ -395,6 +401,19 @@ pub fn locate(repository: &mut Repository, id: &str, path: &Path) -> Result<(), 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn renamed_documents_cannot_open_executables_or_shell_shortcuts() {
+        let root = directory();
+        let file = root.join("reading.txt");
+        fs::write(&file, b"local document").unwrap();
+        let mut item = index(&file, None, None, None).unwrap();
+        assert!(can_open(&item));
+        for extension in ["exe", "cmd", "ps1", "lnk", "url", "cpl", "hta"] {
+            item.path = root.join(format!("reading.{extension}"));
+            assert!(!can_open(&item), "The actual extension must guard system-open.");
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
     #[test]
     fn subtitle_files_index_real_timestamps_and_removal_retires_their_search_entries() {
         let root = directory();

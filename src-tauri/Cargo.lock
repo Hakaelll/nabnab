@@ -1863,6 +1863,7 @@ dependencies = [
  "httpdate",
  "qrcodegen",
  "quick-xml",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",

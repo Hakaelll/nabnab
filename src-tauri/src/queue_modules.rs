@@ -50,6 +50,58 @@ pub(super) async fn run(app:&AppHandle,state:&Arc<AppState>,job:&Job,staging:&Pa
     let handle=app.clone();let shared=state.clone();let id=job.id.clone();let run_id=job.run_id;
     let emit=move|update|progress(&handle,&shared,&id,run_id,update);
     let output=match &job.source{
+        Source::ImageAssets {library_ids,options,input_hashes}=>{
+            let (_,library)=crate::file_operations::context(state)?;
+            let inputs=crate::file_operations::selected(&library,library_ids,256)?;
+            if inputs.len()!=input_hashes.len(){return Err("The image preview is incomplete. Review it again.".into());}
+            for (input,expected) in inputs.iter().zip(input_hashes){if &digest(input.path.clone(),cancel.clone()).await?!=expected{return Err("An original image changed after its preview. Review it again.".into());}}
+            let _permit=processing_permit(state,cancel.clone()).await?;phase(app,state,&job.id,run_id,JobState::Processing)?;
+            let file=crate::image_assets::execute(&crate::dependencies::engine_root(app)?,&inputs,staging,options,cancel.clone(),run_id,emit.clone()).await?;
+            for (input,expected) in inputs.iter().zip(input_hashes){if &digest(input.path.clone(),cancel.clone()).await?!=expected{return Err("An image changed during production. The proposed output was not published; review a new preview.".into());}}
+            Some((file,None,library_ids.first().cloned()))
+        },
+        Source::FileAnalysis {library_ids,options}=>{
+            let (_,library)=crate::file_operations::context(state)?;
+            let _permit=processing_permit(state,cancel.clone()).await?;phase(app,state,&job.id,run_id,JobState::Processing)?;
+            let ffmpeg=if matches!(options,crate::file_organization::AnalyzeOptions::Similar {..}){crate::dependencies::engine_root(app)?.join("ffmpeg.exe")}else{PathBuf::new()};
+            let analysis=crate::file_organization::analyze(&ffmpeg,staging,&library,library_ids,options,cancel.clone(),run_id,emit.clone()).await?;
+            let file=staging.join(format!("file-analysis-{run_id}.json"));
+            write_report(&file,&analysis)?;
+            Some((file,None,None))
+        },
+        Source::FileRename {..}|Source::FileUndo {..}=>{
+            let (operation_id,undo)=match &job.source{Source::FileRename {plan_id}=>(plan_id.clone(),false),Source::FileUndo {operation_id}=>(operation_id.clone(),true),_=>unreachable!()};
+            let (root,library)=crate::file_operations::context(state)?;
+            phase(app,state,&job.id,run_id,JobState::Processing)?;
+            let token=cancel.clone();let updates=emit.clone();
+            let verified=tokio::task::spawn_blocking(move||crate::file_organization::preflight_rename(&root,&library,&operation_id,undo,token,run_id,updates)).await.map_err(|e|e.to_string())??;
+            let shared=state.clone();let token=cancel.clone();
+            let journal=tokio::task::spawn_blocking(move||{
+                let mut guard=shared.repository.lock().unwrap();let repo=guard.as_mut().ok_or("Open nabnab first.")?;
+                if undo{crate::file_organization::undo_rename(repo,verified,token)}else{crate::file_organization::execute_rename(repo,verified,token)}
+            }).await.map_err(|e|e.to_string())??;
+            let file=staging.join(format!("rename-{}-{run_id}.json",journal.id));
+            write_report(&file,&journal)?;
+            if !journal.successful(){return Err(format!("The rename operation stopped with partial results. Open Review and rename → History to inspect, resume or undo operation {}. {}",journal.id,journal.error.as_deref().unwrap_or("Some files were preserved at their previous location.")));}
+            Some((file,None,None))
+        },
+        Source::PortableExport {library_ids,options}=>{
+            let (root,library)=crate::file_operations::context(state)?;
+            let inputs=crate::file_operations::selected(&library,library_ids,2000)?;
+            let _permit=processing_permit(state,cancel.clone()).await?;phase(app,state,&job.id,run_id,JobState::Processing)?;
+            Some((crate::portable_collections::execute_export(&root,&inputs,staging,options,cancel.clone(),run_id,emit.clone()).await?,None,None))
+        },
+        Source::PortableImport {plan_id}=>{
+            let (root,_)=crate::file_operations::context(state)?;
+            crate::portable_collections::validate_import_plan(&root,plan_id,&job.folder)?;
+            let _permit=processing_permit(state,cancel.clone()).await?;phase(app,state,&job.id,run_id,JobState::Processing)?;
+            let prepared=crate::portable_collections::execute_import(&root,plan_id,&job.folder,cancel.clone(),run_id,emit.clone()).await?;
+            if *cancel.borrow(){return Err(crate::engine::CANCELLED.into());}
+            {let mut guard=state.repository.lock().unwrap();let repo=guard.as_mut().ok_or("Open nabnab first.")?;crate::portable_collections::commit_import(repo,&prepared)?;}
+            let file=staging.join(format!("collection-import-{run_id}.json"));
+            fs::copy(&prepared.report_path,&file).map_err(|e|e.to_string())?;
+            Some((file,None,None))
+        },
         Source::DocumentEdit {library_id,options,input_hash}=>{
             let input={let guard=state.repository.lock().unwrap();guard.as_ref().ok_or("Open nabnab first.")?.data.library.iter().find(|i|&i.id==library_id).cloned().ok_or("The PDF is no longer in the library.")?};
             if &digest(input.path.clone(),cancel.clone()).await?!=input_hash{return Err("The original PDF changed after its preview. Review it again.".into());}
@@ -194,6 +246,12 @@ pub(super) async fn run(app:&AppHandle,state:&Arc<AppState>,job:&Job,staging:&Pa
     if let Source::CaptionEdit{library_id,track_id,..}=&job.source{let guard=state.repository.lock().unwrap();if let Some(track)=guard.as_ref().and_then(|repo|repo.data.library.iter().find(|i|&i.id==library_id)).and_then(|i|i.details.tracks.iter().find(|t|&t.id==track_id)){for generated in &mut item.details.tracks{generated.language=track.language.clone();}}}
     annotate_output(&mut item,job,staging);
     Ok(Some(publish_verified_output(state,job,staging,&file,item,cancel).await?))
+}
+
+fn write_report(path:&Path,value:&impl serde::Serialize)->Result<(),String>{
+    let bytes=serde_json::to_vec_pretty(value).map_err(|e|e.to_string())?;
+    let mut file=fs::OpenOptions::new().write(true).create_new(true).open(path).map_err(|e|e.to_string())?;
+    file.write_all(&bytes).and_then(|_|file.sync_all()).map_err(|e|e.to_string())
 }
 
 #[tauri::command]

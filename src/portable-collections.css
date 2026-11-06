@@ -1,0 +1,59 @@
+.portable-workspace { max-width: 1120px; margin-inline: auto; min-width: 0; }
+.portable-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+.portable-heading h2 { font-size: 22px; font-weight: 600; letter-spacing: -.3px; margin: 0 0 8px; }
+.portable-heading p { font-size: 13px; color: var(--muted); margin: 0; max-width: 720px; }
+.portable-format { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.portable-tabs { display: flex; gap: 24px; border-bottom: 1px solid var(--edge-quiet); margin: 24px 0; }
+.portable-tabs > button { background: none; border: 0; color: var(--muted); font: inherit; font-size: 13px; padding: 12px 0; cursor: pointer; }
+.portable-tabs > button[aria-current="page"] { color: var(--text); box-shadow: 0 1px var(--text); font-weight: 600; }
+.portable-tabs > button:focus-visible { outline: 2px solid var(--action); outline-offset: 4px; }
+.portable-tabs > button:disabled { opacity: .55; cursor: default; }
+.portable-export-layout { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 24px; align-items: start; }
+.portable-filters { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; }
+.portable-filters > label { display: grid; gap: 6px; font-size: 12px; color: var(--muted); }
+.portable-filters > .search-control { display: flex; flex: 1; min-width: 180px; }
+.portable-selection-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--muted); font-size: 12px; margin: 16px 0 8px; }
+.portable-file-picker { max-height: 360px; overflow: auto; border-block: 1px solid var(--edge-quiet); }
+.portable-file-picker > label { display: flex; flex-direction: row; align-items: center; gap: 12px; border-bottom: 1px solid var(--edge-quiet); padding: 12px 8px; font-size: 13px; cursor: pointer; }
+.portable-file-picker > label:last-child { border-bottom: 0; }
+.portable-file-picker input { margin: 0; flex: 0 0 auto; }
+.portable-file-picker > label > span { flex: 1; min-width: 0; }
+.portable-file-picker strong { font-weight: 500; display: block; overflow-wrap: anywhere; }
+.portable-file-picker small { display: block; font-size: 12px; color: var(--muted); }
+.portable-file-picker > label > small { flex: 0 0 auto; }
+.portable-options { border: 1px solid var(--edge-quiet); border-radius: 10px; padding: 16px; margin: 0; }
+.portable-options legend { font-size: 13px; font-weight: 600; padding-inline: 4px; }
+.portable-options > label { display: flex; flex-direction: row; gap: 8px; align-items: baseline; font-size: 13px; margin-top: 14px; }
+.portable-options input { flex: 0 0 auto; margin: 0; }
+.portable-options p { margin: 0; }
+.portable-options p:last-child { margin-top: 16px; }
+.portable-action-row { display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: 16px; margin-top: 20px; }
+.portable-action-row > span { max-width: 560px; }
+.portable-preview { margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--edge-quiet); }
+.portable-summary { display: flex; align-items: baseline; flex-wrap: wrap; gap: 16px 32px; }
+.portable-summary > div { display: grid; gap: 6px; }
+.portable-summary span { color: var(--muted); font-size: 12px; }
+.portable-summary strong { font-size: 20px; font-weight: 600; letter-spacing: -.3px; }
+.portable-reviewed-files { max-height: 340px; overflow: auto; border-block: 1px solid var(--edge-quiet); margin-top: 16px; }
+.portable-reviewed-files table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.portable-reviewed-files th { position: sticky; top: 0; background: var(--secondary); color: var(--muted); text-align: left; font-weight: 400; padding: 10px 12px; }
+.portable-reviewed-files td { padding: 12px; border-top: 1px solid var(--edge-quiet); vertical-align: top; color: var(--muted); }
+.portable-reviewed-files td:first-child { width: 44%; }
+.portable-reviewed-files strong { display: block; font-size: 13px; color: var(--text); font-weight: 500; overflow-wrap: anywhere; }
+.portable-reviewed-files small { display: block; margin-top: 4px; }
+.portable-warnings { margin: 16px 0 0; padding-left: 20px; color: var(--muted); font-size: 12px; }
+.portable-warnings li + li { margin-top: 8px; }
+.portable-confirm { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; background: var(--secondary); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-top: 20px; }
+.portable-confirm > div { min-width: 0; flex: 1; }
+.portable-confirm span, .portable-confirm small { display: block; font-size: 12px; color: var(--muted); }
+.portable-confirm strong { display: block; font-size: 12px; font-weight: 500; overflow-wrap: anywhere; margin-top: 6px; }
+.portable-confirm small { margin-top: 6px; }
+.portable-import-source { max-width: 760px; }
+.portable-import-source h3 { font-size: 16px; font-weight: 500; margin-bottom: 8px; }
+.portable-source-path { font-size: 12px; color: var(--muted); padding: 12px; border: 1px solid var(--edge-quiet); border-radius: 8px; overflow-wrap: anywhere; margin-block: 16px; }
+.portable-boundary { border-top: 1px solid var(--edge-quiet); padding-top: 16px; margin-top: 24px; font-size: 12px; color: var(--auxiliary); }
+.portable-error { color: var(--error); padding: 12px 16px; background: var(--secondary); border-left: 2px solid var(--error); overflow-wrap: anywhere; }
+.portable-progress { display: flex; gap: 12px; align-items: center; justify-content: space-between; font-size: 13px; color: var(--muted); margin-bottom: 16px; }
+@media (max-width: 1050px) { .portable-export-layout { grid-template-columns: minmax(0, 1fr); } .portable-options { display: flex; align-items: baseline; flex-wrap: wrap; gap: 12px 20px; } .portable-options > p { flex-basis: 100%; } .portable-options > label { margin: 0; } .portable-options p:last-child { margin: 0; } }
+@media (max-width: 700px) { .portable-heading { flex-wrap: wrap; } .portable-confirm > .button { width: 100%; } .portable-reviewed-files th, .portable-reviewed-files td { padding: 10px 8px; } .portable-summary { gap: 16px 24px; } }
+@media (hover: hover) { .portable-file-picker > label:hover { background: var(--hover); } .portable-tabs button:hover:not(:disabled) { color: var(--text); } }

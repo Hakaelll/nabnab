@@ -37,6 +37,14 @@ Estado inicial: `7f533a8`, rama inicial `codex/nabnab`. El usuario pidió despu�
 
 Cada unidad se verifica antes de commit y push. No se certifica una plataforma mediante fixtures. Las pruebas de códecs usan archivos sintéticos locales autorizados; las de plataformas requieren fuentes autorizadas y se registran por separado.
 
+## Ampliación de archivos y herramientas locales
+
+- [x] A: fuentes públicas y conectores OAuth, selección y cola compartida. OAuth requiere una aplicación registrada y una cuenta autorizada; no se certifica acceso a cuentas mediante fixtures.
+- [x] B: archivo web, lector/anotaciones, OCR y edición PDF; recorrido nativo con motores locales.
+- [x] C: comparación y renombrado de archivos, assets de imágenes y colecciones portables; recorrido nativo con integridad de originales.
+- [ ] D: pantalla, búfer de repetición y voz local.
+- [ ] E: CLI/MCP, permisos y recorrido autorizado.
+
 ## Riesgos que deben probarse
 
 1. Corte durante persistencia/publicación y segundo arranque sin duplicados.

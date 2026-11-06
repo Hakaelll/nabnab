@@ -1,23 +1,15 @@
 use crate::{document_edits, ocr, queue, AppState};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use std::{collections::HashMap, fs, path::{Path,PathBuf}, sync::{Arc,Mutex,atomic::{AtomicU64,Ordering}}};
+use std::{collections::HashMap, fs, path::PathBuf, sync::{Arc,Mutex}};
 use tauri::{AppHandle,State};
 use tokio::sync::watch;
 
 #[derive(Default)]
 pub struct PreviewState { approved:Mutex<HashMap<String,Approval>> }
 struct Approval {id:String,options:String,input_hash:String,expires:u64}
-struct Workspace {path:PathBuf,root:PathBuf}
-impl Workspace {
-    fn new(root:&Path)->Result<Self,String>{
-        static SEQUENCE:AtomicU64=AtomicU64::new(0);
-        let root=crate::sessions::secure_module_directory(root,"document-previews")?;
-        let path=root.join(format!("{}-{}",queue::now(),SEQUENCE.fetch_add(1,Ordering::Relaxed)));
-        fs::create_dir(&path).map_err(|e|e.to_string())?;Ok(Self{path,root})
-    }
-}
-impl Drop for Workspace {fn drop(&mut self){if fs::canonicalize(&self.path).ok().and_then(|p|p.parent().map(Path::to_owned))==fs::canonicalize(&self.root).ok(){let _=fs::remove_dir_all(&self.path);}}}
+use crate::workspaces::Workspace;
+
 fn input(state:&AppState,id:&str)->Result<(PathBuf,crate::library::LibraryItem),String>{
     let guard=state.repository.lock().unwrap();let repo=guard.as_ref().ok_or("Open nabnab first.")?;let item=repo.data.library.iter().find(|i|i.id==id).cloned().ok_or("Choose a local library file.")?;crate::library::authorized_path(&item.path)?;Ok((repo.root().to_owned(),item))
 }

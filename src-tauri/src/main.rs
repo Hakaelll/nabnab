@@ -2,6 +2,12 @@
 mod batch;
 mod file_sources;
 mod web_archive;
+mod portable_zip;
+mod file_organization;
+mod image_assets;
+mod workspaces;
+mod portable_collections;
+mod file_operations;
 mod document_edits;
 mod document_operations;
 mod ocr;
@@ -75,6 +81,7 @@ use tokio::sync::watch;
 #[derive(Default)]
 pub(crate) struct AppState {
     document_previews: document_operations::PreviewState,
+    file_previews: file_operations::PreviewState,
     file_sources: file_sources::BrowserState,
     repository: Mutex<Option<store::Repository>>,
     runtime: queue::Runtime,
@@ -877,7 +884,7 @@ fn open_media(state: State<Arc<AppState>>, id: String, folder: bool) -> Result<(
             .iter()
             .find(|i| i.id == id)
             .ok_or("File not found in the library.")?;
-        if item.kind == "file" && !folder { return Err("Downloaded files are never executed from nabnab. Use Show folder to review the file.".into()); }
+        if !folder && !library::can_open(item) { return Err("This file type cannot be opened from nabnab. Use Show folder to review it.".into()); }
         library::authorized_path(&item.path)?
     };
     open_local(if folder {
@@ -1131,6 +1138,9 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             web_archive::archive_document,web_archive::archive_add_annotation,web_archive::archive_remove_annotation,web_archive::queue_article_export,
+            file_operations::image_assets_inspect,file_operations::image_assets_preview,file_operations::queue_image_assets,file_operations::cancel_image_assets_preview,
+            file_operations::file_analysis,file_operations::queue_file_analysis,file_operations::file_rename_preview,file_operations::queue_file_rename,file_operations::file_rename_history,file_operations::queue_file_undo,file_operations::file_organize_review,file_operations::cancel_file_operation,
+            file_operations::portable_preview_export,file_operations::queue_portable_export,file_operations::portable_choose_import,file_operations::portable_preview_import,file_operations::queue_portable_import,file_operations::cancel_portable_preview,
             document_operations::document_edit_info,document_operations::document_edit_preview,document_operations::cancel_document_edit_preview,document_operations::queue_document_edit,
             document_operations::ocr_status,document_operations::ocr_models,document_operations::install_ocr_model,document_operations::queue_ocr,
             document_operations::ocr_get,document_operations::ocr_preview,document_operations::ocr_correct_page,document_operations::ocr_remove_generated,document_operations::ocr_search,document_operations::ocr_save_text,

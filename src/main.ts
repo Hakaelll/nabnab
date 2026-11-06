@@ -1,5 +1,8 @@
 import "./style.css";
 import "./sections.css";
+import {createImageAssets} from "./image-assets-ui";
+import {createFileOrganization} from "./file-organization-ui";
+import {createPortableCollections} from "./portable-collections-ui";
 import {createArticles} from "./articles-ui";
 import {createOcr} from "./ocr-ui";
 import {createDocumentEdits} from "./document-edits-ui";
@@ -58,7 +61,7 @@ let thumbnailWorkers=0;
 const home: HomeState = { input: "", media: null, loading: false, selectedUrls: new Set(), format: "mp4", quality: "", audioBitrate: "192", subtitleLanguage: "", submitting: false };
 const downloads: DownloadView = { query: "", filter: "all", selected: new Set(), detailId: null };
 const library: LibraryView = { query: "", filter: "all", sort: "newest", layout: "grid", collection: "", offset: 0, selected: new Set(), detailId: null };
-let localToolModule:"media"|"documents"|"pdfEdits"|"ocr"|"composition"|"palettes"="media";
+let localToolModule:"media"|"documents"|"pdfEdits"|"ocr"|"composition"|"palettes"|"imageAssets"|"fileOrganization"|"portable"="media";
 const tools: ToolsView = { kind: "convert", ids: new Set(), options: defaultToolOptions("convert"), picking: false };
 const preferences: SettingsView = { section: "general", engines: null, sessions: null, bridge: null, pairing: null, cache: null, working: false };
 const t: Copy = (spanish, english) => snapshot.settings.language === "es" ? spanish : english;
@@ -85,6 +88,9 @@ const live=createLiveController({command,refresh,render:renderCurrent,notify,t})
 const telegram=createTelegramController({command,refresh,render:renderCurrent,notify,showError,t,settings:()=>{preferences.section='engines';navigate('settings');void loadSettingsSection().catch(showError);},folder:()=>snapshot.settings.folder});
 const articles=createArticles({command,snapshot:()=>snapshot,refresh,render:renderLibraryModules,notify,t});
 const ocr=createOcr({command,snapshot:()=>snapshot,refresh,render:renderLibraryModules,notify,t,settings:()=>{preferences.section="engines";navigate("settings");void loadSettingsSection().catch(showError);}});
+const imageAssets=createImageAssets({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t});
+const fileOrganization=createFileOrganization({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t});
+const portable=createPortableCollections({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t});
 const documentEdits=createDocumentEdits({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t});
 const documents=createDocuments({command,snapshot:()=>snapshot,refresh,render:renderLibraryModules,t});
 const galleryExports=createGalleryExports({command,selected:()=>[...library.selected],refresh,notify,t});
@@ -161,6 +167,7 @@ function showError(error: unknown): void {
     dependency: ["Falta un motor o no puede iniciarse. Revisa Motores en Ajustes.", "An engine is missing or cannot start. Review Engines in Settings."],
     javascript: ["No se pudo resolver la verificación de JavaScript. Revisa los motores.", "JavaScript verification failed. Review the engines."],
     format_unavailable: ["La calidad ya no está disponible. Analiza el enlace de nuevo.", "This quality is no longer available. Analyze the link again."],
+    partial_operation: ["Algunos archivos no se renombraron. Abre Revisar y renombrar → Historial para continuar o deshacer.", "Some files were not renamed. Open Review and rename → History to resume or undo."],
     processing: ["No se pudo procesar o verificar el archivo. Revisa el diagnóstico.", "The file could not be processed or verified. Review the diagnostic."],
     subtitles: ["No se pudieron integrar los subtítulos. Elige otro idioma manual o descarga sin subtítulos.", "Subtitles could not be embedded. Choose another manual language or download without subtitles."],
     disk_full: ["No hay espacio suficiente. Libera espacio o elige otro destino.", "There is not enough disk space. Free space or choose another destination."],
@@ -283,12 +290,16 @@ function renderCurrent(): void {
     if(page==='settings'&&(preferences.section==='formats'||preferences.section==='organization'))required('.settings-content').innerHTML=`<h2 id="settings-title">${preferences.section==='formats'?t('Ajustes reutilizables','Reusable presets'):t('Organización','Organization')}</h2>${preferences.section==='formats'?batches.renderPresets():organization.render()}`;
     if(page==='tools'){
       const directory=required('.tool-directory');
-      const modules=[['documents',t('Operaciones PDF','PDF operations')],['pdfEdits',t('Editar PDF','Edit PDF')],['ocr',t('Reconocer texto · OCR','Recognize text · OCR')],['composition',t('Componer medios','Compose media')],['palettes',t('Paleta de imagen','Image palette')]];
-      const moduleNav=`<section class="tool-group local-tool-group"><h2>${t('Documentos y producción','Documents and production')}</h2><div class="tool-navigation">${modules.map(([id,label])=>`<button type="button" id="local-tool-${id}" data-action="tool-module" data-id="${id}" data-tool-name="${h(label.toLocaleLowerCase())}" aria-pressed="${localToolModule===id}">${icon(id==='palettes'?'image':'document')}<span>${label}</span></button>`).join('')}</div></section>`;
+      const groups=[
+        {title:t('Documentos','Documents'),items:[['documents',t('Operaciones PDF','PDF operations'),'document'],['pdfEdits',t('Editar PDF','Edit PDF'),'document'],['ocr',t('Reconocer texto · OCR','Recognize text · OCR'),'document']]},
+        {title:t('Imagen y composición','Image and composition'),items:[['imageAssets',t('Capturas, iconos y atlas','Screenshots, icons and atlas'),'image'],['palettes',t('Paleta de imagen','Image palette'),'image'],['composition',t('Componer medios','Compose media'),'video']]},
+        {title:t('Archivos y colecciones','Files and collections'),items:[['fileOrganization',t('Revisar y renombrar','Review and rename'),'library'],['portable',t('Colección portátil','Portable collection'),'folder']]}
+      ] satisfies {title:string;items:[string,string,Parameters<typeof icon>[0]][]}[];
+      const moduleNav=groups.map(group=>`<section class="tool-group local-tool-group"><h2>${group.title}</h2><div class="tool-navigation">${group.items.map(([id,label,glyph])=>`<button type="button" id="local-tool-${id}" data-action="tool-module" data-id="${id}" data-tool-name="${h(label.toLocaleLowerCase())}" aria-pressed="${localToolModule===id}">${icon(glyph)}<span>${label}</span></button>`).join('')}</div></section>`).join('');
       directory.querySelector('.tool-search')?.insertAdjacentHTML('afterend',moduleNav);
       if(localToolModule!=='media'){
         for(const button of directory.querySelectorAll('[data-action="tool-kind"]'))button.setAttribute('aria-pressed','false');
-        required('.tool-workspace').innerHTML=localToolModule==='documents'?documentToolsPanel(snapshot,t):localToolModule==='pdfEdits'?documentEdits.render():localToolModule==='ocr'?ocr.renderTools():localToolModule==='composition'?mediaEditsPanel(snapshot,t):palettesPanel(snapshot,t);
+        required('.tool-workspace').innerHTML=localToolModule==='documents'?documentToolsPanel(snapshot,t):localToolModule==='pdfEdits'?documentEdits.render():localToolModule==='ocr'?ocr.renderTools():localToolModule==='composition'?mediaEditsPanel(snapshot,t):localToolModule==='imageAssets'?imageAssets.render():localToolModule==='fileOrganization'?fileOrganization.renderTools():localToolModule==='portable'?portable.render():palettesPanel(snapshot,t);
       }
     }
     if(page==='settings'&&preferences.section==='engines')required('.settings-content').insertAdjacentHTML('beforeend',platforms.renderComponents());
@@ -298,7 +309,7 @@ function renderCurrent(): void {
 }
 function observeThumbnails(): void {
   thumbnailObserver?.disconnect();thumbnailQueue.length=0;
-  if(page!=='library'||!desktop)return;
+  if((page!=='library'&&page!=='tools')||!desktop)return;
   thumbnailObserver=new IntersectionObserver(entries=>{
     for(const entry of entries)if(entry.isIntersecting&&entry.target instanceof HTMLElement){thumbnailObserver?.unobserve(entry.target);thumbnailQueue.push(entry.target);}
     void pumpThumbnails();
@@ -462,7 +473,9 @@ async function handleAction(action: string, button: HTMLButtonElement): Promise<
   if(action==='emblem-activate'){const color=handleEmblemClick();if(color.toggled)renderHome();return;}
   if(action==='open-fileSources'){platformModule='fileSources';navigate('platforms');await fileSources.open();if(id==='drive'||id==='onedrive'||id==='dropbox'){const tabButton=document.createElement('button');tabButton.dataset.tab=id;await fileSources.handleClick('file-source-tab',tabButton);}return;}
   if(action==='open-files'){platformModule='files';navigate('platforms');await advancedFiles.load();return;}
-  if(action==='tool-module'){const module=button.dataset.id;if(module==='documents'||module==='pdfEdits'||module==='ocr'||module==='composition'||module==='palettes'){localToolModule=module;renderCurrent();}return;}
+  if(action==='tool-module'){const module=button.dataset.id;if(module==='documents'||module==='pdfEdits'||module==='ocr'||module==='composition'||module==='palettes'||module==='imageAssets'||module==='fileOrganization'||module==='portable'){localToolModule=module;renderCurrent();}return;}
+  if(action==='organize-selected'){localToolModule='fileOrganization';navigate('tools');fileOrganization.open([...library.selected]);return;}
+  if(action==='portable-selected'){localToolModule='portable';navigate('tools');portable.open([...library.selected]);return;}
   if(action==='tool-audio-preview'){tools.options=readToolOptions();const libraryId=[...tools.ids][0];if(libraryId){await command('queue_audio_preview',{libraryId,options:tools.options,clientRequest:crypto.randomUUID()});await refresh();notify(t('Escucha previa añadida a Descargas. El resultado aparecerá en Biblioteca.','Audio preview added to Downloads. The result will appear in Library.'));}return;}
   if(action==='open-source-exports'){platformModule='exports';navigate('platforms');sourceExports.open();return;}
   if(action==='open-live'){platformModule='live';navigate('platforms');return;}
@@ -472,6 +485,7 @@ async function handleAction(action: string, button: HTMLButtonElement): Promise<
   if(action==='open-podcasts'){librarySection='sources';navigate('library');sources.openAdd('', 'podcast');return;}
   if(action==='open-torrents'||action==='open-torrent'){platformModule='torrent';navigate('platforms');await torrents.load();renderCurrent();return;}
   if(action==='platform-back'){showPlatformsCatalog();return;}
+  if(await imageAssets.click(action,button)||await fileOrganization.click(action,button)||await portable.click(action,button))return;
   if(await articles.click(action,button)||await ocr.click(action,button)||await documentEdits.click(action))return;
   if(await fileSources.handleClick(action,button))return;
   if(await palettes.click(action)||await advancedFiles.handleClick(action)||await mediaEdits.click(action,button)||await sourceExports.handleClick(action)||await galleryExports.click(action)||await documents.click(action,button)||await telegram.handleClick(action)||await courses.handleClick(action,button)||await transcriptionManager.click(action,button)||await torrents.handleClick(action)||await platforms.handleClick(action,button)||await batches.handleClick(action,button)||await sources.handleClick(action,button)||await organization.handleClick(action,button)||await libraryFeatures.handleClick(button))return;
@@ -534,7 +548,7 @@ async function handleAction(action: string, button: HTMLButtonElement): Promise<
   }
 }
 document.addEventListener('input',event=>{
-  if(event.target instanceof HTMLElement&&(fileSources.handleInput(event.target)||advancedFiles.handleInput(event.target)||sourceExports.handleInput(event.target)||live.input(event.target)||telegram.handleInput(event.target)||courses.handleInput(event.target)||torrents.handleInput(event.target)||platforms.handleInput(event.target)||batches.handleInput(event.target)||sources.handleInput(event.target)||libraryFeatures.handleInput(event.target)))return;
+  if(event.target instanceof HTMLElement&&(imageAssets.input(event.target)||fileOrganization.input(event.target)||(event.target.id==='portable-query'&&portable.change(event.target))||fileSources.handleInput(event.target)||advancedFiles.handleInput(event.target)||sourceExports.handleInput(event.target)||live.input(event.target)||telegram.handleInput(event.target)||courses.handleInput(event.target)||torrents.handleInput(event.target)||platforms.handleInput(event.target)||batches.handleInput(event.target)||sources.handleInput(event.target)||libraryFeatures.handleInput(event.target)))return;
   const target=event.target;if(!(target instanceof HTMLInputElement||target instanceof HTMLTextAreaElement))return;
   if(target.id==='url')updateSourceInput(target.value,false);
   else if(target.id==='job-search'){downloads.query=target.value;renderCurrent();}
@@ -545,7 +559,7 @@ document.addEventListener('input',event=>{
 document.addEventListener('change',event=>{
   const target=event.target;
   if((target instanceof HTMLInputElement||target instanceof HTMLSelectElement||target instanceof HTMLTextAreaElement)&&(articles.change(target)||ocr.change(target)))return;
-  if(target instanceof HTMLElement&&documentEdits.change(target))return;
+  if(target instanceof HTMLElement&&(imageAssets.change(target)||portable.change(target)||documentEdits.change(target)))return;
   if(target instanceof HTMLElement){if((target instanceof HTMLInputElement||target instanceof HTMLSelectElement)&&(palettes.change(target)||mediaEdits.change(target)||captionEditor.change(target)||documents.change(target)))return;
   if(fileSources.handleInput(target)||advancedFiles.handleInput(target)||sourceExports.handleInput(target)||telegram.handleInput(target)||live.input(target)||courses.handleInput(target)||torrents.handleInput(target)||platforms.handleInput(target)||sources.handleInput(target)||libraryFeatures.handleChange(target))return;void batches.handleChange(target).catch(showError);}
   if(target instanceof HTMLSelectElement&&target.id==='job-schedule-kind'){for(const field of target.closest('form')?.querySelectorAll<HTMLElement>('[data-schedule-fields]')??[])field.hidden=field.dataset.scheduleFields!==target.value;return;}
@@ -571,6 +585,7 @@ document.addEventListener('change',event=>{
 });
 document.addEventListener('submit',event=>{const form=event.target;if(form instanceof HTMLFormElement){event.preventDefault();void submitForm(form).catch(showError);}});
 async function submitForm(form: HTMLFormElement): Promise<void> {
+  if(await imageAssets.submit(form)||await fileOrganization.submit(form)||await portable.submit(form))return;
   if(await articles.submit(form)||await ocr.submit(form)||await documentEdits.submit(form))return;
   if(await fileSources.handleSubmit(form))return;
   if(await sources.handleSubmit(form)||await organization.handleSubmit(form)||await libraryFeatures.handleSubmit(form))return;

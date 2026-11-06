@@ -4,7 +4,7 @@ La dirección vigente conserva el carácter de la interfaz anterior a partir de 
 
 La app es una herramienta de escritorio monocromática. Su entrada y el emblema geométrico son el foco de Inicio. Descargas utiliza filas compactas; Biblioteca, una cuadrícula o lista e inspector; Herramientas comparte selección, opciones, destino y cola.
 
-La petición posterior de mejorar los apartados y evitar un acabado genérico amplía su composición. Herramientas utiliza un directorio lateral y una superficie de trabajo visible; las operaciones adicionales se seleccionan desde ese directorio, sin encadenar todos sus formularios debajo. Ajustes agrupa preferencias, conexiones y componentes. Plataformas separa categorías y fuentes. Descargas distingue la actividad en curso mediante superficie, peso y estado. La jerarquía se apoya en títulos de 29 px, separación entre grupos y menos divisores. Los paneles de trabajo admiten radios de 18–20 px, filas de 15–16 px y controles de 10 px; esta petición sustituye los valores más rígidos de apartados anteriores para estas superficies. Inicio conserva su composición y renderer.
+La petición posterior de mejorar los apartados y evitar un acabado genérico amplía su composición. Herramientas utiliza un directorio lateral y una superficie de trabajo visible; las operaciones adicionales se seleccionan desde ese directorio, sin encadenar todos sus formularios debajo. Ajustes agrupa preferencias, conexiones y componentes. Plataformas separa categorías y fuentes. Descargas distingue la actividad en curso mediante superficie, peso y estado. La jerarquía se apoya en títulos de 29 px, separación entre grupos y menos divisores. Los paneles de trabajo admiten radios de 18–20 px, filas de 15–16 px y controles de 10 px; esta petición sustituye los valores más rígidos de apartados anteriores para estas superficies. Inicio conserva su composición y emblema; el fondo se ajusta según la petición posterior descrita más abajo.
 
 Referencias visuales consultadas para esta ampliación: [Linear, marzo de 2026](https://linear.app/now/behind-the-latest-design-refresh), por navegación contenida, pestañas compactas y separación suave; [Raycast, mayo de 2026](https://www.raycast.com/blog/the-new-raycast), por capas funcionales y superficies de acciones; y [Fluent 2, botones](https://fluent2.microsoft.design/components/web/react/core/button/usage/), por distinguir acción principal y acciones secundarias. Se revisaron sus imágenes, sin copiar recursos, paleta, tipografía, funciones ni APIs nativas. El sistema sigue siendo el de nabnab. `src/sections.css` concreta estas reglas fuera de Inicio. Las comparaciones equivalentes están en `artifacts/section-design/`.
 
@@ -26,7 +26,10 @@ El movimiento sirve para confirmar interacción y orientar cambios de superficie
 
 Referencias contrastadas para interpretar esta petición, sin trasladar APIs nativas a WebView2: [Apple Materials](https://developer.apple.com/design/human-interface-guidelines/materials), por la distinción entre navegación/controles y contenido; [Fluent Material](https://fluent2.microsoft.design/material), por la jerarquía y el uso acotado de Acrylic en superficies transitorias; y [el ajuste de Linear del 12 de marzo de 2026](https://linear.app/now/behind-the-latest-design-refresh), por una sidebar contenida, límites suaves y prioridad del contenido. El resultado sigue la identidad y los tokens propios de nabnab.
 
+Las superficies de trabajo comparten los controles, foco visible y jerarquía de tonos de la aplicación. Biblioteca muestra nombres de hasta dos líneas en cuadrícula, una línea de metadatos y otra de favoritos/colecciones; el formato del nombre ayuda a distinguir documentos y archivos. La lista conserva su densidad y la selección permanece visible sin depender del hover. El inspector mantiene su control de cierre accesible al desplazarse, usa la misma base de los paneles de trabajo y presenta marcadores temporales para audio y vídeo. Los documentos conservan sus marcadores de página en el lector. Las preferencias alinean las etiquetas con sus controles cuando caben, y los directorios de herramientas y plataformas permanecen disponibles al recorrer el contenido. Este pulido se comprobó a 1180 y 900 px de ancho con estados de interfaz de muestra; esas capturas no acreditan ejecución de motores ni acceso a proveedores.
+
 ## Archivo de referencia Graphite
+
 > Luminous terminal lattice. Build dark, bordered product surfaces around precise white typography and sparse bursts of spectral light.
 
 **Theme:** dark
@@ -469,7 +472,7 @@ Create a bordered feature mosaic with an Obsidian Canvas #0a0a0a surface, 10px r
 }
 ```
 
-Ajuste solicitado: fondo de puntos más claro y con filamentos secundarios y pequeñas corrientes continuas; barra lateral con tinte al 9 % y desenfoque de 2 px. Las oleadas de color normales nacen cada 25 segundos. Diez activaciones alternan oleadas continuas solapadas (4–6 segundos entre ellas), con tonos vecinos y sin un arcoíris fijo repartido por la pantalla. La reducción de movimiento mantiene una imagen estática y la reducción de transparencia conserva superficies opacas.
+Referencia anterior, sustituida por el campo más espaciado descrito al inicio de este documento: fondo de puntos más claro y con filamentos secundarios y pequeñas corrientes continuas; barra lateral con tinte al 9 % y desenfoque de 2 px. Las oleadas de color normales nacen cada 25 segundos. Diez activaciones alternan oleadas continuas solapadas (4–6 segundos entre ellas), con tonos vecinos y sin un arcoíris fijo repartido por la pantalla. La reducción de movimiento mantiene una imagen estática y la reducción de transparencia conserva superficies opacas.
 
 ## Verificación del fondo de Inicio
 

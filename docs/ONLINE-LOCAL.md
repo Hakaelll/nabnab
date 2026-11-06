@@ -62,6 +62,30 @@ El acabado de Descargas, Herramientas, Plataformas y Ajustes también cambia la 
 
 ![Preferencias agrupadas](sections-settings-after.png)
 
+## Entrega C: archivos e imágenes
+
+Herramientas organiza estas operaciones en Imagen y composición y Archivos y colecciones, dentro del mismo directorio. Biblioteca permite enviar una selección a revisión o exportación.
+
+[Revisar y renombrar](FILE-ORGANIZATION.md) distingue copias exactas por SHA-256 de parecidos visuales estimados. Permite comparar lado a lado y reunir resultados en una colección de revisión. El renombrado muestra el mapa de nombres antes de aplicarlo, conserva identificadores y relaciones y ofrece historial para continuar o deshacer. Una colisión posterior no se sobrescribe; un resultado parcial exige revisión.
+
+[Capturas, iconos y atlas](IMAGE-ASSETS.md) añade unión vertical con cortes corregibles, PNG e ICO con transparencia o fondo elegido, separación de cuadrículas y hojas con atlas JSON. La previsualización queda vinculada a imágenes y opciones. Las operaciones producen archivos nuevos mediante la cola.
+
+[Colección portable](PORTABLE-COLLECTIONS.md) permite exportar un ZIP con manifiesto, metadatos y notas elegidas; OCR es opcional. La importación revisa tamaño, contenido idéntico, rutas relativas y límites del paquete antes de copiarlo al destino autorizado. Los artículos se regeneran desde su captura validada.
+
+El recorrido de tests/native-asset-workflows.browser.mjs usa la aplicación, motores, cola y disco reales con imágenes sintéticas y datos aislados. Comprueba SHA-256, parecido visual, colección de revisión, informe, unión, atlas, iconos, aprobación de vista previa, renombrado/deshacer, colisiones tardías y exportación/importación con deduplicación. Los originales mantienen sus hashes. [Resultados estructurados](verification/asset-workflows-native.json).
+
+![Previsualización nativa del atlas](assets-atlas-native.png)
+
+![Revisión nativa de archivos](assets-organization-native.png)
+
+La biblioteca y el inspector también se refinan; estas dos capturas usan fixtures de IPC:
+
+![Biblioteca refinada](sections-library-after.png)
+
+![Inspector refinado](sections-inspector-after.png)
+
 ## Entregas siguientes
 
-C, organización e imágenes; D, captura/voz; E, CLI/MCP y permisos siguen pendientes de implementación. Esta guía se actualizará al cerrar sus recorridos. Las funciones de fases anteriores no se contabilizan como novedades.
+D, captura y voz local; E, CLI/MCP y permisos siguen pendientes de implementación. Las funciones de fases anteriores no se contabilizan como novedades.
+
+Comprobación final de esta entrega: 303 pruebas nativas y 27 pruebas JavaScript pasadas; TypeScript, identidad y compilaciones web/escritorio correctas. El recorrido nativo se repitió sobre la compilación final y pasó los cinco grupos funcionales con cero errores del navegador. Los controles de cada módulo distinguen su prueba de interfaz simulada de esta ejecución real.

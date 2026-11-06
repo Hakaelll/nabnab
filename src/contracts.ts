@@ -21,6 +21,12 @@ export type ToolOptions =
   | {kind:'imageConvert';format:'jpg'|'png'|'webp';width:number;quality:number;stripMetadata:boolean};
 export type ToolKind = ToolOptions["kind"];
 export type JobSource = {kind:"webArchive";reference:string;format:"html"|"epub"|"md";collection:string;tags:string[];parentId:string|null}
+  | {kind:"imageAssets";libraryIds:string[];options:{kind:string};inputHashes:string[]}
+  | {kind:"fileAnalysis";libraryIds:string[];options:{kind:"exact"}|{kind:"similar";maxDistance:number}}
+  | {kind:"fileRename";planId:string}
+  | {kind:"fileUndo";operationId:string}
+  | {kind:"portableExport";libraryIds:string[];options:{metadata:boolean;notes:boolean;ocr:boolean}}
+  | {kind:"portableImport";planId:string}
   | {kind:"documentEdit";libraryId:string;options:{kind:string};inputHash:string}
   | {kind:"ocr";libraryId:string;options:{output:string}}
   | {kind:"ocrText";libraryId:string;reference:string;expectedHash:string}

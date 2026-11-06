@@ -16,6 +16,7 @@ tokio = { version = "1", features = ["process", "io-util", "sync", "time", "macr
 url = "2"
 reqwest = { version = "0.13", default-features = false, features = ["native-tls-no-alpn"] }
 sha2 = "0.10"
+regex = "1"
 quick-xml = "0.42"
 qrcodegen = "1.8"
 httpdate = "1"

@@ -52,6 +52,8 @@ impl Failure {
         let has = |items: &[&str]| items.iter().any(|s| text.contains(s));
         let (code, message, retryable) = if raw == crate::engine::CANCELLED {
             ("cancelled", "Download cancelled.", false)
+        } else if text.starts_with("the rename operation stopped with partial results.") {
+            ("partial_operation", "Some files could not be renamed. Open Review and rename → History to review, resume or undo the recorded operation.", false)
         } else if has(&["429", "too many requests", "rate_limited"]) {
             (
                 "rate_limited",
@@ -199,6 +201,13 @@ impl From<&str> for Failure {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn partial_rename_requires_review_instead_of_automatic_retry() {
+        let failure = Failure::classify("The rename operation stopped with partial results. A file appeared at the destination.", "processing");
+        assert_eq!(failure.code, "partial_operation");
+        assert!(!failure.retryable);
+        assert!(failure.message.contains("History"));
+    }
     #[test]
     fn classifies_causes_and_redacts_secrets() {
         for (raw, code) in [

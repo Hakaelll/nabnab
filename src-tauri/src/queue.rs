@@ -151,6 +151,12 @@ pub enum Source {
     DocumentEdit {library_id:String,options:crate::document_edits::Options,input_hash:String},
     Ocr {library_id:String,options:crate::ocr::OcrOptions},
     OcrText {library_id:String,reference:String,expected_hash:String},
+    ImageAssets {library_ids:Vec<String>,options:crate::image_assets::Options,input_hashes:Vec<String>},
+    FileAnalysis {library_ids:Vec<String>,options:crate::file_organization::AnalyzeOptions},
+    FileRename {plan_id:String},
+    FileUndo {operation_id:String},
+    PortableExport {library_ids:Vec<String>,options:crate::portable_collections::ExportOptions},
+    PortableImport {plan_id:String},
     Attribution { entries: Vec<crate::file_sources::PublicSelection> },
     WebArchive { reference:String, format:crate::web_archive::Format, collection:String, tags:Vec<String>, parent_id:Option<String> },
     Palette {library_ids:Vec<String>,colors:u8,format:String},
@@ -170,6 +176,7 @@ pub enum Source {
     },
 }
 impl Source {
+    fn exclusive(&self) -> bool { matches!(self, Self::FileRename {..} | Self::FileUndo {..}) }
     fn network(&self) -> bool {
         matches!(self, Self::Download { .. } | Self::Torrent { .. } | Self::Telegram { .. } | Self::Live { .. } | Self::ProviderExport {..} | Self::AdvancedFile {..} | Self::PublicFile {..} | Self::CloudFile {..})
     }
@@ -326,6 +333,9 @@ impl Job {
             Source::CloudFile {selection,..} => format!("{:?}",selection.provider),
             Source::Attribution {..} => "Wikimedia Commons".into(),
             Source::WebArchive {..} => "Web archive".into(),
+            Source::ImageAssets {..} => "Images".into(),
+            Source::FileAnalysis {..} | Source::FileRename {..} | Source::FileUndo {..} => "Files".into(),
+            Source::PortableExport {..} | Source::PortableImport {..} => "Collections".into(),
             Source::DocumentEdit {..} => "MuPDF".into(),
             Source::Ocr {..} => "Tesseract".into(),
             Source::OcrText {..} => "OCR".into(),
@@ -1064,7 +1074,7 @@ fn stage(job: &Job) -> Result<PathBuf, String> {
             let journaled = [JOURNAL, "publication.new"]
                 .iter()
                 .any(|name| fs::symlink_metadata(owned.join(name)).is_ok());
-            if matches!(job.source, Source::Transform { .. } | Source::CloudFile {..} | Source::Attribution {..} | Source::WebArchive {..} | Source::DocumentEdit {..} | Source::Ocr {..} | Source::OcrText {..})
+            if matches!(job.source, Source::Transform { .. } | Source::ImageAssets {..} | Source::FileAnalysis {..} | Source::FileRename {..} | Source::FileUndo {..} | Source::PortableExport {..} | Source::PortableImport {..} | Source::CloudFile {..} | Source::Attribution {..} | Source::WebArchive {..} | Source::DocumentEdit {..} | Source::Ocr {..} | Source::OcrText {..})
                 && owner.run_id != job.run_id
                 && !journaled
             {
@@ -1284,7 +1294,7 @@ async fn publish_verified_output(
         publication_guard(state, job, &cancel)?;
         return Ok((existing.path.clone(), existing, publication));
     }
-    if matches!(job.source,Source::PublicFile {..}|Source::CloudFile {..}|Source::Attribution {..}|Source::WebArchive {..}|Source::DocumentEdit {..}|Source::Ocr {..}|Source::OcrText {..}) {
+    if matches!(job.source,Source::ImageAssets {..} | Source::FileAnalysis {..} | Source::FileRename {..} | Source::FileUndo {..} | Source::PortableExport {..} | Source::PortableImport {..} | Source::PublicFile {..}|Source::CloudFile {..}|Source::Attribution {..}|Source::WebArchive {..}|Source::DocumentEdit {..}|Source::Ocr {..}|Source::OcrText {..}) {
         (file,target)=available_file_version(staging,&destination,&file)?;
     }
     item=target_item(item,target.clone());
@@ -1494,6 +1504,8 @@ fn reserve(state: &AppState) -> Option<(Job, watch::Receiver<bool>)> {
         .iter()
         .filter(|j| j.state.active() || active.contains_key(&j.id))
         .collect();
+    if running.iter().any(|j| j.source.exclusive()) { return None; }
+    let exclusive_waiting = repo.data.jobs.iter().any(|j| j.source.exclusive() && j.state == JobState::Pending && j.schedule.eligible(now()) && j.next_retry_at.is_none_or(|time| time <= now()));
     let network = running.iter().filter(|j| j.source.network()).count();
     let local = running.iter().filter(|j| !j.source.network()).count();
     let next = repo
@@ -1503,6 +1515,8 @@ fn reserve(state: &AppState) -> Option<(Job, watch::Receiver<bool>)> {
         .enumerate()
         .filter(|(_, j)| {
             j.state == JobState::Pending
+                && (!exclusive_waiting || j.source.exclusive())
+                && (!j.source.exclusive() || running.is_empty())
                 && j.schedule.eligible(now())
                 && !active.contains_key(&j.id)
                 && j.next_retry_at.is_none_or(|time| time <= now())
@@ -1717,7 +1731,7 @@ async fn run(
     let run_id = job.run_id;
     let emit = move |update| progress(&handle, &shared, &id, run_id, update);
     let (mut file, source, parent) = match &job.source {
-        Source::PublicFile {..} | Source::CloudFile {..} | Source::Attribution {..} | Source::WebArchive {..} | Source::DocumentEdit {..} | Source::Ocr {..} | Source::OcrText {..} | Source::AdvancedFile{..} | Source::Palette{..} | Source::AudioPreview{..} | Source::ProviderExport {..} | Source::CaptionEdit {..} | Source::MediaEdit {..} | Source::Torrent { .. } | Source::Document { .. } | Source::GalleryExport { .. } | Source::Telegram { .. } | Source::Live { .. } => return Err("Module execution was not dispatched.".into()),
+        Source::ImageAssets {..} | Source::FileAnalysis {..} | Source::FileRename {..} | Source::FileUndo {..} | Source::PortableExport {..} | Source::PortableImport {..} | Source::PublicFile {..} | Source::CloudFile {..} | Source::Attribution {..} | Source::WebArchive {..} | Source::DocumentEdit {..} | Source::Ocr {..} | Source::OcrText {..} | Source::AdvancedFile{..} | Source::Palette{..} | Source::AudioPreview{..} | Source::ProviderExport {..} | Source::CaptionEdit {..} | Source::MediaEdit {..} | Source::Torrent { .. } | Source::Document { .. } | Source::GalleryExport { .. } | Source::Telegram { .. } | Source::Live { .. } => return Err("Module execution was not dispatched.".into()),
         Source::Download {
             url_ref,
             format,
@@ -3002,6 +3016,36 @@ mod tests {
         assert_ne!(first.source.domain(), second.source.domain());
         assert!(reserve(&state).is_none());
         assert_eq!(state.runtime.active.lock().unwrap().len(), 2);
+        drop(state);
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn renames_drain_active_jobs_and_block_new_readers_until_finished() {
+        let (root, state, _) = state_fixture();
+        let (reading, _) = reserve(&state).unwrap();
+        {
+            let mut guard = state.repository.lock().unwrap();
+            let repo = guard.as_mut().unwrap();
+            enqueue_tasks(repo, vec![
+                (Source::FileAnalysis {library_ids: vec!["fixture".into()], options: crate::file_organization::AnalyzeOptions::Exact}, "Read files".into()),
+                (Source::FileRename {plan_id: "fixture-plan".into()}, "Rename".into()),
+            ], "rename-barrier").unwrap();
+        }
+        assert!(reserve(&state).is_none(), "A pending rename must drain existing readers.");
+        {
+            let mut guard = state.repository.lock().unwrap();
+            guard.as_mut().unwrap().data.jobs.iter_mut().find(|j| j.id == reading.id).unwrap().state = JobState::Completed;
+        }
+        state.runtime.active.lock().unwrap().remove(&reading.id);
+        let (renaming, _) = reserve(&state).unwrap();
+        assert!(matches!(renaming.source, Source::FileRename {..}));
+        assert!(reserve(&state).is_none(), "No reader may start while rename handles are held.");
+        {
+            let mut guard = state.repository.lock().unwrap();
+            guard.as_mut().unwrap().data.jobs.iter_mut().find(|j| j.id == renaming.id).unwrap().state = JobState::Completed;
+        }
+        state.runtime.active.lock().unwrap().remove(&renaming.id);
+        assert!(matches!(reserve(&state).unwrap().0.source, Source::FileAnalysis {..}));
         drop(state);
         fs::remove_dir_all(root).unwrap();
     }
