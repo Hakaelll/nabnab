@@ -98,7 +98,7 @@ pub fn page_selection(value: &str, count: u32) -> Result<Vec<u32>, String> {
     Ok(result)
 }
 
-fn cli_path(path: &Path) -> String {
+pub(crate) fn cli_path(path: &Path) -> String {
     let value = path.to_string_lossy();
     if let Some(rest) = value.strip_prefix(r"\\?\UNC\") {
         format!("//{}", rest.replace('\\', "/"))
@@ -114,7 +114,7 @@ fn inspect_arguments(script: &Path, input: &Path) -> Vec<String> {
     ]
 }
 
-async fn inspect(
+pub(crate) async fn inspect(
     mutool: &Path,
     input: &Path,
     staging: &Path,

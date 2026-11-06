@@ -1,0 +1,35 @@
+[
+  {
+    "case": "real OCR text/searchable PDF/correction/index removal and global phrase search",
+    "passed": true,
+    "originalHashPreserved": true,
+    "textOutput": "recognized.txt",
+    "searchableOutput": "searchable.pdf",
+    "correctedTextOutput": "ocr-corrected-1793981706178.txt",
+    "sourceTextPageSkipped": true,
+    "ocrCoordinates": true,
+    "globalSearchOpenedPage": 2
+  },
+  {
+    "case": "native PDF preview approval bound to options and consent, then queued numbered copy",
+    "passed": true,
+    "originalHashPreserved": true,
+    "output": "document-edit-number.pdf"
+  },
+  {
+    "case": "authenticated local archive bridge, offline reader, version-bound annotations, EPUB and full-text library search",
+    "passed": true,
+    "articleVersions": 2,
+    "annotationMoved": false,
+    "epubOutput": "article-4b116e4231e7.epub",
+    "sourceParametersRemoved": true,
+    "pngEmbedded": true
+  },
+  {
+    "evidence": "Real native IPC and local engines; synthetic original inputs; optional engines provisioned by an ignored test helper into fresh isolated app data, not installed through a product consent flow",
+    "data": "<workspace>\\artifacts\\document-workflows\\native-run-ky0LIy",
+    "completedJobs": 7,
+    "libraryItems": 9,
+    "pageErrors": []
+  }
+]

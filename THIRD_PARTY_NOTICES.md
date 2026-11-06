@@ -2,6 +2,8 @@
 
 nabnab launches the following separate engine executables. They are not linked into its Rust binary.
 
+Optional OCR uses Tesseract 5.5.4 and Leptonica 1.87.0 from pinned Cygwin packages, plus their separate runtime dependencies. Package versions, SHA-512 checksums, license labels and source-package links are recorded in `src-tauri/src/ocr/packages.json`. The installer retains package license files and excludes unrelated system utilities. English and Spanish use the pinned Apache-2.0 `tessdata_fast` models documented in `docs/OCR.md`; they are downloaded only after consent. These binaries and models are not included in the default application bundle.
+
 - **yt-dlp 2026.10.26**: yt-dlp's source is under the Unlicense. The official PyInstaller Windows executable includes GPLv3+ code and is distributed under GPLv3+ as a combined work. See licenses/yt-dlp.txt, licenses/yt-dlp-third-party.txt and licenses/GPL-3.0.txt.
 - **Deno 2.9.8**: MIT, with additional third-party components documented in its upstream source. See licenses/deno.txt.
 - **FFmpeg 9.0.2**: LGPL 2.1 or later, built from official source with the pinned Microsoft vcpkg recipes in scripts/ffmpeg. FFmpeg and FFprobe share replaceable DLLs; GPL and nonfree features are disabled. See licenses/ffmpeg-lgpl.txt and engines/licenses/ffmpeg.txt. Dependency notices, including LAME, Opus, OpenH264, libvpx, dav1d, zlib, libwebp and libass when enabled by the recipe, are copied into engines/licenses/.

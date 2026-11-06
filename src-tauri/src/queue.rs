@@ -148,7 +148,11 @@ pub enum Source {
     AdvancedFile {url:String,url_ref:Option<String>,connections:u8,checksum:Option<String>},
     PublicFile { selection: crate::file_sources::PublicSelection },
     CloudFile { selection: crate::cloud_storage::Selection, collection: String },
+    DocumentEdit {library_id:String,options:crate::document_edits::Options,input_hash:String},
+    Ocr {library_id:String,options:crate::ocr::OcrOptions},
+    OcrText {library_id:String,reference:String,expected_hash:String},
     Attribution { entries: Vec<crate::file_sources::PublicSelection> },
+    WebArchive { reference:String, format:crate::web_archive::Format, collection:String, tags:Vec<String>, parent_id:Option<String> },
     Palette {library_ids:Vec<String>,colors:u8,format:String},
     AudioPreview {library_id:String,options:ToolOptions},
     ProviderExport {url:String,url_ref:Option<String>,operation:String,format:String},
@@ -321,6 +325,10 @@ impl Job {
             Source::PublicFile {selection} => url::Url::parse(&selection.source_url).ok().and_then(|u|u.host_str().map(str::to_owned)).unwrap_or_else(||"Public files".into()),
             Source::CloudFile {selection,..} => format!("{:?}",selection.provider),
             Source::Attribution {..} => "Wikimedia Commons".into(),
+            Source::WebArchive {..} => "Web archive".into(),
+            Source::DocumentEdit {..} => "MuPDF".into(),
+            Source::Ocr {..} => "Tesseract".into(),
+            Source::OcrText {..} => "OCR".into(),
             Source::Download { url, .. } => {
                 providers::identify(url).map(|p| p.name).unwrap_or_default()
             }
@@ -1056,7 +1064,7 @@ fn stage(job: &Job) -> Result<PathBuf, String> {
             let journaled = [JOURNAL, "publication.new"]
                 .iter()
                 .any(|name| fs::symlink_metadata(owned.join(name)).is_ok());
-            if matches!(job.source, Source::Transform { .. } | Source::CloudFile {..} | Source::Attribution {..})
+            if matches!(job.source, Source::Transform { .. } | Source::CloudFile {..} | Source::Attribution {..} | Source::WebArchive {..} | Source::DocumentEdit {..} | Source::Ocr {..} | Source::OcrText {..})
                 && owner.run_id != job.run_id
                 && !journaled
             {
@@ -1135,7 +1143,7 @@ fn file_hash(file: &Path, cancel: &watch::Receiver<bool>) -> Result<String, Stri
     }
     Ok(format!("{:x}", hash.finalize()))
 }
-async fn digest(file: PathBuf, cancel: watch::Receiver<bool>) -> Result<String, String> {
+pub(crate) async fn digest(file: PathBuf, cancel: watch::Receiver<bool>) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || file_hash(&file, &cancel))
         .await
         .map_err(|e| e.to_string())?
@@ -1276,7 +1284,7 @@ async fn publish_verified_output(
         publication_guard(state, job, &cancel)?;
         return Ok((existing.path.clone(), existing, publication));
     }
-    if matches!(job.source,Source::PublicFile {..}|Source::CloudFile {..}|Source::Attribution {..}) {
+    if matches!(job.source,Source::PublicFile {..}|Source::CloudFile {..}|Source::Attribution {..}|Source::WebArchive {..}|Source::DocumentEdit {..}|Source::Ocr {..}|Source::OcrText {..}) {
         (file,target)=available_file_version(staging,&destination,&file)?;
     }
     item=target_item(item,target.clone());
@@ -1579,6 +1587,7 @@ async fn execute(app: AppHandle, state: Arc<AppState>, job: Job, cancel: watch::
                         current.outputs = vec![path];
                         current.error = None;
                         current.state = JobState::Completed;
+                        if let Source::Ocr {library_id,..}=&job.source { if let Some(reference)=&item.details.ocr_ref { if let Some(original)=repo.data.library.iter_mut().find(|i|&i.id==library_id){original.details.ocr_ref=Some(reference.clone());} } }
                         success = true;
                         if !repo.data.library.iter().any(|old| old.path == item.path) {
                             repo.data.library.push(item);
@@ -1708,7 +1717,7 @@ async fn run(
     let run_id = job.run_id;
     let emit = move |update| progress(&handle, &shared, &id, run_id, update);
     let (mut file, source, parent) = match &job.source {
-        Source::PublicFile {..} | Source::CloudFile {..} | Source::Attribution {..} | Source::AdvancedFile{..} | Source::Palette{..} | Source::AudioPreview{..} | Source::ProviderExport {..} | Source::CaptionEdit {..} | Source::MediaEdit {..} | Source::Torrent { .. } | Source::Document { .. } | Source::GalleryExport { .. } | Source::Telegram { .. } | Source::Live { .. } => return Err("Module execution was not dispatched.".into()),
+        Source::PublicFile {..} | Source::CloudFile {..} | Source::Attribution {..} | Source::WebArchive {..} | Source::DocumentEdit {..} | Source::Ocr {..} | Source::OcrText {..} | Source::AdvancedFile{..} | Source::Palette{..} | Source::AudioPreview{..} | Source::ProviderExport {..} | Source::CaptionEdit {..} | Source::MediaEdit {..} | Source::Torrent { .. } | Source::Document { .. } | Source::GalleryExport { .. } | Source::Telegram { .. } | Source::Live { .. } => return Err("Module execution was not dispatched.".into()),
         Source::Download {
             url_ref,
             format,

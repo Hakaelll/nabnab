@@ -1,6 +1,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod batch;
 mod file_sources;
+mod web_archive;
+mod document_edits;
+mod document_operations;
+mod ocr;
+mod ocr_component;
 mod public_sources;
 mod cloud_storage;
 mod browser;
@@ -69,6 +74,7 @@ use tokio::sync::watch;
 
 #[derive(Default)]
 pub(crate) struct AppState {
+    document_previews: document_operations::PreviewState,
     file_sources: file_sources::BrowserState,
     repository: Mutex<Option<store::Repository>>,
     runtime: queue::Runtime,
@@ -1124,6 +1130,10 @@ fn main() {
             local_media::serve(context.app_handle(), request)
         })
         .invoke_handler(tauri::generate_handler![
+            web_archive::archive_document,web_archive::archive_add_annotation,web_archive::archive_remove_annotation,web_archive::queue_article_export,
+            document_operations::document_edit_info,document_operations::document_edit_preview,document_operations::cancel_document_edit_preview,document_operations::queue_document_edit,
+            document_operations::ocr_status,document_operations::ocr_models,document_operations::install_ocr_model,document_operations::queue_ocr,
+            document_operations::ocr_get,document_operations::ocr_preview,document_operations::ocr_correct_page,document_operations::ocr_remove_generated,document_operations::ocr_search,document_operations::ocr_save_text,
             file_sources::public_source_inspect, file_sources::cancel_file_source_inspection,
             file_sources::queue_public_files, file_sources::cloud_status, file_sources::cloud_configure,
             file_sources::cloud_connect, file_sources::cloud_revoke, file_sources::cloud_browse, file_sources::cloud_preview_folder, file_sources::queue_cloud_files,

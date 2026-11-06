@@ -36,3 +36,9 @@ button.quiet { width: auto; margin: 0; background: transparent; border-color: tr
 ol { padding-left: 20px; }
 li + li { margin-top: 8px; }
 @media (prefers-reduced-motion: reduce) { button:active { transform: none; } }
+ .archive-actions { display: grid; gap: 6px; }
+ .archive-preview { max-height: 240px; overflow: auto; padding: 12px; border: 1px solid #34373d; border-radius: 8px; margin: 12px 0; }
+ .archive-preview p { white-space: pre-wrap; overflow-wrap: anywhere; }
+ #archive-form label { display: grid; gap: 6px; margin-top: 10px; }
+ #archive-form input { width: 100%; box-sizing: border-box; }
+ #archive-url { overflow-wrap: anywhere; }

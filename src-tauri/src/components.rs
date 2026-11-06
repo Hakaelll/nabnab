@@ -39,6 +39,7 @@ pub fn executable(app: &AppHandle, id: &str) -> Result<PathBuf, String> {
         "torrent" | "files" => "aria2c.exe",
         "transcription" => "whisper-cli.exe",
         "documents" => "mutool.exe",
+        "ocr" => "tesseract.exe",
         "telegram" => "tdjson.dll",
         _ => return Err("Unknown component.".into()),
     };
@@ -48,6 +49,7 @@ pub fn executable(app: &AppHandle, id: &str) -> Result<PathBuf, String> {
             "Enable the {id} component in Settings → Components."
         ));
     }
+    if id=="ocr" {return crate::ocr_component::verify(&root);}
     if id!="gallery" {return crate::component_archives::verify(&root,if id=="files"{"torrent"}else{id});}
     let path = root.join(name);
     if !path.is_file() {
@@ -81,11 +83,13 @@ pub fn optional_components(app: AppHandle) -> Result<Vec<Component>, String> {
         note: None,
     }];
     entries.extend(crate::component_archives::PACKAGES.iter().map(|p|{let id=if p.id=="torrent"{"files"}else{p.id};Component{id,name:p.name,version:p.version,size:p.bytes as u64,license:p.license,source:p.url,installed:crate::component_archives::installed(&root,p.id),enabled:root.join(format!("{id}.enabled")).exists(),available:cfg!(target_os="windows")&&cfg!(target_arch="x86_64"),note:if p.id=="torrent"{Some("Instalar Archivos no activa BitTorrent; P2P requiere consentimiento en su selector.")}else if p.id=="telegram"{Some("Paquete tdlib.native de ForNeVeR en NuGet. Requiere Microsoft Visual C++ Redistributable 2019 o posterior; no inicia sesión.")}else{None}}}));
+    entries.push(Component{id:"ocr",name:"OCR local · Tesseract",version:crate::ocr_component::VERSION,size:crate::ocr_component::DOWNLOAD_BYTES,license:crate::ocr_component::LICENSE,source:crate::ocr_component::SOURCE,installed:crate::ocr_component::installed(&root),enabled:root.join("ocr.enabled").is_file(),available:cfg!(all(target_os="windows",target_arch="x86_64")),note:Some("Motor local opcional. Modelos español/inglés por separado, con consentimiento y tamaño visible.")});
     Ok(entries)
 }
 #[tauri::command]
 pub async fn install_component(app: AppHandle, id: String) -> Result<(), String> {
     let id=if id=="files"{"torrent".to_owned()}else{id};
+    if id=="ocr" {return crate::ocr_component::install(&app).await;}
     if id != "gallery" { return crate::component_archives::install(&app,&id).await; }
     if !cfg!(target_os = "windows") || !cfg!(target_arch = "x86_64") {
         return Err("No verified package is available for this component and system.".into());
@@ -128,7 +132,7 @@ pub async fn install_component(app: AppHandle, id: String) -> Result<(), String>
 }
 #[tauri::command]
 pub fn enable_component(app: AppHandle, state:tauri::State<Arc<crate::AppState>>, id: String, enabled: bool) -> Result<(), String> {
-    if !matches!(id.as_str(), "gallery" | "torrent" | "files" | "transcription" | "documents" | "telegram") {
+    if !matches!(id.as_str(), "gallery" | "torrent" | "files" | "transcription" | "documents" | "telegram" | "ocr") {
         return Err("Unknown component.".into());
     }
     if id=="torrent"&&enabled {return Err("Activate BitTorrent from its selector after reviewing the P2P notice.".into());}
@@ -147,18 +151,18 @@ pub fn enable_component(app: AppHandle, state:tauri::State<Arc<crate::AppState>>
 }
 
 fn idle(state:&crate::AppState,id:&str)->Result<(),String>{
-    let active={let guard=state.repository.lock().unwrap();guard.as_ref().is_some_and(|repo|repo.data.jobs.iter().any(|job|job.state.active()&&match(&job.source,id){(crate::queue::Source::Torrent{..},"torrent"|"files")=>true,(crate::queue::Source::Document{..},"documents")=>true,(crate::queue::Source::Telegram{..},"telegram")=>true,(crate::queue::Source::Transform{options:crate::tools::ToolOptions::Transcribe{..},..},"transcription")=>true,(_,"gallery")=>job.content_id.as_deref().is_some_and(|v|v.starts_with("gallery:")),_=>false}))};
+    let active={let guard=state.repository.lock().unwrap();guard.as_ref().is_some_and(|repo|repo.data.jobs.iter().any(|job|job.state.active()&&match(&job.source,id){(crate::queue::Source::Torrent{..},"torrent"|"files")=>true,(crate::queue::Source::Document{..}|crate::queue::Source::DocumentEdit{..},"documents")=>true,(crate::queue::Source::Ocr{..},"documents"|"ocr")=>true,(crate::queue::Source::Telegram{..},"telegram")=>true,(crate::queue::Source::Transform{options:crate::tools::ToolOptions::Transcribe{..},..},"transcription")=>true,(_,"gallery")=>job.content_id.as_deref().is_some_and(|v|v.starts_with("gallery:")),_=>false}))};
     if active || id=="gallery"&&crate::gallery_sources::active_checks(state){return Err("This component has active work. Stop it or wait for it to finish before disabling or removing the component.".into());}Ok(())
 }
 
 #[tauri::command]
 pub async fn remove_component(app:AppHandle,state:tauri::State<'_,Arc<crate::AppState>>,id:String)->Result<bool,String>{
-    if !matches!(id.as_str(),"gallery"|"files"|"torrent"|"transcription"|"documents"|"telegram"){return Err("This component cannot be removed by the package manager.".into());}
+    if !matches!(id.as_str(),"gallery"|"files"|"torrent"|"transcription"|"documents"|"telegram"|"ocr"){return Err("This component cannot be removed by the package manager.".into());}
     idle(&state,&id)?;
     let dialog=app.clone();let approved=tauri::async_runtime::spawn_blocking(move||dialog.dialog().message("Remove this optional engine? Downloaded files, models and account sessions will be kept.").title("nabnab · Remove component").buttons(MessageDialogButtons::OkCancel).blocking_show()).await.map_err(|_|"The component confirmation could not be shown.")?;
     if !approved{return Ok(false);}idle(&state,&id)?;if id=="telegram"{crate::telegram::shutdown();}
     let root=root(&app)?;
-    if id=="gallery"{let file=root.join("gallery-dl.exe");if file.exists(){let file=crate::library::authorized_path(&file)?;fs::remove_file(file).map_err(|e|e.to_string())?;}}else{crate::component_archives::remove(&root,if id=="files"{"torrent"}else{&id})?;}
+    if id=="gallery"{let file=root.join("gallery-dl.exe");if file.exists(){let file=crate::library::authorized_path(&file)?;fs::remove_file(file).map_err(|e|e.to_string())?;}}else if id=="ocr"{crate::ocr_component::remove(&root)?;}else{crate::component_archives::remove(&root,if id=="files"{"torrent"}else{&id})?;}
     for marker in [format!("{id}.enabled"),if id=="files"{"torrent.enabled".into()}else{format!("{id}.enabled")}] {let path=root.join(marker);if path.exists(){fs::remove_file(path).map_err(|e|e.to_string())?;}}
     Ok(true)
 }

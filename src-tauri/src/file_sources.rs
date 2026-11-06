@@ -47,7 +47,7 @@ impl PublicSelection {
     }
 }
 
-fn begin(state: &AppState, request: u64) -> Result<watch::Receiver<bool>, String> {
+pub(crate) fn begin(state: &AppState, request: u64) -> Result<watch::Receiver<bool>, String> {
     let mut active = state.file_sources.active.lock().unwrap();
     if active.contains_key(&request) { return Err("This request identifier is already active.".into()); }
     if active.len() >= 8 { return Err("Finish or cancel an existing file source request first.".into()); }
@@ -55,7 +55,7 @@ fn begin(state: &AppState, request: u64) -> Result<watch::Receiver<bool>, String
     active.insert(request, sender);
     Ok(receiver)
 }
-fn finish(state: &AppState, request: u64) { state.file_sources.active.lock().unwrap().remove(&request); }
+pub(crate) fn finish(state: &AppState, request: u64) { state.file_sources.active.lock().unwrap().remove(&request); }
 
 #[tauri::command]
 pub fn cancel_file_source_inspection(state: State<Arc<AppState>>, request_id: u64) {

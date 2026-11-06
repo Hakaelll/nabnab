@@ -1,4 +1,8 @@
 import "./style.css";
+import "./sections.css";
+import {createArticles} from "./articles-ui";
+import {createOcr} from "./ocr-ui";
+import {createDocumentEdits} from "./document-edits-ui";
 import {createFileSources} from "./file-sources-ui";
 import {createAdvancedFilesController} from "./advanced-files-ui";
 import {createPalettes,palettesPanel} from "./palettes-ui";
@@ -54,6 +58,7 @@ let thumbnailWorkers=0;
 const home: HomeState = { input: "", media: null, loading: false, selectedUrls: new Set(), format: "mp4", quality: "", audioBitrate: "192", subtitleLanguage: "", submitting: false };
 const downloads: DownloadView = { query: "", filter: "all", selected: new Set(), detailId: null };
 const library: LibraryView = { query: "", filter: "all", sort: "newest", layout: "grid", collection: "", offset: 0, selected: new Set(), detailId: null };
+let localToolModule:"media"|"documents"|"pdfEdits"|"ocr"|"composition"|"palettes"="media";
 const tools: ToolsView = { kind: "convert", ids: new Set(), options: defaultToolOptions("convert"), picking: false };
 const preferences: SettingsView = { section: "general", engines: null, sessions: null, bridge: null, pairing: null, cache: null, working: false };
 const t: Copy = (spanish, english) => snapshot.settings.language === "es" ? spanish : english;
@@ -61,6 +66,9 @@ let librarySection:'files'|'collections'|'sources'|'later'='files';
 let quickPreset='';
 let quickRequest=0;
 let quickLoading=false;
+let libraryContentHits:import("./library-types").SearchHit[]=[];
+let contentSearchGeneration=0;
+let contentSearchTimer:ReturnType<typeof setTimeout>|undefined;
 type QuickPrepared={url:string;title:string;contentId:string;options:ResolvedOptions;sourceId:null;groupId:null};
 let quickPrepared:QuickPrepared|null=null;
 let localTimezone='UTC';
@@ -75,6 +83,9 @@ const captionEditor=createCaptionEditor({command,snapshot:()=>snapshot,refresh,r
 const sourceExports=createSourceExportsController({command,refresh,render:renderCurrent,notify,showError,t});
 const live=createLiveController({command,refresh,render:renderCurrent,notify,t});
 const telegram=createTelegramController({command,refresh,render:renderCurrent,notify,showError,t,settings:()=>{preferences.section='engines';navigate('settings');void loadSettingsSection().catch(showError);},folder:()=>snapshot.settings.folder});
+const articles=createArticles({command,snapshot:()=>snapshot,refresh,render:renderLibraryModules,notify,t});
+const ocr=createOcr({command,snapshot:()=>snapshot,refresh,render:renderLibraryModules,notify,t,settings:()=>{preferences.section="engines";navigate("settings");void loadSettingsSection().catch(showError);}});
+const documentEdits=createDocumentEdits({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t});
 const documents=createDocuments({command,snapshot:()=>snapshot,refresh,render:renderLibraryModules,t});
 const galleryExports=createGalleryExports({command,selected:()=>[...library.selected],refresh,notify,t});
 const courses=createCoursesController({command,getSnapshot:()=>snapshot,refresh,render:renderCurrent,notify,showError,t,openLibrary:id=>{librarySection='files';library.detailId=id;navigate('library');if(snapshot.library.some(i=>i.id===id&&i.kind==='document'))void documents.open(id);}});
@@ -121,7 +132,7 @@ required("#app").innerHTML = `<canvas id="field" aria-hidden="true"></canvas><he
   <main id="main"><div id="notification" class="notification" hidden><span id="notification-icon"></span><div><span id="notification-text"></span><details id="notification-details" hidden><summary>Detalles técnicos</summary><pre></pre></details></div><button class="icon-button" data-action="dismiss-message" aria-label="Cerrar aviso">${icon("close")}</button></div><section id="home-page" class="home-page"><div id="home-content"></div></section><div class="content-layout"><section id="page-content" class="page-content" hidden></section><aside id="inspector" class="inspector" aria-label="Detalles" hidden></aside></div><button id="activity" class="activity" data-action="show-activity" hidden><span class="activity-dot"></span><span id="activity-text"></span>${icon("arrow")}</button></main></div><dialog id="detail-dialog" class="detail-dialog" aria-label="Detalles"></dialog><div id="drop-indicator" class="drop-indicator" hidden>${icon("add")}<span></span></div>`;
 const inspectorBody = document.createElement("div");
 inspectorBody.className = "inspector-body";
-const palette=createPalette({snapshot:()=>snapshot,t,showError,
+const palette=createPalette({snapshot:()=>snapshot,t,showError,search:desktop?async query=>(await command<import("./library-types").SearchHit[]>("library_search",{query,collection:null,smartId:null})).filter(hit=>hit.kind==="article"||hit.kind==="ocr").map((hit,index)=>({id:`content:${hit.fileId}:${index}`,kind:hit.kind==="article"?t("Artículo","Article"):"OCR",label:hit.title,context:hit.excerpt,run:()=>openContentHit(hit,query)})):undefined,
   prepare:()=>{navigate('home');required<HTMLTextAreaElement>('#url').focus();},
   addSource:()=>{librarySection='sources';navigate('library');sources.openAdd();},
   inspect:(id,time)=>{librarySection='files';library.detailId=id;navigate('library');if(time!==undefined)libraryFeatures.seek(id,time);},
@@ -186,6 +197,7 @@ function preserveFocus(render: () => void): void {
   required("#main").scrollTop = scrollTop;
 }
 function updateNavigation(): void {
+  document.body.dataset.page=page;
   required('#app').classList.toggle('is-home',page==='home');
   document.documentElement.lang = snapshot.settings.language;
   document.documentElement.classList.toggle("reduced-motion", snapshot.settings.reducedMotion);
@@ -246,10 +258,13 @@ function renderInspector(force=false): void {
   const aside=required("#inspector");const dialog=required<HTMLDialogElement>("#detail-dialog");const opening=!inspectorKey&&!!key;
   if(!key){aside.hidden=true;if(dialog.open)dialog.close();inspectorKey="";required(".content-layout").classList.remove("has-inspector");return;}
   if(force||key!==inspectorKey){inspectorBody.innerHTML=job?jobInspector(job,snapshot,t):item?mediaInspector(item,snapshot,t):"";inspectorKey=key;
+    if(item?.kind==='article')inspectorBody.insertAdjacentHTML("beforeend",articles.renderInspector(item));
+    if(item?.details?.ocrRef)inspectorBody.insertAdjacentHTML("beforeend",ocr.renderInspector(item));
     if(job&&['pending','paused'].includes(job.state))inspectorBody.insertAdjacentHTML('beforeend',`<form id="job-scheduling" class="settings-form" data-id="${h(job.id)}"><h3>${t('Prioridad y programación','Priority and schedule')}</h3>${schedulingFields('job',job.priority??'normal',job.schedule??{kind:'immediate'},localTimezone,t)}<button type="submit" class="button secondary">${t('Guardar programación','Save schedule')}</button><div class="button-group"><button type="button" class="button quiet" data-action="job-next" data-id="${h(job.id)}">${t('Ejecutar a continuación','Run next')}</button><button type="button" class="button quiet" data-action="job-up" data-id="${h(job.id)}">${t('Subir','Move up')}</button><button type="button" class="button quiet" data-action="job-down" data-id="${h(job.id)}">${t('Bajar','Move down')}</button></div></form>`);
   }
   if(window.innerWidth>=1120){if(dialog.open)dialog.close();aside.hidden=false;if(inspectorBody.parentElement!==aside)aside.append(inspectorBody);required(".content-layout").classList.add("has-inspector");}
   else{aside.hidden=true;required(".content-layout").classList.remove("has-inspector");if(inspectorBody.parentElement!==dialog)dialog.append(inspectorBody);if(!dialog.open)dialog.showModal();}
+  articles.bind();
   if(opening)enterSurface(window.innerWidth>=1120?aside:dialog,"x");
 }
 function renderLibraryModules():void{preserveFocus(()=>{renderCurrent();renderInspector(true);libraryFeatures.bind();});}
@@ -266,7 +281,16 @@ function renderCurrent(): void {
       container.insertAdjacentHTML('afterbegin',navigation);
     }
     if(page==='settings'&&(preferences.section==='formats'||preferences.section==='organization'))required('.settings-content').innerHTML=`<h2 id="settings-title">${preferences.section==='formats'?t('Ajustes reutilizables','Reusable presets'):t('Organización','Organization')}</h2>${preferences.section==='formats'?batches.renderPresets():organization.render()}`;
-    if(page==='tools')required('#page-content').insertAdjacentHTML('beforeend',documentToolsPanel(snapshot,t)+mediaEditsPanel(snapshot,t)+palettesPanel(snapshot,t));
+    if(page==='tools'){
+      const directory=required('.tool-directory');
+      const modules=[['documents',t('Operaciones PDF','PDF operations')],['pdfEdits',t('Editar PDF','Edit PDF')],['ocr',t('Reconocer texto · OCR','Recognize text · OCR')],['composition',t('Componer medios','Compose media')],['palettes',t('Paleta de imagen','Image palette')]];
+      const moduleNav=`<section class="tool-group local-tool-group"><h2>${t('Documentos y producción','Documents and production')}</h2><div class="tool-navigation">${modules.map(([id,label])=>`<button type="button" id="local-tool-${id}" data-action="tool-module" data-id="${id}" data-tool-name="${h(label.toLocaleLowerCase())}" aria-pressed="${localToolModule===id}">${icon(id==='palettes'?'image':'document')}<span>${label}</span></button>`).join('')}</div></section>`;
+      directory.querySelector('.tool-search')?.insertAdjacentHTML('afterend',moduleNav);
+      if(localToolModule!=='media'){
+        for(const button of directory.querySelectorAll('[data-action="tool-kind"]'))button.setAttribute('aria-pressed','false');
+        required('.tool-workspace').innerHTML=localToolModule==='documents'?documentToolsPanel(snapshot,t):localToolModule==='pdfEdits'?documentEdits.render():localToolModule==='ocr'?ocr.renderTools():localToolModule==='composition'?mediaEditsPanel(snapshot,t):palettesPanel(snapshot,t);
+      }
+    }
     if(page==='settings'&&preferences.section==='engines')required('.settings-content').insertAdjacentHTML('beforeend',platforms.renderComponents());
     if(page==='settings'&&preferences.section==='connections')required('.settings-content').insertAdjacentHTML('beforeend',fileSources.renderConnections());
     renderInspector();libraryFeatures.bind();if(page==='platforms'&&platformModule==='catalog')platforms.bind();if(page==='platforms'&&platformModule==='courses')courses.bind();updateActivity();observeThumbnails();
@@ -365,6 +389,15 @@ async function queueDownload(): Promise<void> {
   try{const jobs=await command<Job[]>("queue_download",{urls,titles,format:home.format,height:home.quality?Number(home.quality):null,audioBitrate:home.format==='mp3'?Number(home.audioBitrate):null,subtitleLanguage:!batch&&(home.format==='mp4'||home.format==='source')?(home.subtitleLanguage||null):null,clientRequest:crypto.randomUUID()});const ids=new Set(jobs.map(job=>job.id));snapshot.jobs=[...snapshot.jobs.filter(job=>!ids.has(job.id)),...jobs];invalidateAnalysis();home.input="";home.selectedUrls.clear();notify(t("Añadido a Descargas. Ya puedes pegar otro enlace.", "Added to Downloads. You can paste another link now."),"success");}
   catch(error){showError(error);}finally{home.submitting=false;renderHome();updateActivity();required<HTMLTextAreaElement>("#url").focus({preventScroll:true});}
 }
+async function openContentHit(hit:import('./library-types').SearchHit,query:string):Promise<void>{
+  librarySection='files';library.detailId=hit.fileId;navigate('library');
+  if(hit.kind==='article'){
+    await articles.open(hit.fileId);
+    const block=document.querySelector<HTMLElement>(`#article-dialog [data-article-block="${hit.block}"]`);
+    if(block){block.dataset.searchMatch='true';block.focus({preventScroll:true});block.scrollIntoView({block:'center'});}
+  }else if(hit.kind==='ocr')await ocr.open(hit.fileId,{page:hit.page,query});
+  else if(hit.kind==='subtitle')libraryFeatures.seek(hit.fileId,hit.time);
+}
 async function saveSettings(settings: Settings): Promise<void> { applySnapshot(await command<Snapshot>("save_settings",{settings})); }
 async function chooseFolder(): Promise<void> {const folder=await command<string|null>("choose_folder");if(folder){snapshot.settings.folder=folder;await refresh();notify(t("Carpeta de destino actualizada.", "Destination folder updated."),"success");}}
 async function importMedia(folders: boolean, intoTools=false): Promise<void> {
@@ -411,7 +444,8 @@ function focusLibraryPage(): void {
   document.querySelector<HTMLButtonElement>('.media-open')?.focus({preventScroll:true});
 }
 async function copyText(text: string): Promise<void> {await navigator.clipboard.writeText(text);notify(t("Copiado al portapapeles.", "Copied to clipboard."),"success");}
-function setToolInput(ids: string[]): void {if(ids.some(id=>snapshot.library.some(item=>item.id===id&&item.kind==='image'))){tools.kind='imageConvert';tools.options=defaultToolOptions('imageConvert');}tools.ids=new Set(ids.filter(id=>snapshot.library.some(item=>item.id===id&&['video','audio','image'].includes(item.kind))));tools.picking=false;navigate('tools');}
+function setToolInput(ids: string[]): void {
+  localToolModule='media';if(ids.some(id=>snapshot.library.some(item=>item.id===id&&item.kind==='image'))){tools.kind='imageConvert';tools.options=defaultToolOptions('imageConvert');}tools.ids=new Set(ids.filter(id=>snapshot.library.some(item=>item.id===id&&['video','audio','image'].includes(item.kind))));tools.picking=false;navigate('tools');}
 
 document.addEventListener("pointerdown",()=>{pointerInput=true;document.documentElement.dataset.input="pointer";},{passive:true});
 document.addEventListener("keydown",()=>{pointerInput=false;document.documentElement.dataset.input="keyboard";cancelSurfaceMotion();},true);
@@ -428,6 +462,7 @@ async function handleAction(action: string, button: HTMLButtonElement): Promise<
   if(action==='emblem-activate'){const color=handleEmblemClick();if(color.toggled)renderHome();return;}
   if(action==='open-fileSources'){platformModule='fileSources';navigate('platforms');await fileSources.open();if(id==='drive'||id==='onedrive'||id==='dropbox'){const tabButton=document.createElement('button');tabButton.dataset.tab=id;await fileSources.handleClick('file-source-tab',tabButton);}return;}
   if(action==='open-files'){platformModule='files';navigate('platforms');await advancedFiles.load();return;}
+  if(action==='tool-module'){const module=button.dataset.id;if(module==='documents'||module==='pdfEdits'||module==='ocr'||module==='composition'||module==='palettes'){localToolModule=module;renderCurrent();}return;}
   if(action==='tool-audio-preview'){tools.options=readToolOptions();const libraryId=[...tools.ids][0];if(libraryId){await command('queue_audio_preview',{libraryId,options:tools.options,clientRequest:crypto.randomUUID()});await refresh();notify(t('Escucha previa añadida a Descargas. El resultado aparecerá en Biblioteca.','Audio preview added to Downloads. The result will appear in Library.'));}return;}
   if(action==='open-source-exports'){platformModule='exports';navigate('platforms');sourceExports.open();return;}
   if(action==='open-live'){platformModule='live';navigate('platforms');return;}
@@ -437,6 +472,7 @@ async function handleAction(action: string, button: HTMLButtonElement): Promise<
   if(action==='open-podcasts'){librarySection='sources';navigate('library');sources.openAdd('', 'podcast');return;}
   if(action==='open-torrents'||action==='open-torrent'){platformModule='torrent';navigate('platforms');await torrents.load();renderCurrent();return;}
   if(action==='platform-back'){showPlatformsCatalog();return;}
+  if(await articles.click(action,button)||await ocr.click(action,button)||await documentEdits.click(action))return;
   if(await fileSources.handleClick(action,button))return;
   if(await palettes.click(action)||await advancedFiles.handleClick(action)||await mediaEdits.click(action,button)||await sourceExports.handleClick(action)||await galleryExports.click(action)||await documents.click(action,button)||await telegram.handleClick(action)||await courses.handleClick(action,button)||await transcriptionManager.click(action,button)||await torrents.handleClick(action)||await platforms.handleClick(action,button)||await batches.handleClick(action,button)||await sources.handleClick(action,button)||await organization.handleClick(action,button)||await libraryFeatures.handleClick(button))return;
   switch(action){
@@ -462,13 +498,13 @@ async function handleAction(action: string, button: HTMLButtonElement): Promise<
     case 'retry-selected':await actOnJobs(snapshot.jobs.filter(job=>downloads.selected.has(job.id)&&['error','cancelled'].includes(job.state)).map(job=>job.id),'retry');break;
     case 'clear-job-selection':downloads.selected.clear();renderCurrent();break;
     case 'copy-job-error':{const job=snapshot.jobs.find(job=>job.id===id);if(job?.error)await copyText(job.error.technical);break;}
-    case 'library-filter':{const value=button.dataset.filter;if(value==='all'||value==='video'||value==='audio'||value==='image'||value==='subtitle'||value==='document'||value==='file'){library.filter=value;library.offset=0;renderCurrent();}break;}
+    case 'library-filter':{const value=button.dataset.filter;if(value==='all'||value==='video'||value==='audio'||value==='image'||value==='subtitle'||value==='document'||value==='file'||value==='article'||value==='ocr'){library.filter=value;library.offset=0;renderCurrent();}break;}
     case 'library-layout':if(button.dataset.layout==='grid'||button.dataset.layout==='list'){library.layout=button.dataset.layout;renderCurrent();}break;
     case 'library-next':library.offset+=60;renderCurrent();focusLibraryPage();break;
     case 'library-previous':library.offset=Math.max(0,library.offset-60);renderCurrent();focusLibraryPage();break;
     case 'import-files':await importMedia(false);break;
     case 'import-folder':await importMedia(true);break;
-    case 'inspect-media':library.detailId=id;if(page!=='library')navigate('library');else renderCurrent();if(snapshot.library.some(item=>item.id===id&&item.kind==='document'))await documents.open(id);break;
+    case 'inspect-media':library.detailId=id;if(page!=='library')navigate('library');else renderCurrent();if(snapshot.library.some(item=>item.id===id&&item.kind==='document'))await documents.open(id);const contentHit=libraryContentHits.find(hit=>hit.fileId===id&&(hit.kind==='article'||hit.kind==='ocr'));if(library.query&&contentHit)await openContentHit(contentHit,library.query);else{if(snapshot.library.some(item=>item.id===id&&item.kind==='article'))await articles.open(id);if(snapshot.library.some(item=>item.id===id&&item.details?.ocrRef))await ocr.open(id);}break;
     case 'close-inspector':closeInspector();break;
     case 'open-media':await command('open_media',{id,folder:false});break;
     case 'reveal-media':await command('open_media',{id,folder:true});break;
@@ -478,7 +514,7 @@ async function handleAction(action: string, button: HTMLButtonElement): Promise<
     case 'tool-media':setToolInput([id]);break;
     case 'tools-selected':setToolInput([...library.selected]);break;
     case 'clear-library-selection':library.selected.clear();renderCurrent();break;
-    case 'tool-kind':{const kind=button.dataset.kind;if(isTool(kind)){tools.kind=kind;tools.options=defaultToolOptions(kind);renderCurrent();if(kind==='transcribe')await transcriptionManager.load();}break;}
+    case 'tool-kind':{localToolModule='media';const kind=button.dataset.kind;if(isTool(kind)){tools.kind=kind;tools.options=defaultToolOptions(kind);renderCurrent();if(kind==='transcribe')await transcriptionManager.load();}break;}
     case 'pick-tool-files':tools.options=readToolOptions();await importMedia(false,true);break;
     case 'pick-tool-library':tools.options=readToolOptions();tools.picking=!tools.picking;renderCurrent();break;
     case 'finish-tool-picker':tools.picking=false;renderCurrent();break;
@@ -502,12 +538,14 @@ document.addEventListener('input',event=>{
   const target=event.target;if(!(target instanceof HTMLInputElement||target instanceof HTMLTextAreaElement))return;
   if(target.id==='url')updateSourceInput(target.value,false);
   else if(target.id==='job-search'){downloads.query=target.value;renderCurrent();}
-  else if(target.id==='library-search'){library.query=target.value;library.offset=0;renderCurrent();}
+  else if(target.id==='library-search'){library.query=target.value;library.offset=0;library.contentMatches=undefined;libraryContentHits=[];renderCurrent();clearTimeout(contentSearchTimer);const request=++contentSearchGeneration;if(library.query.trim().length>=2)contentSearchTimer=setTimeout(()=>{void command<import('./library-types').SearchHit[]>('library_search',{query:library.query,collection:library.collection&&!library.collection.startsWith('smart:')&&!library.collection.startsWith('__')?library.collection:null,smartId:library.collection.startsWith('smart:')?library.collection.slice(6):null}).then(hits=>{if(request!==contentSearchGeneration)return;libraryContentHits=hits;library.contentMatches=new Set(hits.map(hit=>hit.fileId));if(page==='library')renderCurrent();}).catch(showError);},250);}
   else if(target.id==='tool-search'){const query=target.value.toLocaleLowerCase();for(const item of document.querySelectorAll('[data-tool-name]'))if(item instanceof HTMLElement)item.hidden=!item.dataset.toolName?.includes(query);for(const group of document.querySelectorAll('.tool-group'))if(group instanceof HTMLElement)group.hidden=![...group.querySelectorAll('[data-tool-name]')].some(item=>item instanceof HTMLElement&&!item.hidden);}
   else if(target.id==='tool-picker-search'){const query=target.value.toLocaleLowerCase();for(const item of document.querySelectorAll<HTMLElement>('[data-picker-name]'))item.hidden=!item.dataset.pickerName?.includes(query);}
 });
 document.addEventListener('change',event=>{
   const target=event.target;
+  if((target instanceof HTMLInputElement||target instanceof HTMLSelectElement||target instanceof HTMLTextAreaElement)&&(articles.change(target)||ocr.change(target)))return;
+  if(target instanceof HTMLElement&&documentEdits.change(target))return;
   if(target instanceof HTMLElement){if((target instanceof HTMLInputElement||target instanceof HTMLSelectElement)&&(palettes.change(target)||mediaEdits.change(target)||captionEditor.change(target)||documents.change(target)))return;
   if(fileSources.handleInput(target)||advancedFiles.handleInput(target)||sourceExports.handleInput(target)||telegram.handleInput(target)||live.input(target)||courses.handleInput(target)||torrents.handleInput(target)||platforms.handleInput(target)||sources.handleInput(target)||libraryFeatures.handleChange(target))return;void batches.handleChange(target).catch(showError);}
   if(target instanceof HTMLSelectElement&&target.id==='job-schedule-kind'){for(const field of target.closest('form')?.querySelectorAll<HTMLElement>('[data-schedule-fields]')??[])field.hidden=field.dataset.scheduleFields!==target.value;return;}
@@ -533,6 +571,7 @@ document.addEventListener('change',event=>{
 });
 document.addEventListener('submit',event=>{const form=event.target;if(form instanceof HTMLFormElement){event.preventDefault();void submitForm(form).catch(showError);}});
 async function submitForm(form: HTMLFormElement): Promise<void> {
+  if(await articles.submit(form)||await ocr.submit(form)||await documentEdits.submit(form))return;
   if(await fileSources.handleSubmit(form))return;
   if(await sources.handleSubmit(form)||await organization.handleSubmit(form)||await libraryFeatures.handleSubmit(form))return;
   if(await palettes.submit(form)||await advancedFiles.handleSubmit(form)||await mediaEdits.submit(form)||await captionEditor.submit(form)||await sourceExports.handleSubmit(form)||await documents.submit(form)||await live.submit(form)||await telegram.handleSubmit(form)||await courses.handleSubmit(form)||await torrents.handleSubmit(form)||await platforms.handleSubmit(form))return;
@@ -551,6 +590,7 @@ async function submitForm(form: HTMLFormElement): Promise<void> {
 document.addEventListener('keydown',event=>{
   if(event.ctrlKey&&!event.altKey&&!event.shiftKey&&event.key.toLowerCase()==='k'){event.preventDefault();palette.open();return;}
   if(palette.isOpen)return;
+  if(event.key==='Escape'&&document.querySelector('dialog[open]:not(#detail-dialog)'))return;
   if(event.target instanceof HTMLTextAreaElement&&event.target.id==='url'&&event.key==='Enter'&&!event.shiftKey){event.preventDefault();void inspect().catch(showError);return;}
   if(event.key==='Escape'&&!required<HTMLDialogElement>('#detail-dialog').open){closeInspector();return;}
   if(!desktop||!event.ctrlKey||event.altKey||event.shiftKey)return;

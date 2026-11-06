@@ -19,6 +19,9 @@ pub struct LibraryDetails {
     pub source_url:Option<String>,
     pub license: Option<String>,
     pub attribution: Option<String>,
+    pub web_archive_ref: Option<String>,
+    pub article_annotations: Vec<crate::web_archive::Annotation>,
+    pub ocr_ref: Option<String>,
     pub chapters: Vec<Chapter>,
     pub tracks: Vec<LocalTrack>,
     pub playback_position: f64,
@@ -213,6 +216,8 @@ fn valid_name(value: &str) -> Result<(), String> {
     rename_all_fields = "camelCase"
 )]
 pub enum SearchHit {
+    Article {file_id:String,title:String,block:usize,excerpt:String},
+    Ocr {file_id:String,title:String,page:u32,excerpt:String},
     Metadata {
         file_id: String,
         title: String,
@@ -304,19 +309,29 @@ pub fn library_search(
     if query.len() > 2048 {
         return Err("Use a search query of at most 2048 bytes.".into());
     }
-    let guard = state.repository.lock().unwrap();
-    let repo = guard.as_ref().ok_or("Open the app first.")?;
-    let smart = smart_id
-        .as_ref()
-        .and_then(|id| repo.data.smart_collections.iter().find(|s| s.id == *id));
-    Ok(search(
-        &repo.data.library,
-        &query,
-        collection.as_deref(),
-        smart,
-    ))
+    let (root,items)={
+        let guard=state.repository.lock().unwrap();let repo=guard.as_ref().ok_or("Open the app first.")?;
+        let smart=smart_id.as_ref().and_then(|id|repo.data.smart_collections.iter().find(|s|s.id==*id));
+        (repo.root().to_owned(),repo.data.library.iter().filter(|i|collection.as_ref().is_none_or(|name|i.collections.contains(name))&&smart.is_none_or(|s|matches(i,s))).cloned().collect::<Vec<_>>())
+    };
+    let mut result=search(&items,&query,None,None);let needle=query.trim().to_lowercase();if needle.len()<2{return Ok(result);}
+    let mut seen=std::collections::HashSet::new();
+    for item in &items {
+        if result.len()>=100{break;}
+        if let Some(reference)=&item.details.web_archive_ref {
+            if seen.insert(format!("article:{reference}")) {
+                if let Ok(capture)=crate::web_archive::load(&root,reference){for(block,content)in capture.blocks.iter().enumerate(){if content.text().to_lowercase().contains(&needle){result.push(SearchHit::Article{file_id:item.id.clone(),title:item.name.clone(),block,excerpt:content.text().chars().take(240).collect()});if result.len()>=100{break;}}}}
+            }
+        }
+        if let Some(reference)=&item.details.ocr_ref {
+            if seen.insert(reference.clone()) {
+                if let Ok(index)=crate::ocr::read_index(&root,reference){if let Ok(hits)=crate::ocr::search(&index,&query){for hit in hits{result.push(SearchHit::Ocr{file_id:item.id.clone(),title:item.name.clone(),page:hit.page,excerpt:hit.excerpt});if result.len()>=100{break;}}}}
+            }
+        }
+    }
+    Ok(result)
 }
-fn edit_item(
+pub(crate) fn edit_item(
     state: &AppState,
     id: &str,
     change: impl FnOnce(&mut LibraryItem) -> Result<(), String>,

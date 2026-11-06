@@ -41,6 +41,12 @@ export function createClient({ token, fetcher = globalThis.fetch }) {
     return payload;
   }
   return {
+    async archive(request) {
+      if (request?.version !== 1 || typeof request.requestId !== "string" || !/^[a-zA-Z0-9_.-]{8,128}$/.test(request.requestId) || !["html", "epub", "md"].includes(request.format) || JSON.stringify(request).length > 4000000) throw new Error("La captura no es válida o supera su límite.");
+      const receipt = await call("/archive", request);
+      if (receipt?.version !== 1 || receipt.kind !== "archive" || receipt.requestId !== request.requestId || !Array.isArray(receipt.acceptedJobIds) || receipt.acceptedJobIds.length !== 1 || typeof receipt.acceptedJobIds[0] !== "string" || !receipt.acceptedJobIds[0].length) throw new Error("nabnab no ha confirmado la captura. Reintenta la misma solicitud.");
+      return receipt;
+    },
     async health() {
       const response = await call("/health", { version: 1 });
       if (response?.version !== 1 || response.product !== "nabnab" || response.connected !== true) throw new Error("La versión del enlace con nabnab no es compatible.");

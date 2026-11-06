@@ -50,6 +50,34 @@ pub(super) async fn run(app:&AppHandle,state:&Arc<AppState>,job:&Job,staging:&Pa
     let handle=app.clone();let shared=state.clone();let id=job.id.clone();let run_id=job.run_id;
     let emit=move|update|progress(&handle,&shared,&id,run_id,update);
     let output=match &job.source{
+        Source::DocumentEdit {library_id,options,input_hash}=>{
+            let input={let guard=state.repository.lock().unwrap();guard.as_ref().ok_or("Open nabnab first.")?.data.library.iter().find(|i|&i.id==library_id).cloned().ok_or("The PDF is no longer in the library.")?};
+            if &digest(input.path.clone(),cancel.clone()).await?!=input_hash{return Err("The original PDF changed after its preview. Review it again.".into());}
+            let _permit=processing_permit(state,cancel.clone()).await?;phase(app,state,&job.id,run_id,JobState::Processing)?;
+            Some((crate::document_edits::execute(&crate::components::executable(app,"documents")?,&input.path,staging,options,cancel.clone(),run_id,emit.clone()).await?,None,Some(library_id.clone())))
+        },
+        Source::Ocr {library_id,options}=>{
+            let (root,input)={let guard=state.repository.lock().unwrap();let repo=guard.as_ref().ok_or("Open nabnab first.")?;(repo.root().to_owned(),repo.data.library.iter().find(|i|&i.id==library_id).cloned().ok_or("The OCR source is no longer in the library.")?)};
+            let component_root=crate::components::root(app)?;let tesseract=crate::components::executable(app,"ocr")?;let models=crate::ocr_component::verify_models(&component_root,&options.languages)?;
+            let mutool=if input.path.extension().is_some_and(|e|e.eq_ignore_ascii_case("pdf")){Some(crate::components::executable(app,"documents")?)}else{None};
+            let _permit=processing_permit(state,cancel.clone()).await?;phase(app,state,&job.id,run_id,JobState::Processing)?;
+            let result=crate::ocr::execute(&tesseract,&models,mutool.as_deref(),&crate::dependencies::engine_root(app)?.join("ffmpeg.exe"),&input.path,staging,options,cancel.clone(),run_id,emit.clone()).await?;
+            crate::ocr::write_index(&root,&format!("{}-{}",job.id,job.run_id),&result.index)?;
+            Some((result.file,None,Some(library_id.clone())))
+        },
+        Source::OcrText {library_id,reference,expected_hash}=>{
+            let root={let guard=state.repository.lock().unwrap();guard.as_ref().ok_or("Open nabnab first.")?.root().to_owned()};
+            let text=crate::ocr::corrected_text(&crate::ocr::read_index(&root,reference)?);
+            if &format!("{:x}",Sha256::digest(text.as_bytes()))!=expected_hash{return Err("The corrected OCR text changed. Export it again from the current index.".into());}
+            let file=staging.join(format!("ocr-corrected-{run_id}.txt"));let mut writer=fs::OpenOptions::new().create_new(true).write(true).open(&file).map_err(|e|e.to_string())?;writer.write_all(text.as_bytes()).and_then(|_|writer.sync_all()).map_err(|e|e.to_string())?;
+            Some((file,None,Some(library_id.clone())))
+        },
+        Source::WebArchive {reference,format,..}=>{
+            let root={let guard=state.repository.lock().unwrap();guard.as_ref().ok_or("Open nabnab first.")?.root().to_owned()};
+            let _permit=processing_permit(state,cancel.clone()).await?;phase(app,state,&job.id,run_id,JobState::Processing)?;
+            let capture=crate::web_archive::load(&root,reference)?;
+            Some((crate::web_archive::execute(&root,reference,*format,staging,cancel.clone(),run_id,emit.clone()).await?,Some(capture.url),None))
+        },
         Source::PublicFile {selection} => {
             phase(app,state,&job.id,run_id,JobState::Downloading)?;
             let asset=crate::public_sources::resolve(&selection.source_url,&selection.asset_id,cancel.clone()).await?;
@@ -129,7 +157,24 @@ pub(super) async fn run(app:&AppHandle,state:&Arc<AppState>,job:&Job,staging:&Pa
     let Some((file,source,parent))=output else{return Ok(None);};
     phase(app,state,&job.id,run_id,JobState::Verifying)?;
     let mut item=library::index(&file,None,source,parent).or_else(|_|library::index_file(&file))?;
+    if matches!(job.source,Source::DocumentEdit {..}|Source::Ocr {..}|Source::OcrText {..}) {
+        if let Some(parent)=&item.parent_id {
+            let guard=state.repository.lock().unwrap();
+            if let Some(original)=guard.as_ref().and_then(|repo|repo.data.library.iter().find(|i|&i.id==parent)) {
+                item.collections=original.collections.clone();item.tags=original.tags.clone();item.source=original.source.clone();
+                item.details.content_id=original.details.content_id.clone();item.details.creator=original.details.creator.clone();item.details.source_url=original.details.source_url.clone();item.details.license=original.details.license.clone();item.details.attribution=original.details.attribution.clone();
+            }
+        }
+    }
     match &job.source {
+        Source::Ocr {..}=>{item.details.ocr_ref=Some(format!("ocr:{}-{}",job.id,job.run_id));},
+        Source::OcrText {reference,..}=>{item.details.ocr_ref=Some(reference.clone());},
+        Source::WebArchive {reference,collection,tags,parent_id,..}=>{
+            let root={let guard=state.repository.lock().unwrap();guard.as_ref().ok_or("Open nabnab first.")?.root().to_owned()};
+            let capture=crate::web_archive::load(&root,reference)?;
+            item.kind="article".into();item.parent_id=parent_id.clone();item.details.web_archive_ref=Some(reference.clone());item.details.content_id=Some(format!("article:{}",capture.url));item.details.creator=capture.author;item.details.source_url=Some(capture.url);item.tags=tags.clone();
+            if !collection.trim().is_empty(){item.collections.push(collection.trim().to_owned());}
+        },
         Source::PublicFile {selection} => {
             item.source=Some(selection.source_url.clone());
             item.details.source_url=Some(selection.source_url.clone());

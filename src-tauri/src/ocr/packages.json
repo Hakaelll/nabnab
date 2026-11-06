@@ -1,0 +1,191 @@
+[
+  {
+    "id": "tesseract-ocr",
+    "version": "5.5.4-1",
+    "path": "x86_64/release/tesseract-ocr/tesseract-ocr-5.5.4-1-x86_64.tar.xz",
+    "bytes": 24576,
+    "sha512": "3ac9d426b5056d4746fc89627deef33da4f8b3b2f2bc97a327613992869ffd77c3aa9e90c03ed9bf1e7313388b17a8ef73b06ef00687db8a3adfdf335c334f1d",
+    "source": "https://mirrors.kernel.org/sourceware/cygwin/src/release/tesseract-ocr/tesseract-ocr-5.5.4-1-src.tar.xz",
+    "license": "Apache-2.0"
+  },
+  {
+    "id": "cygwin",
+    "version": "3.6.12-1",
+    "path": "x86_64/release/cygwin/cygwin-3.6.12-1-x86_64.tar.xz",
+    "bytes": 1621132,
+    "sha512": "c2ceaed3f6fb6c52c30c3fc06fe0ace4b5d9c452dc0a20fd31ffbeb46fd3f98cdea82136ff2feb6d889cb56731336808925f93b85bd9315f5fd544848a2bc582",
+    "source": "https://mirrors.kernel.org/sourceware/cygwin/src/release/cygwin/cygwin-3.6.12-1-src.tar.xz",
+    "license": "LGPL-3.0-or-later with Cygwin linking exception"
+  },
+  {
+    "id": "libgcc1",
+    "version": "14.4.0-1",
+    "path": "x86_64/release/gcc/libgcc1/libgcc1-14.4.0-1-x86_64.tar.zst",
+    "bytes": 59166,
+    "sha512": "5ac8a56e5eee285efcd6dbd05a473e795e181021d7194b8a98dfe2fa201a71f0abe2908e0b4c81490eb5ef472efaeac8e56a61a5f289eee4ad6e90e52a844ff8",
+    "source": "https://mirrors.kernel.org/sourceware/cygwin/x86_64/release/gcc/gcc-14.4.0-1-src.tar.zst",
+    "license": "GPL-3.0-or-later with GCC Runtime Library Exception"
+  },
+  {
+    "id": "libleptonica_6",
+    "version": "1.87.0-1",
+    "path": "x86_64/release/leptonica/libleptonica_6/libleptonica_6-1.87.0-1-x86_64.tar.xz",
+    "bytes": 1013932,
+    "sha512": "5595ed60360a04bc83858d609ecdc57ef14d098ad709031d82c0e7083e56b6fb028f06290d80de83c28e0a59ec04bbec51b96e8a8b66569dec1ec445af6a9362",
+    "source": "https://mirrors.kernel.org/sourceware/cygwin/src/release/leptonica/leptonica-1.87.0-1-src.tar.xz",
+    "license": "BSD-2-Clause"
+  },
+  {
+    "id": "libgif7",
+    "version": "6.1.3-1",
+    "path": "x86_64/release/giflib/libgif7/libgif7-6.1.3-1-x86_64.tar.xz",
+    "bytes": 18108,
+    "sha512": "93faf1fe5a99cb6814aa244f95cde926529a231b1e39cc8cce2f25cdcc74d56318ff756beec7eb774b7f8ab07efd99d9e6d1efb5ed6990b613fa76b638ff3186",
+    "source": "https://mirrors.kernel.org/sourceware/cygwin/src/release/giflib/giflib-6.1.3-1-src.tar.xz",
+    "license": "MIT"
+  },
+  {
+    "id": "libjpeg8",
+    "version": "3.2.0-1",
+    "path": "x86_64/release/libjpeg-turbo/libjpeg8/libjpeg8-3.2.0-1-x86_64.tar.xz",
+    "bytes": 198004,
+    "sha512": "0f090b63f980aa761a23fce123ceec97d2f4d4e76fd432ced76ca54deb2f271f58bf24238a106d4b12c7ef21d40820e2f7f176de0581edb87200a5e9274eab78",
+    "source": "https://mirrors.kernel.org/sourceware/cygwin/src/release/libjpeg-turbo/libjpeg-turbo-3.2.0-1-src.tar.xz",
+    "license": "BSD-3-Clause and IJG"
+  },
+  {
+    "id": "libopenjp2_7",
+    "version": "2.5.4-1",
+    "path": "x86_64/release/openjpeg2/libopenjp2_7/libopenjp2_7-2.5.4-1-x86_64.tar.xz",
+    "bytes": 137996,
+    "sha512": "a9c90280dc85615130237a8ef2a812c72400861906e77e8116c877f5a048f3fc3f3cff4e7938382c7c5ba636f045e80be91ca6d5b49dcbc51a327b81d235ce87",
+    "source": "https://mirrors.kernel.org/sourceware/cygwin/src/release/openjpeg2/openjpeg2-2.5.4-1-src.tar.xz",
+    "license": "BSD-2-Clause"
+  },
+  {
+    "id": "libpng16",
+    "version": "1.6.59-1",
+    "path": "x86_64/release/libpng/libpng16/libpng16-1.6.59-1-x86_64.tar.xz",
+    "bytes": 180120,
+    "sha512": "82c922cb908cb2a335e59a67f9b5fe6d2cb3a856c874a1f677042515211501a4caa9f4205bbdc8c495457401fc869854dac94230a2a9522d240298735b2d9c0d",
+    "source": "https://mirrors.kernel.org/sourceware/cygwin/src/release/libpng/libpng-1.6.59-1-src.tar.xz",
+    "license": "libpng-2.0"
+  },
+  {
+    "id": "zlib0",
+    "version": "1.3.2-1",
+    "path": "x86_64/release/zlib/zlib0/zlib0-1.3.2-1-x86_64.tar.zst",
+    "bytes": 46254,
+    "sha512": "d79ba6098cadf6bf2f32f35d9cd54729293c64b3c9daabb9d080f52861a19db71544d5710fdbd61ff45e7c2ae4eecb3f2e3b8a1e3bc05695b8cfe01c7639c53a",
+    "source": "https://mirrors.kernel.org/sourceware/cygwin/x86_64/release/zlib/zlib-1.3.2-1-src.tar.zst",
+    "license": "Zlib"
+  },
+  {
+    "id": "libtiff7",
+    "version": "4.7.2-1",
+    "path": "x86_64/release/tiff/libtiff7/libtiff7-4.7.2-1-x86_64.tar.xz",
+    "bytes": 165960,
+    "sha512": "645f6fee066dfc353d297840feb703fd50bb5b5a78d7b7bd4adddc92ff2a4e483143af76efa03c94038b38ed93d193f91d602f27d12f1e56540be1c93fa7aa93",
+    "source": "https://mirrors.kernel.org/sourceware/cygwin/src/release/tiff/tiff-4.7.2-1-src.tar.xz",
+    "license": "libtiff"
+  },
+  {
+    "id": "libdeflate0",
+    "version": "1.26-1",
+    "path": "x86_64/release/libdeflate/libdeflate0/libdeflate0-1.26-1-x86_64.tar.xz",
+    "bytes": 42516,
+    "sha512": "ccb2f55354978fddf386b79b338ec16635b705f7a67622e2990a86b80008929bd5402c3646347cc385eb0dc0f0445c784a8dc1e0b8e7f853969dca06715607e6",
+    "source": "https://mirrors.kernel.org/sourceware/cygwin/src/release/libdeflate/libdeflate-1.26-1-src.tar.xz",
+    "license": "MIT"
+  },
+  {
+    "id": "libjbig2",
+    "version": "2.1-2",
+    "path": "x86_64/release/jbigkit/libjbig2/libjbig2-2.1-2.tar.xz",
+    "bytes": 24548,
+    "sha512": "419922e8322b9484cc6788926c3742b244ecd93d6ebc92ebb5b52cde422f468403fedb0d55f7fcfbc80cc824dfe313c5a339595e4bac2b7065967a2916e64d0a",
+    "source": "https://mirrors.kernel.org/sourceware/cygwin/x86_64/release/jbigkit/jbigkit-2.1-2-src.tar.xz",
+    "license": "GPL-2.0-or-later"
+  },
+  {
+    "id": "liblzma5",
+    "version": "5.8.4-1",
+    "path": "x86_64/release/xz/liblzma5/liblzma5-5.8.4-1-x86_64.tar.zst",
+    "bytes": 88387,
+    "sha512": "3fa68c933b64215fe70be45c026d046fd330a28467a589329ffe1a571b7434246063c866369314015d9966767476f315c91097c9bb1d25a71e4ce36c0ef98a9d",
+    "source": "https://mirrors.kernel.org/sourceware/cygwin/x86_64/release/xz/xz-5.8.4-1-src.tar.zst",
+    "license": "0BSD and LGPL-2.1-or-later"
+  },
+  {
+    "id": "libstdc++6",
+    "version": "14.4.0-1",
+    "path": "x86_64/release/gcc/libstdc++6/libstdc++6-14.4.0-1-x86_64.tar.zst",
+    "bytes": 651767,
+    "sha512": "3d86409193c952618eee7e2dea32bdeb97f22ee800e13cc46f98b5095d4d0b1b31ac4336dc5819abb2d553ad1c2151619e9f6f337dfe921ba80fda1323f6f4e3",
+    "source": "https://mirrors.kernel.org/sourceware/cygwin/x86_64/release/gcc/gcc-14.4.0-1-src.tar.zst",
+    "license": "GPL-3.0-or-later with GCC Runtime Library Exception"
+  },
+  {
+    "id": "libiconv2",
+    "version": "1.19-2",
+    "path": "x86_64/release/libiconv/libiconv2/libiconv2-1.19-2-x86_64.tar.xz",
+    "bytes": 555664,
+    "sha512": "a1b23e24e0a495e7163923bcf40a4b933403e0826cfc0d9bde785bc92c909b8c4fb94b1e6b2c0242f4328a723855e72ff3baab9f557ef855b7fe7a7d901b0943",
+    "source": "https://mirrors.kernel.org/sourceware/cygwin/src/release/libiconv/libiconv-1.19-2-src.tar.xz",
+    "license": "LGPL-2.1-or-later"
+  },
+  {
+    "id": "libintl8",
+    "version": "0.22.5-1",
+    "path": "x86_64/release/gettext/libintl8/libintl8-0.22.5-1.tar.xz",
+    "bytes": 43256,
+    "sha512": "370a19af888bc7c9ed95cf8ade0d36d5e7cdb634abdebcba260cad61fa9a4cc05b5e748e315c9709f66861e8756b227d6757d529846591189e19ee2b2d00002d",
+    "source": "https://mirrors.kernel.org/sourceware/cygwin/x86_64/release/gettext/gettext-0.22.5-1-src.tar.xz",
+    "license": "LGPL-2.1-or-later"
+  },
+  {
+    "id": "libwebp7",
+    "version": "1.6.0-1",
+    "path": "x86_64/release/libwebp/libwebp7/libwebp7-1.6.0-1-x86_64.tar.xz",
+    "bytes": 197532,
+    "sha512": "0233a2feabfb1cd65ecc1fd1af50cceb2b96d68056106ddc549cffdc360189aa95071c822ce8a68be6c6957b088917736fbff6e43b30d67531cbd2a0ce3b6b0c",
+    "source": "https://mirrors.kernel.org/sourceware/cygwin/x86_64/release/libwebp/libwebp-1.6.0-1-src.tar.xz",
+    "license": "BSD-3-Clause"
+  },
+  {
+    "id": "libzstd1",
+    "version": "1.5.7-1",
+    "path": "x86_64/release/zstd/libzstd1/libzstd1-1.5.7-1.tar.zst",
+    "bytes": 253786,
+    "sha512": "f89cdaa004487ec8c4796b8f56887c81f6f497873c1495b9cb585ffe6c8d6e6b8ad4b52617d5238075f965f1fe001da287d9a00d121590274b2d87672b415a0f",
+    "source": "https://mirrors.kernel.org/sourceware/cygwin/x86_64/release/zstd/zstd-1.5.7-1-src.tar.zst",
+    "license": "BSD-3-Clause or GPL-2.0"
+  },
+  {
+    "id": "libwebpmux3",
+    "version": "1.6.0-1",
+    "path": "x86_64/release/libwebp/libwebpmux3/libwebpmux3-1.6.0-1-x86_64.tar.xz",
+    "bytes": 16848,
+    "sha512": "998c296522bcca6f58755b872d5d1751caac006ed8c6014ffeda8e173da61060a7742099cf015e4be2e64a7210e619cd260430533bca7bee17d7d41cd2237831",
+    "source": "https://mirrors.kernel.org/sourceware/cygwin/x86_64/release/libwebp/libwebp-1.6.0-1-src.tar.xz",
+    "license": "BSD-3-Clause"
+  },
+  {
+    "id": "libtesseract-ocr_5",
+    "version": "5.5.4-1",
+    "path": "x86_64/release/tesseract-ocr/libtesseract-ocr_5/libtesseract-ocr_5-5.5.4-1-x86_64.tar.xz",
+    "bytes": 1226184,
+    "sha512": "d7aa1bcb21b2e5ea67592bb58031130a2a5824f15170512d4d9fb212851caa7cc66d7c57f3f3d20b86fc2de2da077a2ac22dc250be9424c99d7514033f35c9c5",
+    "source": "https://mirrors.kernel.org/sourceware/cygwin/src/release/tesseract-ocr/tesseract-ocr-5.5.4-1-src.tar.xz",
+    "license": "Apache-2.0"
+  },
+  {
+    "id": "libgomp1",
+    "version": "14.4.0-1",
+    "path": "x86_64/release/gcc/libgomp1/libgomp1-14.4.0-1-x86_64.tar.zst",
+    "bytes": 112610,
+    "sha512": "dbc36b7182d25ca655f23105997a5d1f0d3e1a9e82dbf38928750dff00e1af411af1c9c6f2020d828dbb676e984a17444c8ff5cddfd0769f96ea6a85100ddb8d",
+    "source": "https://mirrors.kernel.org/sourceware/cygwin/x86_64/release/gcc/gcc-14.4.0-1-src.tar.zst",
+    "license": "GPL-3.0-or-later with GCC Runtime Library Exception"
+  }
+]

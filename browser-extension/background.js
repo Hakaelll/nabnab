@@ -1,5 +1,25 @@
 import { createClient, makeRequest, validToken } from "./protocol.js";
 import { scanMedia, normalizeMediaScan, mediaSummaries, selectedMediaRequest } from "./media.js";
+import { captureDocument, validateCapture } from "./archive.js";
+
+async function captureArchive(mode) {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id || !/^https?:\/\//i.test(tab.url || "")) throw new Error("Abre una página HTTP o HTTPS para archivarla.");
+  await chrome.storage.session.remove("archiveCapture");
+  const result = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: captureDocument, args: [mode] });
+  const [current] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (current?.id !== tab.id || current.url !== tab.url) throw new Error("La pestaña ha cambiado. Vuelve a capturarla.");
+  const capture = validateCapture(result[0]?.result);
+  await chrome.storage.session.set({ archiveCapture: { tabId: tab.id, pageUrl: tab.url, createdAt: Date.now(), capture } });
+  return capture;
+}
+async function sendArchive(request) {
+  await chrome.storage.session.set({ pendingArchive: request });
+  const receipt = await (await client()).archive(request);
+  await chrome.storage.session.remove(["pendingArchive", "archiveCapture"]);
+  await chrome.action.setBadgeText({ text: "" });
+  return receipt;
+}
 
 async function client() {
   const { pairingToken } = await chrome.storage.local.get("pairingToken");
@@ -15,6 +35,24 @@ async function send(request) {
 }
 async function handle(message) {
   switch (message?.kind) {
+    case "captureArchive": return captureArchive(message.mode);
+    case "archivePreview": return (await chrome.storage.session.get("archiveCapture")).archiveCapture?.capture || null;
+    case "clearArchive": await chrome.storage.session.remove(["archiveCapture", "pendingArchive"]); return { cleared: true };
+    case "retryArchive": {
+      const { pendingArchive } = await chrome.storage.session.get("pendingArchive");
+      if (!pendingArchive) throw new Error("No hay una captura pendiente.");
+      return sendArchive(pendingArchive);
+    }
+    case "sendArchive": {
+      const { archiveCapture } = await chrome.storage.session.get("archiveCapture");
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (!archiveCapture || archiveCapture.tabId !== tab?.id || archiveCapture.pageUrl !== tab.url || Date.now() - archiveCapture.createdAt > 15 * 60000) throw new Error("La captura ha caducado o cambiaste de pestaña. Revísala de nuevo.");
+      const title = String(message.title || "").trim(), author = String(message.author || "").trim();
+      if (!title || title.length > 500 || author.length > 500 || !["html", "epub", "md"].includes(message.format) || typeof message.collection !== "string" || message.collection.length > 120 || !Array.isArray(message.tags) || message.tags.length > 50 || message.tags.some(tag => typeof tag !== "string" || tag.length > 120)) throw new Error("Revisa el título, formato, colección y etiquetas.");
+      if (typeof message.requestId !== "string" || !/^[a-zA-Z0-9_.-]{8,128}$/.test(message.requestId)) throw new Error("Identificador de captura inválido.");
+      const capture = validateCapture({ ...archiveCapture.capture, title, author: author || null });
+      return sendArchive({ version: 1, requestId: message.requestId, capture, format: message.format, collection: message.collection, tags: message.tags });
+    }
     case "health":
       await (await client()).health();
       return { connected: true };
@@ -73,6 +111,7 @@ async function handle(message) {
     case "forget":
       await chrome.storage.local.remove("pairingToken");
       await chrome.storage.session.remove(["pendingRequest", "detectedMedia"]);
+      await chrome.storage.session.remove(["archiveCapture", "pendingArchive"]);
       return { connected: false };
     default:
       throw new Error("Solicitud de extensión desconocida.");
@@ -91,10 +130,18 @@ async function menus() {
   chrome.contextMenus.create({ id: "nabnab-audio", title: "Enviar audio a nabnab", contexts: ["link", "page"] });
   chrome.contextMenus.create({ id: "nabnab-prepare", title: "Preparar enlace en nabnab", contexts: ["link", "page"] });
   chrome.contextMenus.create({ id: "nabnab-save", title: "Guardar para después en nabnab", contexts: ["link", "page"] });
+  chrome.contextMenus.create({ id: "nabnab-article", title: "Guardar artículo…", contexts: ["page"] });
+  chrome.contextMenus.create({ id: "nabnab-selection", title: "Guardar selección…", contexts: ["selection"] });
+  chrome.contextMenus.create({ id: "nabnab-page", title: "Guardar página offline…", contexts: ["page"] });
 }
 chrome.runtime.onInstalled.addListener(() => { void menus(); });
 chrome.runtime.onStartup.addListener(() => { void menus(); });
 chrome.contextMenus.onClicked.addListener((info, tab) => {
+  const archiveMode = { "nabnab-article": "reading", "nabnab-selection": "selection", "nabnab-page": "page" }[String(info.menuItemId)];
+  if (archiveMode) {
+    void captureArchive(archiveMode).then(async () => { await chrome.action.setBadgeText({ text: "1" }); try { await chrome.action.openPopup(); } catch { /* Opening the extension shows the saved preview. */ } }).catch(async () => { await chrome.action.setBadgeText({ text: "!" }); });
+    return;
+  }
   if (!["nabnab-video", "nabnab-audio",'nabnab-prepare','nabnab-save'].includes(String(info.menuItemId))) return;
   const url = info.linkUrl || info.pageUrl || tab?.url;
   void send({ url, profile: info.menuItemId === "nabnab-audio" ? "mp3" : "mp4", requestId: crypto.randomUUID(),intent:info.menuItemId==='nabnab-prepare'?'prepare':info.menuItemId==='nabnab-save'?'save':'download' })

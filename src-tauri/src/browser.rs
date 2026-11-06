@@ -396,7 +396,7 @@ fn read_request(stream: &mut impl Read) -> Result<HttpRequest, u16> {
         Some(_) => return Err(400),
         None => 0,
     };
-    if length > MAX_BODY {
+    if length > if path=="/archive" {4*1024*1024}else{MAX_BODY} {
         return Err(413);
     }
     let mut body = bytes[header_end..].to_vec();
@@ -595,7 +595,7 @@ fn serve(app: &AppHandle, state: &Shared, stream: &mut TcpStream) {
             return;
         }
     };
-    if !matches!(request.path.as_str(), "/health" | "/enqueue" | "/presets") {
+    if !matches!(request.path.as_str(), "/health" | "/enqueue" | "/presets" | "/archive") {
         write_response(
             stream,
             404,
@@ -613,7 +613,7 @@ fn serve(app: &AppHandle, state: &Shared, stream: &mut TcpStream) {
                     .get("access-control-request-method")
                     .map(String::as_str)
             ),
-            ("/health" | "/presets", Some("GET" | "POST")) | ("/enqueue", Some("POST"))
+            ("/health" | "/presets", Some("GET" | "POST")) | ("/enqueue" | "/archive", Some("POST"))
         );
         let valid = request.body.is_empty()
             && allowed_method
@@ -708,6 +708,12 @@ fn serve(app: &AppHandle, state: &Shared, stream: &mut TcpStream) {
             Some(&origin),
             &json!({"error":"Use application/json."}),
         );
+        return;
+    }
+    if request.path=="/archive" {
+        let message=serde_json::from_slice::<crate::web_archive::Request>(&request.body).map_err(|_|"The archive request does not match the protocol.".to_owned());
+        let result=message.and_then(|message|tauri::async_runtime::block_on(crate::web_archive::accept(&app.state::<Arc<crate::AppState>>(),&client,message)));
+        match result {Ok(receipt)=>write_response(stream,200,Some(&origin),&serde_json::to_value(receipt).unwrap_or_default()),Err(error)=>write_response(stream,400,Some(&origin),&json!({"error":crate::failure::sanitize(&error)}))};
         return;
     }
     let message = serde_json::from_slice::<BrowserRequest>(&request.body)

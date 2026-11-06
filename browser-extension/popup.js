@@ -2,6 +2,46 @@ const connection = document.querySelector("#connection");
 const message = document.querySelector("#message");
 const send = document.querySelector("#send");
 const retry = document.querySelector("#retry");
+let archiveRequestId;
+const archiveStatus = document.querySelector("#archive-status");
+function showArchive(capture) {
+  const form = document.querySelector("#archive-form");
+  form.hidden = !capture; if (!capture) return;
+  archiveRequestId = crypto.randomUUID();
+  document.querySelector("#archive-name").value = capture.title;
+  document.querySelector("#archive-author").value = capture.author || "";
+  document.querySelector("#archive-url").textContent = capture.url;
+  document.querySelector("#archive-date").textContent = "Fecha de archivo: " + new Date(capture.archivedAt).toLocaleString() + (capture.publishedAt ? " · Publicación: " + capture.publishedAt : "");
+  const preview = document.querySelector("#archive-preview"); preview.replaceChildren();
+  for (const block of capture.blocks.slice(0, 12)) {
+    const element = document.createElement(block.kind === "heading" ? "h3" : "p");
+    element.textContent = block.kind === "image" ? "Imagen local: " + (block.text || block.resourceId) : block.text.slice(0, 1200);
+    preview.append(element);
+  }
+  const warnings = document.querySelector("#archive-warnings"); warnings.replaceChildren();
+  for (const warning of capture.warnings) { const li = document.createElement("li"); li.textContent = warning; warnings.append(li); }
+  archiveStatus.textContent = capture.blocks.length + " bloques · " + capture.resources.length + " imágenes locales. Revisa la copia antes de guardarla.";
+}
+for (const button of document.querySelectorAll("[data-capture]")) button.addEventListener("click", async () => {
+  showArchive(null);
+  button.disabled = true; archiveStatus.textContent = "Preparando vista previa…";
+  try { showArchive(await call({ kind: "captureArchive", mode: button.dataset.capture })); }
+  catch (error) { archiveStatus.textContent = error.message; }
+  finally { button.disabled = false; }
+});
+document.querySelector("#archive-form").addEventListener("input", () => { archiveRequestId = crypto.randomUUID(); });
+document.querySelector("#archive-form").addEventListener("change", () => { archiveRequestId = crypto.randomUUID(); });
+document.querySelector("#archive-form").addEventListener("submit", async event => {
+  event.preventDefault(); const button = event.currentTarget.querySelector("button[type=submit]"); button.disabled = true;
+  try {
+    await call({ kind: "sendArchive", requestId: archiveRequestId, title: document.querySelector("#archive-name").value, author: document.querySelector("#archive-author").value, format: document.querySelector("#archive-format").value, collection: document.querySelector("#archive-collection").value.trim(), tags: [...new Set(document.querySelector("#archive-tags").value.split(",").map(value => value.trim()).filter(Boolean))] });
+    showArchive(null); archiveStatus.textContent = "Copia recibida por nabnab. Consulta Descargas y Biblioteca."; document.querySelector("#archive-retry").hidden = true;
+  } catch (error) { archiveStatus.textContent = error.message; document.querySelector("#archive-retry").hidden = false; }
+  finally { button.disabled = false; }
+});
+document.querySelector("#archive-discard").addEventListener("click", async () => { await call({ kind: "clearArchive" }); showArchive(null); archiveStatus.textContent = "Captura descartada."; });
+document.querySelector("#archive-retry").addEventListener("click", async () => { try { await call({ kind: "retryArchive" }); showArchive(null); archiveStatus.textContent = "Copia recibida por nabnab."; document.querySelector("#archive-retry").hidden = true; } catch (error) { archiveStatus.textContent = error.message; } });
+void call({ kind: "archivePreview" }).then(showArchive).catch(() => {});
 let pendingRequest;
 async function call(value) {
   const response = await chrome.runtime.sendMessage(value);

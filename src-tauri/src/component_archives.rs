@@ -70,6 +70,12 @@ pub fn remove(root:&Path,id:&str)->Result<(),String>{
 #[cfg(test)]mod tests{use super::*;#[test]fn sources_are_fixed_and_pinned(){for p in &PACKAGES{assert!(p.url.starts_with("https://github.com/")&&p.url.contains("/releases/download/")||p.url=="https://api.nuget.org/v3-flatcontainer/tdlib.native.win-x64/1.8.69/tdlib.native.win-x64.1.8.69.nupkg");assert_eq!(p.hash.len(),64);assert!(p.bytes>0);}}}
 
 #[cfg(test)]
+pub(crate) async fn provision_document_workflow_fixture(root:&Path,archive:&Path)->Result<(),String>{
+    let package=PACKAGES.iter().find(|package|package.id=="documents").ok_or("No pinned document fixture package.")?;
+    activate_archive(root,package,fs::read(archive).map_err(|error|error.to_string())?).await
+}
+
+#[cfg(test)]
 mod runtime_tests {
     use super::*;
     #[tokio::test]

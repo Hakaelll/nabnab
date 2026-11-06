@@ -42,6 +42,26 @@ Los informes de cada ejecución quedan en `artifacts/file-sources/`. Las restric
 
 El test permite repetir solo la comprobación local con `NABNAB_NATIVE_REUSE_DATA` apuntando a una carpeta `artifacts/file-sources/native-run-*` generada por él. Una repetición de las APIs encontró errores 504 de GitHub; se registraron como fallos temporales y no se confundieron con trabajos completados.
 
+## Entrega B: lectura y documentos
+
+La extensión incorpora Guardar artículo, Guardar selección y Guardar página offline con previsualización y exportación HTML, EPUB o Markdown. El lector local permite notas y resaltados por versión. La [guía de archivo web](WEB-ARCHIVE.md) explica qué se conserva y qué se omite.
+
+En Herramientas, el directorio permite elegir Operaciones PDF, Editar PDF y Reconocer texto sin recorrer todos los formularios. [OCR](OCR.md) añade imágenes, regiones y PDF escaneados, copia buscable, revisión y corrección de texto, búsqueda con coordenadas y retirada del índice. Tesseract y sus idiomas son componentes opcionales. [Edición PDF](DOCUMENT-EDITS.md) añade compresión, márgenes, numeración, marca de agua e índice jerárquico, con previsualización vinculada a la entrada y opciones elegidas. Cada resultado conserva el original.
+
+La aplicación nativa completó siete trabajos y dejó nueve archivos de biblioteca en datos de prueba aislados. Se verificaron OCR, PDF buscable, búsqueda global que abre la página reconocida, texto corregido exportado, consentimiento y parámetros de previsualización PDF, archivo web autenticado, notas por versión y EPUB. Los motores y entradas sintéticas se prepararon para las pruebas; no se modificó una instalación del usuario. Consulta la [evidencia nativa](verification/document-workflows-native.json).
+
+![Búsqueda OCR en la aplicación nativa](documents-ocr-native.png)
+
+![Artículo offline y notas en la aplicación nativa](article-offline-native.png)
+
+El acabado de Descargas, Herramientas, Plataformas y Ajustes también cambia la composición, las superficies y la jerarquía de controles. Las referencias y reglas siguen en [la fuente de diseño canónica](design-reference.md). Estas comparaciones usan ventanas y fixtures equivalentes:
+
+![Herramientas antes](sections-tools-before.png)
+
+![Herramientas después](sections-tools-after.png)
+
+![Preferencias agrupadas](sections-settings-after.png)
+
 ## Entregas siguientes
 
-B, archivo web/OCR/documentos; C, organización e imágenes; D, captura/voz; E, CLI/MCP y permisos siguen pendientes de implementación. Esta guía se actualizará al cerrar sus recorridos. Las funciones de fases anteriores no se contabilizan como novedades.
+C, organización e imágenes; D, captura/voz; E, CLI/MCP y permisos siguen pendientes de implementación. Esta guía se actualizará al cerrar sus recorridos. Las funciones de fases anteriores no se contabilizan como novedades.

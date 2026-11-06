@@ -20,7 +20,11 @@ export type ToolOptions =
   | {kind:'audioProcess';operation:'normalize'|'silence'|'denoise';profile:'podcast'|'broadcast'|'music'}
   | {kind:'imageConvert';format:'jpg'|'png'|'webp';width:number;quality:number;stripMetadata:boolean};
 export type ToolKind = ToolOptions["kind"];
-export type JobSource = { kind: "download"; url: string; format: OutputFormat; height: number | null; audioBitrate: number | null; subtitleLanguage?: string | null }
+export type JobSource = {kind:"webArchive";reference:string;format:"html"|"epub"|"md";collection:string;tags:string[];parentId:string|null}
+  | {kind:"documentEdit";libraryId:string;options:{kind:string};inputHash:string}
+  | {kind:"ocr";libraryId:string;options:{output:string}}
+  | {kind:"ocrText";libraryId:string;reference:string;expectedHash:string}
+  | { kind: "download"; url: string; format: OutputFormat; height: number | null; audioBitrate: number | null; subtitleLanguage?: string | null }
   | { kind: "transform"; libraryId: string; options: ToolOptions }
   | {kind:"publicFile";selection:{sourceUrl:string;assetId:string;filename:string;collection:string;author:string|null;license:string|null;attribution:string|null;sha256:string|null;version:string|null;size:number|null}}
   | {kind:"cloudFile";selection:import("./file-sources-ui").CloudSelection;collection:string}
@@ -43,7 +47,7 @@ export interface Job {
   priority?: import('./scheduling-types').Priority; schedule?: import('./scheduling-types').Schedule; manualOrder?: number; runNext?:boolean; options?: import('./options').ResolvedOptions | null; contentId?:string|null; sourceId?:string|null;
 }
 export interface LibraryItem {
-  id: string; path: string; name: string; kind: "video" | "audio" | "image" | "subtitle" | "file" | "document"; size: number; duration: number | null;
+  id: string; path: string; name: string; kind: "video" | "audio" | "image" | "subtitle" | "file" | "document" | "article"; size: number; duration: number | null;
   width: number | null; height: number | null; videoCodec: string | null; audioCodec: string | null;
   container: string | null; addedAt: number; source: string | null; parentId: string | null; collections: string[]; tags: string[]; missing?: boolean;
   details?: import('./library-types').LibraryDetails;
@@ -62,7 +66,7 @@ export interface HomeState {
   format: OutputFormat; quality: string; audioBitrate: string; subtitleLanguage: string; submitting: boolean;
 }
 export interface DownloadView { query: string; filter: "activity" | "pending" | "completed" | "error" | "all"; selected: Set<string>; detailId: string | null }
-export interface LibraryView { query: string; filter: "all" | "video" | "audio" | "image" | "subtitle" | "document" | "file"; sort: "newest" | "name" | "duration" | "size"; layout: "grid" | "list"; collection: string; offset: number; selected: Set<string>; detailId: string | null }
+export interface LibraryView { contentMatches?:Set<string>;query: string; filter: "all" | "video" | "audio" | "image" | "subtitle" | "document" | "file" | "article" | "ocr"; sort: "newest" | "name" | "duration" | "size"; layout: "grid" | "list"; collection: string; offset: number; selected: Set<string>; detailId: string | null }
 export interface ToolsView { kind: ToolKind; ids: Set<string>; options: ToolOptions; picking: boolean }
 export type SettingsSection = "connections" | "general" | "downloads" | "formats" | "organization" | "engines" | "sessions" | "appearance" | "browser" | "about";
 export interface SettingsView { section: SettingsSection; engines: EngineStatus[] | null; sessions: SessionStatus[] | null; bridge: BridgeStatus | null; pairing: { token: string; port: number } | null; cache: { bytes: number; files: number } | null; working: boolean }
