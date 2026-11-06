@@ -731,6 +731,35 @@ async fn download_with_network(
     emit: impl Fn(Progress) + Send + Sync + Clone + 'static,
     network: Network,
 ) -> Result<PathBuf, String> {
+    download_named_with_network(url, staging, None, cancel, run_id, emit, network).await
+}
+
+pub fn validate_filename(filename: &str) -> Result<(), String> {
+    let stem = filename.split('.').next().unwrap_or("").to_ascii_uppercase();
+    if filename.is_empty() || filename.len() > 240
+        || filename.chars().any(|c| c.is_control() || "<>:\"/\\|?*".contains(c))
+        || filename.ends_with(['.', ' ']) || filename.starts_with(".direct-source.") || matches!(filename, "." | "..")
+        || matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || (stem.len() == 4 && (stem.starts_with("COM") || stem.starts_with("LPT"))
+            && matches!(stem.as_bytes()[3], b'1'..=b'9'))
+    { return Err("Choose a safe single filename without paths or reserved Windows names.".into()); }
+    Ok(())
+}
+
+/// Files explicitly selected from an adapter keep their real name and type.
+pub async fn download_file(
+    url: &str, staging: &Path, filename: &str, cancel: watch::Receiver<bool>, run_id: u64,
+    emit: impl Fn(Progress) + Send + Sync + Clone + 'static,
+) -> Result<PathBuf, String> {
+    validate_filename(filename)?;
+    download_named_with_network(url, staging, Some(filename), cancel, run_id, emit, Network::Public).await
+}
+
+async fn download_named_with_network(
+    url: &str, staging: &Path, filename: Option<&str>, cancel: watch::Receiver<bool>, run_id: u64,
+    emit: impl Fn(Progress) + Send + Sync + Clone + 'static, network: Network,
+) -> Result<PathBuf, String> {
+    if let Some(filename) = filename { validate_filename(filename)?; }
     parsed_url(url, network)?;
     let metadata = fs::symlink_metadata(staging)
         .map_err(|_| "The owned download staging folder is unavailable.")?;
@@ -747,7 +776,7 @@ async fn download_with_network(
     if !metadata.is_dir() || metadata.file_type().is_symlink() {
         return Err("Direct staging must be an owned regular directory.".into());
     }
-    let hash = url_hash(url);
+    let hash = filename.map_or_else(||url_hash(url), |name|url_hash(&format!("{url}\n{name}")));
     if regular(&staging.join(COMPLETED))?.is_some() {
         emit(Progress {
             request_id: run_id,
@@ -788,7 +817,13 @@ async fn download_with_network(
         response = fetch(url, None, None, false, cancel.clone(), network).await?;
     }
     successful(&response)?;
-    let kind = media_type(&response)?;
+    let extension = if let Some(filename) = filename {
+        let content_type = response.headers().get(header::CONTENT_TYPE).and_then(|v|v.to_str().ok()).unwrap_or("").split(';').next().unwrap_or("").trim();
+        if content_type.eq_ignore_ascii_case("text/html") && !filename.to_ascii_lowercase().ends_with(".html") && !filename.to_ascii_lowercase().ends_with(".htm") {
+            return Err("The source returned an HTML page instead of the selected file.".into());
+        }
+        None
+    } else { Some(media_type(&response)?.extension) };
     let length = content_length(&response)?;
     let tag = etag(&response);
     let total = if response.status() == StatusCode::PARTIAL_CONTENT {
@@ -815,15 +850,15 @@ async fn download_with_network(
     }
     // Strong validators belong to one resource URI, not a different redirect target.
     let mut prefix = Vec::new();
-    let mut checked_prefix = offset > 0;
-    if checked_prefix {
+    let mut checked_prefix = offset > 0 || filename.is_some();
+    if offset > 0 {
         let mut first = File::open(&part)
             .map_err(|_| "Could not inspect the resumed partial.")?
             .take(PREFIX_LIMIT as u64);
         first
             .read_to_end(&mut prefix)
             .map_err(|_| "Could not inspect the resumed partial.")?;
-        prefix_ready(&prefix, true)?;
+        if filename.is_none() { prefix_ready(&prefix, true)?; }
         prefix.clear();
     }
     let mut file = partial_file(&part, offset)?;
@@ -889,7 +924,7 @@ async fn download_with_network(
     file.sync_all()
         .map_err(|_| "Could not flush the completed direct file.")?;
     drop(file);
-    let output = staging.join(format!("direct-source.{}", kind.extension));
+    let output = staging.join(filename.map(str::to_owned).unwrap_or_else(||format!("direct-source.{}", extension.unwrap_or("bin"))));
     if regular(&output)?.is_some() {
         return Err("The direct input already exists. Existing files were preserved.".into());
     }
@@ -924,6 +959,29 @@ async fn download_with_network(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn selected_filename_rejects_paths_devices_and_collisions_with_receipts() {
+        for name in ["", "../secret", "a\\b", "CON.zip", "LPT1", "a:token", "trailing.", "bad\nname"] {
+            assert!(validate_filename(name).is_err(), "{name}");
+        }
+        for name in ["release-x64.tar.gz", "document.docx", "Notas en español.md"] {
+            validate_filename(name).unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn selected_binary_keeps_name_bytes_and_safe_receipts() {
+        let fixture = Fixture::start(vec![reply("200 OK", &[("Content-Type", "application/octet-stream"), ("Content-Length", "7")], b"package")]);
+        let path = stage();
+        let (_sender, cancel) = watch::channel(false);
+        let output = download_named_with_network(&fixture.url, &path, Some("app-x64.7z"), cancel, 1, |_| {}, fixture.network).await.unwrap();
+        assert_eq!(output.file_name().unwrap(), "app-x64.7z");
+        assert_eq!(fs::read(output).unwrap(), b"package");
+        let receipt = fs::read_to_string(path.join(COMPLETED)).unwrap();
+        assert!(!receipt.contains("secret") && !receipt.contains("http"));
+        fixture.finish();
+        fs::remove_dir_all(path).unwrap();
+    }
     use std::{
         net::TcpListener,
         sync::{Arc, Mutex},
