@@ -45,7 +45,7 @@ fn extension_kind(path: &Path) -> Option<&'static str> {
         "png" | "jpg" | "jpeg" | "webp" | "gif" | "bmp" | "tiff" | "tif" | "avif" | "heic"
         | "heif" => Some("image"),
         "srt" | "vtt" => Some("subtitle"),
-        "pdf" | "epub" => Some("document"),
+        "pdf" | "epub" | "doc" | "docx" | "odt" | "ppt" | "pptx" | "odp" | "xls" | "xlsx" | "ods" | "rtf" | "txt" | "md" | "csv" => Some("document"),
         _ => None,
     }
 }

@@ -24,4 +24,4 @@ Probar paginación/cancelación, archivos vacíos o truncados, nombres/rutas hos
 
 ## Estado
 
-A en implementación. B, C, D y E pendientes. Ninguna cuenta OAuth ni captura de pantalla del usuario se activa sin su autorización explícita en la aplicación.
+A implementada: fuentes públicas con descargas reales verificadas, conectores OAuth con pruebas locales y configuración legítima pendiente para comprobar cuentas reales. Suite nativa: 254 pruebas aprobadas y 27 opt-in omitidas; JavaScript: 27 aprobadas. Navegador verificado en 1180 × 780 y 900 × 620 con fixtures. La verificación adicional de trabajos en la aplicación nativa está en curso. B, C, D y E pendientes. Ninguna cuenta OAuth ni captura de pantalla del usuario se activa sin su autorización explícita en la aplicación.

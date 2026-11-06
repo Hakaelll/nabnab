@@ -17,7 +17,7 @@ export interface SourceItem {
   reason: string | null; jobIds: string[];
 }
 export interface FollowedSource {
-  id: string; name: string; url: string; kind: "channel" | "playlist" | "podcast" | "gallery"; urlRef?: string | null; publicFeedUrl?: string | null; status: SourceStatus;
+  id: string; name: string; url: string; kind: "channel" | "playlist" | "podcast" | "gallery" | "github"; urlRef?: string | null; publicFeedUrl?: string | null; status: SourceStatus;
   createdAt: number; lastCheck: number | null; nextCheck: number | null; error: string | null; failures: number;
   settings: SourceSettings;
   baseline: { complete: boolean; inspected: number; total: number | null; cursor: number; hasMore: boolean };

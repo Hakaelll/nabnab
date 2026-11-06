@@ -450,7 +450,7 @@ fn regular(path: &Path) -> Result<Option<fs::Metadata>, String> {
     Ok(Some(metadata))
 }
 
-fn partial_file(path: &Path, offset: u64) -> Result<File, String> {
+pub(crate) fn partial_file(path: &Path, offset: u64) -> Result<File, String> {
     let existing = regular(path)?.is_some();
     let mut options = OpenOptions::new();
     options.write(true);
@@ -667,7 +667,7 @@ fn prefix_ready(prefix: &[u8], complete: bool) -> Result<bool, String> {
     Ok(true)
 }
 
-fn move_completed(part: &Path, output: &Path) -> Result<(), String> {
+pub(crate) fn move_completed(part: &Path, output: &Path) -> Result<(), String> {
     #[cfg(windows)]
     {
         use std::os::windows::ffi::OsStrExt;
@@ -738,7 +738,8 @@ pub fn validate_filename(filename: &str) -> Result<(), String> {
     let stem = filename.split('.').next().unwrap_or("").to_ascii_uppercase();
     if filename.is_empty() || filename.len() > 240
         || filename.chars().any(|c| c.is_control() || "<>:\"/\\|?*".contains(c))
-        || filename.ends_with(['.', ' ']) || filename.starts_with(".direct-source.") || matches!(filename, "." | "..")
+        || filename.ends_with(['.', ' ']) || filename.to_ascii_lowercase().starts_with(".direct-source.")
+        || matches!(filename.to_ascii_lowercase().as_str(), "." | ".." | "owner.json" | "publication.json" | "publication.new" | ".cloud-source.part")
         || matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
         || (stem.len() == 4 && (stem.starts_with("COM") || stem.starts_with("LPT"))
             && matches!(stem.as_bytes()[3], b'1'..=b'9'))

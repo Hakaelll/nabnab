@@ -22,6 +22,9 @@ export type ToolOptions =
 export type ToolKind = ToolOptions["kind"];
 export type JobSource = { kind: "download"; url: string; format: OutputFormat; height: number | null; audioBitrate: number | null; subtitleLanguage?: string | null }
   | { kind: "transform"; libraryId: string; options: ToolOptions }
+  | {kind:"publicFile";selection:{sourceUrl:string;assetId:string;filename:string;collection:string;author:string|null;license:string|null;attribution:string|null;sha256:string|null;version:string|null;size:number|null}}
+  | {kind:"cloudFile";selection:import("./file-sources-ui").CloudSelection;collection:string}
+  | {kind:"attribution";entries:{sourceUrl:string;filename:string}[]}
   | {kind:'advancedFile';url:string;connections:number;checksum:string|null}
   | {kind:'palette';libraryIds:string[];colors:number;format:string}
   | {kind:'audioPreview';libraryId:string;options:ToolOptions}
@@ -61,7 +64,7 @@ export interface HomeState {
 export interface DownloadView { query: string; filter: "activity" | "pending" | "completed" | "error" | "all"; selected: Set<string>; detailId: string | null }
 export interface LibraryView { query: string; filter: "all" | "video" | "audio" | "image" | "subtitle"; sort: "newest" | "name" | "duration" | "size"; layout: "grid" | "list"; collection: string; offset: number; selected: Set<string>; detailId: string | null }
 export interface ToolsView { kind: ToolKind; ids: Set<string>; options: ToolOptions; picking: boolean }
-export type SettingsSection = "general" | "downloads" | "formats" | "organization" | "engines" | "sessions" | "appearance" | "browser" | "about";
+export type SettingsSection = "connections" | "general" | "downloads" | "formats" | "organization" | "engines" | "sessions" | "appearance" | "browser" | "about";
 export interface SettingsView { section: SettingsSection; engines: EngineStatus[] | null; sessions: SessionStatus[] | null; bridge: BridgeStatus | null; pairing: { token: string; port: number } | null; cache: { bytes: number; files: number } | null; working: boolean }
 
 export const initialSettings: Settings = { folder: "", language: "es", networkLimit: 3, processingLimit: 1, reducedMotion: false, reducedTransparency: false, sidebarExpanded: true, trayEnabled: false, closeToTray: false, startWithWindows: false };

@@ -1,5 +1,25 @@
 use super::*;
 
+#[test]
+fn selected_files_create_versions_without_replacing_existing_files_or_links() {
+    let root=std::env::temp_dir().join(format!("nabnab-selected-versions-{}-{}",std::process::id(),SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
+    let staging=root.join("stage");let destination=root.join("files");
+    fs::create_dir_all(&staging).unwrap();fs::create_dir_all(&destination).unwrap();
+    let input=staging.join("report.pdf");fs::write(&input,b"new report").unwrap();
+    fs::write(destination.join("report.pdf"),b"original report").unwrap();
+    fs::write(destination.join("report (2).pdf"),b"another report").unwrap();
+    let (file,target)=available_file_version(&staging,&destination,&input).unwrap();
+    assert_eq!(target.file_name().unwrap(),"report (3).pdf");
+    assert_eq!(fs::read(&file).unwrap(),b"new report");
+    assert_eq!(file.file_name(),target.file_name());
+    let published=crate::publish(&staging,&file.to_string_lossy(),&destination).unwrap();
+    assert_eq!(fs::read(published).unwrap(),b"new report");
+    assert_eq!(fs::read(destination.join("report.pdf")).unwrap(),b"original report");
+    assert_eq!(fs::read(destination.join("report (2).pdf")).unwrap(),b"another report");
+    assert_eq!(fs::read(input).unwrap(),b"new report");
+    fs::remove_dir_all(root).unwrap();
+}
+
 #[tokio::test]
 async fn cancellation_interrupts_a_wait_for_output_publication() {
     let state = Arc::new(AppState::default());

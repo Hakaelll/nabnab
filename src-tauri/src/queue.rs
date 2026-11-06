@@ -146,6 +146,9 @@ pub enum Source {
         options: ToolOptions,
     },
     AdvancedFile {url:String,url_ref:Option<String>,connections:u8,checksum:Option<String>},
+    PublicFile { selection: crate::file_sources::PublicSelection },
+    CloudFile { selection: crate::cloud_storage::Selection, collection: String },
+    Attribution { entries: Vec<crate::file_sources::PublicSelection> },
     Palette {library_ids:Vec<String>,colors:u8,format:String},
     AudioPreview {library_id:String,options:ToolOptions},
     ProviderExport {url:String,url_ref:Option<String>,operation:String,format:String},
@@ -164,10 +167,12 @@ pub enum Source {
 }
 impl Source {
     fn network(&self) -> bool {
-        matches!(self, Self::Download { .. } | Self::Torrent { .. } | Self::Telegram { .. } | Self::Live { .. } | Self::ProviderExport {..} | Self::AdvancedFile {..})
+        matches!(self, Self::Download { .. } | Self::Torrent { .. } | Self::Telegram { .. } | Self::Live { .. } | Self::ProviderExport {..} | Self::AdvancedFile {..} | Self::PublicFile {..} | Self::CloudFile {..})
     }
     fn domain(&self) -> String {
         match self {
+            Self::PublicFile {selection} => providers::scope(&selection.source_url).unwrap_or_default(),
+            Self::CloudFile {selection,..} => format!("cloud:{:?}",selection.provider),
             Self::Download { url, .. } => providers::scope(url).unwrap_or_default(),
             Self::Torrent { .. } => "BitTorrent".into(),
             Self::AdvancedFile{url,..}=>providers::scope(url).unwrap_or_default(),
@@ -268,6 +273,12 @@ impl Job {
     }
 
     pub fn validate_public_source(&self) -> Result<(), String> {
+        match &self.source {
+            Source::PublicFile {selection} => selection.validate()?,
+            Source::CloudFile {selection,..} => crate::cloud_storage::validate_selection(selection)?,
+            Source::Attribution {entries} => { if entries.is_empty() || entries.len()>199 {return Err("Invalid attribution selection.".into());} for entry in entries {entry.validate()?;} },
+            _=>{}
+        }
         if let Some(provenance)=&self.provenance{if provenance.referer.as_deref().is_some_and(|r|r!="https://www.pixiv.net/"){return Err("Invalid gallery download context.".into());}if let Some(link)=&provenance.source_url{let parsed=url::Url::parse(&crate::model::validate_url(link)?).map_err(|_|"Invalid gallery source.")?;if parsed.query().is_some()||parsed.fragment().is_some(){return Err("Gallery backlinks must not contain access parameters.".into());}}}
         if let Source::Download { url, url_ref, .. } | Source::Live {url,url_ref,..} | Source::ProviderExport {url,url_ref,..} | Source::AdvancedFile{url,url_ref,..} = &self.source {
             if public_origin(url)? != *url
@@ -307,6 +318,9 @@ impl Job {
         static SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let time = now();
         let provider = match &source {
+            Source::PublicFile {selection} => url::Url::parse(&selection.source_url).ok().and_then(|u|u.host_str().map(str::to_owned)).unwrap_or_else(||"Public files".into()),
+            Source::CloudFile {selection,..} => format!("{:?}",selection.provider),
+            Source::Attribution {..} => "Wikimedia Commons".into(),
             Source::Download { url, .. } => {
                 providers::identify(url).map(|p| p.name).unwrap_or_default()
             }
@@ -1042,7 +1056,7 @@ fn stage(job: &Job) -> Result<PathBuf, String> {
             let journaled = [JOURNAL, "publication.new"]
                 .iter()
                 .any(|name| fs::symlink_metadata(owned.join(name)).is_ok());
-            if matches!(job.source, Source::Transform { .. })
+            if matches!(job.source, Source::Transform { .. } | Source::CloudFile {..} | Source::Attribution {..})
                 && owner.run_id != job.run_id
                 && !journaled
             {
@@ -1252,16 +1266,20 @@ async fn publish_verified_output(
     item: library::LibraryItem,
     cancel: watch::Receiver<bool>,
 ) -> Result<PublishedOutput, String> {
-    let file = crate::checked_output(staging, &file.to_string_lossy())?;
+    let mut file = crate::checked_output(staging, &file.to_string_lossy())?;
     let (destination, _) = stage_path(job)?;
-    let target = destination.join(file.file_name().ok_or("Invalid output filename.")?);
-    let mut item = target_item(item, target.clone());
+    let mut target = destination.join(file.file_name().ok_or("Invalid output filename.")?);
+    let mut item = item;
     let hash = digest(file.clone(), cancel.clone()).await?;
     let publication = publication_lock(state, cancel.clone()).await?;
     if let Some(existing) = reusable_output(state, job, &hash, cancel.clone()).await? {
         publication_guard(state, job, &cancel)?;
         return Ok((existing.path.clone(), existing, publication));
     }
+    if matches!(job.source,Source::PublicFile {..}|Source::CloudFile {..}|Source::Attribution {..}) {
+        (file,target)=available_file_version(staging,&destination,&file)?;
+    }
+    item=target_item(item,target.clone());
     item.content_hash = Some(hash.clone());
     let journal = Publication {
         schema_version: 1,
@@ -1277,6 +1295,23 @@ async fn publish_verified_output(
     checked_run(repo, job, &cancel)?;
     let target = crate::publish(staging, &file.to_string_lossy(), &destination)?;
     Ok((target, item, publication))
+}
+
+fn available_file_version(staging:&Path,destination:&Path,file:&Path)->Result<(PathBuf,PathBuf),String>{
+    let name=file.file_name().ok_or("Invalid selected filename.")?;
+    let original=destination.join(name);
+    if fs::symlink_metadata(&original).is_err(){return Ok((file.to_owned(),original));}
+    let stem=file.file_stem().unwrap_or(name).to_string_lossy();
+    let extension=file.extension().map(|e|format!(".{}",e.to_string_lossy())).unwrap_or_default();
+    for version in 2..=10000 {
+        let name=format!("{stem} ({version}){extension}");
+        let target=destination.join(&name);
+        let staged=staging.join(&name);
+        if fs::symlink_metadata(&target).is_ok()||fs::symlink_metadata(&staged).is_ok(){continue;}
+        fs::hard_link(file,&staged).map_err(|_|"Could not prepare a separate local version. Existing files were preserved.")?;
+        return Ok((staged,target));
+    }
+    Err("Choose another folder; too many versions share this filename.".into())
 }
 fn validate_journal(job: &Job, staging: &Path, journal: &Publication) -> Result<(), String> {
     let stage = owned_stage(job, staging)?;
@@ -1673,7 +1708,7 @@ async fn run(
     let run_id = job.run_id;
     let emit = move |update| progress(&handle, &shared, &id, run_id, update);
     let (mut file, source, parent) = match &job.source {
-        Source::AdvancedFile{..} | Source::Palette{..} | Source::AudioPreview{..} | Source::ProviderExport {..} | Source::CaptionEdit {..} | Source::MediaEdit {..} | Source::Torrent { .. } | Source::Document { .. } | Source::GalleryExport { .. } | Source::Telegram { .. } | Source::Live { .. } => return Err("Module execution was not dispatched.".into()),
+        Source::PublicFile {..} | Source::CloudFile {..} | Source::Attribution {..} | Source::AdvancedFile{..} | Source::Palette{..} | Source::AudioPreview{..} | Source::ProviderExport {..} | Source::CaptionEdit {..} | Source::MediaEdit {..} | Source::Torrent { .. } | Source::Document { .. } | Source::GalleryExport { .. } | Source::Telegram { .. } | Source::Live { .. } => return Err("Module execution was not dispatched.".into()),
         Source::Download {
             url_ref,
             format,

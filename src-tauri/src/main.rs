@@ -1,5 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod batch;
+mod file_sources;
+mod public_sources;
+mod cloud_storage;
 mod browser;
 mod captions;
 mod captions_editor;
@@ -66,6 +69,7 @@ use tokio::sync::watch;
 
 #[derive(Default)]
 pub(crate) struct AppState {
+    file_sources: file_sources::BrowserState,
     repository: Mutex<Option<store::Repository>>,
     runtime: queue::Runtime,
     metadata: Mutex<Option<(u64, watch::Sender<bool>)>>,
@@ -1120,6 +1124,9 @@ fn main() {
             local_media::serve(context.app_handle(), request)
         })
         .invoke_handler(tauri::generate_handler![
+            file_sources::public_source_inspect, file_sources::cancel_file_source_inspection,
+            file_sources::queue_public_files, file_sources::cloud_status, file_sources::cloud_configure,
+            file_sources::cloud_connect, file_sources::cloud_revoke, file_sources::cloud_browse, file_sources::cloud_preview_folder, file_sources::queue_cloud_files,
             transcription::remove_transcription_model, transcription::transcription_models, transcription::install_transcription_model,
             courses::members::save_course_token, courses::members::inspect_member_course, courses::inspect_course, courses::queue_course_assets, courses::list_courses, courses::import_local_course, courses::course_learned, courses::save_course_note,
             queue_torrent, torrents::torrent_status, torrents::set_torrent_enabled, torrents::open_torrent, torrents::inspect_torrent_magnet, torrents::cancel_torrent_inspection,

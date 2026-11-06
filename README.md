@@ -8,6 +8,8 @@ La ampliación de [productividad local](docs/PRODUCTIVITY.md) añade preparació
 
 La [ampliación de fuentes y herramientas](docs/EXPANSION.md) añade selección de galerías y adjuntos, RSS, archivos avanzados y BitTorrent, Telegram opcional, cursos y herramientas locales de documentos, imágenes, vídeo, audio y transcripción. La guía distingue capacidades implementadas, componentes necesarios y recorridos pendientes con cuentas autorizadas.
 
+La entrega A de [archivos online y herramientas locales](docs/ONLINE-LOCAL.md) incorpora GitHub Releases, Internet Archive, Commons y conectores Drive, OneDrive y Dropbox, con selección explícita, cola compartida y metadatos en Biblioteca. Las conexiones cloud requieren una aplicación OAuth legítima y consentimiento; la guía distingue pruebas públicas reales y pruebas de interfaz.
+
 ## Interfaz
 
 El acabado glass integra la navegación con el campo de caracteres original. Incluye preferencias para reducir movimiento y transparencias. Estas capturas muestran la interfaz con datos de prueba; los recorridos nativos y de plataformas se registran por separado.

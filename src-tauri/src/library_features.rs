@@ -17,6 +17,8 @@ pub struct LibraryDetails {
     pub platform: Option<String>,
     pub source_ids: Vec<String>,
     pub source_url:Option<String>,
+    pub license: Option<String>,
+    pub attribution: Option<String>,
     pub chapters: Vec<Chapter>,
     pub tracks: Vec<LocalTrack>,
     pub playback_position: f64,

@@ -4,8 +4,9 @@ import {escapeHtml as h, type Copy, type Job, type Snapshot} from './contracts';
 import {icon, option} from './views-common';
 
 type Group = 'social'|'images'|'audio'|'telegram'|'courses'|'files';
-interface Platform {module?:'telegram'|'courses'|'torrent'|'podcasts'|'files';federated?:'peertube'|'mastodon';id:string;name:string;host:string;group:Group;operations:string;engine:string;session:string;gallery?:boolean}
+interface Platform {module?:'telegram'|'courses'|'torrent'|'podcasts'|'files'|'fileSources';federated?:'peertube'|'mastodon';id:string;name:string;host:string;group:Group;operations:string;engine:string;session:string;gallery?:boolean}
 const platforms:Platform[] = [
+  ...[{id:"github",name:"GitHub Releases",host:"github.com",session:"Versiones estables y prerelease"},{id:"archive",name:"Internet Archive",host:"archive.org",session:"Originales y derivados autorizados"},{id:"commons",name:"Wikimedia Commons",host:"commons.wikimedia.org",session:"Autor y licencia por archivo"},{id:"drive",name:"Google Drive",host:"drive.google.com",session:"OAuth de escritorio requerido"},{id:"onedrive",name:"OneDrive",host:"onedrive.live.com",session:"OAuth de escritorio requerido"},{id:"dropbox",name:"Dropbox",host:"dropbox.com",session:"OAuth de escritorio requerido"}].map<Platform>(p=>({...p,group:"files",module:"fileSources",engine:"API oficial",operations:"Explorar · seleccionar · descargar a Biblioteca"})),
   {id:'telegram',name:'Telegram',host:'t.me · cuenta MTProto autorizada',group:'telegram',operations:'Medios de mensajes y chats accesibles · selección paginada',engine:'TDLib opcional',session:'api_id, api_hash y cuenta propia',module:'telegram'},
   {id:'udemy',name:'Udemy',host:'udemy.com',group:'courses',operations:'Secciones · lecciones · materiales con descarga autorizada',engine:'Integrado',session:'Sesión autorizada necesaria',module:'courses'},
   {id:'hotmart',name:'Hotmart',host:'hotmart.com',group:'courses',operations:'Lecciones · adjuntos autorizados',engine:'Integrado',session:'Token de alumno necesario',module:'courses'},
@@ -31,7 +32,7 @@ export function createPlatformsController(hooks:Hooks){
   const selected=new Set<string>();
   function showCatalog(){current=null;gallery=null;selected.clear();}
   const previews=new Map<string,string>();const previewing=new Set<string>();const attempted=new Set<string>();
-  const labels:Record<Group,[string,string]>={social:['Redes y vídeo','Social and video'],images:['Imágenes','Images'],audio:['Audio','Audio'],telegram:['Telegram','Telegram'],courses:['Cursos','Courses'],files:['Archivos','Files']};
+  const labels:Record<Group,[string,string]>={social:['Redes y vídeo','Social and video'],images:['Imágenes','Images'],audio:['Audio','Audio'],telegram:['Telegram','Telegram'],courses:['Cursos','Courses'],files:['Archivos y documentos','Files and documents']};
   function assetVisible(a:Asset){const date=a.date?.match(/^\d{4}-\d{2}-\d{2}/)?.[0];return(kind==='all'||a.kind===kind)&&(!minimum||(a.width!==null&&a.width>=Number(minimum)))&&(!minimumHeight||(a.height!==null&&a.height>=Number(minimumHeight)))&&(!fromDate||(date!==undefined&&date>=fromDate))&&(!toDate||(date!==undefined&&date<=toDate));}
   function render():string{
     if(current){

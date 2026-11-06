@@ -50,6 +50,34 @@ pub(super) async fn run(app:&AppHandle,state:&Arc<AppState>,job:&Job,staging:&Pa
     let handle=app.clone();let shared=state.clone();let id=job.id.clone();let run_id=job.run_id;
     let emit=move|update|progress(&handle,&shared,&id,run_id,update);
     let output=match &job.source{
+        Source::PublicFile {selection} => {
+            phase(app,state,&job.id,run_id,JobState::Downloading)?;
+            let asset=crate::public_sources::resolve(&selection.source_url,&selection.asset_id,cancel.clone()).await?;
+            selection.verify(&asset)?;
+            let file=crate::direct::download_file(&asset.download_url,staging,&asset.filename,cancel.clone(),run_id,emit.clone()).await?;
+            if let Some(expected)=&asset.sha256 {
+                if !digest(file.clone(),cancel.clone()).await?.eq_ignore_ascii_case(expected) {
+                    return Err("The downloaded file does not match its published SHA-256. It was not added to the library.".into());
+                }
+            }
+            Some((file,Some(selection.source_url.clone()),None))
+        },
+        Source::CloudFile {selection,..} => {
+            let root={let guard=state.repository.lock().unwrap();guard.as_ref().ok_or("Open nabnab first.")?.root().to_owned()};
+            phase(app,state,&job.id,run_id,JobState::Downloading)?;
+            let files=crate::cloud_storage::execute(&root,selection,staging,cancel.clone(),run_id,emit.clone()).await?;
+            if files.len()!=1 {return Err("Select individual files after reviewing the folder contents.".into());}
+            Some((files.into_iter().next().ok_or("No cloud file was downloaded.")?,None,None))
+        },
+        Source::Attribution {entries} => {
+            let _permit=processing_permit(state,cancel.clone()).await?;
+            phase(app,state,&job.id,run_id,JobState::Processing)?;
+            let file=staging.join(format!("commons-attribution-{}.json",job.id));
+            let bytes=serde_json::to_vec_pretty(&serde_json::json!({"schemaVersion":1,"archivedAt":now(),"notice":"Metadata as reported by each source. Missing rights are not an assertion of permission.","files":entries})).map_err(|e|e.to_string())?;
+            let mut output=fs::OpenOptions::new().write(true).create_new(true).open(&file).map_err(|e|e.to_string())?;
+            output.write_all(&bytes).and_then(|_|output.sync_all()).map_err(|e|e.to_string())?;
+            Some((file,None,None))
+        },
         Source::AdvancedFile{url_ref,connections,checksum,..}=>{
             let root={let guard=state.repository.lock().unwrap();guard.as_ref().ok_or("Open nabnab first.")?.root().to_owned()};let url=crate::sessions::resolve_url(&root,url_ref.as_deref().ok_or("The file link is unavailable. Add it again.")?)?;
             phase(app,state,&job.id,run_id,JobState::Downloading)?;
@@ -101,6 +129,23 @@ pub(super) async fn run(app:&AppHandle,state:&Arc<AppState>,job:&Job,staging:&Pa
     let Some((file,source,parent))=output else{return Ok(None);};
     phase(app,state,&job.id,run_id,JobState::Verifying)?;
     let mut item=library::index(&file,None,source,parent).or_else(|_|library::index_file(&file))?;
+    match &job.source {
+        Source::PublicFile {selection} => {
+            item.source=Some(selection.source_url.clone());
+            item.details.source_url=Some(selection.source_url.clone());
+            item.details.content_id=Some(selection.asset_id.clone());
+            item.details.creator=selection.author.clone();
+            item.details.license=selection.license.clone();
+            item.details.attribution=selection.attribution.clone();
+            if !selection.collection.is_empty(){item.collections.push(selection.collection.clone());}
+        },
+        Source::CloudFile {selection,collection} => {
+            item.details.content_id=Some(format!("cloud:{}:{}:{}",selection.provider.name(),selection.account_id,selection.id));
+            if !collection.is_empty(){item.collections.push(collection.clone());}
+        },
+        Source::Attribution {entries} => if let Some(first)=entries.first(){if !first.collection.is_empty(){item.collections.push(first.collection.clone());}},
+        _=>{}
+    }
     if let Source::CaptionEdit{library_id,track_id,..}=&job.source{let guard=state.repository.lock().unwrap();if let Some(track)=guard.as_ref().and_then(|repo|repo.data.library.iter().find(|i|&i.id==library_id)).and_then(|i|i.details.tracks.iter().find(|t|&t.id==track_id)){for generated in &mut item.details.tracks{generated.language=track.language.clone();}}}
     annotate_output(&mut item,job,staging);
     Ok(Some(publish_verified_output(state,job,staging,&file,item,cancel).await?))

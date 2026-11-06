@@ -19,6 +19,7 @@ pub enum SourceKind {
     Playlist,
     Podcast,
     Gallery,
+    Github,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -171,6 +172,35 @@ pub struct FollowedSource {
 
 impl FollowedSource {
     pub fn validate(&self) -> Result<(), String> {
+        if self.kind == SourceKind::Github {
+            let canonical = crate::public_sources::github_repository_url(&self.url)?;
+            if canonical != self.url
+                || github_source_id(&canonical) != self.id
+                || self.url_ref.is_some()
+            {
+                return Err(
+                    "The saved GitHub source identity does not match its repository.".into(),
+                );
+            }
+            validate_github_settings(&self.settings)?;
+            let mut identities = HashSet::new();
+            for item in &self.items {
+                if crate::public_sources::github_repository_url(&item.url)? != canonical
+                    || crate::public_sources::github_release_url(&item.url)? != item.url
+                    || !item.content_id.strip_prefix("release:").is_some_and(|id| {
+                        !id.is_empty() && id.len() <= 20 && id.bytes().all(|b| b.is_ascii_digit())
+                    })
+                    || !identities.insert(&item.content_id)
+                    || item.url_ref.is_some()
+                {
+                    return Err(
+                        "The saved GitHub source contains invalid or repeated release identities."
+                            .into(),
+                    );
+                }
+            }
+            return Ok(());
+        }
         if matches!(self.kind, SourceKind::Podcast | SourceKind::Gallery) {
             crate::model::validate_url(&self.url)?;
             let valid_source = if self.kind == SourceKind::Gallery {
@@ -299,6 +329,24 @@ fn source_url(input: &str) -> Result<(String, SourceKind), String> {
 
 fn source_id(url: &str) -> String {
     format!("yt-{:x}", Sha256::digest(url.as_bytes()))
+}
+
+fn github_source_id(url: &str) -> String {
+    format!("github-{:x}", Sha256::digest(url.as_bytes()))
+}
+
+fn validate_github_settings(settings: &SourceSettings) -> Result<(), String> {
+    if settings.automatic {
+        return Err("GitHub release following requires manual file selection. Open a release to choose its files.".into());
+    }
+    settings.validate()?;
+    if settings.page_size > 50 || settings.exploration_limit > 5000 {
+        return Err(
+            "GitHub release following supports up to 50 releases per page and 5000 positions."
+                .into(),
+        );
+    }
+    Ok(())
 }
 
 pub(crate) fn trusted_podcast_identity(
@@ -492,7 +540,9 @@ fn apply_page(
                 } else {
                     SourceItemState::Review
                 };
-                item.reason=Some("Initial history is never downloaded automatically. Select an item to queue it.".into());
+                item.reason=Some(if source.kind == SourceKind::Github {
+                    "Release history is observed only. Open a release to choose its files."
+                } else { "Initial history is never downloaded automatically. Select an item to queue it." }.into());
             } else if !baseline_complete || item.published_at.is_none() {
                 item.discovery = Discovery::Ambiguous;
                 item.reason=Some("Incomplete baseline or missing publication date. Review this item before downloading.".into());
@@ -604,6 +654,13 @@ fn queue_items(
     ids: &[String],
     manual: bool,
 ) -> Result<Vec<queue::Job>, String> {
+    if source.kind == SourceKind::Github {
+        return if ids.is_empty() {
+            Ok(Vec::new())
+        } else {
+            Err("Open the release and select its files before adding them to the queue.".into())
+        };
+    }
     let selected: HashSet<_> = ids.iter().collect();
     let mut prepared = Vec::new();
     for item in source.items.iter().filter(|item| {
@@ -725,6 +782,63 @@ async fn inspect_page(
     mut cancel: watch::Receiver<bool>,
 ) -> Result<Page, String> {
     source.validate()?;
+    if source.kind == SourceKind::Github {
+        let offset = if continuation {
+            source.baseline.cursor
+        } else {
+            0
+        };
+        let count = source
+            .settings
+            .page_size
+            .min(source.settings.exploration_limit.saturating_sub(offset));
+        if count == 0 {
+            return Err("Increase the exploration limit to continue this release source.".into());
+        }
+        let cursor = (offset / 50 + 1).to_string();
+        let releases = crate::public_sources::inspect(&source.url, Some(&cursor), cancel).await?;
+        let skip = offset % 50;
+        let inspected = releases.entries.len().saturating_sub(skip).min(count);
+        let more = releases.next_cursor.is_some() || releases.entries.len() > skip + inspected;
+        let items = releases
+            .entries
+            .into_iter()
+            .skip(skip)
+            .take(inspected)
+            .map(|entry| SourceItem {
+                content_id: entry.id,
+                title: entry.title,
+                creator: releases.title.clone(),
+                url: entry.url,
+                url_ref: None,
+                size: None,
+                media_type: if entry.prerelease {
+                    "github-prerelease"
+                } else {
+                    "github-stable"
+                }
+                .into(),
+                thumbnail: None,
+                duration: None,
+                published_at: entry
+                    .published_at
+                    .as_deref()
+                    .and_then(crate::gallery_sources::published_at),
+                discovered_at: queue::now(),
+                state: SourceItemState::Review,
+                discovery: Discovery::Ambiguous,
+                reason: None,
+                job_ids: Vec::new(),
+            })
+            .collect();
+        return Ok(Page {
+            name: Some(releases.title),
+            items,
+            inspected,
+            has_more: more,
+            total: None,
+        });
+    }
     if source.kind == SourceKind::Gallery {
         let config = crate::config_root(state)?;
         let operational = crate::podcasts::protected_url(&config, &source.url_ref, &source.url)?;
@@ -1170,7 +1284,12 @@ pub async fn add_source(
     public_feed: Option<bool>,
 ) -> Result<FollowedSource, String> {
     settings.validate()?;
-    let (url, kind, url_ref, public_feed_url, id) = if kind == Some(SourceKind::Podcast) {
+    let (url, kind, url_ref, public_feed_url, id) = if kind == Some(SourceKind::Github) {
+        validate_github_settings(&settings)?;
+        let canonical = crate::public_sources::github_repository_url(&url)?;
+        let id = github_source_id(&canonical);
+        (canonical, SourceKind::Github, None, None, id)
+    } else if kind == Some(SourceKind::Podcast) {
         let url = crate::model::validate_url(&url)?;
         let id = crate::podcasts::feed_id(&url);
         let config = crate::config_root(&state)?;
@@ -1287,6 +1406,9 @@ pub fn save_source(
         .iter()
         .position(|source| source.id == id)
         .ok_or("Source not found.")?;
+    if repo.data.sources[index].kind == SourceKind::Github {
+        validate_github_settings(&settings)?;
+    }
     let old = repo.data.sources[index].clone();
     let source = &mut repo.data.sources[index];
     source.name = if name.trim().is_empty() {
@@ -1703,6 +1825,70 @@ pub async fn export_podcast_m3u(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn github_following_requires_file_selection_and_validates_repository_boundaries() {
+        let mut followed = source();
+        followed.url = crate::public_sources::github_repository_url(
+            "https://github.com/example/tool/releases/tag/v1",
+        )
+        .unwrap();
+        followed.id = github_source_id(&followed.url);
+        followed.kind = SourceKind::Github;
+        followed.settings = SourceSettings::default();
+        assert!(followed.validate().is_ok());
+        followed.settings.automatic = true;
+        assert!(followed
+            .validate()
+            .unwrap_err()
+            .contains("manual file selection"));
+        followed.settings.automatic = false;
+        followed.items = vec![SourceItem {
+            content_id: "release:123".into(),
+            title: "Version 1".into(),
+            creator: "example/tool".into(),
+            url: "https://github.com/example/tool/releases/tag/v1".into(),
+            url_ref: None,
+            size: None,
+            media_type: "github-stable".into(),
+            thumbnail: None,
+            duration: None,
+            published_at: Some(15_000),
+            discovered_at: 20_000,
+            state: SourceItemState::Review,
+            discovery: Discovery::Published,
+            reason: None,
+            job_ids: vec![],
+        }];
+        assert!(followed.validate().is_ok());
+        followed.items[0].url = "https://github.com/other/tool/releases/tag/v1".into();
+        assert!(followed.validate().is_err());
+    }
+
+    #[test]
+    fn github_release_discovery_never_queues_history_or_new_versions() {
+        let mut followed = source();
+        followed.kind = SourceKind::Github;
+        followed.settings = SourceSettings::default();
+        assert!(apply_page(
+            &mut followed,
+            page(&[("old", Some(1))], false),
+            false,
+            20_000
+        )
+        .is_empty());
+        assert!(apply_page(
+            &mut followed,
+            page(&[("new", Some(30_000))], false),
+            false,
+            40_000
+        )
+        .is_empty());
+        assert_eq!(followed.items[0].state, SourceItemState::Observed);
+        assert_eq!(followed.items[1].state, SourceItemState::Review);
+        assert_eq!(followed.items[1].discovery, Discovery::Published);
+        assert_eq!(followed.items.len(), 2);
+    }
     fn source() -> FollowedSource {
         FollowedSource {
             id: "source".into(),
