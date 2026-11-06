@@ -632,7 +632,8 @@ mod tests {
             fs::read(&silent).unwrap(),
             fs::read(&audio).unwrap(),
         ];
-        let first_item = library::index(&first, None, None, None).unwrap();
+        let mut first_item = library::index(&first, None, None, None).unwrap();
+        first_item.details.tracks.push(crate::captions::LocalTrack { id: "burn-fixture".into(), language: "en".into(), origin: crate::captions::TrackOrigin::Imported, path: None, segments: vec![crate::captions::Segment { start: 0.0, end: 1.5, text: "Synthetic local subtitle".into() }], formatting_lost: false });
         let silent_item = library::index(&silent, None, None, None).unwrap();
         let audio_item = library::index(&audio, None, None, None).unwrap();
         for (index, (inputs, options)) in [
@@ -654,7 +655,8 @@ mod tests {
                     fps: 12,
                 },
             ),
-            (vec![first_item, audio_item], MediaEditOptions::ReplaceAudio),
+            (vec![first_item.clone(), audio_item], MediaEditOptions::ReplaceAudio),
+            (vec![first_item], MediaEditOptions::BurnSubtitles { track_id: "burn-fixture".into() }),
         ]
         .into_iter()
         .enumerate()
@@ -675,7 +677,7 @@ mod tests {
             let result = probe(&engines, &output, cancel.clone()).await.unwrap();
             assert_eq!(stream(&result, "video").unwrap()["width"], 160);
             assert_eq!(stream(&result, "video").unwrap()["height"], 120);
-            assert!((duration(&result).unwrap() - if index == 2 { 2.0 } else { 4.0 }).abs() < 0.3);
+            assert!((duration(&result).unwrap() - if index >= 2 { 2.0 } else { 4.0 }).abs() < 0.3);
             if index == 1 {
                 assert_eq!(stream(&result, "video").unwrap()["r_frame_rate"], "12/1");
                 assert_eq!(stream(&result, "audio").unwrap()["channels"], 2);

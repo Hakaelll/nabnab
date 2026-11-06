@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { handleEmblemClick, isFullColor, onColorModeChange, spectrumAt, tintPacked } from "../src/graphics-color.ts";
+import { handleEmblemClick, isFullColor, onColorModeChange, spectrumAt, tintPacked, waveDelay } from "../src/graphics-color.ts";
 
 test("the emblem toggles full color on every tenth activation",()=>{
   assert.equal(isFullColor(),false);
@@ -35,5 +35,15 @@ test("neighboring glyphs and successive frames traverse adjacent hues continuous
 test("reduced motion removes ambient color waves while preserving a chosen static spectrum",()=>{
   const waves=[{x:0,y:0,born:0,strength:1,ellipse:1}];
   assert.equal(spectrumAt(6.5,305.5,0,1000,800,waves,false,true).saturation,0);
-  assert.equal(spectrumAt(6.5,305.5,0,1000,800,waves,true,true).saturation,.85);
+  assert.equal(spectrumAt(6.5,305.5,0,1000,800,waves,true,true).saturation,.12);
+});
+
+test("ambient waves are separated by twenty-five seconds while the easter egg overlaps successive waves",()=>{
+  assert.equal(waveDelay(false,0),25);
+  assert.equal(waveDelay(false,1),25);
+  assert.equal(waveDelay(true,0),4);
+  assert.equal(waveDelay(true,1),6);
+  const waves=[{x:0,y:0,born:0,strength:1,ellipse:1}];
+  assert(spectrumAt(6.5,305.5,0,1000,800,waves,true,false).saturation>.7);
+  assert(spectrumAt(6.5,999,0,1000,800,waves,true,false).saturation<.2);
 });

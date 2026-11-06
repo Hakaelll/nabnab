@@ -1,6 +1,6 @@
 import sourcePoints from "./emblem-points.json";
 import { createFieldRenderer, type Glyph, type Wave } from "./field";
-import { COLOR_CYCLE_SECONDS, COLOR_WAVE_SECONDS, isFullColor, onColorModeChange, spectrumAt, tintPacked } from "./graphics-color";
+import { COLOR_WAVE_SECONDS, waveDelay, isFullColor, onColorModeChange, spectrumAt, tintPacked } from "./graphics-color";
 export { handleEmblemClick } from "./graphics-color";
 type Point = { x: number; y: number; z: number; edge: boolean; face: number; hue: number };
 const TAU = Math.PI * 2;
@@ -50,14 +50,13 @@ export function startGraphics(background: HTMLCanvasElement, emblem: HTMLCanvasE
   const colors = new Uint32Array(64 * 16);
   for (let level = 0; level < 64; level++) for (let coverage = 0; coverage < 16; coverage++) {
     const alpha = level / 128 * coverage / 15;
-    const value = Math.round(9 + 194 * alpha);
+    const value = Math.round(13 + 210 * alpha);
     colors[level * 16 + coverage] = (255 << 24) | (value << 16) | (value << 8) | value;
   }
   let fieldImage: ImageData;
   let fieldPixels: Uint32Array;
   const markImage = mark.createImageData(360, 360);
   const markPixels = new Uint32Array(markImage.data.buffer);
-  const markColors = new Uint32Array(512);
   // Front and rear surfaces share the original mask; edge layers give the rays actual thickness.
   const points: Point[] = [];
   for (const [x, y, edge] of sourcePoints) {
@@ -73,7 +72,7 @@ export function startGraphics(background: HTMLCanvasElement, emblem: HTMLCanvasE
   let width = 0, height = 0, frame = 0, previous = 0, elapsed = graphicsTime;
   let ratio = 0, pixelWidth = 0, pixelHeight = 0;
   let fieldInterval = 1 / 20;
-  let nextWave = elapsed + 1.5;
+  let nextWave = elapsed + (isFullColor()?0:waveDelay(false,.5));
   let lastField = -1;
   let glyphs: Glyph[] = [];
   let waves: Wave[] = [];
@@ -85,10 +84,10 @@ export function startGraphics(background: HTMLCanvasElement, emblem: HTMLCanvasE
     const reducedMotion=motionReduced(),fullColor=isFullColor();
     if (gpu) { gpu.draw(time, reducedMotion?[]:waves, fullColor); return; }
     if (!field) return;
-    fieldPixels.fill(0xff090909);
+    fieldPixels.fill(0xff0d0d0d);
     const span = 680;
     const readingWidth = Math.min(width - 64, width >= 1500 ? 740 : width >= 900 ? 600 : 480);
-    const drift = time * 0.065;
+    const drift = time * 0.085;
     const turn = Math.sin(time * 0.027) * 0.14;
     const ct = Math.cos(turn), st = Math.sin(turn);
     const foldWidth = 2.1 + Math.sin(time * 0.041) * 0.45;
@@ -99,6 +98,7 @@ export function startGraphics(background: HTMLCanvasElement, emblem: HTMLCanvasE
       const fold = Math.sin(u * 8.5 + Math.sin(v * 5.2 - drift * 0.42) * foldWidth + drift * 0.55);
       const cross = Math.cos(v * 7.2 - u * 2.8 + Math.sin(u * 3.6 + drift * 0.3) + current);
       const ribbon = Math.exp(-Math.pow(fold - 0.15, 2) * 4.8);
+      const filament = Math.exp(-Math.pow(cross + fold * 0.3, 2) * 13);
       const hollow = 0.3 + 0.7 * Math.min(1, Math.hypot(u * 2.3, (v + 0.21) * 2));
       const depth = 0.35 + (cross + 1) * 0.25;
       let x = g.x + Math.sin(v * 4.8 + fold * 1.6 + drift) * 23 * depth;
@@ -106,6 +106,8 @@ export function startGraphics(background: HTMLCanvasElement, emblem: HTMLCanvasE
       // An oblique fold compresses the lattice into coherent, slowly moving sheets.
       x += fold * cross * 15;
       y += Math.sin(u * 6 + v * 3 + drift * 0.4) * 11;
+      x += Math.sin(u * 19 + v * 12 - drift * 1.8) * 2.2 * depth;
+      y += Math.cos(v * 16 - u * 9 + drift * 1.4) * 1.8 * depth;
       let light = 0;
       for (const wave of waves) {
         const dx = x - wave.x, dy = (y - wave.y) / wave.ellipse;
@@ -120,7 +122,7 @@ export function startGraphics(background: HTMLCanvasElement, emblem: HTMLCanvasE
       }
       const breathe = 0.85 + Math.sin(time * 0.14 + g.phase) * 0.15;
       const quiet = 1 - 0.38 * Math.exp(-Math.pow((x - width * 0.5) / (readingWidth * 0.7), 4));
-      const opacity = Math.min(0.46, ((0.045 + ribbon * 0.32) * depth * hollow * breathe + light * 0.2) * quiet);
+      const opacity = Math.min(0.49, ((0.065 + ribbon * 0.35 + filament * 0.09) * depth * hollow * breathe + light * 0.2) * quiet);
       if (opacity < 0.025) continue;
       const level = Math.min(63, Math.round(opacity * 128));
       const palette = level * 16;
@@ -137,10 +139,10 @@ export function startGraphics(background: HTMLCanvasElement, emblem: HTMLCanvasE
         const color = colors[palette + pixel.coverage];
         if (!tinted) { if ((color & 255) > (fieldPixels[index] & 255)) fieldPixels[index] = color; }
         else {
-          const ink=(color&255)-9,previous=fieldPixels[index];
-          const red=Math.max(previous&255,Math.round(9+ink*redInk));
-          const green=Math.max((previous>>>8)&255,Math.round(9+ink*greenInk));
-          const blue=Math.max((previous>>>16)&255,Math.round(9+ink*blueInk));
+          const ink=(color&255)-13,previous=fieldPixels[index];
+          const red=Math.max(previous&255,Math.round(13+ink*redInk));
+          const green=Math.max((previous>>>8)&255,Math.round(13+ink*greenInk));
+          const blue=Math.max((previous>>>16)&255,Math.round(13+ink*blueInk));
           fieldPixels[index]=(255<<24)|(blue<<16)|(green<<8)|red;
         }
       }
@@ -158,9 +160,8 @@ export function startGraphics(background: HTMLCanvasElement, emblem: HTMLCanvasE
     const cx = Math.cos(tilt), sx = Math.sin(tilt);
     const fullColor=isFullColor();
     const bounds=emblem.getBoundingClientRect();
-    const spectrum=spectrumAt(time,bounds.left+bounds.width/2,bounds.top+bounds.height/2,width,height,waves,false,motionReduced());
+    const spectrum=spectrumAt(time,bounds.left+bounds.width/2,bounds.top+bounds.height/2,width,height,waves,fullColor,motionReduced());
     const monochrome=tintPacked(spectrum.hue,spectrum.saturation,235);
-    if(fullColor)for(let index=0;index<markColors.length;index++)markColors[index]=tintPacked(time/COLOR_CYCLE_SECONDS+index/markColors.length,.8,235);
 
     for (const p of points) {
       const rx = p.x * cy + p.z * sy;
@@ -175,7 +176,7 @@ export function startGraphics(background: HTMLCanvasElement, emblem: HTMLCanvasE
       const y = 180 + (ry * 0.985 + rx * 0.17) * 163 * perspective;
       const left = Math.floor(x), top = Math.floor(y);
       const fx = x - left, fy = y - top;
-      const color=fullColor?markColors[p.hue]:monochrome;
+      const color=monochrome;
       // Bilinear coverage keeps subpixel rotation smooth at the emblem's compact display size.
       for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) {
         const px = left + dx, py = top + dy;
@@ -217,7 +218,7 @@ export function startGraphics(background: HTMLCanvasElement, emblem: HTMLCanvasE
     emblem.height = symbolSize;
     seed = 41;
     lastField = -1;
-    const step = 8.4;
+    const step = 8;
     glyphs = [];
     for (let y = -24; y < height + 24; y += step) {
       for (let x = -24; x < width + 24; x += step) {
@@ -238,9 +239,9 @@ export function startGraphics(background: HTMLCanvasElement, emblem: HTMLCanvasE
     if (elapsed > nextWave) {
       waves.push({ x: width * (0.12 + random() * 0.76), y: height * random(),
         born: elapsed, strength: 0.55 + random() * 0.3, ellipse: 0.7 + random() * 0.5 });
-      nextWave = elapsed + 6 + random() * 5;
+      nextWave = elapsed + waveDelay(isFullColor(),random());
     }
-    waves = waves.filter(wave => elapsed - wave.born < COLOR_WAVE_SECONDS);
+    waves = waves.filter(wave => elapsed - wave.born < COLOR_WAVE_SECONDS).slice(-3);
     draw();
   }
   function resume() {
@@ -259,7 +260,7 @@ export function startGraphics(background: HTMLCanvasElement, emblem: HTMLCanvasE
   document.addEventListener("visibilitychange", resume);
   reduced.addEventListener("change", resume);
   forcedColors.addEventListener("change", resume);
-  const unsubscribeColor=onColorModeChange(()=>{lastField=-1;if(!document.hidden)draw();});
+  const unsubscribeColor=onColorModeChange(()=>{nextWave=elapsed+(isFullColor()?0:waveDelay(false,random()));lastField=-1;if(!document.hidden)draw();});
   resize(); resume();
   return () => {
     cancelAnimationFrame(frame); observer.disconnect();

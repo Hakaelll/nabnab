@@ -20,7 +20,7 @@ const platforms:Platform[] = [
   ...['Pinterest','ArtStation','DeviantArt','Pixiv','Flickr','Tumblr','Imgur'].map<Platform>((name,index)=>({id:name.toLowerCase(),name,host:['pinterest.com · pin.it','artstation.com','deviantart.com','pixiv.net','flickr.com','tumblr.com','imgur.com'][index],group:'images' satisfies Group,operations:index===0?'Pin · tablero · sección':'Obras · álbumes · selección de perfil',engine:'gallery-dl',session:index===3?'Token de actualización Pixiv necesario':'Según acceso del origen',gallery:true})),
   {id:'soundcloud',name:'SoundCloud',host:'soundcloud.com',group:'audio',operations:'Pistas · listas accesibles',engine:'yt-dlp',session:'Según acceso del origen'},
   {id:'bandcamp',name:'Bandcamp',host:'bandcamp.com',group:'audio',operations:'Pistas · álbumes públicos, calidad del stream',engine:'yt-dlp',session:'No equivale a formatos de compra'},
-  {id:'http',module:'files',name:'HTTP / HTTPS',host:'Enlace directo a un archivo multimedia',group:'files',operations:'Original · reanudación con ETag',engine:'Integrado',session:'Enlace autorizado sin cookies compartidas'},
+  {id:'http',module:'files',name:'HTTP / HTTPS',host:'Enlace directo a un archivo',group:'files',operations:'Conexiones · reanudación · SHA-256',engine:'aria2 opcional',session:'Enlace autorizado sin cookies compartidas'},
 ];
 interface Asset {id:string;position:number;title:string;author:string|null;kind:string;width:number|null;height:number|null;date:string|null}
 interface Gallery {warnings?:string[];id:string;origin:string;assets:Asset[];offset:number;hasMore:boolean}

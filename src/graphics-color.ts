@@ -1,5 +1,7 @@
 export const COLOR_CYCLE_SECONDS = 180;
 export const COLOR_WAVE_SECONDS = 13;
+export const CONTINUOUS_COLOR_CYCLE_SECONDS = 36;
+export function waveDelay(continuous:boolean,random:number):number{return continuous?4+random*2:25;}
 export interface ColorWave { x:number; y:number; born:number; strength:number; ellipse:number }
 export type Rgb = readonly [number,number,number];
 let activations=0;
@@ -26,8 +28,7 @@ export function tintPacked(hue:number,saturation:number,level=255):number{
   return red|(green<<8)|(blue<<16);
 }
 export function spectrumAt(time:number,x:number,y:number,width:number,height:number,waves:readonly ColorWave[],full:boolean,reduced:boolean):{hue:number;saturation:number}{
-  const base=time/COLOR_CYCLE_SECONDS;
-  if(full)return {hue:base+x/width*.55+y/height*.45,saturation:.85};
+  const base=time/(full?CONTINUOUS_COLOR_CYCLE_SECONDS:COLOR_CYCLE_SECONDS);
   let strength=0;
   if(!reduced)for(const wave of waves){
     const age=time-wave.born;
@@ -36,7 +37,7 @@ export function spectrumAt(time:number,x:number,y:number,width:number,height:num
     const offset=distance-age*47;
     strength=Math.max(strength,Math.exp(-offset*offset/11000)*Math.sin(Math.PI*age/COLOR_WAVE_SECONDS)*wave.strength);
   }
-  return {hue:base+x/width*.025+y/height*.02,saturation:Math.min(.62,strength*.72)};
+  return {hue:base+x/width*.025+y/height*.02,saturation:full?Math.max(.12,Math.min(.8,strength*.9)):Math.min(.62,strength*.72)};
 }
 export function tintRgb(hue:number,saturation:number):Rgb{
   const rgb=hueRgb(hue);

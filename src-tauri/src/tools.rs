@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     fs,
+    io::Read,
     path::{Path, PathBuf},
 };
 use tokio::sync::watch;
@@ -80,7 +81,7 @@ pub enum ToolOptions {
 
 // Local media must not turn into an HLS, DASH, concat or network input after probing.
 const LOCAL_FORMATS: &str =
-    "mov,matroska,webm,mp3,ogg,wav,flac,aac,avi,asf,flv,mpeg,mpegts,nut,ac3,eac3,aiff,ape,gif,image2,png_pipe,jpeg_pipe,webp_pipe,bmp_pipe,tiff_pipe";
+    "mov,matroska,webm,mp3,ogg,wav,flac,aac,avi,asf,flv,mpeg,mpegts,nut,ac3,eac3,aiff,ape,gif,image2,png_pipe,jpeg_pipe,webp_pipe,webp_anim,bmp_pipe,tiff_pipe";
 
 fn number(value: &Value) -> Option<f64> {
     value
@@ -319,13 +320,13 @@ pub fn validate_options(options: &ToolOptions, info: &Value) -> Result<(), Strin
             let stream = track(info, "video").ok_or("Image conversion requires an image.")?;
             if !matches!(
                 video,
-                Some("png" | "mjpeg" | "webp" | "bmp" | "tiff" | "gif" | "apng")
+                Some("png" | "mjpeg" | "webp" | "webp_anim" | "bmp" | "tiff" | "gif" | "apng")
             ) || audio.is_some()
             {
                 return Err("Choose a PNG, JPEG, WebP, BMP, TIFF or GIF image.".into());
             }
             // Animated sources must never silently become a still image.
-            if matches!(video, Some("gif" | "apng" | "webp"))
+            if matches!(video, Some("gif" | "apng" | "webp_anim"))
                 && stream["nb_frames"].as_str() != Some("1")
             {
                 return Err("This image may be animated. Static conversion would lose animation; choose a still image.".into());
@@ -935,7 +936,12 @@ fn image_demuxer(file: &Path) -> Option<&'static str> {
     match file.extension()?.to_str()?.to_ascii_lowercase().as_str() {
         "png" => Some("png_pipe"),
         "jpg" | "jpeg" => Some("jpeg_pipe"),
-        "webp" => Some("webp_pipe"),
+        "webp" => {
+            let mut header = [0u8; 21];
+            let animated = fs::File::open(file).and_then(|mut input| input.read_exact(&mut header)).is_ok()
+                && &header[..4] == b"RIFF" && &header[8..16] == b"WEBPVP8X" && header[20] & 2 != 0;
+            Some(if animated { "webp_anim" } else { "webp_pipe" })
+        },
         "bmp" => Some("bmp_pipe"),
         "tif" | "tiff" => Some("tiff_pipe"),
         _ => None,
@@ -955,7 +961,7 @@ fn verify(info: &Value, p: &Plan) -> Result<(), String> {
     if number(&info["format"]["size"]).is_none_or(|n| n <= 0.0) {
         return Err("FFprobe found an empty output. The file was not published.".into());
     }
-    if codec(track(info, "video")) != p.video.as_deref()
+    if (codec(track(info, "video")) != p.video.as_deref() && !(p.video.as_deref() == Some("webp") && codec(track(info, "video")) == Some("webp_anim")))
         || codec(track(info, "audio")) != p.audio.as_deref()
     {
         return Err(
@@ -968,7 +974,7 @@ fn verify(info: &Value, p: &Plan) -> Result<(), String> {
         .unwrap_or_default()
         .split(',')
         .any(|c| {
-            c == p.container
+            c == p.container || (p.container == "webp" && matches!(c, "webp_pipe" | "webp_anim"))
                 || (p.container == "image2"
                     && matches!(
                         (p.extension, c),
@@ -1762,6 +1768,7 @@ mod tests {
                 operation: "denoise".into(),
                 profile: "podcast".into(),
             },
+            ToolOptions::Animate { format: "webp".into(), start: 1.0, end: 3.0, width: 160, fps: 8 },
         ];
         for (index, options) in operations.iter().enumerate() {
             let stage = work.join(format!("stage-{index}"));
@@ -1811,6 +1818,7 @@ mod tests {
             .path();
         let image_original = fs::read(&image).unwrap();
         for (index, options) in [
+            ToolOptions::ImageConvert { format: "webp".into(), width: 80, quality: 85, strip_metadata: true },
             ToolOptions::ImageConvert {
                 format: "png".into(),
                 width: 80,

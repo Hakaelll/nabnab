@@ -464,3 +464,5 @@ Create a bordered feature mosaic with an Obsidian Canvas #0a0a0a surface, 10px r
   --shadow-md-2: lab(15.204 0 -0.00000596046) 0px 0px 12px 0px inset;
 }
 ```
+
+Ajuste solicitado: fondo de puntos más claro y con filamentos secundarios y pequeñas corrientes continuas; barra lateral con tinte al 9 % y desenfoque de 2 px. Las oleadas de color normales nacen cada 25 segundos. Diez activaciones alternan oleadas continuas solapadas (4–6 segundos entre ellas), con tonos vecinos y sin un arcoíris fijo repartido por la pantalla. La reducción de movimiento mantiene una imagen estática y la reducción de transparencia conserva superficies opacas.

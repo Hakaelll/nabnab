@@ -7,7 +7,7 @@
   --edge: #ffffff21; --edge-quiet: #ffffff10; --control-smoke: #0d0e10ed;
   --inset: inset 0 1px 0 #ffffff08, inset 0 -1px 2px #0005;
   --contact: 0 1px 2px #0004, 0 4px 12px #0002;
-  --glass-smoke: #111318; --glass-raised: #17191d; --nav-smoke: #0e1013;
+  --glass-smoke: #111318; --glass-raised: #17191d; --nav-smoke: #090a0c18;
   --glass-reflection: linear-gradient(155deg, #ffffff09 0%, #ffffff02 38%, transparent 64%);
   --nav-reflection: linear-gradient(160deg, #ffffff05, transparent 60%);
   --glass-blur: none; --nav-blur: none; --ease-out: cubic-bezier(.23, 1, .32, 1);
@@ -458,7 +458,7 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 24px 0; }
 .drop-indicator { position: fixed; inset: 12px; z-index: 100; border: 1px solid var(--muted); border-radius: 12px; background: #101114f5; display: flex; flex-direction: column; gap: 20px; align-items: center; justify-content: center; pointer-events: none; font-size: 20px; }
 .drop-indicator svg { width: 40px; height: 40px; stroke-width: 1; }
 @supports (backdrop-filter: blur(1px)) {
-  :root { --glass-smoke: #11131899; --glass-raised: #17191dcf; --nav-smoke: #090a0c66; --glass-blur: blur(8px); --nav-blur: blur(6px); }
+  :root { --glass-smoke: #11131899; --glass-raised: #17191dcf; --nav-smoke: #090a0c18; --glass-blur: blur(8px); --nav-blur: blur(2px); }
 }
 .sidebar, .is-home .sidebar { background-color: var(--nav-smoke); background-image: none; }
 .is-home .sidebar { backdrop-filter: var(--nav-blur); }
