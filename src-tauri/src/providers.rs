@@ -12,6 +12,14 @@ pub enum ProviderId {
     Vimeo,
     Twitch,
     Pinterest,
+    Facebook,
+    Bilibili,
+    Dailymotion,
+    Bluesky,
+    Threads,
+    Soundcloud,
+    Bandcamp,
+    Gallery,
     Generic,
 }
 
@@ -57,6 +65,22 @@ pub fn identify(input: &str) -> Result<ProviderInfo, String> {
             (ProviderId::Twitch, "Twitch")
         } else if matches("pinterest.com") || host == "pin.it" {
             (ProviderId::Pinterest, "Pinterest")
+        } else if matches("facebook.com") || host == "fb.watch" {
+            (ProviderId::Facebook, "Facebook")
+        } else if matches("bilibili.com") || host == "b23.tv" {
+            (ProviderId::Bilibili, "Bilibili")
+        } else if matches("dailymotion.com") || host == "dai.ly" {
+            (ProviderId::Dailymotion, "Dailymotion")
+        } else if matches("bsky.app") {
+            (ProviderId::Bluesky, "Bluesky")
+        } else if matches("threads.net") || matches("threads.com") {
+            (ProviderId::Threads, "Threads")
+        } else if matches("soundcloud.com") {
+            (ProviderId::Soundcloud, "SoundCloud")
+        } else if matches("bandcamp.com") {
+            (ProviderId::Bandcamp, "Bandcamp")
+        } else if crate::galleries::supported(input) {
+            (ProviderId::Gallery, "Gallery")
         } else {
             (ProviderId::Generic, "HTTP")
         };
@@ -99,6 +123,14 @@ pub(crate) fn valid_scope_key(key: &str) -> bool {
             | "Vimeo"
             | "Twitch"
             | "Pinterest"
+            | "Facebook"
+            | "Bilibili"
+            | "Dailymotion"
+            | "Bluesky"
+            | "Threads"
+            | "Soundcloud"
+            | "Bandcamp"
+            | "Gallery"
     ) {
         return true;
     }

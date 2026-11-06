@@ -11,13 +11,13 @@ export interface SourceSettings {
   history: "fromNow" | "reviewHistory";
 }
 export interface SourceItem {
-  contentId: string; title: string; creator: string; url: string; thumbnail: string | null; duration: number | null;
+  contentId: string; title: string; creator: string; url: string; urlRef?: string | null; size?: number | null; mediaType?: string; thumbnail: string | null; duration: number | null;
   publishedAt: number | null; discoveredAt: number; state: SourceItemState;
   discovery: "history" | "published" | "added" | "ambiguous";
   reason: string | null; jobIds: string[];
 }
 export interface FollowedSource {
-  id: string; name: string; url: string; kind: "channel" | "playlist"; status: SourceStatus;
+  id: string; name: string; url: string; kind: "channel" | "playlist" | "podcast"; urlRef?: string | null; publicFeedUrl?: string | null; status: SourceStatus;
   createdAt: number; lastCheck: number | null; nextCheck: number | null; error: string | null; failures: number;
   settings: SourceSettings;
   baseline: { complete: boolean; inspected: number; total: number | null; cursor: number; hasMore: boolean };

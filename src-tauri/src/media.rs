@@ -119,7 +119,7 @@ pub async fn probe(
         "-protocol_whitelist",
         "file",
         "-format_whitelist",
-        "mov,matroska,webm,mp3,ogg,wav,flac,aac,avi,asf,flv,mpeg,mpegts,nut,ac3,eac3,aiff,ape",
+        "gif,image2,png_pipe,jpeg_pipe,webp_pipe,bmp_pipe,tiff_pipe,mov,matroska,webm,mp3,ogg,wav,flac,aac,avi,asf,flv,mpeg,mpegts,nut,ac3,eac3,aiff,ape",
         "-show_streams",
         "-show_chapters",
         "-show_format",
@@ -129,6 +129,10 @@ pub async fn probe(
     .into_iter()
     .map(str::to_owned)
     .collect();
+    let demuxer = match file.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase().as_str() {
+        "png" => Some("png_pipe"), "jpg" | "jpeg" => Some("jpeg_pipe"), "webp" => Some("webp_pipe"), "bmp" => Some("bmp_pipe"), "tif" | "tiff" => Some("tiff_pipe"), "gif" => Some("gif"), _ => None,
+    };
+    if let Some(demuxer) = demuxer { args.extend(["-f".into(), demuxer.into()]); }
     args.push(file.to_string_lossy().into_owned());
     let raw = crate::engine::tool(root, "ffprobe.exe", args, cancel).await?;
     serde_json::from_str(&raw).map_err(|_| "FFprobe returned invalid media information.".into())

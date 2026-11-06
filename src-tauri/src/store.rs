@@ -84,6 +84,8 @@ pub struct Data {
     pub sources: Vec<crate::sources::FollowedSource>,
     #[serde(default)]
     pub smart_collections: Vec<crate::library_features::SmartCollection>,
+    #[serde(default)]
+    pub courses: Vec<crate::courses::Course>,
 }
 
 fn serialize_live_cooldowns<S: serde::Serializer>(
@@ -107,6 +109,8 @@ impl Data {
             ));
         }
         self.settings.validate()?;
+        if self.courses.len()>1000 {return Err("Course library exceeds its limit.".into());}
+        for course in &self.courses {course.validate()?;}
         if self.cooldowns.len() > crate::queue::MAX_PROVIDER_COOLDOWNS
             || (self.cooldowns.len() == crate::queue::MAX_PROVIDER_COOLDOWNS
                 && !self.cooldowns.contains_key("*"))
@@ -243,6 +247,7 @@ impl Repository {
                 drafts: Vec::new(),
                 sources: Vec::new(),
                 smart_collections: Vec::new(),
+                courses: Vec::new(),
             }
         };
         if data.schema_version == 1 {

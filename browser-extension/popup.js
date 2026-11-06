@@ -23,9 +23,11 @@ async function submit(value) {
     message.textContent = receipt.acceptedDraftId ? receipt.intent==='save'?'Guardado en Biblioteca > Para después. No se inició ninguna descarga.':'Recibido en el preparador de nabnab. Revisa los enlaces antes de añadirlos a la cola.' : receipt.acceptedJobIds.length === 1 ? "Recibido en nabnab. Consulta Descargas en la aplicación." : "Recibido en nabnab. Consulta los trabajos en Descargas.";
     pendingRequest = undefined;
     retry.hidden = true;
+    return true;
   } catch (error) {
     message.textContent = error.message;
     retry.hidden = false;
+    return false;
   } finally { send.disabled = false; retry.disabled = false; }
 }
 send.addEventListener("click", async () => {
@@ -54,4 +56,44 @@ document.querySelector('#collect').addEventListener('click',async()=>{
 });
 document.querySelector('#select-visible').addEventListener('change',event=>{for(const input of document.querySelectorAll('#candidate-links input'))input.checked=event.target.checked;});
 retry.addEventListener("click", () => { void submit({ kind: "retry" }); });
+
+const detectMedia = document.querySelector("#detect-media");
+const sendMedia = document.querySelector("#send-media");
+const mediaCandidates = document.querySelector("#media-candidates");
+const mediaStatus = document.querySelector("#media-status");
+let pendingMedia;
+const mediaSize = value => value === null ? "Tamaño desconocido" : value < 1024 ** 2 ? `${Math.round(value / 1024)} KiB observados` : `${(value / 1024 ** 2).toFixed(1)} MiB observados`;
+detectMedia.addEventListener("click", async () => {
+  detectMedia.disabled = true; sendMedia.disabled = true;
+  mediaCandidates.replaceChildren(); document.querySelector("#detected-media").hidden = false;
+  mediaStatus.textContent = "Inspeccionando los medios ya cargados en esta pestaña…";
+  try {
+    const result = await call({ kind: "detectMedia" });
+    for (const candidate of result.candidates) {
+      const row = document.createElement("li"), label = document.createElement("label"), input = document.createElement("input"), text = document.createElement("span"), details = document.createElement("small");
+      input.type = "checkbox"; input.value = candidate.id; input.disabled = candidate.protected;
+      text.textContent = `${candidate.format}${candidate.width && candidate.height ? ` · ${candidate.width} × ${candidate.height}` : ""} · ${candidate.host}`;
+      details.textContent = candidate.protected ? "DRM detectado. No se puede enviar." : candidate.manifest ? "Manifiesto. Compatibilidad y DRM pendientes de comprobar." : mediaSize(candidate.size);
+      text.append(details); label.append(input, text); row.append(label); mediaCandidates.append(row);
+    }
+    mediaStatus.textContent = `${result.candidates.length} candidatos. ${result.blobs ? `${result.blobs} fuentes blob no se pueden descargar desde el escritorio. ` : ""}${result.drmDetected ? "Se detectó reproducción protegida. " : ""}La detección no garantiza una descarga. Las direcciones firmadas se ocultan.`;
+  } catch (error) { mediaStatus.textContent = error.message; }
+  finally { detectMedia.disabled = false; }
+});
+mediaCandidates.addEventListener("change", () => { sendMedia.disabled = !mediaCandidates.querySelector("input:checked"); });
+sendMedia.addEventListener("click", async () => {
+  const ids = [...mediaCandidates.querySelectorAll("input:checked")].map(input => input.value);
+  if (!ids.length) return;
+  const selected = document.querySelector("#profile").value;
+  const presetId = selected.startsWith("preset:") ? selected.slice(7) : null;
+  const request = { kind: "sendDetectedMedia", ids, profile: presetId ? "source" : selected, ...(presetId ? { presetId } : {}) };
+  const key = JSON.stringify(request);
+  if (!pendingMedia || pendingMedia.key !== key) pendingMedia = { key, requestId: crypto.randomUUID() };
+  sendMedia.disabled = true;
+  try { if (await submit({ ...request, requestId: pendingMedia.requestId })) pendingMedia = undefined; }
+  finally { sendMedia.disabled = false; }
+});
+document.querySelector("#clear-media").addEventListener("click", async () => {
+  await call({ kind: "clearDetectedMedia" }); mediaCandidates.replaceChildren(); document.querySelector("#detected-media").hidden = true; sendMedia.disabled = true;
+});
 void update();

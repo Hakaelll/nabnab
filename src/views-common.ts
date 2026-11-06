@@ -2,6 +2,8 @@ import { durationLabel } from "./presentation";
 import { escapeHtml as h, type Copy, type JobState } from "./contracts";
 
 const paths = {
+  document: '<path d="M5 3h9l5 5v13H5V3Z"/><path d="M14 3v6h5M8 13h8M8 17h8"/>',
+  file: '<path d="M5 3h9l5 5v13H5V3Z"/><path d="M14 3v6h5M8 13h8M8 17h8"/>',
   home: '<path d="m3 10 9-7 9 7M5 9v11h5v-6h4v6h5V9"/>',
   downloads: '<path d="M12 3v12m-4-4 4 4 4-4M4 17v4h16v-4"/>',
   library: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M9 9v11"/>',

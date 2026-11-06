@@ -55,6 +55,9 @@ pub fn transform_details(
     for track in &mut details.tracks {
         track.path = None;
     }
+    if matches!(options, crate::tools::ToolOptions::Animate { .. } | crate::tools::ToolOptions::Frame { .. } | crate::tools::ToolOptions::ContactSheet { .. } | crate::tools::ToolOptions::ImageConvert { .. }) || matches!(options, crate::tools::ToolOptions::AudioProcess { operation, .. } if operation == "silence") {
+        details.tracks.clear(); details.chapters.clear();
+    }
     if let crate::tools::ToolOptions::Trim { start, end, .. } = options {
         details.clip = Some(ClipReference {
             requested_start: *start,

@@ -12,3 +12,9 @@ Exact corresponding upstream source and build-material locations are listed in l
 The customized NSIS installer template derives from Tauri CLI 2.12.4 under the MIT license. Its complete notice and pinned source revision are preserved in src-tauri/installer.nsi.
 
 The supplied emblem and application logo were provided by the project owner. No license to those assets is implied.
+# Optional expansion components
+
+gallery-dl 1.31.10 is an optional standalone component from https://github.com/mikf/gallery-dl, licensed under GPL-2.0. aria2 1.37.0 is optional, from https://github.com/aria2/aria2, licensed under GPL-2.0-or-later with its bundled third-party notices. whisper.cpp 1.7.6 and its multilingual GGML models are optional, from https://github.com/ggml-org/whisper.cpp and https://huggingface.co/ggerganov/whisper.cpp, licensed under MIT. No optional executable or model is downloaded at startup. Packages have fixed sources, sizes and SHA-256 values in the native component manager. Archive installations retain included license files.
+
+The Rust RSS parser uses quick-xml under MIT and the local Telegram QR generator uses qrcodegen under MIT. Course API behavior was studied from OpenSelena/omniget as a reference; no source code, assets or credentials were copied.
+

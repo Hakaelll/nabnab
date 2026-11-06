@@ -1,5 +1,5 @@
 export type Language = "es" | "en";
-export type Page = "home" | "downloads" | "library" | "tools" | "settings";
+export type Page = "home" | "downloads" | "library" | "tools" | "platforms" | "settings";
 export type OutputFormat = "mp4" | "mp3" | "m4a" | "opus" | "source" | "audio";
 export type JobState = "pending" | "analyzing" | "ready" | "downloading" | "processing" | "verifying" | "completed" | "paused" | "cancelled" | "error";
 export interface Settings { folder: string; language: Language; networkLimit: number; processingLimit: number; reducedMotion: boolean; reducedTransparency: boolean; sidebarExpanded: boolean; trayEnabled: boolean; closeToTray: boolean; startWithWindows: boolean }
@@ -9,10 +9,20 @@ export type ToolOptions =
   | { kind: "convert"; container: "mp4" | "mkv" | "webm"; videoCodec: "copy" | "h264" | "vp9"; audioCodec: "copy" | "aac" | "opus" | "mp3" }
   | { kind: "extractAudio"; format: "original" | "mp3" | "m4a" }
   | { kind: "trim"; start: number; end: number; precise: boolean }
-  | { kind: "compress"; targetMb: number | null; quality: "balanced" | "small" | "high" };
+  | { kind: "compress"; targetMb: number | null; quality: "balanced" | "small" | "high" }
+  | {kind:'animate';format:'gif'|'webp';start:number;end:number;width:number;fps:number}
+  | {kind:'frame';at:number;width:number}
+  | {kind:'contactSheet';columns:number;rows:number;width:number}
+  | {kind:'rotate';degrees:90|180|270}
+  | {kind:'crop';x:number;y:number;width:number;height:number}
+  | {kind:'transcribe';model:string;language:string;threads:number}
+  | {kind:'mute'}
+  | {kind:'audioProcess';operation:'normalize'|'silence'|'denoise';profile:'podcast'|'broadcast'|'music'}
+  | {kind:'imageConvert';format:'jpg'|'png'|'webp';width:number;quality:number;stripMetadata:boolean};
 export type ToolKind = ToolOptions["kind"];
 export type JobSource = { kind: "download"; url: string; format: OutputFormat; height: number | null; audioBitrate: number | null; subtitleLanguage?: string | null }
-  | { kind: "transform"; libraryId: string; options: ToolOptions };
+  | { kind: "transform"; libraryId: string; options: ToolOptions }
+  | { kind:"torrent";reference:string;manifestId:string;index:number;options:import("./torrents-ui").TorrentOptions };
 export interface Job {
   id: string; runId: number; title: string; createdAt: number; updatedAt: number; state: JobState;
   source: JobSource; folder: string; provider: string; thumbnail: string | null;
@@ -20,12 +30,12 @@ export interface Job {
   priority?: import('./scheduling-types').Priority; schedule?: import('./scheduling-types').Schedule; manualOrder?: number; runNext?:boolean; options?: import('./options').ResolvedOptions | null; contentId?:string|null; sourceId?:string|null;
 }
 export interface LibraryItem {
-  id: string; path: string; name: string; kind: "video" | "audio" | "image" | "subtitle"; size: number; duration: number | null;
+  id: string; path: string; name: string; kind: "video" | "audio" | "image" | "subtitle" | "file" | "document"; size: number; duration: number | null;
   width: number | null; height: number | null; videoCodec: string | null; audioCodec: string | null;
   container: string | null; addedAt: number; source: string | null; parentId: string | null; collections: string[]; tags: string[]; missing?: boolean;
   details?: import('./library-types').LibraryDetails;
 }
-export interface Snapshot { settings: Settings; jobs: Job[]; library: LibraryItem[]; collections: string[]; presets?: import('./options').Preset[]; rules?: import('./options').Rule[]; drafts?:import('./batch-types').Draft[]; sources?:import('./source-types').FollowedSource[]; smartCollections?:import('./library-types').SmartCollection[] }
+export interface Snapshot { settings: Settings; jobs: Job[]; library: LibraryItem[]; collections: string[]; presets?: import('./options').Preset[]; rules?: import('./options').Rule[]; drafts?:import('./batch-types').Draft[]; sources?:import('./source-types').FollowedSource[]; smartCollections?:import('./library-types').SmartCollection[];courses?:import("./courses-ui").Course[] }
 export interface Startup extends Snapshot { folder: string; enginesReady: boolean; engineError: string | null }
 export interface Capabilities { video: boolean; audio: boolean; images: boolean; batches: boolean; subtitles: boolean; verified: boolean }
 export interface MediaEntry { id: string; title: string; url: string; thumbnail: string | null; duration: number | null }
@@ -66,6 +76,15 @@ export function sourceUrls(value: string): { urls: string[]; invalid: boolean; t
 export function localMediaUrl(id: string): string { return `http://nabmedia.localhost/${encodeURIComponent(id)}`; }
 export function defaultToolOptions(kind: ToolKind): ToolOptions {
   switch (kind) {
+    case 'animate': return {kind,format:'gif',start:0,end:5,width:480,fps:12};
+    case 'frame': return {kind,at:0,width:1280};
+    case 'contactSheet': return {kind,columns:4,rows:4,width:240};
+    case 'rotate': return {kind,degrees:90};
+    case 'crop': return {kind,x:0,y:0,width:640,height:360};
+    case 'transcribe': return {kind,model:'tiny',language:'es',threads:4};
+    case 'mute': return {kind};
+    case 'audioProcess': return {kind,operation:'normalize',profile:'podcast'};
+    case 'imageConvert': return {kind,format:'png',width:1920,quality:85,stripMetadata:false};
     case "convert": return { kind, container: "mp4", videoCodec: "h264", audioCodec: "aac" };
     case "extractAudio": return { kind, format: "original" };
     case "trim": return { kind, start: 0, end: 10, precise: false };

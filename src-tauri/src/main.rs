@@ -2,10 +2,15 @@
 mod batch;
 mod browser;
 mod captions;
+mod components;
+mod component_archives;
+mod courses;
+mod transcription;
 mod dependencies;
 mod direct;
 mod engine;
 mod failure;
+mod galleries;
 mod library;
 mod library_features;
 mod local_media;
@@ -14,6 +19,7 @@ mod model;
 mod options;
 #[cfg(test)]
 mod platform_checks;
+mod podcasts;
 mod preferences;
 mod providers;
 mod queue;
@@ -25,6 +31,7 @@ mod sources;
 mod store;
 mod support;
 mod tools;
+mod torrents;
 mod updater;
 
 use failure::Failure;
@@ -49,6 +56,7 @@ pub(crate) struct AppState {
     metadata: Mutex<Option<(u64, watch::Sender<bool>)>>,
     latest_metadata: AtomicU64,
     bridge: browser::Bridge,
+    galleries: Mutex<std::collections::HashMap<String, galleries::Gallery>>,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -69,6 +77,7 @@ struct Snapshot {
     drafts: Vec<batch::Draft>,
     sources: Vec<sources::FollowedSource>,
     smart_collections: Vec<library_features::SmartCollection>,
+    courses: Vec<courses::Course>,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -100,6 +109,7 @@ fn snapshot(state: &AppState) -> Result<Snapshot, String> {
         drafts: repo.data.drafts.clone(),
         sources: repo.data.sources.clone(),
         smart_collections: repo.data.smart_collections.clone(),
+        courses: repo.data.courses.clone(),
     })
 }
 fn config_root(state: &AppState) -> Result<PathBuf, String> {
@@ -358,6 +368,18 @@ fn queue_tool(
     for job in &jobs {
         let _ = app.emit("job-update", job);
     }
+    state.runtime.notify.notify_one();
+    Ok(jobs)
+}
+
+#[tauri::command]
+fn queue_torrent(app: AppHandle, state: State<Arc<AppState>>, reference: String, manifest_id: String, options: torrents::TorrentOptions, client_request: String) -> Result<Vec<queue::Job>, String> {
+    components::executable(&app, "torrent")?;
+    let path = torrents::resolve_reference(&app, &reference)?;
+    let manifest = torrents::read_manifest(&path)?;
+    if manifest.id != manifest_id { return Err("Torrent metadata changed. Inspect it again.".into()); }
+    let mut guard = state.repository.lock().unwrap();
+    let jobs = queue::enqueue_torrent(guard.as_mut().ok_or("Open nabnab first.")?, reference, &manifest, options, &client_request)?;
     state.runtime.notify.notify_one();
     Ok(jobs)
 }
@@ -829,6 +851,7 @@ fn open_media(state: State<Arc<AppState>>, id: String, folder: bool) -> Result<(
             .iter()
             .find(|i| i.id == id)
             .ok_or("File not found in the library.")?;
+        if item.kind == "file" && !folder { return Err("Downloaded files are never executed from nabnab. Use Show folder to review the file.".into()); }
         library::authorized_path(&item.path)?
     };
     open_local(if folder {
@@ -1081,6 +1104,14 @@ fn main() {
             local_media::serve(context.app_handle(), request)
         })
         .invoke_handler(tauri::generate_handler![
+            transcription::transcription_models, transcription::install_transcription_model,
+            courses::members::save_course_token, courses::members::inspect_member_course, courses::inspect_course, courses::queue_course_assets, courses::list_courses, courses::import_local_course, courses::course_learned, courses::save_course_note,
+            queue_torrent, torrents::torrent_status, torrents::set_torrent_enabled, torrents::open_torrent, torrents::inspect_torrent_magnet, torrents::cancel_torrent_inspection,
+            components::optional_components,
+            components::install_component,
+            components::enable_component,
+            galleries::gallery_preview, galleries::inspect_gallery,
+            galleries::queue_gallery,
             startup,
             get_snapshot,
             inspect_media,
@@ -1127,6 +1158,9 @@ fn main() {
             batch::batch_chapters,
             scheduling::local_timezone,
             sources::add_source,
+            sources::import_podcast_opml,
+            sources::export_podcast_opml,
+            sources::export_podcast_m3u,
             sources::check_source,
             sources::save_source,
             sources::source_item_action,

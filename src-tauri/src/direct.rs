@@ -195,6 +195,18 @@ async fn fetch(
     tokio::select! { _ = cancellation(cancel) => Err(crate::engine::CANCELLED.into()), result = operation => result }
 }
 
+pub async fn image_preview(input: &str) -> Result<(String,Vec<u8>),String> {
+    let (_sender,cancel)=watch::channel(false);
+    let mut response=fetch(input,None,None,true,cancel,Network::Public).await?;
+    successful(&response)?;
+    let kind=media_type(&response)?;
+    let mime=match kind.extension {"jpg"=>"image/jpeg","png"=>"image/png","gif"=>"image/gif","webp"=>"image/webp","avif"=>"image/avif",_=>return Err("No image preview is available.".into())};
+    if content_length(&response)?.is_some_and(|size|size>2*1024*1024){return Err("This original is too large for a preview.".into());}
+    let mut bytes=Vec::new();while let Some(chunk)=response.chunk().await.map_err(|_|"Preview transfer interrupted.")?{if bytes.len()+chunk.len()>2*1024*1024{return Err("Preview exceeds its size limit.".into());}bytes.extend_from_slice(&chunk);}
+    prefix_ready(&bytes,true)?;
+    Ok((mime.into(),bytes))
+}
+
 fn content_length(response: &Response) -> Result<Option<u64>, String> {
     if response.headers().contains_key(header::TRANSFER_ENCODING)
         && response.headers().contains_key(header::CONTENT_LENGTH)
@@ -281,6 +293,8 @@ fn media_type(response: &Response) -> Result<MediaType, String> {
         .trim()
         .to_ascii_lowercase();
     let (extension, video) = match mime.as_str() {
+        "application/pdf" => ("pdf", false), "application/epub+zip" => ("epub", false), "application/zip" | "application/x-zip-compressed" => ("zip",false), "application/x-subrip" => ("srt",false), "text/vtt" => ("vtt",false),
+        "image/jpeg" => ("jpg", false), "image/png" => ("png", false), "image/webp" => ("webp", false), "image/gif" => ("gif", false), "image/avif" => ("avif", false),
         "video/mp4" => ("mp4", true), "video/webm" => ("webm", true), "video/quicktime" => ("mov", true),
         "video/x-matroska" => ("mkv", true), "video/x-msvideo" => ("avi", true), "video/mpeg" => ("mpg", true), "video/mp2t" => ("ts", true),
         "audio/mpeg" | "audio/mp3" => ("mp3", false), "audio/mp4" | "audio/x-m4a" => ("m4a", false),
@@ -291,11 +305,13 @@ fn media_type(response: &Response) -> Result<MediaType, String> {
             let extension = response.url().path().rsplit('.').next().unwrap_or("").to_ascii_lowercase();
             match extension.as_str() {
                 "mp4" => ("mp4", true), "m4v" => ("m4v", true), "webm" => ("webm", true), "mkv" => ("mkv", true), "mov" => ("mov", true), "avi" => ("avi", true), "mpg" | "mpeg" => ("mpg", true), "ts" => ("ts", true),
+                "pdf" => ("pdf",false), "epub" => ("epub",false), "zip" => ("zip",false), "srt" => ("srt",false), "vtt" => ("vtt",false),
+                "jpg" | "jpeg" => ("jpg", false), "png" => ("png", false), "webp" => ("webp", false), "gif" => ("gif", false), "avif" => ("avif", false),
                 "mp3" => ("mp3", false), "m4a" => ("m4a", false), "ogg" => ("ogg", false), "opus" => ("opus", false), "wav" => ("wav", false), "flac" => ("flac", false), "aac" => ("aac", false),
                 _ => return Err("Binary direct responses require a supported media extension.".into()),
             }
         }
-        _ => return Err("The direct source is not a supported audio/video file. Images, HTML and HLS/DASH playlists are not supported here.".into()),
+        _ => return Err("The direct source is not a supported media file. HTML and HLS/DASH playlists are not supported here.".into()),
     };
     Ok(MediaType { extension, video })
 }
@@ -348,6 +364,7 @@ async fn inspect_with_network(
     successful(&response)?;
     let kind = media_type(&response)?;
     let length = content_length(&response)?;
+    if length == Some(0) { return Err("The direct source is empty.".into()); }
     if response.status() == StatusCode::PARTIAL_CONTENT {
         let (start, end, _) = range_header(&response)?;
         if start != 0 || end != 0 || length.is_some_and(|length| length != 1) {
@@ -367,7 +384,7 @@ async fn inspect_with_network(
         thumbnail: None,
         uploader: response.url().host_str().map(str::to_owned),
         heights: Vec::new(),
-        has_audio: true,
+        has_audio: !matches!(kind.extension, "jpg" | "png" | "gif" | "webp" | "avif"),
         has_video: kind.video,
         entries: Vec::new(),
         subtitle_languages: Vec::new(),
@@ -375,8 +392,8 @@ async fn inspect_with_network(
         subtitle_tracks: Vec::new(),
         capabilities: Capabilities {
             video: kind.video,
-            audio: true,
-            images: false,
+            audio: !matches!(kind.extension, "jpg" | "png" | "gif" | "webp" | "avif"),
+            images: matches!(kind.extension, "jpg" | "png" | "gif" | "webp" | "avif"),
             batches: false,
             subtitles: false,
             verified: false,
@@ -587,8 +604,8 @@ async fn completed_input(
         || receipt.sha256.len() != 64
         || !receipt.sha256.bytes().all(|byte| byte.is_ascii_hexdigit())
         || ![
-            "mp4", "m4v", "webm", "mkv", "mov", "avi", "mpg", "ts", "mp3", "m4a", "ogg", "opus",
-            "wav", "flac", "aac",
+            "pdf", "epub", "zip", "srt", "vtt", "jpg", "png", "webp", "gif", "avif", "mp4", "m4v", "webm", "mkv", "mov", "avi", "mpg",
+            "ts", "mp3", "m4a", "ogg", "opus", "wav", "flac", "aac",
         ]
         .contains(&extension)
     {
@@ -1091,7 +1108,6 @@ mod tests {
             "application/x-mpegURL",
             "application/dash+xml",
             "text/html",
-            "image/jpeg",
         ] {
             let fixture = Fixture::start(vec![reply(
                 "200 OK",
@@ -1106,6 +1122,15 @@ mod tests {
             );
             fixture.finish();
         }
+    }
+
+    #[tokio::test]
+    async fn image_inspection_reports_only_observed_image_capability() {
+        let fixture = Fixture::start(vec![reply("200 OK", &[("Content-Type","image/png"),("Content-Length","3")], b"PNG")]);
+        let (_sender,cancel)=watch::channel(false);
+        let media=inspect_with_network(&fixture.url,17,cancel,fixture.network).await.unwrap();
+        assert!(media.capabilities.images); assert!(!media.has_audio); assert!(!media.has_video); assert!(!media.capabilities.verified);
+        assert_eq!(media.request_id,17); assert_eq!(fixture.finish().len(),1);
     }
 
     #[tokio::test]

@@ -17,6 +17,7 @@ use tokio::sync::watch;
 pub enum SourceKind {
     Channel,
     Playlist,
+    Podcast,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -118,6 +119,12 @@ pub struct SourceItem {
     #[serde(default)]
     pub creator: String,
     pub url: String,
+    #[serde(default)]
+    pub url_ref: Option<String>,
+    #[serde(default)]
+    pub size: Option<u64>,
+    #[serde(default)]
+    pub media_type: String,
     pub thumbnail: Option<String>,
     pub duration: Option<f64>,
     pub published_at: Option<u64>,
@@ -145,6 +152,10 @@ pub struct FollowedSource {
     pub id: String,
     pub name: String,
     pub url: String,
+    #[serde(default)]
+    pub url_ref: Option<String>,
+    #[serde(default)]
+    pub public_feed_url: Option<String>,
     pub kind: SourceKind,
     pub status: SourceStatus,
     pub created_at: u64,
@@ -159,6 +170,38 @@ pub struct FollowedSource {
 
 impl FollowedSource {
     pub fn validate(&self) -> Result<(), String> {
+        if self.kind == SourceKind::Podcast {
+            crate::model::validate_url(&self.url)?;
+            if !crate::podcasts::valid_episode_id(&self.id)
+                || !self
+                    .url_ref
+                    .as_deref()
+                    .is_some_and(crate::sessions::valid_url_reference)
+                || self
+                    .public_feed_url
+                    .as_ref()
+                    .is_some_and(|url| crate::model::validate_url(url).is_err())
+            {
+                return Err("The saved podcast source has invalid protected references.".into());
+            }
+            self.settings.validate()?;
+            let mut identities = HashSet::new();
+            for item in &self.items {
+                if !crate::podcasts::valid_episode_id(&item.content_id)
+                    || !identities.insert(&item.content_id)
+                    || !item
+                        .url_ref
+                        .as_deref()
+                        .is_some_and(crate::sessions::valid_url_reference)
+                    || crate::model::validate_url(&item.url).is_err()
+                {
+                    return Err(
+                        "The saved podcast contains invalid or repeated episode identities.".into(),
+                    );
+                }
+            }
+            return Ok(());
+        }
         let (canonical, kind) = source_url(&self.url)?;
         if canonical != self.url || source_id(&self.url) != self.id || kind != self.kind {
             return Err("The saved source identity does not match its stable YouTube URL.".into());
@@ -247,6 +290,30 @@ fn source_id(url: &str) -> String {
     format!("yt-{:x}", Sha256::digest(url.as_bytes()))
 }
 
+pub(crate) fn trusted_podcast_identity(
+    repo: &crate::store::Repository,
+    source_id: Option<&str>,
+    content_id: &str,
+    url: &str,
+) -> bool {
+    if !crate::podcasts::valid_episode_id(content_id) {
+        return false;
+    }
+    repo.data
+        .sources
+        .iter()
+        .find(|source| Some(source.id.as_str()) == source_id && source.kind == SourceKind::Podcast)
+        .and_then(|source| {
+            source
+                .items
+                .iter()
+                .find(|item| item.content_id == content_id)
+        })
+        .and_then(|item| item.url_ref.as_ref())
+        .and_then(|reference| crate::sessions::resolve_url(repo.root(), reference).ok())
+        .is_some_and(|protected| protected.as_str() == url)
+}
+
 struct Page {
     name: Option<String>,
     items: Vec<SourceItem>,
@@ -300,6 +367,9 @@ fn parse_page(raw: &str, count: usize, stamp: u64) -> Result<Page, String> {
                     .take(512)
                     .collect(),
                 url: format!("https://www.youtube.com/watch?v={id}"),
+                url_ref: None,
+                size: None,
+                media_type: String::new(),
                 thumbnail: entry["thumbnail"]
                     .as_str()
                     .and_then(|url| crate::model::validate_url(url).ok())
@@ -362,6 +432,10 @@ fn apply_page(
                 known.creator = item.creator;
             }
             known.thumbnail = item.thumbnail;
+            known.url = item.url;
+            known.url_ref = item.url_ref;
+            known.size = item.size;
+            known.media_type = item.media_type;
             known.duration = item.duration;
             known.published_at = item.published_at.or(known.published_at);
             if item.state == SourceItemState::Unavailable
@@ -387,7 +461,7 @@ fn apply_page(
             } else if !baseline_complete || item.published_at.is_none() {
                 item.discovery = Discovery::Ambiguous;
                 item.reason=Some("Incomplete baseline or missing publication date. Review this item before downloading.".into());
-            } else if source.kind == SourceKind::Channel
+            } else if source.kind != SourceKind::Playlist
                 && item
                     .published_at
                     .is_some_and(|time| time < source.created_at)
@@ -500,8 +574,9 @@ fn queue_items(
     for item in source.items.iter().filter(|item| {
         selected.contains(&item.content_id) && item.state != SourceItemState::Unavailable
     }) {
+        let url = crate::podcasts::protected_url(repo.root(), &item.url_ref, &item.url)?;
         let context = options::Context {
-            url: item.url.clone(),
+            url: url.clone(),
             source_url: source.url.clone(),
             title: item.title.clone(),
             creator: if item.creator.is_empty() && source.kind == SourceKind::Channel {
@@ -511,12 +586,29 @@ fn queue_items(
             },
             list: source.name.clone(),
             content_id: item.content_id.clone(),
-            platform: "YouTube".into(),
-            content_type: "video".into(),
+            platform: if source.kind == SourceKind::Podcast {
+                "Podcast"
+            } else {
+                "YouTube"
+            }
+            .into(),
+            content_type: if source.kind == SourceKind::Podcast
+                && !item.media_type.starts_with("video/")
+            {
+                "audio"
+            } else {
+                "video"
+            }
+            .into(),
             tags: Vec::new(),
         };
         let mut resolved =
             options::resolve(repo, &context, source.settings.preset_id.as_deref(), None)?;
+        if source.kind == SourceKind::Podcast && source.settings.preset_id.is_none() {
+            resolved.values.format = crate::model::Format::AudioOriginal;
+            resolved.values.height = None;
+            resolved.values.audio_bitrate = None;
+        }
         if !source.settings.relative_folder.is_empty() {
             resolved.values.relative_folder = source.settings.relative_folder.clone();
             resolved
@@ -524,7 +616,7 @@ fn queue_items(
                 .insert("relativeFolder".into(), "source".into());
         }
         prepared.push(options::PreparedDownload {
-            url: item.url.clone(),
+            url,
             title: item.title.clone(),
             content_id: item.content_id.clone(),
             options: resolved,
@@ -583,6 +675,71 @@ async fn inspect_page(
     mut cancel: watch::Receiver<bool>,
 ) -> Result<Page, String> {
     source.validate()?;
+    if source.kind == SourceKind::Podcast {
+        let config = crate::config_root(state)?;
+        let feed_url = crate::podcasts::protected_url(&config, &source.url_ref, &source.url)?;
+        let feed = crate::podcasts::fetch_feed(&feed_url, cancel).await?;
+        let offset = if continuation {
+            source.baseline.cursor
+        } else {
+            0
+        };
+        if offset >= source.settings.exploration_limit {
+            return Err("Increase the exploration limit to continue.".into());
+        }
+        let count = source
+            .settings
+            .page_size
+            .min(source.settings.exploration_limit - offset);
+        let total = feed.episodes.len();
+        let mut items = Vec::new();
+        for (index, episode) in feed
+            .episodes
+            .into_iter()
+            .enumerate()
+            .skip(offset)
+            .take(count)
+        {
+            let reference = crate::sessions::seal_url(
+                &config,
+                &format!(
+                    "{}-{:x}",
+                    episode.id,
+                    Sha256::digest(episode.enclosure.as_bytes())
+                ),
+                &episode.enclosure,
+            )?;
+            let url = url::Url::parse(&episode.enclosure)
+                .map_err(|_| "Invalid podcast enclosure.")?
+                .origin()
+                .ascii_serialization();
+            items.push(SourceItem {
+                content_id: episode.id,
+                title: format!("{:03} {}", index + 1, episode.title),
+                creator: episode.author,
+                url,
+                url_ref: Some(reference),
+                size: episode.size,
+                media_type: episode.media_type,
+                thumbnail: None,
+                duration: episode.duration,
+                published_at: episode.published_at,
+                discovered_at: queue::now(),
+                state: SourceItemState::Review,
+                discovery: Discovery::Ambiguous,
+                reason: None,
+                job_ids: Vec::new(),
+            });
+        }
+        let inspected = items.len();
+        return Ok(Page {
+            name: Some(feed.title),
+            items,
+            inspected,
+            has_more: offset + inspected < total,
+            total: Some(total),
+        });
+    }
     let _permit = tokio::select! {
         permit=crate::batch::metadata_permit(&source.url)=>permit?,
         _=cancel.changed()=>return Err(engine::CANCELLED.into()),
@@ -891,10 +1048,26 @@ pub async fn add_source(
     state: State<'_, Arc<AppState>>,
     url: String,
     settings: SourceSettings,
+    kind: Option<SourceKind>,
+    public_feed: Option<bool>,
 ) -> Result<FollowedSource, String> {
     settings.validate()?;
-    let (url, kind) = source_url(&url)?;
-    let id = source_id(&url);
+    let (url, kind, url_ref, public_feed_url, id) = if kind == Some(SourceKind::Podcast) {
+        let url = crate::model::validate_url(&url)?;
+        let id = crate::podcasts::feed_id(&url);
+        let config = crate::config_root(&state)?;
+        let reference = crate::sessions::seal_url(&config, &id, &url)?;
+        let public = public_feed.unwrap_or(false).then(|| url.clone());
+        let display = url::Url::parse(&url)
+            .map_err(|_| "Invalid feed URL.")?
+            .origin()
+            .ascii_serialization();
+        (display, SourceKind::Podcast, Some(reference), public, id)
+    } else {
+        let (url, kind) = source_url(&url)?;
+        let id = source_id(&url);
+        (url, kind, None, None, id)
+    };
     {
         let mut guard = state.repository.lock().unwrap();
         let repo = guard.as_mut().ok_or("Open the app first.")?;
@@ -915,6 +1088,8 @@ pub async fn add_source(
             id: id.clone(),
             name: url.clone(),
             url,
+            url_ref,
+            public_feed_url,
             kind,
             status: SourceStatus::Ready,
             created_at: queue::now(),
@@ -1164,6 +1339,222 @@ pub fn start(app: AppHandle, state: Arc<AppState>) {
     });
 }
 
+#[tauri::command]
+pub async fn import_podcast_opml(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+) -> Result<usize, String> {
+    use std::io::Read;
+    use tauri_plugin_dialog::DialogExt;
+    let subscriptions = tauri::async_runtime::spawn_blocking(move || {
+        let path = app
+            .dialog()
+            .file()
+            .add_filter("Podcast subscriptions", &["opml", "xml"])
+            .blocking_pick_file()
+            .ok_or("Cancelled.")?
+            .into_path()
+            .map_err(|_| "Choose a local OPML file.")?;
+        let path = crate::library::authorized_path(&path)?;
+        let file = std::fs::File::open(&path).map_err(|_| "Could not open the OPML file.")?;
+        let mut bytes = Vec::new();
+        file.take(4 * 1024 * 1024 + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|_| "Could not read the OPML file.")?;
+        let xml = std::str::from_utf8(&bytes).map_err(|_| "The OPML file must use UTF-8.")?;
+        crate::podcasts::parse_opml(xml)
+    })
+    .await
+    .map_err(|_| "The OPML file picker failed.")??;
+    let mut guard = state.repository.lock().unwrap();
+    let repo = guard.as_mut().ok_or("Open the app first.")?;
+    let old = repo.data.sources.len();
+    let mut additions = Vec::new();
+    for subscription in subscriptions {
+        let id = crate::podcasts::feed_id(&subscription.url);
+        if repo.data.sources.iter().any(|source| source.id == id) {
+            continue;
+        }
+        let reference = crate::sessions::seal_url(repo.root(), &id, &subscription.url)?;
+        let display = url::Url::parse(&subscription.url)
+            .map_err(|_| "Invalid subscription URL.")?
+            .origin()
+            .ascii_serialization();
+        additions.push(FollowedSource {
+            id,
+            name: subscription.title,
+            url: display,
+            url_ref: Some(reference),
+            public_feed_url: None,
+            kind: SourceKind::Podcast,
+            status: SourceStatus::Ready,
+            created_at: queue::now(),
+            last_check: None,
+            next_check: None,
+            error: None,
+            failures: 0,
+            settings: SourceSettings::default(),
+            baseline: Baseline::default(),
+            items: Vec::new(),
+        });
+    }
+    repo.data.sources.extend(additions);
+    if let Err(error) = repo.save() {
+        repo.data.sources.truncate(old);
+        return Err(error);
+    }
+    Ok(repo.data.sources.len() - old)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpmlExport {
+    pub path: std::path::PathBuf,
+    pub exported: usize,
+    pub omitted: usize,
+}
+
+#[tauri::command]
+pub async fn export_podcast_opml(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+) -> Result<OpmlExport, String> {
+    use std::io::Write;
+    use tauri_plugin_dialog::DialogExt;
+    let (subscriptions, omitted) = {
+        let guard = state.repository.lock().unwrap();
+        let repo = guard.as_ref().ok_or("Open the app first.")?;
+        let sources: Vec<_> = repo
+            .data
+            .sources
+            .iter()
+            .filter(|source| source.kind == SourceKind::Podcast)
+            .collect();
+        let subscriptions: Vec<_> = sources
+            .iter()
+            .filter_map(|source| {
+                source
+                    .public_feed_url
+                    .as_ref()
+                    .map(|url| crate::podcasts::Subscription {
+                        title: source.name.clone(),
+                        url: url.clone(),
+                    })
+            })
+            .collect();
+        let omitted = sources.len() - subscriptions.len();
+        (subscriptions, omitted)
+    };
+    if subscriptions.is_empty() {
+        return Err(
+            "No public podcast subscriptions to export. Private feed URLs are excluded.".into(),
+        );
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = app
+            .dialog()
+            .file()
+            .add_filter("Podcast subscriptions", &["opml"])
+            .set_file_name("nabnab-podcasts.opml")
+            .blocking_save_file()
+            .ok_or("Cancelled.")?
+            .into_path()
+            .map_err(|_| "Choose a local destination.")?;
+        crate::library::authorized_path(path.parent().ok_or("Choose a local destination.")?)?;
+        let mut file = std::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&path)
+            .map_err(|_| "Choose an unused OPML filename.")?;
+        file.write_all(crate::podcasts::export_opml(&subscriptions).as_bytes())
+            .and_then(|_| file.sync_all())
+            .map_err(|_| "Could not save the OPML export.")?;
+        Ok(OpmlExport {
+            path,
+            exported: subscriptions.len(),
+            omitted,
+        })
+    })
+    .await
+    .map_err(|_| "The OPML export failed.")?
+}
+
+#[tauri::command]
+pub async fn export_podcast_m3u(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    id: String,
+) -> Result<std::path::PathBuf, String> {
+    use std::io::Write;
+    use tauri_plugin_dialog::DialogExt;
+    let text = {
+        let guard = state.repository.lock().unwrap();
+        let repo = guard.as_ref().ok_or("Open the app first.")?;
+        let source = repo
+            .data
+            .sources
+            .iter()
+            .find(|source| source.id == id && source.kind == SourceKind::Podcast)
+            .ok_or("Podcast source not found.")?;
+        let mut text = String::from("#EXTM3U\n");
+        let mut paths = HashSet::new();
+        for episode in &source.items {
+            for item in repo.data.library.iter().filter(|item| {
+                item.details.source_ids.contains(&id)
+                    && episode.job_ids.iter().any(|job_id| {
+                        repo.data
+                            .jobs
+                            .iter()
+                            .any(|job| job.id == *job_id && job.outputs.contains(&item.path))
+                    })
+                    && matches!(item.kind.as_str(), "audio" | "video")
+                    && item.path.is_file()
+            }) {
+                if !paths.insert(item.path.clone()) {
+                    continue;
+                }
+                let path = item.path.to_string_lossy();
+                if path.contains(['\n', '\r']) {
+                    continue;
+                }
+                text.push_str(&format!(
+                    "#EXTINF:{},{}\n{}\n",
+                    item.duration.map(|v| v.round() as i64).unwrap_or(-1),
+                    episode.title.replace(['\n', '\r'], " "),
+                    path
+                ));
+            }
+        }
+        if paths.is_empty() {
+            return Err("Download podcast episodes before exporting a local playlist.".into());
+        }
+        text
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = app
+            .dialog()
+            .file()
+            .add_filter("Local playlist", &["m3u8"])
+            .set_file_name("podcast.m3u8")
+            .blocking_save_file()
+            .ok_or("Cancelled.")?
+            .into_path()
+            .map_err(|_| "Choose a local destination.")?;
+        crate::library::authorized_path(path.parent().ok_or("Choose a local destination.")?)?;
+        let mut file = std::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&path)
+            .map_err(|_| "Choose an unused playlist filename.")?;
+        file.write_all(text.as_bytes())
+            .and_then(|_| file.sync_all())
+            .map_err(|_| "Could not save the playlist.")?;
+        Ok(path)
+    })
+    .await
+    .map_err(|_| "The playlist export failed.")?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1172,6 +1563,8 @@ mod tests {
             id: "source".into(),
             name: "List".into(),
             url: "https://www.youtube.com/playlist?list=PLfixture".into(),
+            url_ref: None,
+            public_feed_url: None,
             kind: SourceKind::Playlist,
             status: SourceStatus::Ready,
             created_at: 10_000,

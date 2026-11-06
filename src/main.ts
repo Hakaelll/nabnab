@@ -1,4 +1,9 @@
 import "./style.css";
+import {createCoursesController} from "./courses-ui";
+import {createTranscriptionManager} from "./transcription-ui";
+import {createTorrentsController} from "./torrents-ui";
+import {createPlatformsController} from "./platforms-ui";
+import {readExpandedToolOptions} from "./views-tools";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -49,6 +54,11 @@ let quickLoading=false;
 type QuickPrepared={url:string;title:string;contentId:string;options:ResolvedOptions;sourceId:null;groupId:null};
 let quickPrepared:QuickPrepared|null=null;
 let localTimezone='UTC';
+const transcriptionManager=createTranscriptionManager({command,render:renderCurrent});
+const torrents=createTorrentsController({command,refresh,notify,showError,t,render:renderCurrent,settings:()=>{preferences.section='engines';navigate('settings');void loadSettingsSection().catch(showError);},folder:()=>snapshot.settings.folder});
+let platformModule:'catalog'|'torrent'|'courses'='catalog';
+const courses=createCoursesController({command,getSnapshot:()=>snapshot,refresh,render:renderCurrent,notify,showError,t,openLibrary:id=>{librarySection='files';library.detailId=id;navigate('library');}});
+const platforms=createPlatformsController({command,snapshot:()=>snapshot,refresh,notify,render:renderCurrent,t,openLink:url=>{navigate('home');updateSourceInput(url);void inspect().catch(showError);}});
 const sources=createSourcesController({command,getSnapshot:()=>snapshot,refresh,notify,showError,t,render:renderCurrent});
 const batches=createBatchController({command,snapshot:()=>snapshot,refresh,notify,showError,t,render:renderCurrent,onFollowSource:url=>{librarySection='sources';sources.openAdd(url);navigate('library');}});
 const libraryFeatures=createLibraryFeatures({command,snapshot:()=>snapshot,refresh,notify,showError,t,render:()=>{renderCurrent();renderInspector(true);libraryFeatures.bind();},inspect:(id)=>{librarySection='files';library.detailId=id;navigate('library');}});
@@ -75,8 +85,8 @@ function enterSurface(element: HTMLElement, axis: "x" | "y" = "y"): void {
   void animation.finished.catch(() => {}).then(() => { if (surfaceAnimations.get(element) === animation) surfaceAnimations.delete(element); });
 }
 function checked(id: string): boolean { const element = document.getElementById(id); return element instanceof HTMLInputElement && element.checked; }
-function isPage(value: string | undefined): value is Page { return value === "home" || value === "downloads" || value === "library" || value === "tools" || value === "settings"; }
-function isTool(value: string | undefined): value is ToolKind { return value === "convert" || value === "extractAudio" || value === "trim" || value === "compress"; }
+function isPage(value: string | undefined): value is Page { return value === "platforms" || value === "home" || value === "downloads" || value === "library" || value === "tools" || value === "settings"; }
+function isTool(value: string | undefined): value is ToolKind { return ["transcribe","animate","frame","contactSheet","rotate","crop","mute","audioProcess","imageConvert"].includes(value??"") || value === "convert" || value === "extractAudio" || value === "trim" || value === "compress"; }
 function isSettingsSection(value: string | undefined): value is SettingsSection { return value === "general" || value === "downloads" || value === "formats" || value === 'organization' || value === "engines" || value === "sessions" || value === "appearance" || value === "browser" || value === "about"; }
 async function command<T>(name: string, args?: Record<string, unknown>): Promise<T> {
   if (!desktop) throw new Error(t("Esta acción requiere la aplicación de escritorio nabnab.", "This action requires the nabnab desktop app."));
@@ -160,7 +170,7 @@ function updateNavigation(): void {
   document.documentElement.classList.toggle("reduced-transparency", snapshot.settings.reducedTransparency);
   document.documentElement.classList.toggle("sidebar-collapsed", !snapshot.settings.sidebarExpanded);
   required(".sidebar").setAttribute("aria-label", t("Navegación principal", "Main navigation"));
-  const names: [Page,string,Parameters<typeof icon>[0]][] = [["home",t("Inicio", "Home"),"home"],["downloads",t("Descargas", "Downloads"),"downloads"],["library",t("Biblioteca", "Library"),"library"],["tools",t("Herramientas", "Tools"),"tools"]];
+  const names: [Page,string,Parameters<typeof icon>[0]][] = [["home",t("Inicio", "Home"),"home"],["downloads",t("Descargas", "Downloads"),"downloads"],["library",t("Biblioteca", "Library"),"library"],["tools",t("Herramientas", "Tools"),"tools"],["platforms",t("Plataformas","Platforms"),"grid"]];
   required(".nav-primary").innerHTML = names.map(([key,label,symbol])=>`<button class="nav-item" data-page="${key}" aria-current="${page===key?'page':'false'}" aria-label="${label}" title="${label}">${icon(symbol)}<span class="nav-label">${label}</span>${key==='downloads'&&snapshot.jobs.some(job=>activeStates.includes(job.state))?'<span class="nav-work-dot" aria-hidden="true"></span>':''}</button>`).join("");
   const settingsLabel=t("Ajustes", "Settings");
   required(".nav-secondary").innerHTML=`<button class="nav-item" data-page="settings" aria-current="${page==='settings'?'page':'false'}" aria-label="${settingsLabel}" title="${settingsLabel}">${icon("settings")}<span class="nav-label">${settingsLabel}</span></button>`;
@@ -224,7 +234,7 @@ function renderCurrent(): void {
   preserveFocus(()=>{
     updateNavigation();required('#field').hidden=page!=='home';required("#home-page").hidden=page!=="home";required("#page-content").hidden=page==='home';
     if(page==='home')renderHome();
-    else {disposeGraphics?.();disposeGraphics=null;required("#page-content").innerHTML=page==='downloads'?downloadsView(snapshot,downloads,t):page==='library'?libraryView(snapshot,library,t):page==='tools'?toolsView(snapshot,tools,t):settingsView(snapshot,preferences,t,desktop);}
+    else {disposeGraphics?.();disposeGraphics=null;required("#page-content").innerHTML=page==='downloads'?downloadsView(snapshot,downloads,t):page==='library'?libraryView(snapshot,library,t):page==='tools'?toolsView(snapshot,tools,t):page==='platforms'?(platformModule==='torrent'?torrents.render():platformModule==='courses'?courses.render():platforms.render()):settingsView(snapshot,preferences,t,desktop);}
     if(page==='library'){
       const container=required('#page-content');
       const navigation=`<nav class="library-navigation filter-tabs" aria-label="${t('Vistas de Biblioteca','Library views')}">${[['files',t('Archivos','Files')],['collections',t('Colecciones','Collections')],['sources',t('Fuentes','Sources')],['later',t('Para después','For later')]].map(([section,label])=>`<button data-action="library-section" data-section="${section}" aria-current="${librarySection===section?'page':'false'}">${label}</button>`).join('')}</nav>`;
@@ -232,7 +242,8 @@ function renderCurrent(): void {
       container.insertAdjacentHTML('afterbegin',navigation);
     }
     if(page==='settings'&&(preferences.section==='formats'||preferences.section==='organization'))required('.settings-content').innerHTML=`<h2 id="settings-title">${preferences.section==='formats'?t('Ajustes reutilizables','Reusable presets'):t('Organización','Organization')}</h2>${preferences.section==='formats'?batches.renderPresets():organization.render()}`;
-    renderInspector();libraryFeatures.bind();updateActivity();observeThumbnails();
+    if(page==='settings'&&preferences.section==='engines')required('.settings-content').insertAdjacentHTML('beforeend',platforms.renderComponents());
+    renderInspector();libraryFeatures.bind();if(page==='platforms'&&platformModule==='catalog')platforms.bind();if(page==='platforms'&&platformModule==='courses')courses.bind();updateActivity();observeThumbnails();
   });
 }
 function observeThumbnails(): void {
@@ -263,6 +274,7 @@ function applySnapshot(next: Snapshot): void {
 }
 async function refresh(): Promise<void> { applySnapshot(await command<Snapshot>("get_snapshot")); }
 function navigate(next: Page): void {
+  if(page==='platforms'&&platformModule==='courses')courses.savePlayback();
   const changed=page!==next;cancelSurfaceMotion();
   if(page==='tools'){try{tools.options=readToolOptions();}catch{/* Keep the last valid options while a draft is incomplete. */}}
   scrollPositions.set(page,required("#main").scrollTop);page=next;inspectorKey="";
@@ -294,11 +306,12 @@ async function inspect(): Promise<void> {
   if(batches.active||parsed.urls.length>1||parsed.invalid||inputUrl&&(/youtube\.com$/.test(inputUrl.hostname))&&(inputUrl.pathname.startsWith('/playlist')||inputUrl.pathname.startsWith('/@')||inputUrl.pathname.startsWith('/channel/'))){await batches.prepare(home.input);return;}
   if(parsed.invalid||parsed.urls.length===0){notify(t("Pega uno o varios enlaces HTTP o HTTPS completos.", "Paste one or more complete HTTP or HTTPS links."),"error");return;}
   if(parsed.truncated){notify(t("Divide el lote en grupos de hasta 100 enlaces.", "Split the batch into groups of up to 100 links."),"error");return;}
+  if(parsed.urls.length===1&&["pinterest.com","pin.it","artstation.com","deviantart.com","pixiv.net","flickr.com","tumblr.com","imgur.com"].some(host=>{try{const actual=new URL(parsed.urls[0]).hostname;return actual===host||actual.endsWith('.'+host);}catch{return false;}})&&platforms.openGallery(parsed.urls[0])){navigate('platforms');return;}
   if(parsed.urls.length>1){home.selectedUrls=new Set(parsed.urls);renderHome();return;}
   if(home.loading&&analysisUrl===parsed.urls[0])return;
   if(!enginesReady){notify(t("Prepara los motores en Ajustes para analizar enlaces.", "Prepare engines in Settings to analyze links."));return;}
   invalidateAnalysis();const requestId=++generation;analysisRequest=requestId;analysisUrl=parsed.urls[0];home.loading=true;notify("");renderHome();
-  try{const result=await command<Media>("inspect_media",{url:parsed.urls[0],requestId});if(requestId!==generation)return;if(result.entries.length){await batches.prepare(home.input);return;}home.media=result;home.selectedUrls=new Set(result.entries.map(entry=>entry.url));home.format=result.entries.length||result.hasVideo?"mp4":"audio";}
+  try{const result=await command<Media>("inspect_media",{url:parsed.urls[0],requestId});if(requestId!==generation)return;if(result.entries.length){await batches.prepare(home.input);return;}home.media=result;home.selectedUrls=new Set(result.entries.map(entry=>entry.url));home.format=result.capabilities.images?"source":result.entries.length||result.hasVideo?"mp4":"audio";}
   catch(error){if(requestId===generation)showError(error);}
   finally{if(requestId===generation){home.loading=false;analysisRequest=0;analysisUrl="";renderHome();}}
 }
@@ -317,14 +330,14 @@ async function saveSettings(settings: Settings): Promise<void> { applySnapshot(a
 async function chooseFolder(): Promise<void> {const folder=await command<string|null>("choose_folder");if(folder){snapshot.settings.folder=folder;await refresh();notify(t("Carpeta de destino actualizada.", "Destination folder updated."),"success");}}
 async function importMedia(folders: boolean, intoTools=false): Promise<void> {
   const previous=new Set(snapshot.library.map(item=>item.id));const next=await command<Snapshot>("import_media",{folders});
-  if(intoTools){for(const item of next.library)if(!previous.has(item.id)&&item.kind!=='image')tools.ids.add(item.id);tools.picking=tools.ids.size===0;}
+  if(intoTools){for(const item of next.library)if(!previous.has(item.id)&&(tools.kind==='imageConvert'?item.kind==='image':item.kind!=='subtitle'))tools.ids.add(item.id);tools.picking=tools.ids.size===0;}
   applySnapshot(next);if(next.library.length>previous.size)notify(t("Importado sin copiar ni modificar los originales.", "Imported without copying or modifying originals."),"success");
 }
 async function importUrlFile(path?: string): Promise<void> {const urls=await command<string[]>("import_url_file",path?{path}:undefined);if(urls.length){if(page!=='home')navigate('home');updateSourceInput(urls.join("\n"));}}
 async function actOnJobs(ids: string[], action: "cancel"|"retry"|"pause"): Promise<void> {if(ids.length)applySnapshot(await command<Snapshot>("job_action",{ids,action}));}
 async function loadSettingsSection(): Promise<void> {
   if(!desktop)return;const section=preferences.section;
-  if(section==='engines'){preferences.engines=await command<EngineStatus[]>("engine_status");enginesReady=preferences.engines.length>=4&&preferences.engines.every(engine=>engine.status==='installed');}
+  if(section==='engines'){await platforms.loadComponents();preferences.engines=await command<EngineStatus[]>("engine_status");enginesReady=preferences.engines.length>=4&&preferences.engines.every(engine=>engine.status==='installed');}
   else if(section==='sessions'){preferences.sessions=await command<SessionStatus[]>("sessions_status");preferences.cache=await command<{bytes:number;files:number}>("cache_status");}
   else if(section==='browser')preferences.bridge=await command<BridgeStatus>("bridge_status");
   if(page==='settings'&&section===preferences.section)renderCurrent();
@@ -340,6 +353,7 @@ function readToolOptions(): ToolOptions {
     case 'extractAudio':{const format=inputValue('tool-audio-format');if(format!=='original'&&format!=='mp3'&&format!=='m4a')throw new Error(t("Selecciona un audio válido.", "Choose a valid audio format."));return{kind:'extractAudio',format};}
     case 'trim':{const start=Number(inputValue('tool-start'));const end=Number(inputValue('tool-end'));if(!Number.isFinite(start)||!Number.isFinite(end)||start<0||end<=start)throw new Error(t("El fin debe estar después del inicio.", "End must be after start."));return{kind:'trim',start,end,precise:checked('tool-precise')};}
     case 'compress':{const quality=inputValue('tool-compression');const size=inputValue('tool-target');const targetMb=size?Number(size):null;if(quality!=='balanced'&&quality!=='small'&&quality!=='high')throw new Error(t("Selecciona un perfil válido.", "Choose a valid profile."));if(targetMb!==null&&(!Number.isFinite(targetMb)||targetMb<1))throw new Error(t("El tamaño objetivo debe ser de al menos 1 MB.", "Target size must be at least 1 MB."));return{kind:'compress',quality,targetMb};}
+    default:return readExpandedToolOptions(tools.kind,inputValue,checked);
   }
 }
 async function queueTool(): Promise<void> {
@@ -357,7 +371,7 @@ function focusLibraryPage(): void {
   document.querySelector<HTMLButtonElement>('.media-open')?.focus({preventScroll:true});
 }
 async function copyText(text: string): Promise<void> {await navigator.clipboard.writeText(text);notify(t("Copiado al portapapeles.", "Copied to clipboard."),"success");}
-function setToolInput(ids: string[]): void {tools.ids=new Set(ids.filter(id=>snapshot.library.some(item=>item.id===id&&item.kind!=='image')));tools.picking=false;navigate('tools');}
+function setToolInput(ids: string[]): void {if(ids.some(id=>snapshot.library.some(item=>item.id===id&&item.kind==='image'))){tools.kind='imageConvert';tools.options=defaultToolOptions('imageConvert');}tools.ids=new Set(ids.filter(id=>snapshot.library.some(item=>item.id===id&&['video','audio','image'].includes(item.kind))));tools.picking=false;navigate('tools');}
 
 document.addEventListener("pointerdown",()=>{pointerInput=true;document.documentElement.dataset.input="pointer";},{passive:true});
 document.addEventListener("keydown",()=>{pointerInput=false;document.documentElement.dataset.input="keyboard";cancelSurfaceMotion();},true);
@@ -371,7 +385,11 @@ document.addEventListener("click",event=>{
 async function handleAction(action: string, button: HTMLButtonElement): Promise<void> {
   const id=button.dataset.id??"";
   if(action==='batch-open'||action==='batch-new')navigate('home');
-  if(await batches.handleClick(action,button)||await sources.handleClick(action,button)||await organization.handleClick(action,button)||await libraryFeatures.handleClick(button))return;
+  if(action==='open-courses'){platformModule='courses';navigate('platforms');await courses.open();renderCurrent();return;}
+  if(action==='open-podcasts'){librarySection='sources';navigate('library');sources.openAdd('', 'podcast');return;}
+  if(action==='open-torrents'){platformModule='torrent';navigate('platforms');await torrents.load();renderCurrent();return;}
+  if(action==='platform-back'&&platformModule==='torrent'){platformModule='catalog';renderCurrent();return;}
+  if(await courses.handleClick(action,button)||await transcriptionManager.click(action,button)||await torrents.handleClick(action)||await platforms.handleClick(action,button)||await batches.handleClick(action,button)||await sources.handleClick(action,button)||await organization.handleClick(action,button)||await libraryFeatures.handleClick(button))return;
   switch(action){
     case 'open-library-collection':librarySection='files';library.collection=button.dataset.collection??'';library.offset=0;renderCurrent();break;
     case 'job-next':case 'job-up':case 'job-down':{const job=snapshot.jobs.find(j=>j.id===id);if(job)applySnapshot(await command<Snapshot>('configure_jobs',{ids:[id],priority:job.priority??'normal',schedule:job.schedule??{kind:'immediate'},orderAction:action.slice(4)}));break;}
@@ -412,7 +430,7 @@ async function handleAction(action: string, button: HTMLButtonElement): Promise<
     case 'tool-media':setToolInput([id]);break;
     case 'tools-selected':setToolInput([...library.selected]);break;
     case 'clear-library-selection':library.selected.clear();renderCurrent();break;
-    case 'tool-kind':{const kind=button.dataset.kind;if(isTool(kind)){tools.kind=kind;tools.options=defaultToolOptions(kind);renderCurrent();}break;}
+    case 'tool-kind':{const kind=button.dataset.kind;if(isTool(kind)){tools.kind=kind;tools.options=defaultToolOptions(kind);renderCurrent();if(kind==='transcribe')await transcriptionManager.load();}break;}
     case 'pick-tool-files':tools.options=readToolOptions();await importMedia(false,true);break;
     case 'pick-tool-library':tools.options=readToolOptions();tools.picking=!tools.picking;renderCurrent();break;
     case 'finish-tool-picker':tools.picking=false;renderCurrent();break;
@@ -432,16 +450,17 @@ async function handleAction(action: string, button: HTMLButtonElement): Promise<
   }
 }
 document.addEventListener('input',event=>{
-  if(event.target instanceof HTMLElement&&(batches.handleInput(event.target)||sources.handleInput(event.target)||libraryFeatures.handleInput(event.target)))return;
+  if(event.target instanceof HTMLElement&&(courses.handleInput(event.target)||torrents.handleInput(event.target)||platforms.handleInput(event.target)||batches.handleInput(event.target)||sources.handleInput(event.target)||libraryFeatures.handleInput(event.target)))return;
   const target=event.target;if(!(target instanceof HTMLInputElement||target instanceof HTMLTextAreaElement))return;
   if(target.id==='url')updateSourceInput(target.value,false);
   else if(target.id==='job-search'){downloads.query=target.value;renderCurrent();}
   else if(target.id==='library-search'){library.query=target.value;library.offset=0;renderCurrent();}
+  else if(target.id==='tool-search'){const query=target.value.toLocaleLowerCase();for(const item of document.querySelectorAll('[data-tool-name]'))if(item instanceof HTMLElement)item.hidden=!item.dataset.toolName?.includes(query);for(const group of document.querySelectorAll('.tool-group'))if(group instanceof HTMLElement)group.hidden=![...group.querySelectorAll('[data-tool-name]')].some(item=>item instanceof HTMLElement&&!item.hidden);}
   else if(target.id==='tool-picker-search'){const query=target.value.toLocaleLowerCase();for(const item of document.querySelectorAll<HTMLElement>('[data-picker-name]'))item.hidden=!item.dataset.pickerName?.includes(query);}
 });
 document.addEventListener('change',event=>{
   const target=event.target;
-  if(target instanceof HTMLElement){if(sources.handleInput(target)||libraryFeatures.handleChange(target))return;void batches.handleChange(target).catch(showError);}
+  if(target instanceof HTMLElement){if(courses.handleInput(target)||torrents.handleInput(target)||platforms.handleInput(target)||sources.handleInput(target)||libraryFeatures.handleChange(target))return;void batches.handleChange(target).catch(showError);}
   if(target instanceof HTMLSelectElement&&target.id==='job-schedule-kind'){for(const field of target.closest('form')?.querySelectorAll<HTMLElement>('[data-schedule-fields]')??[])field.hidden=field.dataset.scheduleFields!==target.value;return;}
   if(target instanceof HTMLInputElement){
     const job=target.dataset.selectJob;const media=target.dataset.selectMedia;const tool=target.dataset.toolInput;const url=target.dataset.sourceUrl;
@@ -466,6 +485,7 @@ document.addEventListener('change',event=>{
 document.addEventListener('submit',event=>{const form=event.target;if(form instanceof HTMLFormElement){event.preventDefault();void submitForm(form).catch(showError);}});
 async function submitForm(form: HTMLFormElement): Promise<void> {
   if(await sources.handleSubmit(form)||await organization.handleSubmit(form)||await libraryFeatures.handleSubmit(form))return;
+  if(await courses.handleSubmit(form)||await torrents.handleSubmit(form)||await platforms.handleSubmit(form))return;
   switch(form.id){
     case 'job-scheduling':{const values=readScheduling('job',localTimezone);applySnapshot(await command<Snapshot>('configure_jobs',{ids:[form.dataset.id??''],...values,orderAction:null}));break;}
     case 'source-form':await inspect();break;

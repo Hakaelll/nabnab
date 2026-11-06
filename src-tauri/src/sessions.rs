@@ -14,7 +14,46 @@ const URL_HEADER: &[u8] = b"nabnab-operational-url-v1\n";
 const BACKUP_HEADER: &[u8] = b"nabnab-repository-backup-v1\n";
 const MAX_URL_BYTES: usize = 8192;
 const MAX_BACKUP_BYTES: usize = 64 * 1024 * 1024;
-pub const SITES: [&str; 8] = [
+
+fn module_name(name: &str) -> Result<(), String> {
+    if name.is_empty()
+        || name.len() > 80
+        || !name
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+    {
+        return Err("Invalid protected module name.".into());
+    }
+    Ok(())
+}
+pub fn secure_module_directory(root: &Path, name: &str) -> Result<PathBuf, String> {
+    module_name(name)?;
+    private_directory(root, name)
+}
+pub fn save_module_secret(root: &Path, name: &str, bytes: &[u8]) -> Result<(), String> {
+    module_name(name)?;
+    if bytes.is_empty() || bytes.len() > 65536 {
+        return Err("Module secret exceeds its size limit.".into());
+    }
+    let directory = private_directory(root, "module-secrets")?;
+    write_protected(
+        &directory.join(format!("{name}.bin")),
+        b"nabnab-module-secret-v1\n",
+        &format!("nabnab-module:{name}"),
+        bytes,
+    )
+}
+pub fn load_module_secret(root: &Path, name: &str) -> Result<Vec<u8>, String> {
+    module_name(name)?;
+    let secret = read_protected(
+        &root.join("module-secrets").join(format!("{name}.bin")),
+        b"nabnab-module-secret-v1\n",
+        &format!("nabnab-module:{name}"),
+        65536,
+    )?;
+    Ok(secret.0.clone())
+}
+pub const SITES: [&str; 24] = [
     "youtube",
     "twitter",
     "instagram",
@@ -23,6 +62,22 @@ pub const SITES: [&str; 8] = [
     "vimeo",
     "twitch",
     "pinterest",
+    "facebook",
+    "bilibili",
+    "dailymotion",
+    "soundcloud",
+    "bandcamp",
+    "artstation",
+    "deviantart",
+    "pixiv",
+    "flickr",
+    "tumblr",
+    "imgur",
+    "bluesky",
+    "threads",
+    "udemy",
+    "hotmart",
+    "kiwify",
 ];
 
 #[derive(Serialize)]
@@ -64,6 +119,22 @@ fn domains(site: &str) -> Result<&'static [&'static str], String> {
         "vimeo" => Ok(&["vimeo.com"]),
         "twitch" => Ok(&["twitch.tv"]),
         "pinterest" => Ok(&["pinterest.com", "pin.it"]),
+        "facebook" => Ok(&["facebook.com", "fb.watch"]),
+        "bilibili" => Ok(&["bilibili.com", "b23.tv"]),
+        "dailymotion" => Ok(&["dailymotion.com", "dai.ly"]),
+        "soundcloud" => Ok(&["soundcloud.com"]),
+        "bandcamp" => Ok(&["bandcamp.com"]),
+        "artstation" => Ok(&["artstation.com"]),
+        "deviantart" => Ok(&["deviantart.com"]),
+        "pixiv" => Ok(&["pixiv.net"]),
+        "flickr" => Ok(&["flickr.com"]),
+        "tumblr" => Ok(&["tumblr.com"]),
+        "imgur" => Ok(&["imgur.com"]),
+        "bluesky" => Ok(&["bsky.app"]),
+        "threads" => Ok(&["threads.net", "threads.com"]),
+        "udemy" => Ok(&["udemy.com"]),
+        "hotmart" => Ok(&["hotmart.com"]),
+        "kiwify" => Ok(&["kiwify.com.br", "kiwify.com"]),
         _ => Err("Choose a supported session site.".into()),
     }
 }
@@ -78,7 +149,19 @@ fn site_for(url: &str) -> Result<Option<&'static str>, String> {
         ProviderId::Vimeo => Some("vimeo"),
         ProviderId::Twitch => Some("twitch"),
         ProviderId::Pinterest => Some("pinterest"),
-        ProviderId::Generic => None,
+        _ => {
+            let host = url::Url::parse(url)
+                .map_err(|_| "Invalid session URL.")?
+                .host_str()
+                .unwrap_or_default()
+                .to_owned();
+            SITES.iter().copied().find(|site| {
+                domains(site).is_ok_and(|ds| {
+                    ds.iter()
+                        .any(|d| host == *d || host.ends_with(&format!(".{d}")))
+                })
+            })
+        }
     })
 }
 

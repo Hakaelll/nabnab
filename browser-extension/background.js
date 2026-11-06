@@ -1,4 +1,5 @@
 import { createClient, makeRequest, validToken } from "./protocol.js";
+import { scanMedia, normalizeMediaScan, mediaSummaries, selectedMediaRequest } from "./media.js";
 
 async function client() {
   const { pairingToken } = await chrome.storage.local.get("pairingToken");
@@ -20,6 +21,28 @@ async function handle(message) {
     case "enqueue":
       return send(message.request);
     case 'presets':return (await client()).presets();
+    case "detectMedia": {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (!tab?.id || !tab.url || !/^https?:\/\//i.test(tab.url)) throw new Error("Abre una página HTTP o HTTPS y vuelve a pulsar la extensión.");
+      await chrome.storage.session.remove("detectedMedia");
+      let result;
+      try { result = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: scanMedia }); }
+      catch { throw new Error("El navegador no permite leer esta página. Pulsa la extensión desde la pestaña que quieres inspeccionar."); }
+      const raw = result[0]?.result;
+      if (raw?.pageUrl !== tab.url) throw new Error("La pestaña ha cambiado durante la detección. Vuelve a intentarlo.");
+      const scan = normalizeMediaScan(raw);
+      await chrome.storage.session.set({ detectedMedia: { ...scan, tabId: tab.id, pageUrl: tab.url, createdAt: Date.now() } });
+      return mediaSummaries(scan);
+    }
+    case "sendDetectedMedia": {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      const { detectedMedia } = await chrome.storage.session.get("detectedMedia");
+      const request = selectedMediaRequest(detectedMedia, { tabId: tab?.id, pageUrl: tab?.url, ids: message.ids, profile: message.profile, presetId: message.presetId, requestId: message.requestId });
+      return send(request);
+    }
+    case "clearDetectedMedia":
+      await chrome.storage.session.remove("detectedMedia");
+      return { cleared: true };
     case 'collect':{
       const [tab]=await chrome.tabs.query({active:true,currentWindow:true});
       if(!tab?.id)throw new Error('No hay una página activa.');
@@ -49,7 +72,7 @@ async function handle(message) {
       return { connected: true };
     case "forget":
       await chrome.storage.local.remove("pairingToken");
-      await chrome.storage.session.remove("pendingRequest");
+      await chrome.storage.session.remove(["pendingRequest", "detectedMedia"]);
       return { connected: false };
     default:
       throw new Error("Solicitud de extensión desconocida.");

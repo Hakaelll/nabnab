@@ -45,6 +45,7 @@ fn extension_kind(path: &Path) -> Option<&'static str> {
         "png" | "jpg" | "jpeg" | "webp" | "gif" | "bmp" | "tiff" | "tif" | "avif" | "heic"
         | "heif" => Some("image"),
         "srt" | "vtt" => Some("subtitle"),
+        "pdf" | "epub" => Some("document"),
         _ => None,
     }
 }
@@ -198,6 +199,13 @@ pub fn index(
         content_hash: None,
         details,
     })
+}
+
+pub fn index_file(file: &Path) -> Result<LibraryItem, String> {
+    let path = authorized_path(file)?;
+    let metadata = fs::metadata(&path).map_err(|e| e.to_string())?;
+    if !metadata.is_file() || metadata.len() == 0 { return Err("The downloaded file is empty or not a regular file.".into()); }
+    Ok(LibraryItem { id: format!("{:x}", Sha256::digest(path_key(&path).as_bytes())), name: path.file_name().ok_or("Missing filename.")?.to_string_lossy().into_owned(), path, kind: "file".into(), size: metadata.len(), duration: None, width: None, height: None, video_codec: None, audio_codec: None, container: None, added_at: crate::queue::now(), source: None, parent_id: None, collections: vec![], tags: vec![], content_hash: None, details: Default::default() })
 }
 
 fn collect_files(

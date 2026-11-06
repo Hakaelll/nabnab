@@ -143,14 +143,21 @@ pub enum Source {
         library_id: String,
         options: ToolOptions,
     },
+    Torrent {
+        reference: String,
+        manifest_id: String,
+        index: u32,
+        options: crate::torrents::TorrentOptions,
+    },
 }
 impl Source {
     fn network(&self) -> bool {
-        matches!(self, Self::Download { .. })
+        matches!(self, Self::Download { .. } | Self::Torrent { .. })
     }
     fn domain(&self) -> String {
         match self {
             Self::Download { url, .. } => providers::scope(url).unwrap_or_default(),
+            Self::Torrent { .. } => "BitTorrent".into(),
             _ => String::new(),
         }
     }
@@ -280,6 +287,7 @@ impl Job {
             Source::Download { url, .. } => {
                 providers::identify(url).map(|p| p.name).unwrap_or_default()
             }
+            Source::Torrent { .. } => "BitTorrent".into(),
             _ => "FFmpeg".into(),
         };
         Self {
@@ -535,7 +543,17 @@ pub fn enqueue_prepared(
     let mut associations: Vec<(String, OutputAssociation)> = Vec::new();
     for item in items {
         let url = crate::model::validate_url(&item.url)?;
-        let content_id = crate::options::content_identity(&url)?;
+        let trusted_podcast = crate::sources::trusted_podcast_identity(
+            repo,
+            item.source_id.as_deref(),
+            &item.content_id,
+            &url,
+        );
+        let content_id = if trusted_podcast {
+            item.content_id.clone()
+        } else {
+            crate::options::content_identity(&url)?
+        };
         if content_id != item.content_id {
             return Err("The prepared content identity does not match its source.".into());
         }
@@ -682,6 +700,33 @@ pub fn enqueue_prepared(
     }
     accepted.extend(pending);
     Ok(accepted)
+}
+
+pub fn enqueue_torrent(repo: &mut Repository, reference: String, manifest: &crate::torrents::TorrentManifest, options: crate::torrents::TorrentOptions, request: &str) -> Result<Vec<Job>, String> {
+    validate_request_id(request)?;
+    let previous: Vec<_> = repo.data.jobs.iter().filter(|j| j.client_request == request).cloned().collect();
+    if !previous.is_empty() { return Ok(previous); }
+    if options.selected.is_empty() || options.selected.len() > 200 { return Err("Select 1–200 torrent files at a time.".into()); }
+    crate::torrents::download_args(Path::new("metadata.torrent"), &repo.data.settings.folder, manifest, &options)?;
+    let mut jobs = Vec::new();
+    let mut selected = std::collections::HashSet::new();
+    for index in &options.selected {
+        if !selected.insert(*index) { continue; }
+        let file = manifest.files.iter().find(|f| f.index == *index).ok_or("Unknown torrent file.")?;
+        let relative = Path::new(&file.path);
+        let folder = repo.data.settings.folder.join(relative.parent().unwrap_or(Path::new("")));
+        fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+        let folder = library::authorized_path(&folder)?;
+        let base = library::authorized_path(&repo.data.settings.folder)?;
+        if !folder.starts_with(&base) { return Err("Torrent destination escaped the selected folder.".into()); }
+        let mut per_file = options.clone(); per_file.selected = vec![*index];
+        let mut job = Job::new(Source::Torrent { reference: reference.clone(), manifest_id: manifest.id.clone(), index: *index, options: per_file }, file.path.clone(), folder, request.into(), Some(request.into()));
+        job.content_id = Some(format!("torrent:{}:{}", manifest.id, index));
+        jobs.push(job);
+    }
+    let old_len = repo.data.jobs.len(); repo.data.jobs.extend(jobs.clone());
+    if let Err(error) = repo.save() { repo.data.jobs.truncate(old_len); return Err(error); }
+    Ok(jobs)
 }
 
 pub fn enqueue_tool(
@@ -1542,11 +1587,27 @@ async fn run(
     if let Some(recovered) = recover_publication(state, job, staging, cancel.clone()).await? {
         return Ok(recovered);
     }
+    if let Source::Torrent { reference, manifest_id, index, options } = &job.source {
+        let executable = crate::components::executable(app, "torrent")?;
+        let torrent = crate::torrents::resolve_reference(app, reference)?;
+        let manifest = crate::torrents::read_manifest(&torrent)?;
+        if &manifest.id != manifest_id || options.selected != vec![*index] { return Err("Torrent metadata or file selection changed. Inspect it again.".into()); }
+        phase(app, state, &job.id, job.run_id, JobState::Downloading)?;
+        let handle = app.clone(); let shared = state.clone(); let id = job.id.clone(); let run_id = job.run_id;
+        let files = crate::torrents::run(executable.parent().ok_or("Invalid component path.")?, &torrent, staging, options, true, cancel.clone(), run_id, move |update| progress(&handle, &shared, &id, run_id, update)).await?;
+        let file = files.first().ok_or("The torrent returned no selected output.")?;
+        let flat = staging.join(file.file_name().ok_or("Invalid torrent filename.")?);
+        if file != &flat { if flat.exists() { return Err("The torrent filename collides with a job control file.".into()); } fs::rename(file, &flat).map_err(|e| e.to_string())?; }
+        phase(app, state, &job.id, run_id, JobState::Verifying)?;
+        let mut item = library::index(&flat, None, None, None).or_else(|_| library::index_file(&flat))?;
+        annotate_output(&mut item, job, staging);
+        return publish_verified_output(state, job, staging, &flat, item, cancel).await;
+    }
     let direct_download = match &job.source {
         Source::Download { url, .. } => {
             providers::identify(url)?.id == providers::ProviderId::Generic
         }
-        Source::Transform { .. } => false,
+        Source::Transform { .. } | Source::Torrent { .. } => false,
     };
     let root = if job.source.network() && !direct_download {
         engine::engine_dir(app)?
@@ -1559,6 +1620,7 @@ async fn run(
     let run_id = job.run_id;
     let emit = move |update| progress(&handle, &shared, &id, run_id, update);
     let (mut file, source, parent) = match &job.source {
+        Source::Torrent { .. } => return Err("Torrent execution was not dispatched.".into()),
         Source::Download {
             url_ref,
             format,
@@ -1694,7 +1756,18 @@ async fn run(
             if *cancel.borrow() {
                 return Err(engine::CANCELLED.into());
             }
-            let file = if direct_download {
+            let image = file
+                .extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| matches!(e, "jpg" | "png" | "gif" | "webp" | "avif" | "pdf" | "epub" | "zip" | "srt" | "vtt"));
+            let file = if image {
+                if *format != Format::Source {
+                    return Err(
+                        "This content requires original format; use local tools for conversion.".into(),
+                    );
+                }
+                file
+            } else if direct_download {
                 prepare_direct_download(
                     &root,
                     &file,
@@ -1742,6 +1815,14 @@ async fn run(
                 return Err(engine::CANCELLED.into());
             }
             phase(app, state, &job.id, run_id, JobState::Processing)?;
+            if matches!(options, ToolOptions::Transcribe { .. }) {
+                let (file, track) = crate::transcription::execute(&root, &crate::components::executable(app,"transcription")?, &crate::components::root(app)?.join("models"), &input, staging, options, cancel.clone(), run_id, emit.clone()).await?;
+                let mut item = library::index(&file, None, None, Some(library_id.clone()))?;
+                item.details.tracks = vec![track];
+                annotate_output(&mut item, job, staging);
+                phase(app,state,&job.id,run_id,JobState::Verifying)?;
+                return publish_verified_output(state,job,staging,&file,item,cancel).await;
+            }
             let file = crate::tools::execute(
                 &root,
                 &input,
@@ -1778,8 +1859,30 @@ async fn run(
             file = target;
         }
     }
+    if job
+        .content_id
+        .as_deref()
+        .is_some_and(|id| id.starts_with("gallery:"))
+    {
+        let extension = file
+            .extension()
+            .and_then(|e| e.to_str())
+            .ok_or("Missing gallery extension.")?;
+        let id = job.content_id.as_deref().unwrap_or_default();
+        let target = staging.join(format!(
+            "{}-{}.{}",
+            crate::options::safe_segment(&job.title),
+            &id[id.len().saturating_sub(12)..],
+            extension
+        ));
+        if file != target {
+            fs::rename(&file, &target).map_err(|e| e.to_string())?;
+            file = target;
+        }
+    }
     phase(app, state, &job.id, run_id, JobState::Verifying)?;
-    let info = media::probe(&root, &file, cancel.clone()).await?;
+    let document = file.extension().and_then(|e|e.to_str()).is_some_and(|e|matches!(e,"pdf"|"epub"|"zip"|"srt"|"vtt"));
+    let info = if document {serde_json::Value::Null} else {media::probe(&root, &file, cancel.clone()).await?};
     if let Source::Download {
         subtitle_language: Some(language),
         ..
@@ -1800,7 +1903,7 @@ async fn run(
     if *cancel.borrow() {
         return Err(engine::CANCELLED.into());
     }
-    let mut item = library::index(&file, Some(&info), source, parent)?;
+    let mut item = if file.extension().is_some_and(|e|e=="zip"){library::index_file(&file)?}else{library::index(&file, Some(&info), source, parent)?};
     if let Source::Transform {
         library_id,
         options,

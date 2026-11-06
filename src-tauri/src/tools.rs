@@ -35,11 +35,52 @@ pub enum ToolOptions {
         target_mb: Option<f64>,
         quality: String,
     },
+    Animate {
+        format: String,
+        start: f64,
+        end: f64,
+        width: u32,
+        fps: u32,
+    },
+    Frame {
+        at: f64,
+        width: u32,
+    },
+    ContactSheet {
+        columns: u32,
+        rows: u32,
+        width: u32,
+    },
+    Rotate {
+        degrees: u16,
+    },
+    Crop {
+        x: u32,
+        y: u32,
+        width: u32,
+        height: u32,
+    },
+    Mute,
+    AudioProcess {
+        operation: String,
+        profile: String,
+    },
+    ImageConvert {
+        format: String,
+        width: u32,
+        quality: u32,
+        strip_metadata: bool,
+    },
+    Transcribe {
+        model: String,
+        language: String,
+        threads: u8,
+    },
 }
 
 // Local media must not turn into an HLS, DASH, concat or network input after probing.
 const LOCAL_FORMATS: &str =
-    "mov,matroska,webm,mp3,ogg,wav,flac,aac,avi,asf,flv,mpeg,mpegts,nut,ac3,eac3,aiff,ape";
+    "mov,matroska,webm,mp3,ogg,wav,flac,aac,avi,asf,flv,mpeg,mpegts,nut,ac3,eac3,aiff,ape,gif,image2,png_pipe,jpeg_pipe,webp_pipe,bmp_pipe,tiff_pipe";
 
 fn number(value: &Value) -> Option<f64> {
     value
@@ -96,13 +137,23 @@ fn original_audio(codec: &str) -> Result<(&'static str, &'static str), String> {
 }
 
 pub fn validate_options(options: &ToolOptions, info: &Value) -> Result<(), String> {
-    let length = duration(info)?;
+    let length = if matches!(
+        options,
+        ToolOptions::ImageConvert { .. } | ToolOptions::Rotate { .. } | ToolOptions::Crop { .. }
+    ) {
+        duration(info).unwrap_or(0.0)
+    } else {
+        duration(info)?
+    };
     let video = codec(track(info, "video"));
     let audio = codec(track(info, "audio"));
     if video.is_none() && audio.is_none() {
         return Err("Choose a file with a supported video or audio track.".into());
     }
     match options {
+        ToolOptions::Transcribe { .. } => {
+            return Err("Transcription uses the optional whisper.cpp component.".into())
+        }
         ToolOptions::Convert {
             container,
             video_codec,
@@ -175,6 +226,124 @@ pub fn validate_options(options: &ToolOptions, info: &Value) -> Result<(), Strin
                     return Err("Choose a positive target size up to 1,000,000 MiB.".into());
                 }
                 compression_bitrate(info, *target, audio.is_some())?;
+            }
+        }
+        ToolOptions::Animate {
+            format,
+            start,
+            end,
+            width,
+            fps,
+        } => {
+            if video.is_none()
+                || !matches!(format.as_str(), "gif" | "webp")
+                || !start.is_finite()
+                || !end.is_finite()
+                || *start < 0.0
+                || *end <= *start
+                || *end > length + 0.05
+                || end - start > 300.0
+                || !(16..=1920).contains(width)
+                || !(1..=60).contains(fps)
+            {
+                return Err("Choose a video range up to 300 seconds, a width of 16–1920 pixels and 1–60 FPS.".into());
+            }
+        }
+        ToolOptions::Frame { at, width } => {
+            if video.is_none()
+                || !at.is_finite()
+                || *at < 0.0
+                || *at >= length
+                || !(16..=8192).contains(width)
+            {
+                return Err("Choose a time inside the video and a width of 16–8192 pixels.".into());
+            }
+        }
+        ToolOptions::ContactSheet {
+            columns,
+            rows,
+            width,
+        } => {
+            if video.is_none()
+                || !(1..=10).contains(columns)
+                || !(1..=10).contains(rows)
+                || !(64..=640).contains(width)
+                || columns * width > 8192
+            {
+                return Err("Choose a grid up to 10 × 10 with thumbnails of 64–640 pixels.".into());
+            }
+        }
+        ToolOptions::Rotate { degrees } => {
+            if video.is_none() || !matches!(degrees, 90 | 180 | 270) {
+                return Err(
+                    "Choose a video or image and a rotation of 90, 180 or 270 degrees.".into(),
+                );
+            }
+        }
+        ToolOptions::Crop {
+            x,
+            y,
+            width,
+            height,
+        } => {
+            let stream = track(info, "video").ok_or("Cropping requires a video or image.")?;
+            if *width < 2
+                || *height < 2
+                || width % 2 != 0
+                || height % 2 != 0
+                || u64::from(*x) + u64::from(*width) > stream["width"].as_u64().unwrap_or(0)
+                || u64::from(*y) + u64::from(*height) > stream["height"].as_u64().unwrap_or(0)
+            {
+                return Err("Choose an even crop size inside the original frame.".into());
+            }
+        }
+        ToolOptions::Mute => {
+            if video.is_none() {
+                return Err("Removing audio requires a video track.".into());
+            }
+        }
+        ToolOptions::AudioProcess { operation, profile } => {
+            if audio.is_none()
+                || !matches!(operation.as_str(), "normalize" | "silence" | "denoise")
+                || !matches!(profile.as_str(), "podcast" | "broadcast" | "music")
+            {
+                return Err("Choose an audio track, a supported processing operation and a loudness profile.".into());
+            }
+        }
+        ToolOptions::ImageConvert {
+            format,
+            width,
+            quality,
+            ..
+        } => {
+            let stream = track(info, "video").ok_or("Image conversion requires an image.")?;
+            if !matches!(
+                video,
+                Some("png" | "mjpeg" | "webp" | "bmp" | "tiff" | "gif" | "apng")
+            ) || audio.is_some()
+            {
+                return Err("Choose a PNG, JPEG, WebP, BMP, TIFF or GIF image.".into());
+            }
+            // Animated sources must never silently become a still image.
+            if matches!(video, Some("gif" | "apng" | "webp"))
+                && stream["nb_frames"].as_str() != Some("1")
+            {
+                return Err("This image may be animated. Static conversion would lose animation; choose a still image.".into());
+            }
+            if !matches!(format.as_str(), "jpg" | "png" | "webp")
+                || (*width != 0 && !(16..=8192).contains(width))
+                || !(1..=100).contains(quality)
+            {
+                return Err("Choose JPEG, PNG or WebP, a width of 16–8192 pixels or 0 for original, and quality 1–100.".into());
+            }
+            if format == "jpg"
+                && stream["pix_fmt"]
+                    .as_str()
+                    .is_none_or(|pix| pix.contains('a') && !pix.starts_with("gray"))
+            {
+                return Err(
+                    "JPEG removes transparency. Convert this image to PNG or WebP instead.".into(),
+                );
             }
         }
     }
@@ -251,7 +420,7 @@ fn initial_plan(info: &Value) -> Result<Plan, String> {
         suffix: "converted",
         video: codec(track(info, "video")).map(str::to_owned),
         audio: codec(track(info, "audio")).map(str::to_owned),
-        expected_duration: Some(duration(info)?),
+        expected_duration: duration(info).ok(),
     })
 }
 
@@ -313,6 +482,52 @@ fn finish_plan(p: &mut Plan) {
     }
 }
 
+fn still_output(p: &mut Plan, format: &str) {
+    (p.extension, p.video) = match format {
+        "jpg" => ("jpg", Some("mjpeg".into())),
+        "webp" => ("webp", Some("webp".into())),
+        _ => ("png", Some("png".into())),
+    };
+    p.container = "image2";
+    p.audio = None;
+    p.expected_duration = None;
+    add(&mut p.args, &["-an", "-frames:v", "1", "-update", "1"]);
+    add(
+        &mut p.args,
+        &[
+            "-c:v",
+            if format == "webp" {
+                "libwebp"
+            } else if format == "jpg" {
+                "mjpeg"
+            } else {
+                "png"
+            },
+        ],
+    );
+}
+
+fn video_filter(p: &mut Plan, info: &Value, filter: String) -> Result<(), String> {
+    map_track(
+        &mut p.args,
+        track(info, "video").ok_or("A video or image track is required.")?,
+    )?;
+    add(&mut p.args, &["-vf"]);
+    p.args.push(filter);
+    if duration(info).is_err() {
+        still_output(p, "png");
+    } else {
+        encode_video(&mut p.args, "h264");
+        p.video = Some("h264".into());
+        if let Some(audio) = track(info, "audio") {
+            map_track(&mut p.args, audio)?;
+            encode_audio(&mut p.args, "aac");
+            p.audio = Some("aac".into());
+        }
+    }
+    Ok(())
+}
+
 fn plan(options: &ToolOptions, info: &Value) -> Result<Plan, String> {
     validate_options(options, info)?;
     let video_track = track(info, "video");
@@ -321,6 +536,9 @@ fn plan(options: &ToolOptions, info: &Value) -> Result<Plan, String> {
     let audio = codec(audio_track);
     let mut p = initial_plan(info)?;
     match options {
+        ToolOptions::Transcribe { .. } => {
+            return Err("Transcription uses the optional whisper.cpp component.".into())
+        }
         ToolOptions::Convert {
             container,
             video_codec,
@@ -438,12 +656,179 @@ fn plan(options: &ToolOptions, info: &Value) -> Result<Plan, String> {
                 p.audio = Some("aac".into());
             }
         }
+        ToolOptions::Animate {
+            format,
+            start,
+            end,
+            width,
+            fps,
+        } => {
+            p.suffix = "animation";
+            p.audio = None;
+            p.expected_duration = Some(end - start);
+            p.args.extend(["-t".into(), format!("{:.6}", end - start)]);
+            let scale = format!("fps={fps},scale={width}:-1:flags=lanczos");
+            if format == "gif" {
+                p.extension = "gif";
+                p.container = "gif";
+                p.video = Some("gif".into());
+                add(&mut p.args, &["-filter_complex"]);
+                p.args.push(format!("[0:v:0]{scale},split[a][b];[a]palettegen=reserve_transparent=1[p];[b][p]paletteuse"));
+                add(&mut p.args, &["-an", "-loop", "0"]);
+            } else {
+                p.extension = "webp";
+                p.container = "webp";
+                p.video = Some("webp".into());
+                add(&mut p.args, &["-vf"]);
+                p.args.push(scale);
+                add(
+                    &mut p.args,
+                    &[
+                        "-an",
+                        "-c:v",
+                        "libwebp_anim",
+                        "-quality",
+                        "80",
+                        "-loop",
+                        "0",
+                    ],
+                );
+                // FFprobe cannot validate animated WebP duration across engine versions.
+                p.expected_duration = None;
+            }
+        }
+        ToolOptions::Frame { width, .. } => {
+            p.suffix = "frame";
+            add(&mut p.args, &["-vf"]);
+            p.args.push(format!("scale={width}:-1:flags=lanczos"));
+            still_output(&mut p, "png");
+        }
+        ToolOptions::ContactSheet {
+            columns,
+            rows,
+            width,
+        } => {
+            p.suffix = "contact-sheet";
+            let count = columns * rows;
+            add(&mut p.args, &["-vf"]);
+            p.args.push(format!("fps={count}/{:.6},scale={width}:-1:flags=lanczos,tile={columns}x{rows}:padding=4:margin=4", duration(info)?));
+            still_output(&mut p, "png");
+        }
+        ToolOptions::Rotate { degrees } => {
+            p.suffix = "rotated";
+            video_filter(
+                &mut p,
+                info,
+                match degrees {
+                    90 => "transpose=clock",
+                    180 => "hflip,vflip",
+                    _ => "transpose=cclock",
+                }
+                .into(),
+            )?;
+        }
+        ToolOptions::Crop {
+            x,
+            y,
+            width,
+            height,
+        } => {
+            p.suffix = "cropped";
+            video_filter(&mut p, info, format!("crop={width}:{height}:{x}:{y}"))?;
+        }
+        ToolOptions::Mute => {
+            p.suffix = "muted";
+            p.extension = "mkv";
+            p.container = "matroska";
+            p.audio = None;
+            map_track(
+                &mut p.args,
+                video_track.ok_or("A video track is required.")?,
+            )?;
+            add(&mut p.args, &["-an", "-c:v", "copy"]);
+        }
+        ToolOptions::AudioProcess { operation, profile } => {
+            p.suffix = match operation.as_str() {
+                "silence" => "silence-removed",
+                "denoise" => "denoised",
+                _ => "normalized",
+            };
+            p.extension = "m4a";
+            p.container = "mp4";
+            p.video = None;
+            p.audio = Some("aac".into());
+            map_track(
+                &mut p.args,
+                audio_track.ok_or("An audio track is required.")?,
+            )?;
+            let filter = match operation.as_str() {
+                "silence" => {
+                    p.expected_duration = None;
+                    "silenceremove=start_periods=1:start_duration=0.1:start_threshold=-45dB:stop_periods=-1:stop_duration=0.5:stop_threshold=-45dB".into()
+                }
+                "denoise" => "afftdn=nr=12:nf=-50".into(),
+                _ => format!(
+                    "loudnorm=I={}:TP=-1.5:LRA=11",
+                    match profile.as_str() {
+                        "broadcast" => -23,
+                        "music" => -14,
+                        _ => -16,
+                    }
+                ),
+            };
+            add(&mut p.args, &["-vn", "-af"]);
+            p.args.push(filter);
+            add(
+                &mut p.args,
+                &["-ar", "48000", "-c:a", "aac", "-b:a", "192k"],
+            );
+        }
+        ToolOptions::ImageConvert {
+            format,
+            width,
+            quality,
+            ..
+        } => {
+            p.suffix = "image";
+            if *width > 0 {
+                add(&mut p.args, &["-vf"]);
+                p.args.push(format!("scale={width}:-1:flags=lanczos"));
+            }
+            still_output(&mut p, format);
+            if format == "jpg" {
+                add(&mut p.args, &["-q:v"]);
+                p.args.push((2 + (100 - quality) * 29 / 99).to_string());
+            } else if format == "webp" {
+                add(&mut p.args, &["-quality"]);
+                p.args.push(quality.to_string());
+            } else {
+                add(&mut p.args, &["-compression_level"]);
+                p.args.push(((100 - quality) * 9 / 99).to_string());
+            }
+        }
     }
     finish_plan(&mut p);
+    if matches!(
+        options,
+        ToolOptions::ImageConvert {
+            strip_metadata: false,
+            ..
+        }
+    ) || (p.container == "image2"
+        && matches!(
+            options,
+            ToolOptions::Rotate { .. } | ToolOptions::Crop { .. }
+        ))
+    {
+        if let Some(index) = p.args.iter().position(|arg| arg == "-map_metadata") {
+            p.args[index + 1] = "0".into();
+        }
+    }
     Ok(p)
 }
 
 fn download_audio_plan(format: Format, bitrate: Option<u16>, info: &Value) -> Result<Plan, String> {
+    duration(info)?;
     let requested = match format {
         Format::Mp3 => "mp3",
         Format::M4a => "m4a",
@@ -538,10 +923,23 @@ async fn probe_local(
             "json",
         ],
     );
+    if let Some(format) = image_demuxer(file) {
+        args.extend(["-f".into(), format.into()]);
+    }
     args.push(file.to_string_lossy().into_owned());
     let raw = engine::tool(root, "ffprobe.exe", args, cancel).await?;
     serde_json::from_str(&raw)
         .map_err(|_| "FFprobe returned invalid local media information.".into())
+}
+fn image_demuxer(file: &Path) -> Option<&'static str> {
+    match file.extension()?.to_str()?.to_ascii_lowercase().as_str() {
+        "png" => Some("png_pipe"),
+        "jpg" | "jpeg" => Some("jpeg_pipe"),
+        "webp" => Some("webp_pipe"),
+        "bmp" => Some("bmp_pipe"),
+        "tif" | "tiff" => Some("tiff_pipe"),
+        _ => None,
+    }
 }
 fn phase(emit: &impl Fn(Progress), run_id: u64, phase: &str) {
     emit(Progress {
@@ -554,7 +952,6 @@ fn phase(emit: &impl Fn(Progress), run_id: u64, phase: &str) {
     });
 }
 fn verify(info: &Value, p: &Plan) -> Result<(), String> {
-    let actual_duration = duration(info)?;
     if number(&info["format"]["size"]).is_none_or(|n| n <= 0.0) {
         return Err("FFprobe found an empty output. The file was not published.".into());
     }
@@ -570,13 +967,21 @@ fn verify(info: &Value, p: &Plan) -> Result<(), String> {
         .as_str()
         .unwrap_or_default()
         .split(',')
-        .any(|c| c == p.container)
+        .any(|c| {
+            c == p.container
+                || (p.container == "image2"
+                    && matches!(
+                        (p.extension, c),
+                        ("png", "png_pipe") | ("jpg", "jpeg_pipe") | ("webp", "webp_pipe")
+                    ))
+        })
     {
         return Err(
             "The output container does not match its extension. The file was not published.".into(),
         );
     }
     if let Some(expected) = p.expected_duration {
+        let actual_duration = duration(info)?;
         let tolerance = (expected * 0.02).max(0.25);
         if (actual_duration - expected).abs() > tolerance {
             return Err("The output duration does not match the selected operation. The file was not published.".into());
@@ -598,10 +1003,32 @@ pub async fn execute(
         return Err(engine::CANCELLED.into());
     }
     let (input, staging) = checked_paths(input, staging)?;
+    if matches!(options, ToolOptions::Animate { format, .. } | ToolOptions::ImageConvert { format, .. } if format == "webp")
+    {
+        let encoders = engine::run_process(
+            root.join("ffmpeg.exe"),
+            vec!["-hide_banner".into(), "-encoders".into()],
+            cancel.clone(),
+            run_id,
+            true,
+            |_| {},
+        )
+        .await?;
+        let required = if matches!(options, ToolOptions::Animate { .. }) {
+            "libwebp_anim"
+        } else {
+            "libwebp"
+        };
+        if !encoders.split_whitespace().any(|word| word == required) {
+            return Err("The installed FFmpeg component has no WebP encoder. Use GIF for animation or PNG/JPEG for images; WebP requires an FFmpeg build with libwebp.".into());
+        }
+    }
     let info = probe_local(root, &input, cancel.clone()).await?;
     let p = plan(options, &info)?;
     let seek = match options {
         ToolOptions::Trim { start, precise, .. } => Some((*start, *precise)),
+        ToolOptions::Animate { start, .. } => Some((*start, true)),
+        ToolOptions::Frame { at, .. } => Some((*at, true)),
         _ => None,
     };
     execute_plan(root, input, staging, p, seek, cancel, run_id, emit).await
@@ -699,6 +1126,9 @@ async fn execute_plan(
     if let Some((start, false)) = seek {
         args.extend(["-ss".into(), format!("{start:.6}")]);
     }
+    if let Some(format) = image_demuxer(&input) {
+        args.extend(["-f".into(), format.into()]);
+    }
     args.extend(["-i".into(), input.to_string_lossy().into_owned()]);
     if let Some((start, true)) = seek {
         args.extend(["-ss".into(), format!("{start:.6}")]);
@@ -759,6 +1189,128 @@ mod tests {
             json!({"kind":"trim","start":0,"end":2,"precise":true,"command":"bad"})
         )
         .is_err());
+    }
+    #[test]
+    fn expanded_operations_validate_bounds_and_describe_real_outputs() {
+        let source = info(Some("h264"), Some("aac"));
+        let animation = plan(
+            &ToolOptions::Animate {
+                format: "gif".into(),
+                start: 1.0,
+                end: 3.0,
+                width: 320,
+                fps: 12,
+            },
+            &source,
+        )
+        .unwrap();
+        assert_eq!(
+            (
+                animation.extension,
+                animation.container,
+                animation.audio,
+                animation.expected_duration
+            ),
+            ("gif", "gif", None, Some(2.0))
+        );
+        assert!(animation.args.iter().any(|arg| arg.contains("palettegen=")));
+        for options in [
+            ToolOptions::Animate {
+                format: "gif".into(),
+                start: 2.0,
+                end: 1.0,
+                width: 320,
+                fps: 12,
+            },
+            ToolOptions::Frame {
+                at: 10.0,
+                width: 320,
+            },
+            ToolOptions::ContactSheet {
+                columns: 100,
+                rows: 1,
+                width: 100,
+            },
+            ToolOptions::Crop {
+                x: 1200,
+                y: 0,
+                width: 200,
+                height: 100,
+            },
+            ToolOptions::Rotate { degrees: 45 },
+            ToolOptions::AudioProcess {
+                operation: "restore-perfectly".into(),
+                profile: "music".into(),
+            },
+        ] {
+            assert!(validate_options(&options, &source).is_err(), "{options:?}");
+        }
+        let muted = plan(&ToolOptions::Mute, &source).unwrap();
+        assert_eq!(
+            (
+                muted.extension,
+                muted.video.as_deref(),
+                muted.audio.as_deref()
+            ),
+            ("mkv", Some("h264"), None)
+        );
+        assert!(muted.args.windows(2).any(|args| args == ["-c:v", "copy"]));
+        let audio = plan(
+            &ToolOptions::AudioProcess {
+                operation: "normalize".into(),
+                profile: "broadcast".into(),
+            },
+            &source,
+        )
+        .unwrap();
+        assert!(audio
+            .args
+            .iter()
+            .any(|arg| arg == "loudnorm=I=-23:TP=-1.5:LRA=11"));
+        assert_eq!(
+            (audio.video, audio.audio, audio.extension),
+            (None, Some("aac".into()), "m4a")
+        );
+    }
+    #[test]
+    fn static_images_need_no_duration_and_never_silently_lose_transparency_or_animation() {
+        let image = json!({"streams":[{"index":0,"codec_type":"video","codec_name":"png","pix_fmt":"rgba","width":128,"height":96}],"format":{"format_name":"png_pipe","size":"1024"}});
+        let png = ToolOptions::ImageConvert {
+            format: "png".into(),
+            width: 64,
+            quality: 90,
+            strip_metadata: false,
+        };
+        let result = plan(&png, &image).unwrap();
+        assert_eq!(
+            (
+                result.extension,
+                result.video.as_deref(),
+                result.expected_duration
+            ),
+            ("png", Some("png"), None)
+        );
+        assert!(result
+            .args
+            .windows(2)
+            .any(|args| args == ["-map_metadata", "0"]));
+        assert!(validate_options(
+            &ToolOptions::ImageConvert {
+                format: "jpg".into(),
+                width: 0,
+                quality: 90,
+                strip_metadata: true
+            },
+            &image
+        )
+        .is_err());
+        let mut animated = image.clone();
+        animated["streams"][0]["codec_name"] = json!("gif");
+        animated["streams"][0]["nb_frames"] = json!("12");
+        assert!(validate_options(&png, &animated).is_err());
+        let rotated = plan(&ToolOptions::Rotate { degrees: 90 }, &image).unwrap();
+        assert_eq!(rotated.extension, "png");
+        assert!(verify(&image, &rotated).is_ok());
     }
     #[test]
     fn copy_checks_container_compatibility_before_running_ffmpeg() {
@@ -1174,6 +1726,42 @@ mod tests {
                 target_mb: Some(0.25),
                 quality: "balanced".into(),
             },
+            ToolOptions::Animate {
+                format: "gif".into(),
+                start: 1.0,
+                end: 3.0,
+                width: 160,
+                fps: 8,
+            },
+            ToolOptions::Frame {
+                at: 1.0,
+                width: 160,
+            },
+            ToolOptions::ContactSheet {
+                columns: 2,
+                rows: 2,
+                width: 80,
+            },
+            ToolOptions::Rotate { degrees: 90 },
+            ToolOptions::Crop {
+                x: 0,
+                y: 0,
+                width: 128,
+                height: 96,
+            },
+            ToolOptions::Mute,
+            ToolOptions::AudioProcess {
+                operation: "normalize".into(),
+                profile: "podcast".into(),
+            },
+            ToolOptions::AudioProcess {
+                operation: "silence".into(),
+                profile: "podcast".into(),
+            },
+            ToolOptions::AudioProcess {
+                operation: "denoise".into(),
+                profile: "podcast".into(),
+            },
         ];
         for (index, options) in operations.iter().enumerate() {
             let stage = work.join(format!("stage-{index}"));
@@ -1190,7 +1778,7 @@ mod tests {
                 move |progress| observed.lock().unwrap().push(progress),
             )
             .await
-            .unwrap();
+            .unwrap_or_else(|error| panic!("{options:?}: {error}"));
             assert!(output.is_file());
             assert_eq!(
                 output.parent(),
@@ -1214,6 +1802,58 @@ mod tests {
             )
             .await
             .is_err());
+        }
+        let image = fs::read_dir(work.join("stage-8"))
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        let image_original = fs::read(&image).unwrap();
+        for (index, options) in [
+            ToolOptions::ImageConvert {
+                format: "png".into(),
+                width: 80,
+                quality: 90,
+                strip_metadata: false,
+            },
+            ToolOptions::ImageConvert {
+                format: "jpg".into(),
+                width: 80,
+                quality: 85,
+                strip_metadata: true,
+            },
+            ToolOptions::Rotate { degrees: 270 },
+            ToolOptions::Crop {
+                x: 0,
+                y: 0,
+                width: 80,
+                height: 60,
+            },
+        ]
+        .iter()
+        .enumerate()
+        {
+            let stage = work.join(format!("image-stage-{index}"));
+            fs::create_dir(&stage).unwrap();
+            let output = execute(
+                &engines,
+                &image,
+                &stage,
+                options,
+                cancel.clone(),
+                200 + index as u64,
+                |_| {},
+            )
+            .await
+            .unwrap_or_else(|error| panic!("{options:?}: {error}"));
+            let result = probe_local(&engines, &output, cancel.clone())
+                .await
+                .unwrap();
+            assert!(result["streams"][0]["width"]
+                .as_u64()
+                .is_some_and(|width| width > 0));
+            assert_eq!(fs::read(&image).unwrap(), image_original);
         }
         let (stopped, stopped_cancel) = watch::channel(true);
         assert_eq!(

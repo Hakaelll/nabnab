@@ -9,6 +9,7 @@
     <label for="profile">Perfil de descarga</label>
     <select id="profile"><option value="mp4">Vídeo compatible · MP4</option><option value="source">Vídeo · calidad original</option><option value="mp3">Audio compatible · MP3</option><option value="audio">Audio · códec original</option></select>
     <button id="send" class="primary">Enviar pestaña actual</button>
+    <section class="detected-section" aria-labelledby="detect-title"><h2 id="detect-title">Medios de esta pestaña</h2><button id="detect-media">Detectar medios en esta pestaña</button><p class="hint">Inspección puntual del vídeo, audio y recursos ya cargados. No lee otras pestañas ni descarga archivos.</p><div id="detected-media" hidden><p id="media-status" class="hint" role="status"></p><ul id="media-candidates"></ul><button id="send-media" disabled>Preparar selección en nabnab</button><button id="clear-media" class="quiet">Descartar detección</button></div></section>
     <button id="collect">Recoger enlaces de esta página</button><p class="hint">Solo tras pulsar. Muestra hasta 200 enlaces, sin detectar todos los medios ni explorar otras pestañas.</p><div id="candidates" hidden><label class="candidate-all"><input type="checkbox" id="select-visible">Seleccionar candidatos</label><ul id="candidate-links"></ul></div>
     <button id="retry" hidden>Reintentar la solicitud pendiente</button>
     <p id="message" role="status" aria-live="polite">Descargar añade a la cola. Preparar y Guardar para después no inician descargas.</p>

@@ -19,6 +19,14 @@ button.quiet { width: auto; margin: 0; background: transparent; border-color: tr
 :focus-visible { outline: 2px solid #e9ebef; outline-offset: 3px; }
 [hidden] { display: none !important; }
 .hint { font-size: 12px; }
+.detected-section { border-top: 1px solid #2b2e34; margin-top: 24px; padding-top: 16px; }
+.detected-section h2 { margin: 0; font-size: 14px; font-weight: 600; }
+#media-candidates { list-style: none; padding: 0; max-height: 240px; overflow-y: auto; }
+#media-candidates label { display: flex; gap: 10px; align-items: start; padding: 10px 0; margin: 0; }
+#media-candidates input { width: 16px; min-height: 16px; height: 16px; padding: 0; flex: 0 0 16px; margin: 3px 0 0; }
+#media-candidates span { display: block; overflow-wrap: anywhere; }
+#media-candidates small { color: #b2b5bd; display: block; font-size: 12px; }
+#clear-media { margin-top: 8px; }
 #candidate-links { padding: 0; list-style: none; max-height: 260px; overflow: auto; }
 #candidate-links label, .candidate-all { display: flex; align-items: start; gap: 8px; margin: 8px 0; }
 #candidate-links input, .candidate-all input { width: 16px; min-height: 16px; height: 16px; padding: 0; flex: 0 0 16px; margin-top: 3px; }
