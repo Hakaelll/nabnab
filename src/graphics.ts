@@ -50,8 +50,8 @@ export function startGraphics(background: HTMLCanvasElement, emblem: HTMLCanvasE
   const colors = new Uint32Array(64 * 16);
   for (let level = 0; level < 64; level++) for (let coverage = 0; coverage < 16; coverage++) {
     const alpha = level / 128 * coverage / 15;
-    const value = Math.round(13 + 210 * alpha);
-    colors[level * 16 + coverage] = (255 << 24) | (value << 16) | (value << 8) | value;
+    const ink = Math.round(210 * alpha);
+    colors[level * 16 + coverage] = (255 << 24) | ((12 + ink) << 16) | ((10 + ink) << 8) | (9 + ink);
   }
   let fieldImage: ImageData;
   let fieldPixels: Uint32Array;
@@ -84,30 +84,19 @@ export function startGraphics(background: HTMLCanvasElement, emblem: HTMLCanvasE
     const reducedMotion=motionReduced(),fullColor=isFullColor();
     if (gpu) { gpu.draw(time, reducedMotion?[]:waves, fullColor); return; }
     if (!field) return;
-    fieldPixels.fill(0xff0d0d0d);
+    fieldPixels.fill(0xff0c0a09);
     const span = 680;
     const readingWidth = Math.min(width - 64, width >= 1500 ? 740 : width >= 900 ? 600 : 480);
-    const drift = time * 0.085;
-    const turn = Math.sin(time * 0.027) * 0.14;
-    const ct = Math.cos(turn), st = Math.sin(turn);
-    const foldWidth = 2.1 + Math.sin(time * 0.041) * 0.45;
-    const current = Math.sin(time * 0.035) * 0.75;
+    const drift = time * 0.16;
     for (const g of glyphs) {
-      const a = (g.x - width * 0.5) / span, b = (g.y - height * 0.48) / span;
-      const u = a * ct - b * st, v = a * st + b * ct;
-      const fold = Math.sin(u * 8.5 + Math.sin(v * 5.2 - drift * 0.42) * foldWidth + drift * 0.55);
-      const cross = Math.cos(v * 7.2 - u * 2.8 + Math.sin(u * 3.6 + drift * 0.3) + current);
-      const ribbon = Math.exp(-Math.pow(fold - 0.15, 2) * 4.8);
-      const filament = Math.exp(-Math.pow(cross + fold * 0.3, 2) * 13);
-      const hollow = 0.3 + 0.7 * Math.min(1, Math.hypot(u * 2.3, (v + 0.21) * 2));
-      const depth = 0.35 + (cross + 1) * 0.25;
-      let x = g.x + Math.sin(v * 4.8 + fold * 1.6 + drift) * 23 * depth;
-      let y = g.y + Math.cos(u * 5.4 + cross * 1.3 - drift * 0.7) * 19 * depth;
-      // An oblique fold compresses the lattice into coherent, slowly moving sheets.
-      x += fold * cross * 15;
-      y += Math.sin(u * 6 + v * 3 + drift * 0.4) * 11;
-      x += Math.sin(u * 19 + v * 12 - drift * 1.8) * 2.2 * depth;
-      y += Math.cos(v * 16 - u * 9 + drift * 1.4) * 1.8 * depth;
+      const u = (g.x - width * 0.5) / span, v = (g.y - height * 0.48) / span;
+      const first = u * 0.62 + Math.sin(u * 2.3 + drift * 0.35) * 0.16 + Math.cos(time * 0.027) * 0.13 - 0.5;
+      const second = -u * 0.28 + Math.sin(u * 2.4 - drift * 0.3) * 0.12 + 0.49;
+      const ribbon = Math.max(Math.exp(-Math.pow((v - first) * 4.8, 2)), Math.exp(-Math.pow((v - second) * 5.4, 2)));
+      const filament = Math.max(Math.exp(-Math.pow(v - first, 2) * 500), Math.exp(-Math.pow(v - second, 2) * 600));
+      const depth = 0.45 + g.depth * 0.35;
+      let x = g.x + Math.sin(v * 2.4 + drift) * 18 * depth;
+      let y = g.y + Math.cos(u * 2.8 - drift * 0.7) * 14 * depth;
       let light = 0;
       for (const wave of waves) {
         const dx = x - wave.x, dy = (y - wave.y) / wave.ellipse;
@@ -120,9 +109,9 @@ export function startGraphics(background: HTMLCanvasElement, emblem: HTMLCanvasE
         y += dy / Math.max(1, distance) * displacement * 12;
         light += envelope * wave.strength * (0.6 + Math.cos(offset * 0.05) * 0.4);
       }
-      const breathe = 0.85 + Math.sin(time * 0.14 + g.phase) * 0.15;
-      const quiet = 1 - 0.38 * Math.exp(-Math.pow((x - width * 0.5) / (readingWidth * 0.7), 4));
-      const opacity = Math.min(0.49, ((0.065 + ribbon * 0.35 + filament * 0.09) * depth * hollow * breathe + light * 0.2) * quiet);
+      const breathe = 0.72 + Math.sin(time * 0.22 + u * 4.8 - v * 2.7) * 0.28;
+      const quiet = 1 - 0.86 * Math.exp(-Math.pow((x - width * 0.5) / (readingWidth * 0.7), 4) - Math.pow((y - height * 0.48) / (height * 0.38), 4));
+      const opacity = Math.min(0.38, ((0.012 + ribbon * 0.26 + filament * 0.08) * depth * breathe + light * 0.12) * quiet);
       if (opacity < 0.025) continue;
       const level = Math.min(63, Math.round(opacity * 128));
       const palette = level * 16;
@@ -139,10 +128,10 @@ export function startGraphics(background: HTMLCanvasElement, emblem: HTMLCanvasE
         const color = colors[palette + pixel.coverage];
         if (!tinted) { if ((color & 255) > (fieldPixels[index] & 255)) fieldPixels[index] = color; }
         else {
-          const ink=(color&255)-13,previous=fieldPixels[index];
-          const red=Math.max(previous&255,Math.round(13+ink*redInk));
-          const green=Math.max((previous>>>8)&255,Math.round(13+ink*greenInk));
-          const blue=Math.max((previous>>>16)&255,Math.round(13+ink*blueInk));
+          const ink=(color&255)-9,previous=fieldPixels[index];
+          const red=Math.max(previous&255,Math.round(9+ink*redInk));
+          const green=Math.max((previous>>>8)&255,Math.round(10+ink*greenInk));
+          const blue=Math.max((previous>>>16)&255,Math.round(12+ink*blueInk));
           fieldPixels[index]=(255<<24)|(blue<<16)|(green<<8)|red;
         }
       }
@@ -193,7 +182,7 @@ export function startGraphics(background: HTMLCanvasElement, emblem: HTMLCanvasE
       const start = performance.now();
       drawField(elapsed);
       // Adapt cadence rather than scaling the bitmap or enlarging the characters.
-      fieldInterval = Math.min(1 / 12, Math.max(1 / 24, fieldInterval * 0.9 + (performance.now() - start) / 2500));
+      fieldInterval = Math.min(1 / 12, Math.max(gpu ? 1 / 30 : 1 / 24, fieldInterval * 0.9 + (performance.now() - start) / 2500));
       lastField = elapsed;
     }
     drawEmblem(elapsed);
@@ -218,7 +207,7 @@ export function startGraphics(background: HTMLCanvasElement, emblem: HTMLCanvasE
     emblem.height = symbolSize;
     seed = 41;
     lastField = -1;
-    const step = 8;
+    const step = 12;
     glyphs = [];
     for (let y = -24; y < height + 24; y += step) {
       for (let x = -24; x < width + 24; x += step) {
