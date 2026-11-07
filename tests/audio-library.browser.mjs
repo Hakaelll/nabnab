@@ -37,8 +37,8 @@ const setup = `
   const chapters=(number)=>({audiobook:{bookId:"librivox:1",bookTitle:"Libro de prueba",chapter:number,reader:"Lector de prueba",language:"Spanish"}});
   const state={settings,jobs:[],library:[
     item("last","Third.wav",tags("Tercera pista",2,1)),
-    item("second","Second.wav",tags("Segunda pista",1,10,"Rafael")),
-    item("first","First.wav",tags("Primera pista",1,2)),
+    item("second","Second.mp3",tags("Segunda pista",1,10,"Rafael")),
+    item("first","First.mp3",tags("Primera pista",1,2)),
     item("chapter2","Capítulo 2.wav",null,chapters(2)),
     item("chapter1","Capítulo 1.wav",null,chapters(1)),
     item("episode","Episodio.wav",null,{platform:"Podcast RSS"}),
@@ -63,6 +63,8 @@ const setup = `
     ]};
     if(cmd==="audio_lyrics")return [{time:1,text:"Una letra local"}];
     if(cmd==="audio_lyrics_choose")return [{time:2,text:"Letra elegida"}];
+    if(cmd==="audio_cover_choose"){state.library.find(item=>item.id===args.id).details.audioCover=args.remove?null:"C:/fixture/cover.png";return true;}
+    if(cmd==="audio_tags_queue_copies")return [];
   }, {shouldMockEvents:true});
   await import("/src/main.ts");
 `;
@@ -118,6 +120,22 @@ try {
   assert.equal(await page.evaluate(() => window.audioFixture.calls.some(call=>call.cmd==="audio_tags_edit")), false);
   await page.getByRole("button", {name:"Guardar etiquetas",exact:true}).click();
   await page.waitForFunction(() => window.audioFixture.state.library.filter(item=>["first","second"].includes(item.id)).every(item=>item.details.audio.genre==="Fusion"));
+  await page.getByRole("button", {name:"Elegir portada",exact:true}).click();
+  await page.getByRole("button", {name:"Quitar portada local",exact:true}).waitFor();
+  await page.getByRole("button", {name:"Quitar portada local",exact:true}).click();
+  await page.getByRole("button", {name:"Quitar portada local",exact:true}).waitFor({state:"detached"});
+  await page.locator("[data-action='audio-edit-tags']").click();
+  await page.locator("[data-action='audio-tag-enable'][data-field='album']").check();
+  await page.locator("#audio-tag-album").fill("Álbum para la copia");
+  await page.getByRole("button", {name:"Previsualizar cambios",exact:true}).click();
+  await page.setViewportSize({width:1180,height:780});
+  await page.locator("#audio-tag-form").scrollIntoViewIfNeeded();
+  await page.screenshot({path:`${directory}/audio-tags-preview.png`});
+  await page.getByRole("button", {name:"Crear copias con etiquetas",exact:true}).click();
+  const queued = await page.evaluate(() => window.audioFixture.calls.find(call=>call.cmd==="audio_tags_queue_copies").args);
+  assert.deepEqual(queued.ids,["first","second"]);
+  assert.deepEqual(queued.patch,{album:"Álbum para la copia"});
+  assert.equal(await page.evaluate(() => window.audioFixture.state.library.find(item=>item.id==="first").details.audio.album),"Sesiones");
   await page.getByRole("button", {name:"Crear lista",exact:true}).click();
   await page.locator("#audio-playlist-name").fill("Para escuchar");
   await page.locator("[data-action='audio-list-down'][data-index='0']").click();

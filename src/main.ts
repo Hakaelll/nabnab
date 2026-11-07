@@ -126,6 +126,7 @@ const audioPlayer=createAudioPlayer({
 });
 const audioLibrary=createAudioLibrary({
   snapshot: () => snapshot, command, refresh, render: renderCurrent, notify, showError, t, player: audioPlayer,
+  invalidateCover: id => { thumbnailUrls.delete(id); },
   inspect: id => { librarySection = "files"; library.detailId = id; navigate("library"); },
   importMedia: () => { void importMedia(false).catch(showError); },
 });

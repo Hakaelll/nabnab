@@ -50,7 +50,7 @@ pub(super) async fn run(app:&AppHandle,state:&Arc<AppState>,job:&Job,staging:&Pa
     let handle=app.clone();let shared=state.clone();let id=job.id.clone();let run_id=job.run_id;
     let emit=move|update|progress(&handle,&shared,&id,run_id,update);
     let mut narration=None;
-    let mut capture_info=None;
+    let mut media_info=None;
     let output=match &job.source{
         Source::Voice {plan_id}=>{
             if !crate::components::root(app)?.join("voice.enabled").is_file(){return Err("Enable Local voice in Settings → Components before generating narration.".into());}
@@ -70,7 +70,7 @@ pub(super) async fn run(app:&AppHandle,state:&Arc<AppState>,job:&Job,staging:&Pa
             let engines=crate::dependencies::engine_root(app)?;
             let file=crate::screen_capture::finalize(&root,&engines,capture_id,staging,cancel.clone(),run_id,emit.clone()).await?;
             let info=crate::media::probe(&engines,&file,cancel.clone()).await?;
-            capture_info=Some(info);
+            media_info=Some(info);
             Some((file,None,None))
         },
         Source::ImageAssets {library_ids,options,input_hashes}=>{
@@ -208,6 +208,14 @@ pub(super) async fn run(app:&AppHandle,state:&Arc<AppState>,job:&Job,staging:&Pa
             let inputs={let guard=state.repository.lock().unwrap();let repo=guard.as_ref().ok_or("Open nabnab first.")?;library_ids.iter().map(|id|repo.data.library.iter().find(|i|&i.id==id).cloned().ok_or("The image is no longer in the library.")).collect::<Result<Vec<_>,_>>()?};let _permit=processing_permit(state,cancel.clone()).await?;phase(app,state,&job.id,run_id,JobState::Processing)?;
             Some((crate::palettes::execute(&crate::dependencies::engine_root(app)?,&inputs,staging,*colors,format,cancel.clone(),run_id,emit.clone()).await?,None,None))
         },
+        Source::AudioTagsCopy {selection} => {
+            let engines = crate::dependencies::engine_root(app)?;
+            let _permit = processing_permit(state, cancel.clone()).await?;
+            phase(app, state, &job.id, run_id, JobState::Processing)?;
+            let (file, info) = crate::audio_library::tag_copy::execute(state, &engines, selection, staging, cancel.clone()).await?;
+            media_info = Some(info);
+            Some((file, None, Some(selection.library_id.clone())))
+        },
         Source::AudioPreview{library_id,options}=>{
             let input={let guard=state.repository.lock().unwrap();guard.as_ref().ok_or("Open nabnab first.")?.data.library.iter().find(|i|&i.id==library_id).cloned().ok_or("The audio source is no longer in the library.")?};let _permit=processing_permit(state,cancel.clone()).await?;phase(app,state,&job.id,run_id,JobState::Processing)?;
             Some((crate::audio_preview::execute(&crate::dependencies::engine_root(app)?,&input,staging,options,cancel.clone(),run_id,emit.clone()).await?,None,Some(library_id.clone())))
@@ -249,13 +257,17 @@ pub(super) async fn run(app:&AppHandle,state:&Arc<AppState>,job:&Job,staging:&Pa
     };
     let Some((file,source,parent))=output else{return Ok(None);};
     phase(app,state,&job.id,run_id,JobState::Verifying)?;
-    let mut item=library::index(&file,capture_info.as_ref(),source,parent).or_else(|_|library::index_file(&file))?;
-    if matches!(job.source,Source::Voice {..}|Source::DocumentEdit {..}|Source::Ocr {..}|Source::OcrText {..}) {
+    let mut item=library::index(&file,media_info.as_ref(),source,parent).or_else(|_|library::index_file(&file))?;
+    if matches!(job.source,Source::Voice {..}|Source::DocumentEdit {..}|Source::Ocr {..}|Source::OcrText {..}|Source::AudioTagsCopy {..}) {
         if let Some(parent)=&item.parent_id {
             let guard=state.repository.lock().unwrap();
             if let Some(original)=guard.as_ref().and_then(|repo|repo.data.library.iter().find(|i|&i.id==parent)) {
                 item.collections=original.collections.clone();item.tags=original.tags.clone();item.source=original.source.clone();
                 item.details.content_id=original.details.content_id.clone();item.details.creator=original.details.creator.clone();item.details.source_url=original.details.source_url.clone();item.details.license=original.details.license.clone();item.details.attribution=original.details.attribution.clone();
+                if matches!(job.source, Source::AudioTagsCopy { .. }) {
+                    item.details.audiobook = original.details.audiobook.clone();
+                    item.details.audio_cover = original.details.audio_cover.clone();
+                }
             }
         }
     }

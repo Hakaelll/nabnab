@@ -41,6 +41,7 @@
 .audio-editor > button { justify-self: start; }
 .audio-tag-fields > div { flex: 1 1 138px; }
 .audio-tag-fields label { display: flex; align-items: center; gap: 6px; }
+.audio-tag-fields label input[type="checkbox"] { width: 16px; height: 16px; min-height: 16px; margin: 0; flex: 0 0 16px; }
 .audio-tag-preview { display: grid; gap: 8px; padding: 10px; background: var(--secondary); overflow-wrap: anywhere; }
 .audio-tag-preview ul { margin: 4px 0 0; }
 .audio-playlist-entry { grid-template-columns: 24px minmax(0, 1fr) auto; }
@@ -71,7 +72,8 @@
 .audio-transport-controls, .audio-playback-options { display: flex; gap: 6px; align-items: center; justify-content: center; }
 .audio-transport-controls > .button { min-height: 28px; }
 .audio-progress { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: center; color: var(--muted); font-variant-numeric: tabular-nums; font-size: 11px; }
-.audio-progress input { width: 100%; min-width: 0; accent-color: var(--action); }
+.audio-progress input { width: 100%; min-width: 0; min-height: 24px; height: 24px; padding: 0; border: 0; background: none; box-shadow: none; accent-color: var(--action); }
+.has-audio-player .capture-indicator { bottom: calc(20px + var(--audio-player-height, 0px)); }
 .audio-playback-options { justify-content: end; flex-wrap: wrap; }
 .audio-playback-options [aria-pressed="true"] { background: var(--hover); color: var(--text); border-color: var(--border); }
 .audio-player-issue { grid-column: 1 / -1; margin: 0; color: var(--error); }

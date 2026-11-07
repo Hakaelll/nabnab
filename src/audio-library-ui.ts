@@ -32,6 +32,7 @@ interface Hooks {
   refresh(): Promise<void>;
   render(): void;
   inspect(id: string): void;
+  invalidateCover(id: string): void;
   importMedia(): void;
   notify(message: string, kind?: "info" | "success" | "error"): void;
   showError(error: unknown): void;
@@ -164,7 +165,7 @@ export function createAudioLibrary(hooks: Hooks) {
     const attrs = `data-id="${h(item.id)}" ${item.missing ? "disabled" : ""}`;
     return `<li class="audio-row ${player.current()?.id === item.id ? "is-playing" : ""}">
       <input type="checkbox" data-action="audio-select" data-id="${h(item.id)}" aria-label="${h(t("Seleccionar ", "Select ") + title)}" ${selected.has(item.id) ? "checked" : ""} ${busy || !selected.has(item.id) && selected.size >= 200 ? "disabled" : ""}>
-      <span class="audio-track-number">${h(sequence)}</span><span class="audio-cover"${tags?.embeddedCover ? ` data-thumbnail-id="${h(item.id)}"` : ""} aria-hidden="true">${icon("audio")}</span>
+      <span class="audio-track-number">${h(sequence)}</span><span class="audio-cover"${item.details?.audioCover || tags?.embeddedCover ? ` data-thumbnail-id="${h(item.id)}"` : ""} aria-hidden="true">${icon("audio")}</span>
       <button class="audio-track" data-action="audio-play" ${attrs}><strong>${h(title)}</strong><small>${h(item.missing ? t("Archivo no encontrado", "File not found") : description || noMetadata())}</small></button>
       <span class="audio-track-duration">${item.duration ? durationLabel(item.duration) : "—"}</span>
       ${action("audio-add-queue", t("Añadir a la cola de audio", "Add to audio queue"), "add", "icon-button", attrs)}
@@ -184,7 +185,10 @@ export function createAudioLibrary(hooks: Hooks) {
       <p class="field-note">${t("Se guardan en nabnab. Los archivos de audio se conservan.", "Changes are saved in nabnab. Audio files are preserved.")}</p>
       ${tagPreview ? `<div class="audio-tag-preview" role="region" aria-label="${t("Previsualización de etiquetas", "Tag preview")}"><strong>${affected.length} ${t("archivos", "files")}</strong>
         ${affected.slice(0, 4).map(item => `<div><span>${h(audioTitle(item))}</span><ul>${changed.map(field => `<li>${tagName(field)} · ${h(item.details?.audio?.[field] ?? "—")} → ${h(patch[field] || "—")}</li>`).join("")}</ul></div>`).join("")}</div>` : ""}
-      <button type="submit" class="button primary" ${busy || !changed.length ? "disabled" : ""}>${tagPreview ? t("Guardar etiquetas", "Save tags") : t("Previsualizar cambios", "Preview changes")}</button></form>`;
+      <div class="button-group"><button type="submit" class="button primary" ${busy || !changed.length ? "disabled" : ""}>${tagPreview ? t("Guardar etiquetas", "Save tags") : t("Previsualizar cambios", "Preview changes")}</button>
+      ${tagPreview ? action("audio-tag-copies", t("Crear copias con etiquetas", "Create tagged copies"), "copy", "secondary",
+        busy || affected.some(item => item.missing || !/\.(mp3|m4a|m4b|flac|ogg|opus)$/i.test(item.name)) ? "disabled" : "") : ""}</div>
+      ${tagPreview ? `<p class="field-note">${t("Las copias pasan por Descargas. Formatos admitidos: MP3, M4A, M4B, FLAC, OGG y Opus.", "Copies use Downloads. Supported formats: MP3, M4A, M4B, FLAC, OGG and Opus.")}</p>` : ""}</form>`;
   }
 
   function selection() {
@@ -269,6 +273,8 @@ export function createAudioLibrary(hooks: Hooks) {
         ${detailsFor(item).chapters.map(chapter => action("audio-seek-chapter", `${durationLabel(chapter.start)} · ${chapter.title}`, "play", "quiet", `data-time="${chapter.start}"`)).join("")}
         ${detailsFor(item).bookmarks.map(bookmark => action("audio-seek-chapter", `${durationLabel(bookmark.time)} · ${bookmark.name}`, "play", "quiet", `data-time="${bookmark.time}"`)).join("")}` : ""}
         <div class="button-group">${action("audio-open-lyrics", lyricOpen ? t("Cerrar letras", "Close lyrics") : t("Letras locales", "Local lyrics"), "list", "quiet", disabled())}</div>
+        <div class="button-group">${action("audio-cover-choose", t("Elegir portada", "Choose cover"), "image", "quiet", disabled())}
+        ${item.details?.audioCover ? action("audio-cover-remove", t("Quitar portada local", "Remove local cover"), undefined, "quiet", disabled()) : ""}</div>
         ${lyricOpen ? `<div class="audio-lyrics">${lyrics?.id === item.id && lyrics.lines.length ? `<ol>${lyrics.lines.map(line => `<li>${action("audio-seek-chapter", line.text, undefined, "quiet", `data-time="${line.time}"`)}</li>`).join("")}</ol>` : `<p class="field-note">${t("No hay letras locales asociadas a esta pista.", "No local lyrics are linked to this track.")}</p>`}
           ${action("audio-choose-lyrics", t("Asociar archivo LRC", "Link LRC file"), "file", "secondary", disabled())}</div>` : ""}</div>` : ""}</aside>`;
   }
@@ -335,6 +341,12 @@ export function createAudioLibrary(hooks: Hooks) {
       case "audio-clear": selected.clear(); tagDraft = null; tagPreview = false; hooks.render(); break;
       case "audio-edit-tags": tagDraft = {}; tagPreview = false; hooks.render(); break;
       case "audio-cancel-tags": tagDraft = null; tagPreview = false; hooks.render(); break;
+      case "audio-tag-copies": if (tagPreview && tagDraft) await run(async () => {
+        await hooks.command("audio_tags_queue_copies", { ids: [...selected], patch: tagDraft, clientRequest: crypto.randomUUID() });
+        tagDraft = null; tagPreview = false;
+        await hooks.refresh();
+        hooks.notify(t("Copias añadidas a Descargas.", "Copies added to Downloads."), "success");
+      }); break;
       case "audio-read-tags": await run(async () => {
         const ids = [...selected].filter(id => !itemFor(id)?.details?.audio && !itemFor(id)?.missing).slice(0, 50);
         if (!ids.length) return;
@@ -421,6 +433,18 @@ export function createAudioLibrary(hooks: Hooks) {
       case "audio-open-lyrics":
         lyricOpen = !lyricOpen; if (lyricOpen) await readLyrics(false); else hooks.render(); break;
       case "audio-choose-lyrics": await readLyrics(true); break;
+      case "audio-cover-choose":
+      case "audio-cover-remove": {
+        const item = player.current();
+        if (item) await run(async () => {
+          const changed = await hooks.command<boolean>("audio_cover_choose", { id: item.id, remove: name === "audio-cover-remove" });
+          if (changed) {
+            hooks.invalidateCover(item.id);
+            await hooks.refresh();
+            player.render();
+          }
+        });
+      } break;
       default: return false;
     }
     return true;

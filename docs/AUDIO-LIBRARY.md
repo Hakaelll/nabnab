@@ -6,7 +6,9 @@ El minirreproductor permanece visible al cambiar de sección. La cola **A contin
 
 Los audiolibros agrupan capítulos de LibriVox y reconocen archivos M4B. **Continuar** recupera la posición guardada. El minirreproductor ofrece velocidad, retroceso de 15 segundos y temporizador por minutos o al final del capítulo. Los marcadores se guardan en Biblioteca. Si hay capítulos incrustados, se puede saltar a ellos.
 
-Selecciona pistas para crear una lista, añadirlas a una existente o editar sus etiquetas. Puedes cambiar el orden y quitar entradas desde **Listas → Editar lista**. La previsualización de etiquetas muestra los campos que cambiarán. Los cambios se guardan en la base de nabnab y el audio se conserva intacto.
+Selecciona pistas para crear una lista, añadirlas a una existente o editar sus etiquetas. Puedes cambiar el orden y quitar entradas desde **Listas → Editar lista**. La previsualización de etiquetas muestra los campos que cambiarán. **Guardar etiquetas** actualiza la base de nabnab. **Crear copias con etiquetas** usa la cola para generar archivos nuevos y compara la huella de los flujos de audio antes de incorporarlos a Biblioteca. Se probaron MP3, M4A, M4B, FLAC, OGG y Opus con los motores de producción. Los originales se conservan.
+
+Desde la pista actual, **Elegir portada** permite asociar un JPEG, PNG o WebP local. Quitar la asociación vuelve a mostrar la portada incrustada cuando está disponible.
 
 **Letras locales** lee el archivo LRC junto a la pista si está disponible. **Asociar archivo LRC** permite elegir otro archivo local. Cada línea permite saltar a su marca de tiempo.
 
@@ -17,3 +19,5 @@ La prueba de interfaz reproduce un WAV silencioso en Edge con almacenamiento de 
 ![Biblioteca de audio y minirreproductor persistente con datos de prueba](audio-library-preview.png)
 
 ![Revisión de una lista importada y elección de una grabación local](audio-playlist-matching.png)
+
+![Previsualización de etiquetas y creación explícita de copias](audio-tags-preview.png)

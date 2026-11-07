@@ -144,7 +144,7 @@ export function createAudioPlayer(hooks: Hooks) {
     const button = (id: string, text: string, symbol?: Parameters<typeof icon>[0], pressed?: boolean) =>
       `<button id="audio-${id}" class="${symbol ? "icon-button" : "button quiet"}" type="button" data-action="audio-player-${id}" aria-label="${h(text)}" title="${h(text)}"${pressed === undefined ? "" : ` aria-pressed="${pressed}"`}>${symbol ? icon(symbol) : h(text)}</button>`;
     transport.innerHTML = `
-      <div class="audio-playing"><span class="audio-cover" aria-hidden="true"${item.details?.audio?.embeddedCover ? ` data-thumbnail-id="${h(item.id)}"` : ""}>${icon("audio")}</span>
+      <div class="audio-playing"><span class="audio-cover" aria-hidden="true"${item.details?.audioCover || item.details?.audio?.embeddedCover ? ` data-thumbnail-id="${h(item.id)}"` : ""}>${icon("audio")}</span>
         <button id="audio-open" class="audio-open" type="button" data-action="audio-player-open" title="${h(title)}"><strong>${h(title)}</strong><small>${h(subtitle || t("Biblioteca de audio", "Audio library"))}</small></button></div>
       <div class="audio-timeline"><div class="audio-transport-controls">
         ${book ? button("back", t("Retroceder 15 segundos", "Back 15 seconds")) : button("previous", t("Anterior", "Previous"))}
@@ -306,6 +306,10 @@ export function createAudioPlayer(hooks: Hooks) {
     if (!host || !(element instanceof HTMLAudioElement)) return;
     media = element;
     transport = document.getElementById("audio-transport");
+    const playerHost = host;
+    new ResizeObserver(() => {
+      document.documentElement.style.setProperty("--audio-player-height", `${playerHost.offsetHeight}px`);
+    }).observe(playerHost);
     element.addEventListener("timeupdate", () => {
       updateTime();
       if (sleep === "chapter" && stopAt > 0 && element.currentTime >= stopAt || sleepUntil && Date.now() >= sleepUntil) sleepNow();

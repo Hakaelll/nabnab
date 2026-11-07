@@ -1,5 +1,6 @@
 use crate::{dependencies, engine, failure, library, AppState};
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use std::{
     fs,
     io::Write,
@@ -29,7 +30,9 @@ fn cache_file(name: &str) -> bool {
         })
 }
 pub fn thumbnail_path(root: &Path, item: &library::LibraryItem) -> Result<PathBuf, String> {
-    let metadata = fs::metadata(&item.path)
+    let selected = item.details.audio_cover.as_deref().map(library::authorized_path).transpose()?;
+    let input = selected.as_deref().unwrap_or(&item.path);
+    let metadata = fs::metadata(input)
         .map_err(|_| "The file was not found. Locate it in the library.")?;
     let stamp = metadata
         .modified()
@@ -40,7 +43,11 @@ pub fn thumbnail_path(root: &Path, item: &library::LibraryItem) -> Result<PathBu
     if !item.id.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-') {
         return Err("Invalid media identifier.".into());
     }
-    Ok(root.join(format!("{}-{}-{stamp}.jpg", item.id, metadata.len())))
+    let cover = item.details.audio_cover.as_ref().map(|path| {
+        let hash = format!("{:x}", Sha256::digest(path.to_string_lossy().as_bytes()));
+        format!("-{}", &hash[..16])
+    }).unwrap_or_default();
+    Ok(root.join(format!("{}-{}-{stamp}{cover}.jpg", item.id, metadata.len())))
 }
 #[derive(Serialize)]
 pub struct CacheStatus {
@@ -99,10 +106,11 @@ pub async fn thumbnail(app: &AppHandle, state: &Arc<AppState>, id: &str) -> Resu
             .cloned()
             .ok_or("Library item not found.")?
     };
-    if item.kind == "audio" && !item.details.audio.as_ref().is_some_and(|tags| tags.embedded_cover) {
+    if item.kind == "audio" && item.details.audio_cover.is_none()
+        && !item.details.audio.as_ref().is_some_and(|tags| tags.embedded_cover) {
         return Err("This audio file has no indexed embedded cover.".into());
     }
-    let input = library::authorized_path(&item.path)?;
+    let input = library::authorized_path(item.details.audio_cover.as_deref().unwrap_or(&item.path))?;
     let root = cache_root(state)?;
     let _permit = slots().acquire().await.map_err(|e| e.to_string())?;
     if !root.exists() {

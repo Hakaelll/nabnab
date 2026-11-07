@@ -32,6 +32,8 @@ const setup = `
     if(cmd==="startup")return {...copy(state),folder:settings.folder,enginesReady:true,engineError:null};
     if(cmd==="get_snapshot")return copy(state);
     if(cmd==="local_timezone")return "Europe/Madrid";
+    if(cmd==="screen_capture_status")return null;
+    if(cmd==="library_search")return [];
     if(cmd==="plugin:window|is_maximized")return false;
     if(cmd.startsWith("plugin:"))return null;
     const item=state.library.find(item=>item.id===args.id);
@@ -72,7 +74,7 @@ try {
     await page.waitForFunction(()=>window.libraryFixture?.calls.some(call=>call.cmd==="startup"));
     await page.locator('[data-page="library"]').click();
     assert.equal(await page.locator('.media-item').count(),4);
-    await page.locator('[data-action="library-filter"][data-filter="subtitle"]').click();
+    await page.locator("#library-content-filter").selectOption("subtitle");
     assert.equal(await page.locator('.media-item').count(),1);
     assert.match(await page.locator('.media-item').innerText(),/Fixture subtitles\.srt/);
     await page.locator('[data-action="library-filter"][data-filter="all"]').click();

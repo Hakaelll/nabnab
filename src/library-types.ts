@@ -26,6 +26,7 @@ export interface LibraryDetails {
   sourceVersion?: string | null; sourcePublishedAt?: string | null; sourceChecksum?: string | null;
   audiobook?: AudiobookChapter | null;
   audio?: AudioTags | null; lyrics?: Lyric[] | null; lastPlayedAt?: number | null;
+  audioCover?: string | null;
 }
 export type SmartCondition =
   | { kind: "kind" | "source" | "platform" | "tag" | "subtitleLanguage"; value: string }

@@ -6,7 +6,7 @@ use std::{
     collections::HashSet,
     fs,
     io::Read,
-    path::Path,
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -16,6 +16,7 @@ use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 
 pub(crate) mod playlist_import;
+pub(crate) mod tag_copy;
 
 const MAX_SELECTION: usize = 200;
 const MAX_PLAYLISTS: usize = 100;
@@ -92,7 +93,7 @@ pub fn from_probe(info: &Value) -> Tags {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Patch {
     title: Option<String>,
@@ -109,6 +110,18 @@ fn valid_label(value: &str, max: usize) -> bool {
 }
 
 impl Patch {
+    fn fields(&self) -> [(&'static str, Option<&str>); 7] {
+        [
+            ("title", self.title.as_deref()),
+            ("artist", self.artist.as_deref()),
+            ("album_artist", self.album_artist.as_deref()),
+            ("album", self.album.as_deref()),
+            ("genre", self.genre.as_deref()),
+            ("disc", self.disc.as_deref()),
+            ("track", self.track.as_deref()),
+        ]
+    }
+
     fn validate(&self) -> Result<(), String> {
         for value in [
             &self.title,
@@ -558,6 +571,74 @@ pub async fn audio_lyrics_choose(
         })?;
     }
     Ok(lines)
+}
+
+#[tauri::command]
+pub async fn audio_cover_choose(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    id: String,
+    remove: bool,
+) -> Result<bool, String> {
+    audio_item(&state, &id)?;
+    if remove {
+        library_features::edit_item(&state, &id, |item| {
+            item.details.audio_cover = None;
+            Ok(())
+        })?;
+        return Ok(true);
+    }
+    let engines = crate::dependencies::engine_root(&app)?;
+    let selected = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .add_filter("Cover art", &["jpg", "jpeg", "png", "webp"])
+            .blocking_pick_file()
+            .map(|file| file.into_path().map_err(|_| "Choose a local cover image."))
+            .transpose()
+    })
+    .await
+    .map_err(|_| "Could not open the cover chooser.")??;
+    let Some(path): Option<PathBuf> = selected else {
+        return Ok(false);
+    };
+    let path = crate::library::authorized_path(&path)?;
+    let metadata = fs::metadata(&path).map_err(|_| "Could not inspect the local cover.")?;
+    if !metadata.is_file()
+        || metadata.len() > 24 * 1024 * 1024
+        || !path
+            .extension()
+            .and_then(|value| value.to_str())
+            .is_some_and(|value| {
+                matches!(
+                    value.to_ascii_lowercase().as_str(),
+                    "jpg" | "jpeg" | "png" | "webp"
+                )
+            })
+    {
+        return Err("Choose a local JPEG, PNG or WebP image under 24 MiB.".into());
+    }
+    let (_sender, cancel) = tokio::sync::watch::channel(false);
+    let info = crate::media::probe(&engines, &path, cancel).await?;
+    let valid = info["streams"].as_array().is_some_and(|streams| {
+        streams.iter().any(|stream| {
+            stream["codec_type"] == "video"
+                && stream["width"]
+                    .as_u64()
+                    .zip(stream["height"].as_u64())
+                    .is_some_and(|(width, height)| {
+                        (1..=5000).contains(&width) && (1..=5000).contains(&height)
+                    })
+        })
+    });
+    if !valid {
+        return Err("Choose a valid image up to 5000 × 5000 pixels.".into());
+    }
+    library_features::edit_item(&state, &id, |item| {
+        item.details.audio_cover = Some(path);
+        Ok(())
+    })?;
+    Ok(true)
 }
 
 #[cfg(test)]

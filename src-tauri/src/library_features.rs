@@ -24,6 +24,7 @@ pub struct LibraryDetails {
     pub source_checksum: Option<String>,
     pub audiobook: Option<crate::public_sources::AudiobookChapter>,
     pub audio: Option<crate::audio_library::Tags>,
+    pub audio_cover: Option<PathBuf>,
     pub lyrics: Option<Vec<crate::audio_library::Lyric>>,
     pub last_played_at: Option<u64>,
     pub web_archive_ref: Option<String>,

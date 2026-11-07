@@ -40,6 +40,7 @@ export type JobSource = {kind:"webArchive";reference:string;format:"html"|"epub"
   | {kind:"attribution";entries:{sourceUrl:string;filename:string}[]}
   | {kind:'advancedFile';url:string;connections:number;checksum:string|null}
   | {kind:'palette';libraryIds:string[];colors:number;format:string}
+  | {kind:'audioTagsCopy';selection:{libraryId:string}}
   | {kind:'audioPreview';libraryId:string;options:ToolOptions}
   | {kind:'providerExport';url:string;operation:string;format:string}
   | {kind:'captionEdit';libraryId:string;trackId:string;options:import('./captions-editor-ui').CaptionEditOptions}
