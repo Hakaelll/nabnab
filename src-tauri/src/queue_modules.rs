@@ -83,6 +83,23 @@ pub(super) async fn run(app:&AppHandle,state:&Arc<AppState>,job:&Job,staging:&Pa
             for (input,expected) in inputs.iter().zip(input_hashes){if &digest(input.path.clone(),cancel.clone()).await?!=expected{return Err("An image changed during production. The proposed output was not published; review a new preview.".into());}}
             Some((file,None,library_ids.first().cloned()))
         },
+        Source::Sticker { selection } => {
+            selection.validate()?;
+            let (_, library) = crate::file_operations::context(state)?;
+            let input = crate::file_operations::selected(&library, std::slice::from_ref(&selection.library_id), 1)?.remove(0);
+            let _permit = processing_permit(state, cancel.clone()).await?;
+            phase(app, state, &job.id, run_id, JobState::Processing)?;
+            if digest(input.path.clone(), cancel.clone()).await? != selection.input_hash {
+                return Err("The sticker source changed after preview. Review it again.".into());
+            }
+            let engines = crate::dependencies::engine_root(app)?;
+            let artifact = crate::stickers::encode(&engines, &input.path, staging, &selection.options, cancel.clone(), run_id).await?;
+            if digest(input.path, cancel.clone()).await? != selection.input_hash {
+                return Err("The sticker source changed during processing. Preview it again.".into());
+            }
+            media_info = Some(artifact.info);
+            Some((artifact.path, None, Some(selection.library_id.clone())))
+        },
         Source::FileAnalysis {library_ids,options}=>{
             let (_,library)=crate::file_operations::context(state)?;
             let _permit=processing_permit(state,cancel.clone()).await?;phase(app,state,&job.id,run_id,JobState::Processing)?;
@@ -258,7 +275,7 @@ pub(super) async fn run(app:&AppHandle,state:&Arc<AppState>,job:&Job,staging:&Pa
     let Some((file,source,parent))=output else{return Ok(None);};
     phase(app,state,&job.id,run_id,JobState::Verifying)?;
     let mut item=library::index(&file,media_info.as_ref(),source,parent).or_else(|_|library::index_file(&file))?;
-    if matches!(job.source,Source::Voice {..}|Source::DocumentEdit {..}|Source::Ocr {..}|Source::OcrText {..}|Source::AudioTagsCopy {..}) {
+    if matches!(job.source,Source::Voice {..}|Source::DocumentEdit {..}|Source::Ocr {..}|Source::OcrText {..}|Source::AudioTagsCopy {..}|Source::Sticker {..}) {
         if let Some(parent)=&item.parent_id {
             let guard=state.repository.lock().unwrap();
             if let Some(original)=guard.as_ref().and_then(|repo|repo.data.library.iter().find(|i|&i.id==parent)) {

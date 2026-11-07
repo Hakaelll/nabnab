@@ -153,6 +153,7 @@ pub enum Source {
     Ocr {library_id:String,options:crate::ocr::OcrOptions},
     OcrText {library_id:String,reference:String,expected_hash:String},
     ImageAssets {library_ids:Vec<String>,options:crate::image_assets::Options,input_hashes:Vec<String>},
+    Sticker { selection: crate::stickers::Selection },
     Voice {plan_id:String},
     Capture {capture_id:String},
     FileAnalysis {library_ids:Vec<String>,options:crate::file_organization::AnalyzeOptions},
@@ -296,6 +297,7 @@ impl Job {
             Source::CloudFile {selection,..} => crate::cloud_storage::validate_selection(selection)?,
             Source::PersonalFile {selection} => selection.validate()?,
             Source::AudioTagsCopy {selection} => selection.validate()?,
+            Source::Sticker {selection} => selection.validate()?,
             Source::Attribution {entries} => { if entries.is_empty() || entries.len()>199 {return Err("Invalid attribution selection.".into());} for entry in entries {entry.validate()?;} },
             _=>{}
         }
@@ -343,7 +345,7 @@ impl Job {
             Source::PersonalFile {..} => "Personal server".into(),
             Source::Attribution {..} => "Wikimedia Commons".into(),
             Source::WebArchive {..} => "Web archive".into(),
-            Source::ImageAssets {..} => "Images".into(),
+            Source::ImageAssets {..} | Source::Sticker {..} => "Images".into(),
             Source::Voice {..} => "Local voice".into(),
             Source::Capture {..} => "Screen capture".into(),
             Source::FileAnalysis {..} | Source::FileRename {..} | Source::FileUndo {..} => "Files".into(),
@@ -1103,7 +1105,7 @@ fn stage(job: &Job) -> Result<PathBuf, String> {
             let journaled = [JOURNAL, "publication.new"]
                 .iter()
                 .any(|name| fs::symlink_metadata(owned.join(name)).is_ok());
-            if matches!(job.source, Source::Transform { .. } | Source::Voice {..} | Source::Capture {..} | Source::ImageAssets {..} | Source::FileAnalysis {..} | Source::FileRename {..} | Source::FileUndo {..} | Source::PortableExport {..} | Source::PortableImport {..} | Source::CloudFile {..} | Source::PersonalFile {..} | Source::Attribution {..} | Source::WebArchive {..} | Source::DocumentEdit {..} | Source::Ocr {..} | Source::OcrText {..} | Source::AudioTagsCopy {..})
+            if matches!(job.source, Source::Transform { .. } | Source::Voice {..} | Source::Capture {..} | Source::ImageAssets {..} | Source::Sticker {..} | Source::FileAnalysis {..} | Source::FileRename {..} | Source::FileUndo {..} | Source::PortableExport {..} | Source::PortableImport {..} | Source::CloudFile {..} | Source::PersonalFile {..} | Source::Attribution {..} | Source::WebArchive {..} | Source::DocumentEdit {..} | Source::Ocr {..} | Source::OcrText {..} | Source::AudioTagsCopy {..})
                 && owner.run_id != job.run_id
                 && !journaled
             {
@@ -1334,7 +1336,7 @@ async fn publish_verified_output(
         publication_guard(state, job, &cancel)?;
         return Ok((existing.path.clone(), existing, publication));
     }
-    if matches!(job.source,Source::Voice {..} | Source::Capture {..} | Source::ImageAssets {..} | Source::FileAnalysis {..} | Source::FileRename {..} | Source::FileUndo {..} | Source::PortableExport {..} | Source::PortableImport {..} | Source::PublicFile {..}|Source::CloudFile {..} | Source::PersonalFile {..} | Source::Attribution {..}|Source::WebArchive {..}|Source::DocumentEdit {..}|Source::Ocr {..}|Source::OcrText {..} | Source::AudioTagsCopy {..}) {
+    if matches!(job.source,Source::Voice {..} | Source::Capture {..} | Source::ImageAssets {..} | Source::Sticker {..} | Source::FileAnalysis {..} | Source::FileRename {..} | Source::FileUndo {..} | Source::PortableExport {..} | Source::PortableImport {..} | Source::PublicFile {..}|Source::CloudFile {..} | Source::PersonalFile {..} | Source::Attribution {..}|Source::WebArchive {..}|Source::DocumentEdit {..}|Source::Ocr {..}|Source::OcrText {..} | Source::AudioTagsCopy {..}) {
         (file,target)=available_file_version(staging,&destination,&file)?;
     }
     item=target_item(item,target.clone());
@@ -1801,7 +1803,7 @@ async fn run(
     let run_id = job.run_id;
     let emit = move |update| progress(&handle, &shared, &id, run_id, update);
     let (mut file, source, parent) = match &job.source {
-        Source::Voice {..} | Source::Capture {..} | Source::ImageAssets {..} | Source::FileAnalysis {..} | Source::FileRename {..} | Source::FileUndo {..} | Source::PortableExport {..} | Source::PortableImport {..} | Source::PublicFile {..} | Source::CloudFile {..} | Source::PersonalFile {..} | Source::Attribution {..} | Source::WebArchive {..} | Source::DocumentEdit {..} | Source::Ocr {..} | Source::OcrText {..} | Source::AdvancedFile{..} | Source::Palette{..} | Source::AudioPreview{..} | Source::AudioTagsCopy {..} | Source::ProviderExport {..} | Source::CaptionEdit {..} | Source::MediaEdit {..} | Source::Torrent { .. } | Source::Document { .. } | Source::GalleryExport { .. } | Source::Telegram { .. } | Source::Live { .. } => return Err("Module execution was not dispatched.".into()),
+        Source::Voice {..} | Source::Capture {..} | Source::ImageAssets {..} | Source::Sticker {..} | Source::FileAnalysis {..} | Source::FileRename {..} | Source::FileUndo {..} | Source::PortableExport {..} | Source::PortableImport {..} | Source::PublicFile {..} | Source::CloudFile {..} | Source::PersonalFile {..} | Source::Attribution {..} | Source::WebArchive {..} | Source::DocumentEdit {..} | Source::Ocr {..} | Source::OcrText {..} | Source::AdvancedFile{..} | Source::Palette{..} | Source::AudioPreview{..} | Source::AudioTagsCopy {..} | Source::ProviderExport {..} | Source::CaptionEdit {..} | Source::MediaEdit {..} | Source::Torrent { .. } | Source::Document { .. } | Source::GalleryExport { .. } | Source::Telegram { .. } | Source::Live { .. } => return Err("Module execution was not dispatched.".into()),
         Source::Download {
             url_ref,
             format,
@@ -2287,7 +2289,7 @@ async fn validate_download_url(input: &str) -> Result<String, String> {
     }
 }
 
-async fn processing_permit(
+pub(crate) async fn processing_permit(
     state: &AppState,
     mut cancel: watch::Receiver<bool>,
 ) -> Result<tokio::sync::OwnedSemaphorePermit, String> {
