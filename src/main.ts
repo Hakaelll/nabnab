@@ -7,6 +7,7 @@ import {createVoice} from "./voice-ui";
 import {createImageAssets} from "./image-assets-ui";
 import {createStickerTool} from "./stickers-ui";
 import {createUpscaleTool} from "./upscale-ui";
+import {createBackgroundTool} from "./background-ui";
 import {createFileOrganization} from "./file-organization-ui";
 import {createPortableCollections} from "./portable-collections-ui";
 import {createArticles} from "./articles-ui";
@@ -71,7 +72,7 @@ let thumbnailWorkers=0;
 const home: HomeState = { input: "", media: null, loading: false, selectedUrls: new Set(), format: "mp4", quality: "", audioBitrate: "192", subtitleLanguage: "", submitting: false };
 const downloads: DownloadView = { query: "", filter: "all", selected: new Set(), detailId: null };
 const library: LibraryView = { query: "", filter: "all", sort: "newest", layout: "grid", collection: "", offset: 0, selected: new Set(), detailId: null };
-let localToolModule:"media"|"documents"|"pdfEdits"|"ocr"|"composition"|"palettes"|"imageAssets"|"stickers"|"upscale"|"fileOrganization"|"portable"|"screenCapture"|"voice"="media";
+let localToolModule:"media"|"documents"|"pdfEdits"|"ocr"|"composition"|"palettes"|"imageAssets"|"stickers"|"upscale"|"background"|"fileOrganization"|"portable"|"screenCapture"|"voice"="media";
 const tools: ToolsView = { kind: "convert", ids: new Set(), options: defaultToolOptions("convert"), picking: false };
 const preferences: SettingsView = { section: "general", engines: null, sessions: null, bridge: null, pairing: null, cache: null, working: false };
 const t: Copy = (spanish, english) => snapshot.settings.language === "es" ? spanish : english;
@@ -109,6 +110,7 @@ const ocr=createOcr({command,snapshot:()=>snapshot,refresh,render:renderLibraryM
 const imageAssets=createImageAssets({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t});
 const stickerTool=createStickerTool({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t});
 const upscaleTool=createUpscaleTool({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t,components:()=>{preferences.section='engines';navigate('settings');}});
+const backgroundTool=createBackgroundTool({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t,components:()=>{preferences.section='engines';navigate('settings');}});
 const fileOrganization=createFileOrganization({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t});
 const portable=createPortableCollections({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t});
 type CaptureStatus=CaptureState&{shortcutLabel?:string|null;shortcutReason?:string|null};
@@ -339,7 +341,7 @@ function renderCurrent(): void {
       const directory=required('.tool-directory');
       const groups=[
         {title:t('Documentos','Documents'),items:[['documents',t('Operaciones PDF','PDF operations'),'document'],['pdfEdits',t('Editar PDF','Edit PDF'),'document'],['ocr',t('Reconocer texto · OCR','Recognize text · OCR'),'document']]},
-        {title:t('Imagen y composición','Image and composition'),items:[['upscale',t('Ampliar imagen','Upscale image'),'image'],['imageAssets',t('Capturas, iconos y atlas','Screenshots, icons and atlas'),'image'],['stickers','Stickers','image'],['palettes',t('Paleta de imagen','Image palette'),'image'],['composition',t('Componer medios','Compose media'),'video']]},
+        {title:t('Imagen y composición','Image and composition'),items:[['upscale',t('Ampliar imagen','Upscale image'),'image'],['background',t('Eliminar fondo','Remove background'),'image'],['imageAssets',t('Capturas, iconos y atlas','Screenshots, icons and atlas'),'image'],['stickers','Stickers','image'],['palettes',t('Paleta de imagen','Image palette'),'image'],['composition',t('Componer medios','Compose media'),'video']]},
         {title:t('Archivos y colecciones','Files and collections'),items:[['fileOrganization',t('Revisar y renombrar','Review and rename'),'library'],['portable',t('Colección portátil','Portable collection'),'folder']]},
         {title:t('Captura','Capture'),items:[['screenCapture',t('Pantalla y repetición','Screen and replay'),'video']]},
         {title:t('Voz','Voice'),items:[['voice',t('Narración local','Local narration'),'audio']]}
@@ -348,7 +350,7 @@ function renderCurrent(): void {
       directory.querySelector('.tool-search')?.insertAdjacentHTML('afterend',moduleNav);
       if(localToolModule!=='media'){
         for(const button of directory.querySelectorAll('[data-action="tool-kind"]'))button.setAttribute('aria-pressed','false');
-        required('.tool-workspace').innerHTML=localToolModule==='documents'?documentToolsPanel(snapshot,t):localToolModule==='pdfEdits'?documentEdits.render():localToolModule==='ocr'?ocr.renderTools():localToolModule==='composition'?mediaEditsPanel(snapshot,t):localToolModule==='imageAssets'?imageAssets.render():localToolModule==='stickers'?stickerTool.render():localToolModule==='upscale'?upscaleTool.render():localToolModule==='fileOrganization'?fileOrganization.renderTools():localToolModule==='portable'?portable.render():localToolModule==='screenCapture'?screenCapture.render():localToolModule==='voice'?voice.render():palettesPanel(snapshot,t);
+        required('.tool-workspace').innerHTML=localToolModule==='documents'?documentToolsPanel(snapshot,t):localToolModule==='pdfEdits'?documentEdits.render():localToolModule==='ocr'?ocr.renderTools():localToolModule==='composition'?mediaEditsPanel(snapshot,t):localToolModule==='imageAssets'?imageAssets.render():localToolModule==='stickers'?stickerTool.render():localToolModule==='upscale'?upscaleTool.render():localToolModule==='background'?backgroundTool.render():localToolModule==='fileOrganization'?fileOrganization.renderTools():localToolModule==='portable'?portable.render():localToolModule==='screenCapture'?screenCapture.render():localToolModule==='voice'?voice.render():palettesPanel(snapshot,t);
       }
     }
     if(page==='tools'){
@@ -419,6 +421,7 @@ function navigate(next: Page): void {
   renderCurrent();required("#main").scrollTop=scrollPositions.get(next)??0;
   if(changed&&next==='tools')void mediaEdits.load();
   if(next==='tools'&&localToolModule==='upscale')void upscaleTool.load();
+  if(next==='tools'&&localToolModule==='background')void backgroundTool.load();
   if(changed)enterSurface(required(next==='home'?'#home-content':'#page-content'));
   if(next==='settings')void loadSettingsSection().catch(showError);
   if(next==='library'&&librarySection==='archives')void personalArchives.load();
@@ -558,7 +561,7 @@ async function handleAction(action: string, button: HTMLButtonElement): Promise<
   if(action==='emblem-activate'){const color=handleEmblemClick();if(color.toggled)renderHome();return;}
   if(action==='open-fileSources'){platformModule='fileSources';navigate('platforms');if(id==='personal'){fileSources.openPersonal();await personalServers.load();return;}if(id==='arxiv'||id==='zenodo'||id==='librivox'){fileSources.openCatalog(id);return;}await fileSources.open();if(id==='drive'||id==='onedrive'||id==='dropbox'){const tabButton=document.createElement('button');tabButton.dataset.tab=id;await fileSources.handleClick('file-source-tab',tabButton);}return;}
   if(action==='open-files'){platformModule='files';navigate('platforms');await advancedFiles.load();return;}
-  if(action==='tool-module'){const module=button.dataset.id;if(module==='documents'||module==='pdfEdits'||module==='ocr'||module==='composition'||module==='palettes'||module==='imageAssets'||module==='stickers'||module==='upscale'||module==='fileOrganization'||module==='portable'||module==='screenCapture'||module==='voice'){if(module!=='voice')voice.deactivate();localToolModule=module;renderCurrent();if(module==='screenCapture')await screenCapture.open();if(module==='voice')await voice.open();if(module==='upscale')await upscaleTool.load();}return;}
+  if(action==='tool-module'){const module=button.dataset.id;if(module==='documents'||module==='pdfEdits'||module==='ocr'||module==='composition'||module==='palettes'||module==='imageAssets'||module==='stickers'||module==='upscale'||module==='background'||module==='fileOrganization'||module==='portable'||module==='screenCapture'||module==='voice'){if(module!=='voice')voice.deactivate();localToolModule=module;renderCurrent();if(module==='screenCapture')await screenCapture.open();if(module==='voice')await voice.open();if(module==='upscale')await upscaleTool.load();if(module==='background')await backgroundTool.load();}return;}
   if(action==='organize-selected'){localToolModule='fileOrganization';navigate('tools');fileOrganization.open([...library.selected]);return;}
   if(action==='portable-selected'){localToolModule='portable';navigate('tools');portable.open([...library.selected]);return;}
   if(action==='screen-capture-open'){toolSearch='';voice.deactivate();localToolModule='screenCapture';navigate('tools');await screenCapture.open();return;}
@@ -573,7 +576,7 @@ async function handleAction(action: string, button: HTMLButtonElement): Promise<
   if(action==='open-torrents'||action==='open-torrent'){platformModule='torrent';navigate('platforms');await torrents.load();renderCurrent();return;}
   if(action==='platform-back'){showPlatformsCatalog();return;}
   if(await automation.click(action,button)||await screenCapture.click(action,button)||await voice.click(action,button))return;
-  if(await imageAssets.click(action,button)||await stickerTool.click(action)||await upscaleTool.click(action)||await fileOrganization.click(action,button)||await portable.click(action,button))return;
+  if(await imageAssets.click(action,button)||await stickerTool.click(action)||await upscaleTool.click(action)||await backgroundTool.click(action)||await fileOrganization.click(action,button)||await portable.click(action,button))return;
   if(await articles.click(action,button)||await ocr.click(action,button)||await documentEdits.click(action))return;
   if(audioPlayer.click(action)||await audioLibrary.click(action,button)||await personalArchives.click(action,button))return;
   if(await personalServers.handleClick(action,button)||await fileSources.handleClick(action,button))return;
@@ -639,6 +642,7 @@ async function handleAction(action: string, button: HTMLButtonElement): Promise<
 document.addEventListener('input',event=>{
   if(event.target instanceof HTMLElement&&event.target.id==='sticker-query'&&stickerTool.input(event.target))return;
   if(event.target instanceof HTMLElement&&event.target.id==='upscale-query'&&upscaleTool.input(event.target))return;
+  if(event.target instanceof HTMLElement&&event.target.id==='background-query'&&backgroundTool.input(event.target))return;
   if(event.target instanceof HTMLElement&&personalArchives.input(event.target))return;
   if(event.target instanceof HTMLElement&&(automation.change(event.target)||screenCapture.change(event.target)||voice.change(event.target)||imageAssets.input(event.target)||fileOrganization.input(event.target)||(event.target.id==='portable-query'&&portable.change(event.target))||audioPlayer.input(event.target)||audioLibrary.input(event.target)||personalServers.handleInput(event.target)||fileSources.handleInput(event.target)||advancedFiles.handleInput(event.target)||sourceExports.handleInput(event.target)||live.input(event.target)||telegram.handleInput(event.target)||courses.handleInput(event.target)||torrents.handleInput(event.target)||platforms.handleInput(event.target)||batches.handleInput(event.target)||sources.handleInput(event.target)||libraryFeatures.handleInput(event.target)))return;
   const target=event.target;if(!(target instanceof HTMLInputElement||target instanceof HTMLTextAreaElement))return;
@@ -652,6 +656,7 @@ document.addEventListener('change',event=>{
   const target=event.target;
   if(target instanceof HTMLElement&&target.id!=='sticker-query'&&stickerTool.input(target))return;
   if(target instanceof HTMLElement&&target.id!=='upscale-query'&&upscaleTool.input(target))return;
+  if(target instanceof HTMLElement&&target.id!=='background-query'&&backgroundTool.input(target))return;
   if(target instanceof HTMLElement&&target.closest('.personal-archives')){void personalArchives.change(target).catch(showError);return;}
   if((target instanceof HTMLInputElement||target instanceof HTMLSelectElement||target instanceof HTMLTextAreaElement)&&(articles.change(target)||ocr.change(target)))return;
   if(target instanceof HTMLSelectElement&&target.id==='library-content-filter'){const value=target.value||'all';if(isLibraryFilter(value)){library.filter=value;library.offset=0;renderCurrent();}return;}
@@ -682,7 +687,7 @@ document.addEventListener('change',event=>{
 document.addEventListener('submit',event=>{const form=event.target;if(form instanceof HTMLFormElement){event.preventDefault();void submitForm(form).catch(showError);}});
 async function submitForm(form: HTMLFormElement): Promise<void> {
   if(await automation.submit(form)||await screenCapture.submit(form)||await voice.submit(form))return;
-  if(await imageAssets.submit(form)||await stickerTool.submit(form)||await upscaleTool.submit(form)||await fileOrganization.submit(form)||await portable.submit(form))return;
+  if(await imageAssets.submit(form)||await stickerTool.submit(form)||await upscaleTool.submit(form)||await backgroundTool.submit(form)||await fileOrganization.submit(form)||await portable.submit(form))return;
   if(await articles.submit(form)||await ocr.submit(form)||await documentEdits.submit(form))return;
   if(await audioLibrary.submit(form)||await personalArchives.submit(form))return;
   if(await personalServers.handleSubmit(form)||await fileSources.handleSubmit(form))return;

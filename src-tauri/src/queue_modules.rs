@@ -119,6 +119,25 @@ pub(super) async fn run(app:&AppHandle,state:&Arc<AppState>,job:&Job,staging:&Pa
             media_info = Some(crate::media::probe(&engines, &output, cancel.clone()).await?);
             Some((output, None, Some(selection.library_id.clone())))
         },
+        Source::Background { selection } => {
+            selection.validate()?;
+            let (_, library) = crate::file_operations::context(state)?;
+            let input = crate::file_operations::selected(&library, std::slice::from_ref(&selection.library_id), 1)?.remove(0);
+            let _slot = state.background.permit(cancel.clone()).await?;
+            let _processing = processing_permit(state, cancel.clone()).await?;
+            phase(app, state, &job.id, run_id, JobState::Processing)?;
+            if digest(input.path.clone(), cancel.clone()).await? != selection.input_hash {
+                return Err("The image changed after the background preview. Review it again.".into());
+            }
+            let model = crate::background::component::enabled_model(&crate::components::root(app)?)?;
+            let engines = crate::dependencies::engine_root(app)?;
+            let (output, info) = crate::background::execute(&engines, &model, staging, &input.path, selection.options, cancel.clone(), run_id).await?;
+            if digest(input.path, cancel.clone()).await? != selection.input_hash {
+                return Err("The image changed while removing its background. Preview the source again.".into());
+            }
+            media_info = Some(info);
+            Some((output, None, Some(selection.library_id.clone())))
+        },
         Source::FileAnalysis {library_ids,options}=>{
             let (_,library)=crate::file_operations::context(state)?;
             let _permit=processing_permit(state,cancel.clone()).await?;phase(app,state,&job.id,run_id,JobState::Processing)?;
@@ -294,7 +313,7 @@ pub(super) async fn run(app:&AppHandle,state:&Arc<AppState>,job:&Job,staging:&Pa
     let Some((file,source,parent))=output else{return Ok(None);};
     phase(app,state,&job.id,run_id,JobState::Verifying)?;
     let mut item=library::index(&file,media_info.as_ref(),source,parent).or_else(|_|library::index_file(&file))?;
-    if matches!(job.source,Source::Voice {..}|Source::DocumentEdit {..}|Source::Ocr {..}|Source::OcrText {..}|Source::AudioTagsCopy {..}|Source::Sticker {..} | Source::Upscale {..}) {
+    if matches!(job.source,Source::Voice {..}|Source::DocumentEdit {..}|Source::Ocr {..}|Source::OcrText {..}|Source::AudioTagsCopy {..}|Source::Sticker {..} | Source::Upscale {..} | Source::Background {..}) {
         if let Some(parent)=&item.parent_id {
             let guard=state.repository.lock().unwrap();
             if let Some(original)=guard.as_ref().and_then(|repo|repo.data.library.iter().find(|i|&i.id==parent)) {

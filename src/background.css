@@ -1,0 +1,20 @@
+.background-inputs { display: grid; gap: 10px; }
+.background-tool h3, .background-settings legend { margin: 0; font-size: 14px; font-weight: 600; }
+.background-inputs .section-heading, .background-review .section-heading { flex-wrap: wrap; }
+.background-source { margin: 0; overflow-wrap: anywhere; }
+.background-settings { min-width: 0; margin-top: 18px; }
+.background-settings legend { padding: 0 0 10px; }
+.background-fields { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; }
+.background-fields > label { flex: 1 1 115px; min-width: 0; }
+.background-fields input[type="range"] { min-height: 30px; margin: 0; padding: 0; accent-color: var(--action); }
+.background-fields input[type="color"] { padding: 4px 8px; }
+.background-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 10px 0; }
+.background-pair figure { margin: 0; min-width: 0; }
+.background-pair figcaption { font-size: 12px; font-weight: 600; color: var(--muted); }
+.background-pair .asset-preview-image { margin: 4px 0 0; border-radius: 8px; }
+.background-pair img { width: 100%; max-height: 380px; object-fit: contain; }
+.background-pair [data-surface="light"] { background: #ededee; }
+.background-pair [data-surface="dark"] { background: #101114; }
+.background-review-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.background-review-controls label { flex-direction: row; align-items: center; flex-wrap: wrap; }
+.background-empty { margin: 10px 0 0; min-height: 100px; display: grid; place-items: center; padding: 14px; text-align: center; color: var(--muted); border: 1px dashed var(--border); border-radius: 8px; }
