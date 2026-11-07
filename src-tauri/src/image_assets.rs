@@ -312,7 +312,7 @@ fn owned_bytes(path: &Path, bytes: &[u8]) -> Result<(), String> {
         .and_then(|_| output.sync_all())
         .map_err(|e| e.to_string())
 }
-fn png_dimensions(path: &Path) -> Result<(u32, u32), String> {
+pub(crate) fn png_dimensions(path: &Path) -> Result<(u32, u32), String> {
     use std::io::Read;
     let mut header = [0u8; 24];
     fs::File::open(path)

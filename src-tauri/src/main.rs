@@ -55,6 +55,7 @@ mod library;
 mod library_features;
 mod audio_library;
 mod stickers;
+mod upscale;
 mod personal_archive;
 mod delimited;
 mod local_media;
@@ -105,6 +106,7 @@ pub(crate) struct AppState {
     personal_servers: personal_servers::BrowserState,
     audio_playlist_browser: audio_library::playlist_import::Browser,
     sticker_preview: stickers::commands::PreviewState,
+    upscale: upscale::commands::UpscaleState,
     personal_archive: personal_archive::ArchiveState,
     repository: Mutex<Option<store::Repository>>,
     runtime: queue::Runtime,
@@ -1188,6 +1190,7 @@ fn main() {
             voice_operations::voice_status,voice_operations::voice_prepare,voice_operations::voice_sample,voice_operations::voice_plan_status,voice_operations::voice_segment_audio,voice_operations::queue_voice,voice_operations::voice_pause_job,voice_operations::cancel_voice_request,
             file_operations::image_assets_inspect,file_operations::image_assets_preview,file_operations::queue_image_assets,file_operations::cancel_image_assets_preview,
             stickers::commands::sticker_preview, stickers::commands::queue_sticker,
+            upscale::commands::upscale_preview, upscale::commands::queue_upscale,
             file_operations::file_analysis,file_operations::queue_file_analysis,file_operations::file_rename_preview,file_operations::queue_file_rename,file_operations::file_rename_history,file_operations::queue_file_undo,file_operations::file_organize_review,file_operations::cancel_file_operation,
             file_operations::portable_preview_export,file_operations::queue_portable_export,file_operations::portable_choose_import,file_operations::portable_preview_import,file_operations::queue_portable_import,file_operations::cancel_portable_preview,
             document_operations::document_edit_info,document_operations::document_edit_preview,document_operations::cancel_document_edit_preview,document_operations::queue_document_edit,

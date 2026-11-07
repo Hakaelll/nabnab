@@ -154,6 +154,7 @@ pub enum Source {
     OcrText {library_id:String,reference:String,expected_hash:String},
     ImageAssets {library_ids:Vec<String>,options:crate::image_assets::Options,input_hashes:Vec<String>},
     Sticker { selection: crate::stickers::Selection },
+    Upscale { selection: crate::upscale::Selection },
     Voice {plan_id:String},
     Capture {capture_id:String},
     FileAnalysis {library_ids:Vec<String>,options:crate::file_organization::AnalyzeOptions},
@@ -298,6 +299,7 @@ impl Job {
             Source::PersonalFile {selection} => selection.validate()?,
             Source::AudioTagsCopy {selection} => selection.validate()?,
             Source::Sticker {selection} => selection.validate()?,
+            Source::Upscale {selection} => selection.validate()?,
             Source::Attribution {entries} => { if entries.is_empty() || entries.len()>199 {return Err("Invalid attribution selection.".into());} for entry in entries {entry.validate()?;} },
             _=>{}
         }
@@ -346,6 +348,7 @@ impl Job {
             Source::Attribution {..} => "Wikimedia Commons".into(),
             Source::WebArchive {..} => "Web archive".into(),
             Source::ImageAssets {..} | Source::Sticker {..} => "Images".into(),
+            Source::Upscale {..} => "Real-ESRGAN".into(),
             Source::Voice {..} => "Local voice".into(),
             Source::Capture {..} => "Screen capture".into(),
             Source::FileAnalysis {..} | Source::FileRename {..} | Source::FileUndo {..} => "Files".into(),
@@ -1105,7 +1108,7 @@ fn stage(job: &Job) -> Result<PathBuf, String> {
             let journaled = [JOURNAL, "publication.new"]
                 .iter()
                 .any(|name| fs::symlink_metadata(owned.join(name)).is_ok());
-            if matches!(job.source, Source::Transform { .. } | Source::Voice {..} | Source::Capture {..} | Source::ImageAssets {..} | Source::Sticker {..} | Source::FileAnalysis {..} | Source::FileRename {..} | Source::FileUndo {..} | Source::PortableExport {..} | Source::PortableImport {..} | Source::CloudFile {..} | Source::PersonalFile {..} | Source::Attribution {..} | Source::WebArchive {..} | Source::DocumentEdit {..} | Source::Ocr {..} | Source::OcrText {..} | Source::AudioTagsCopy {..})
+            if matches!(job.source, Source::Transform { .. } | Source::Voice {..} | Source::Capture {..} | Source::ImageAssets {..} | Source::Sticker {..} | Source::Upscale {..} | Source::FileAnalysis {..} | Source::FileRename {..} | Source::FileUndo {..} | Source::PortableExport {..} | Source::PortableImport {..} | Source::CloudFile {..} | Source::PersonalFile {..} | Source::Attribution {..} | Source::WebArchive {..} | Source::DocumentEdit {..} | Source::Ocr {..} | Source::OcrText {..} | Source::AudioTagsCopy {..})
                 && owner.run_id != job.run_id
                 && !journaled
             {
@@ -1336,7 +1339,7 @@ async fn publish_verified_output(
         publication_guard(state, job, &cancel)?;
         return Ok((existing.path.clone(), existing, publication));
     }
-    if matches!(job.source,Source::Voice {..} | Source::Capture {..} | Source::ImageAssets {..} | Source::Sticker {..} | Source::FileAnalysis {..} | Source::FileRename {..} | Source::FileUndo {..} | Source::PortableExport {..} | Source::PortableImport {..} | Source::PublicFile {..}|Source::CloudFile {..} | Source::PersonalFile {..} | Source::Attribution {..}|Source::WebArchive {..}|Source::DocumentEdit {..}|Source::Ocr {..}|Source::OcrText {..} | Source::AudioTagsCopy {..}) {
+    if matches!(job.source,Source::Voice {..} | Source::Capture {..} | Source::ImageAssets {..} | Source::Sticker {..} | Source::Upscale {..} | Source::FileAnalysis {..} | Source::FileRename {..} | Source::FileUndo {..} | Source::PortableExport {..} | Source::PortableImport {..} | Source::PublicFile {..}|Source::CloudFile {..} | Source::PersonalFile {..} | Source::Attribution {..}|Source::WebArchive {..}|Source::DocumentEdit {..}|Source::Ocr {..}|Source::OcrText {..} | Source::AudioTagsCopy {..}) {
         (file,target)=available_file_version(staging,&destination,&file)?;
     }
     item=target_item(item,target.clone());
@@ -1349,7 +1352,11 @@ async fn publish_verified_output(
         sha256: hash,
         item: item.clone(),
     };
-    write_journal(job, staging, &journal)?;
+    let journal_job = job.clone();
+    let journal_stage = staging.to_owned();
+    tokio::task::spawn_blocking(move || write_journal(&journal_job, &journal_stage, &journal))
+        .await
+        .map_err(|error| error.to_string())??;
     let guard = state.repository.lock().unwrap();
     let repo = guard.as_ref().ok_or("Store unavailable.")?;
     checked_run(repo, job, &cancel)?;
@@ -1803,7 +1810,7 @@ async fn run(
     let run_id = job.run_id;
     let emit = move |update| progress(&handle, &shared, &id, run_id, update);
     let (mut file, source, parent) = match &job.source {
-        Source::Voice {..} | Source::Capture {..} | Source::ImageAssets {..} | Source::Sticker {..} | Source::FileAnalysis {..} | Source::FileRename {..} | Source::FileUndo {..} | Source::PortableExport {..} | Source::PortableImport {..} | Source::PublicFile {..} | Source::CloudFile {..} | Source::PersonalFile {..} | Source::Attribution {..} | Source::WebArchive {..} | Source::DocumentEdit {..} | Source::Ocr {..} | Source::OcrText {..} | Source::AdvancedFile{..} | Source::Palette{..} | Source::AudioPreview{..} | Source::AudioTagsCopy {..} | Source::ProviderExport {..} | Source::CaptionEdit {..} | Source::MediaEdit {..} | Source::Torrent { .. } | Source::Document { .. } | Source::GalleryExport { .. } | Source::Telegram { .. } | Source::Live { .. } => return Err("Module execution was not dispatched.".into()),
+        Source::Voice {..} | Source::Capture {..} | Source::ImageAssets {..} | Source::Sticker {..} | Source::Upscale {..} | Source::FileAnalysis {..} | Source::FileRename {..} | Source::FileUndo {..} | Source::PortableExport {..} | Source::PortableImport {..} | Source::PublicFile {..} | Source::CloudFile {..} | Source::PersonalFile {..} | Source::Attribution {..} | Source::WebArchive {..} | Source::DocumentEdit {..} | Source::Ocr {..} | Source::OcrText {..} | Source::AdvancedFile{..} | Source::Palette{..} | Source::AudioPreview{..} | Source::AudioTagsCopy {..} | Source::ProviderExport {..} | Source::CaptionEdit {..} | Source::MediaEdit {..} | Source::Torrent { .. } | Source::Document { .. } | Source::GalleryExport { .. } | Source::Telegram { .. } | Source::Live { .. } => return Err("Module execution was not dispatched.".into()),
         Source::Download {
             url_ref,
             format,

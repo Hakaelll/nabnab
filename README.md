@@ -69,6 +69,7 @@ Las sesiones se importan por sitio desde un archivo Netscape elegido por el usua
 - [HTTP directo](docs/DIRECT.md) y [subtítulos](docs/SUBTITLES.md).
 - [Archivos personales](docs/PERSONAL-ARCHIVES.md) para importar y consultar exportaciones locales por cuenta y categoría.
 - [Stickers](docs/STICKERS.md) para exportar imágenes y clips con los perfiles de Telegram y WhatsApp.
+- [Ampliación de imágenes](docs/IMAGE-UPSCALE.md) con Real-ESRGAN local y comparación del mismo recorte.
 - [Red, motores y privacidad](docs/NETWORK.md), [diseño](docs/design-reference.md) y [plan de trabajo](docs/PLAN.md).
 - [Licencias y avisos](THIRD_PARTY_NOTICES.md).
 
