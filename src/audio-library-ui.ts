@@ -8,8 +8,21 @@ import { action, icon, option } from "./views-common";
 
 type Category = "music" | "podcasts" | "books" | "playlists";
 type TagField = Exclude<keyof AudioTags, "embeddedCover">;
+type Column = "locator" | "id" | "title" | "artist" | "duration" | "version";
+interface Candidate { id: string; title: string; artist: string | null; album: string | null; duration: number | null; versionMatches: boolean }
+interface ImportedRow { entry: AudioPlaylistEntry; artist: string | null; duration: number | null; version: string | null; candidates: Candidate[] }
+type ImportPreview =
+  | { kind: "csv"; id: string; name: string; columns: string[]; sample: string[][]; count: number }
+  | { kind: "list"; name: string; rows: ImportedRow[] };
 const categories: Category[] = ["music", "podcasts", "books", "playlists"];
 const tagFields: TagField[] = ["title", "artist", "albumArtist", "album", "genre", "disc", "track"];
+const columns: Column[] = ["locator", "id", "title", "artist", "duration", "version"];
+const columnAliases: Record<Column, string[]> = {
+  locator: ["path", "filepath", "location", "url", "uri", "ruta"],
+  id: ["id", "trackid", "identifier", "identificador"], title: ["title", "trackname", "track", "título", "titulo"],
+  artist: ["artist", "artistname", "artista"], duration: ["duration", "durationms", "seconds", "duración", "duracion"],
+  version: ["version", "versión", "recording", "edición"],
+};
 const speeds = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 const PAGE_SIZE = 60;
 
@@ -68,6 +81,11 @@ export function createAudioLibrary(hooks: Hooks) {
   let request = 0;
   let lyricOpen = false;
   let lyrics: { id: string; lines: Lyric[] } | null = null;
+  let imported: ImportPreview | null = null;
+  let mapping: Partial<Record<Column, number>> = {};
+  let milliseconds = false;
+  let importPage = 0;
+  const resolutions = new Map<number, string>();
 
   const items = () => hooks.snapshot().library.filter(item => item.kind === "audio");
   const itemFor = (id: string) => hooks.snapshot().library.find(item => item.id === id && item.kind === "audio");
@@ -188,6 +206,7 @@ export function createAudioLibrary(hooks: Hooks) {
     const name = editing?.name ?? list?.name ?? "";
     return `<div class="audio-playlists"><div class="audio-filters"><label>${t("Lista guardada", "Saved playlist")}<select id="audio-active-list" ${disabled()}>${option("", t("Elige lista", "Choose playlist"), activeList)}${lists().map(item => option(item.id, item.name, activeList)).join("")}</select></label>
       ${action("audio-create-list", t("Nueva lista", "New playlist"), "add", "secondary", disabled())}
+      ${action("audio-import-list", t("Importar lista", "Import playlist"), "file", "secondary", disabled())}
       ${list && !editing ? action("audio-edit-list", t("Editar lista", "Edit playlist"), "settings", "quiet", disabled()) : ""}</div>
       ${editing ? `<form id="audio-playlist-form" class="audio-editor"><label>${t("Nombre de la lista", "Playlist name")}<input id="audio-playlist-name" value="${h(name)}" required maxlength="100" ${disabled()}></label></form>` : list ? `<h2>${h(list.name)}</h2>` : ""}
       ${entries.length ? `<ol class="audio-rows audio-list-entries">${entries.map((entry, index) => {
@@ -202,6 +221,40 @@ export function createAudioLibrary(hooks: Hooks) {
       ${editing ? `<div class="button-group"><button class="button primary" type="submit" form="audio-playlist-form" ${disabled()}>${t("Guardar lista", "Save playlist")}</button>
         ${action("audio-cancel-list", t("Cancelar", "Cancel"), undefined, "quiet", disabled())}
         ${editing.id ? action("audio-remove-list", t("Eliminar lista", "Delete playlist"), undefined, "quiet", disabled()) : ""}</div>` : ""}</div>`;
+  }
+
+  function importView(preview: ImportPreview) {
+    const header = `<div class="page-heading"><div><h2>${h(preview.name)}</h2><p>${t("Revisa el contenido antes de guardarlo como lista.", "Review the contents before saving as a playlist.")}</p></div>${action("audio-cancel-import", t("Cerrar importación", "Close import"), "close", "quiet", disabled())}</div>`;
+    if (preview.kind === "csv") {
+      const labels: Record<Column, string> = {
+        locator: t("Ruta o URL", "Path or URL"), id: t("Identificador", "Identifier"), title: tagName("title"),
+        artist: tagName("artist"), duration: t("Duración", "Duration"), version: t("Versión", "Version"),
+      };
+      return `<section class="audio-editor">${header}<p class="field-note">${preview.count} ${t("filas en el CSV", "CSV rows")}</p>
+        <div class="audio-table-wrap"><table class="audio-import-table"><thead><tr>${preview.columns.map((name, index) => `<th scope="col">${h(name || t("Columna ", "Column ") + (index + 1))}</th>`).join("")}</tr></thead>
+        <tbody>${preview.sample.map(row => `<tr>${preview.columns.map((_, index) => `<td>${h(row[index] ?? "")}</td>`).join("")}</tr>`).join("")}</tbody></table></div>
+        <form id="audio-csv-mapping" class="audio-import-map"><div class="audio-filters">${columns.map(field => `<label>${labels[field]}<select id="audio-csv-${field}" ${disabled()}>${option("", t("Sin asignar", "Unassigned"), String(mapping[field] ?? ""))}${preview.columns.map((name, index) => option(String(index), name || String(index + 1), String(mapping[field] ?? ""))).join("")}</select></label>`).join("")}</div>
+        <label class="audio-ms"><input type="checkbox" id="audio-csv-ms" ${milliseconds ? "checked" : ""} ${disabled()}> ${t("La duración numérica está en milisegundos", "Numeric duration is in milliseconds")}</label>
+        <button class="button primary" type="submit" ${busy || mapping.id === undefined && mapping.title === undefined && mapping.locator === undefined ? "disabled" : ""}>${t("Buscar coincidencias locales", "Find local matches")}</button></form></section>`;
+    }
+    const start = importPage * 40;
+    const unresolved = preview.rows.filter((row, index) => row.entry.kind !== "local" && !resolutions.has(index)).length;
+    return `<section class="audio-editor">${header}<p class="field-note">${preview.rows.length} ${t("entradas", "entries")} · ${unresolved} ${t("referencias remotas o ausentes", "remote or missing references")}</p>
+      <p class="field-note">${t("Elige una grabación para resolver una sugerencia. Las URLs quedan como referencias y no se descargan.", "Choose a recording to resolve a suggestion. URLs remain references and are never downloaded.")}</p>
+      <ol class="audio-rows audio-import-rows" start="${start + 1}">${preview.rows.slice(start, start + 40).map((row, offset) => {
+        const index = start + offset;
+        const original = resolutions.has(index) ? t("Copia local elegida", "Local copy chosen")
+          : row.entry.kind === "local" ? t("Archivo local", "Local file") : row.entry.kind === "remote" ? t("URL remota", "Remote URL") : t("Archivo ausente", "Missing file");
+        const metadata = [row.artist, row.version, row.duration === null ? "" : durationLabel(row.duration), original].filter(Boolean).join(" · ");
+        return `<li class="audio-playlist-entry"><span>${index + 1}</span><div><strong>${h(row.entry.title)}</strong><small>${h(metadata)}</small></div>
+          ${row.candidates.length ? `<label class="audio-match">${t("Coincidencia local", "Local match")}<select id="audio-import-match-${index}" data-audio-match="${index}" ${disabled()}>
+            ${option("", t("Conservar referencia original", "Keep original reference"), resolutions.get(index) ?? "")}
+            ${row.candidates.map(candidate => option(candidate.id, [candidate.title, candidate.artist, candidate.album, candidate.duration === null ? "" : durationLabel(candidate.duration), candidate.versionMatches ? t("Versión indicada", "Reported version") : ""].filter(Boolean).join(" · "), resolutions.get(index) ?? "")).join("")}</select></label>` : ""}</li>`;
+      }).join("")}</ol>
+      ${preview.rows.length > 40 ? `<div class="library-pagination"><span>${start + 1}–${Math.min(preview.rows.length, start + 40)} / ${preview.rows.length}</span>
+        ${action("audio-import-back", t("Anterior", "Previous"), undefined, "quiet", importPage ? disabled() : "disabled")}
+        ${action("audio-import-next", t("Siguiente", "Next"), undefined, "quiet", start + 40 < preview.rows.length ? disabled() : "disabled")}</div>` : ""}
+      ${action("audio-import-review", t("Preparar lista", "Prepare playlist"), "check", "primary", disabled())}</section>`;
   }
 
   function context() {
@@ -229,7 +282,7 @@ export function createAudioLibrary(hooks: Hooks) {
       <p>${t("Música, podcasts y audiolibros de tu biblioteca.", "Music, podcasts and audiobooks from your library.")}</p></div>
       ${action("audio-import-media", t("Importar audio", "Import audio"), "add", "secondary", disabled())}</div>
       <nav class="file-source-tabs" aria-label="${t("Tipo de audio", "Audio type")}">${categories.map(value => `<button type="button" data-action="audio-category" data-id="${value}" ${value === category ? 'aria-current="page"' : ""}>${categoryName(value)}</button>`).join("")}</nav>
-      <div class="audio-layout"><div class="audio-content">${category === "playlists" ? playlistView() : `${filters(byCategory)}
+      <div class="audio-layout"><div class="audio-content">${category === "playlists" ? imported ? importView(imported) : playlistView() : `${filters(byCategory)}
         ${currentBook ? action("audio-play", t("Continuar · ", "Continue · ") + audioTitle(currentBook), "play", "secondary", `data-id="${h(currentBook.id)}"`) : ""}
         ${selection()}${editTags()}${request ? `<p role="status" class="field-note">${t("Leyendo etiquetas locales…", "Reading local tags…")} ${action("audio-cancel-read", t("Cancelar", "Cancel"), undefined, "quiet")}</p>` : ""}
         ${results.length ? `<ol class="audio-rows">${results.slice(offset, offset + PAGE_SIZE).map(row).join("")}</ol>`
@@ -297,6 +350,35 @@ export function createAudioLibrary(hooks: Hooks) {
       case "audio-create-list":
         editing = { id: null, name: "", entries: category === "playlists" ? [] : [...selected].flatMap(id => { const item = itemFor(id); return item ? [localEntry(item)] : []; }) };
         category = "playlists"; hooks.render(); document.getElementById("audio-playlist-name")?.focus(); break;
+      case "audio-import-list": await run(async () => {
+        const preview = await hooks.command<ImportPreview | null>("audio_playlist_choose");
+        if (!preview) return;
+        imported = preview;
+        mapping = {};
+        resolutions.clear();
+        importPage = 0;
+        if (preview.kind === "csv") {
+          const labels = preview.columns.map(name => name.trim().toLocaleLowerCase().replace(/[ _-]/g, ""));
+          for (const field of columns) {
+            const index = labels.findIndex(value => columnAliases[field].includes(value));
+            if (index >= 0) mapping[field] = index;
+          }
+          milliseconds = mapping.duration !== undefined && labels[mapping.duration] === "durationms";
+        }
+      }); break;
+      case "audio-cancel-import": imported = null; resolutions.clear(); hooks.render(); break;
+      case "audio-import-back": importPage = Math.max(0, importPage - 1); hooks.render(); break;
+      case "audio-import-next": importPage++; hooks.render(); break;
+      case "audio-import-review": if (imported?.kind === "list") {
+        const preview = imported;
+        const entries = preview.rows.map((row, index) => {
+          const chosen = row.candidates.find(candidate => candidate.id === resolutions.get(index));
+          return chosen ? { kind: "local" as const, id: chosen.id, title: chosen.title } : row.entry;
+        });
+        editing = { id: null, name: preview.name, entries };
+        imported = null; resolutions.clear();
+        hooks.render(); document.getElementById("audio-playlist-name")?.focus();
+      } break;
       case "audio-edit-list": if (list) { editing = { id: list.id, name: list.name, entries: [...list.entries] }; hooks.render(); } break;
       case "audio-cancel-list": editing = null; hooks.render(); break;
       case "audio-remove-list": if (editing?.id) await run(async () => {
@@ -346,6 +428,7 @@ export function createAudioLibrary(hooks: Hooks) {
 
   function input(element: HTMLElement): boolean {
     if (element instanceof HTMLInputElement) {
+      if (element.id === "audio-csv-ms") { milliseconds = element.checked; return true; }
       if (element.id === "audio-query") { query = element.value; offset = 0; hooks.render(); return true; }
       if (element.id === "audio-playlist-name" && editing) { editing.name = element.value; return true; }
       if (element.dataset.action === "audio-select" && element.dataset.id) {
@@ -365,6 +448,16 @@ export function createAudioLibrary(hooks: Hooks) {
       }
     }
     if (!(element instanceof HTMLSelectElement)) return false;
+    const column = columns.find(field => element.id === `audio-csv-${field}`);
+    if (column) {
+      if (element.value === "") delete mapping[column]; else mapping[column] = Number(element.value);
+      hooks.render(); return true;
+    }
+    if (element.dataset.audioMatch !== undefined) {
+      const index = Number(element.dataset.audioMatch);
+      if (element.value) resolutions.set(index, element.value); else resolutions.delete(index);
+      hooks.render(); return true;
+    }
     switch (element.id) {
       case "audio-artist": artist = element.value; break;
       case "audio-album": album = element.value; break;
@@ -380,6 +473,13 @@ export function createAudioLibrary(hooks: Hooks) {
   }
 
   async function submit(form: HTMLFormElement): Promise<boolean> {
+    if (form.id === "audio-csv-mapping" && imported?.kind === "csv") {
+      const id = imported.id;
+      await run(async () => {
+        imported = await hooks.command<ImportPreview>("audio_playlist_map", { id, mapping: { ...mapping, milliseconds } });
+      });
+      return true;
+    }
     if (form.id === "audio-playlist-form" && editing) {
       if (form.reportValidity()) await run(async () => {
         const draft = editing;

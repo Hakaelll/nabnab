@@ -46,6 +46,21 @@
 .audio-playlist-entry { grid-template-columns: 24px minmax(0, 1fr) auto; }
 .audio-playlist-entry strong, .audio-playlist-entry small { display: block; overflow-wrap: anywhere; }
 .audio-playlists > .button-group { margin-top: 12px; }
+.audio-table-wrap { max-width: 100%; overflow: auto; }
+.audio-import-table { width: 100%; border-collapse: collapse; font-size: 12px; text-align: start; }
+.audio-import-table th, .audio-import-table td { padding: 8px; border-bottom: 1px solid var(--edge-quiet); text-align: start; }
+.audio-import-table td { color: var(--muted); }
+.audio-import-map { display: grid; gap: 12px; }
+.audio-import-map .audio-filters { margin: 0; }
+.audio-import-map > button { justify-self: start; }
+.audio-ms { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+.audio-match { display: grid; gap: 4px; color: var(--muted); max-width: min(100%, 250px); }
+.audio-match select { max-width: 100%; }
+.audio-import-rows .audio-playlist-entry:has(.audio-match) { grid-template-columns: 24px minmax(0, 1fr) minmax(140px, auto); }
+@media (max-width: 1080px) {
+  .audio-import-rows .audio-playlist-entry:has(.audio-match) { grid-template-columns: 24px minmax(0, 1fr); }
+  .audio-match { grid-column: 2; }
+}
 .has-audio-player .app-shell { grid-template-rows: minmax(0, 1fr) auto; }
 .has-audio-player .sidebar { grid-row: 1 / -1; }
 .audio-player { grid-column: 2; min-width: 0; z-index: 5; padding: 8px 20px; background: var(--secondary); border-top: 1px solid var(--border); }

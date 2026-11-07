@@ -53,7 +53,14 @@ const setup = `
     if(cmd==="local_timezone")return "Romance Standard Time";
     if(cmd==="library_playback"){const details=state.library.find(item=>item.id===args.id).details;details.playbackPosition=args.position;details.lastPlayedAt=Date.now();return;}
     if(cmd==="audio_tags_edit"){for(const item of state.library.filter(item=>args.ids.includes(item.id)))Object.assign(item.details.audio,args.patch);return;}
-    if(cmd==="audio_playlist_save"){const list={id:args.id??"fixture-playlist",name:args.name,entries:args.entries};state.audioPlaylists=[list];return copy(state.audioPlaylists);}
+    if(cmd==="audio_playlist_save"){const list={id:args.id??"fixture-playlist-"+state.audioPlaylists.length,name:args.name,entries:args.entries};state.audioPlaylists=state.audioPlaylists.filter(entry=>entry.id!==list.id).concat(list);return copy(state.audioPlaylists);}
+    if(cmd==="audio_playlist_choose")return {kind:"csv",id:"fixture-csv",name:"Lista exportada",columns:["Track name","Artist","Duration (ms)","Version"],sample:[["Versión buscada","Sonia","10000","En directo"]],count:2};
+    if(cmd==="audio_playlist_map")return {kind:"list",name:"Lista exportada",rows:[
+      {entry:{kind:"remote",url:"https://example.org/audio",title:"Versión buscada"},artist:"Sonia",duration:10,version:"En directo",candidates:[
+        {id:"first",title:"Primera pista",artist:"Sonia",album:"Sesiones",duration:10,versionMatches:false},
+        {id:"last",title:"Tercera pista",artist:"Sonia",album:"Sesiones",duration:10,versionMatches:true}]},
+      {entry:{kind:"missing",locator:"missing.mp3",title:"Ausente"},artist:null,duration:null,version:null,candidates:[]},
+    ]};
     if(cmd==="audio_lyrics")return [{time:1,text:"Una letra local"}];
     if(cmd==="audio_lyrics_choose")return [{time:2,text:"Letra elegida"}];
   }, {shouldMockEvents:true});
@@ -117,6 +124,24 @@ try {
   await page.getByRole("button", {name:"Guardar lista",exact:true}).click();
   await page.getByRole("heading", {name:"Para escuchar",exact:true}).waitFor();
   assert.deepEqual(await page.locator(".audio-list-entries strong").allTextContents(), ["Segunda pista", "Primera pista"]);
+  await page.getByRole("button", {name:"Importar lista",exact:true}).click();
+  await page.locator("#audio-csv-duration").selectOption("2");
+  await page.locator("#audio-csv-ms").check();
+  await page.getByRole("button", {name:"Buscar coincidencias locales",exact:true}).click();
+  await page.locator("#audio-import-match-0").waitFor();
+  assert.equal(await page.locator("#audio-import-match-0").inputValue(),"");
+  assert.equal(await page.locator("#audio-import-match-0 option").count(),3);
+  await page.locator("#audio-import-match-0").selectOption("last");
+  await page.setViewportSize({width:1180,height:780});
+  await page.screenshot({path:`${directory}/playlist-matching.png`});
+  await page.getByRole("button", {name:"Preparar lista",exact:true}).click();
+  await page.getByRole("button", {name:"Guardar lista",exact:true}).click();
+  await page.getByRole("heading", {name:"Lista exportada",exact:true}).waitFor();
+  const imported = await page.evaluate(() => window.audioFixture.state.audioPlaylists.find(list=>list.name==="Lista exportada"));
+  assert.deepEqual(imported.entries,[{kind:"local",id:"last",title:"Tercera pista"},{kind:"missing",locator:"missing.mp3",title:"Ausente"}]);
+  const mapping = await page.evaluate(() => window.audioFixture.calls.find(call=>call.cmd==="audio_playlist_map").args.mapping);
+  assert.equal(mapping.duration,2);
+  assert.equal(mapping.milliseconds,true);
 
   await category("podcasts").click();
   assert.deepEqual(await page.locator(".audio-track strong").allTextContents(), ["Episodio"]);

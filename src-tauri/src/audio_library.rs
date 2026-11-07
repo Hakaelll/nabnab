@@ -15,6 +15,8 @@ use std::{
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 
+pub(crate) mod playlist_import;
+
 const MAX_SELECTION: usize = 200;
 const MAX_PLAYLISTS: usize = 100;
 const MAX_ENTRIES: usize = 2000;

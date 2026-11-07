@@ -10,6 +10,10 @@ Selecciona pistas para crear una lista, añadirlas a una existente o editar sus 
 
 **Letras locales** lee el archivo LRC junto a la pista si está disponible. **Asociar archivo LRC** permite elegir otro archivo local. Cada línea permite saltar a su marca de tiempo.
 
+En **Listas → Importar lista** puedes abrir M3U, M3U8, PLS o CSV en UTF-8. En CSV, confirma las columnas y la unidad de duración. nabnab reconoce identificadores y rutas de archivos que ya están en Biblioteca. Las coincidencias por título, artista, duración o versión son sugerencias. Puedes escoger la grabación o conservar la referencia remota o ausente. La lista conserva el orden y las URLs importadas permanecen como referencias.
+
 La prueba de interfaz reproduce un WAV silencioso en Edge con almacenamiento de escritorio simulado. Comprueba el orden por disco y pista, la continuidad del reproductor, el descanso de audiolibros, las letras y la edición de listas y etiquetas. Las teclas físicas del sistema requieren una prueba en el WebView de escritorio.
 
 ![Biblioteca de audio y minirreproductor persistente con datos de prueba](audio-library-preview.png)
+
+![Revisión de una lista importada y elección de una grabación local](audio-playlist-matching.png)
