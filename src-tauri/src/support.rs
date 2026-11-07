@@ -99,8 +99,8 @@ pub async fn thumbnail(app: &AppHandle, state: &Arc<AppState>, id: &str) -> Resu
             .cloned()
             .ok_or("Library item not found.")?
     };
-    if item.kind == "audio" {
-        return Err("No video thumbnail is available for this audio file.".into());
+    if item.kind == "audio" && !item.details.audio.as_ref().is_some_and(|tags| tags.embedded_cover) {
+        return Err("This audio file has no indexed embedded cover.".into());
     }
     let input = library::authorized_path(&item.path)?;
     let root = cache_root(state)?;

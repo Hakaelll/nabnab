@@ -40,7 +40,7 @@ fn extension_kind(path: &Path) -> Option<&'static str> {
     match path.extension()?.to_str()?.to_ascii_lowercase().as_str() {
         "mp4" | "mkv" | "webm" | "avi" | "mov" | "m4v" | "mpeg" | "mpg" | "ts" | "mts" | "m2ts"
         | "3gp" | "ogv" | "mxf" => Some("video"),
-        "mp3" | "m4a" | "aac" | "opus" | "ogg" | "flac" | "wav" | "wma" | "aiff" | "aif"
+        "mp3" | "m4a" | "m4b" | "aac" | "opus" | "ogg" | "flac" | "wav" | "wma" | "aiff" | "aif"
         | "alac" => Some("audio"),
         "png" | "jpg" | "jpeg" | "webp" | "gif" | "bmp" | "tiff" | "tif" | "avif" | "heic"
         | "heif" => Some("image"),
@@ -149,6 +149,7 @@ pub fn index(
     };
     let id = format!("{:x}", Sha256::digest(path_key(&path).as_bytes()));
     let mut details = crate::library_features::LibraryDetails {
+        audio: info.filter(|_| kind == "audio").map(crate::audio_library::from_probe),
         chapters: info
             .map(crate::model::chapters_from_value)
             .unwrap_or_default(),

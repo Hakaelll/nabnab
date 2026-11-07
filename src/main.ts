@@ -12,6 +12,8 @@ import {createOcr} from "./ocr-ui";
 import {createDocumentEdits} from "./document-edits-ui";
 import {createFileSources} from "./file-sources-ui";
 import {createPersonalServers} from "./personal-servers-ui";
+import {createAudioPlayer} from "./audio-player";
+import {createAudioLibrary} from "./audio-library-ui";
 import {createAdvancedFilesController} from "./advanced-files-ui";
 import {createPalettes,palettesPanel} from "./palettes-ui";
 import {createMediaEdits,mediaEditsPanel} from "./media-edits-ui";
@@ -70,7 +72,7 @@ let localToolModule:"media"|"documents"|"pdfEdits"|"ocr"|"composition"|"palettes
 const tools: ToolsView = { kind: "convert", ids: new Set(), options: defaultToolOptions("convert"), picking: false };
 const preferences: SettingsView = { section: "general", engines: null, sessions: null, bridge: null, pairing: null, cache: null, working: false };
 const t: Copy = (spanish, english) => snapshot.settings.language === "es" ? spanish : english;
-let librarySection:'files'|'collections'|'sources'|'later'|'references'='files';
+let librarySection:'files'|'collections'|'sources'|'later'|'references'|'audio'='files';
 let quickPreset='';
 let toolSearch='';
 let quickRequest=0;
@@ -117,6 +119,16 @@ const platforms=createPlatformsController({command,snapshot:()=>snapshot,refresh
 const sources=createSourcesController({command,openPublicSource:url=>{platformModule="fileSources";navigate("platforms");void fileSources.open(url).catch(showError);},getSnapshot:()=>snapshot,refresh,notify,showError,t,render:renderCurrent});
 const batches=createBatchController({command,snapshot:()=>snapshot,refresh,notify,showError,t,render:renderCurrent,onFollowSource:url=>{librarySection='sources';sources.openAdd(url);navigate('library');}});
 const libraryFeatures=createLibraryFeatures({command,snapshot:()=>snapshot,refresh,notify,showError,t,render:()=>{renderCurrent();renderInspector(true);libraryFeatures.bind();},inspect:(id)=>{librarySection='files';library.detailId=id;navigate('library');}});
+const audioPlayer=createAudioPlayer({
+  item: id => snapshot.library.find(item => item.id === id && item.kind === "audio"),
+  command, render: renderCurrent, showError, t,
+  open: () => { librarySection = "audio"; navigate("library"); },
+});
+const audioLibrary=createAudioLibrary({
+  snapshot: () => snapshot, command, refresh, render: renderCurrent, notify, showError, t, player: audioPlayer,
+  inspect: id => { librarySection = "files"; library.detailId = id; navigate("library"); },
+  importMedia: () => { void importMedia(false).catch(showError); },
+});
 const organization=createOrganizationController({command,snapshot:()=>snapshot,refresh,render:renderCurrent,t});
 
 function required<T extends HTMLElement = HTMLElement>(selector: string): T {
@@ -154,7 +166,7 @@ required("#app").innerHTML = `<canvas id="field" aria-hidden="true"></canvas><he
   <button id="maximize" aria-label="Maximizar" title="Maximizar"><svg class="maximize-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="3.5" width="9" height="9" rx=".5"/></svg><svg class="restore-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 5.5v-2h7v7h-2"/><rect x="3.5" y="5.5" width="7" height="7" rx=".5"/></svg></button>
   <button id="close" aria-label="Cerrar" title="Cerrar"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg></button>
   </div></header><div class="app-shell"><nav class="sidebar" aria-label="Navegación principal"><button id="toggle-sidebar" class="sidebar-toggle icon-button" data-action="toggle-sidebar" title="Contraer navegación" aria-label="Contraer navegación">${icon("menu")}</button><div class="nav-primary"></div><div class="nav-secondary"></div></nav>
-  <main id="main"><div id="notification" class="notification" hidden><span id="notification-icon"></span><div><span id="notification-text"></span><details id="notification-details" hidden><summary>Detalles técnicos</summary><pre></pre></details></div><button class="icon-button" data-action="dismiss-message" aria-label="Cerrar aviso">${icon("close")}</button></div><section id="home-page" class="home-page"><div id="home-content"></div></section><div class="content-layout"><section id="page-content" class="page-content" hidden></section><aside id="inspector" class="inspector" aria-label="Detalles" hidden></aside></div><button id="activity" class="activity" data-action="show-activity" hidden><span class="activity-dot"></span><span id="activity-text"></span>${icon("arrow")}</button></main></div><aside id="capture-indicator" class="capture-indicator" hidden aria-label="Controles de captura"><span class="capture-status-dot" aria-hidden="true"></span><div class="capture-status-copy"><strong id="capture-status-label" aria-live="polite"></strong><small id="capture-status-source"></small></div><time id="capture-status-time"></time><span id="capture-shortcut-label"></span><button class="button quiet" data-action="screen-capture-open">Captura</button><button class="button secondary" data-action="screen-capture-save-replay" hidden>Guardar</button><button class="button primary" data-action="screen-capture-stop">Detener</button></aside><dialog id="detail-dialog" class="detail-dialog" aria-label="Detalles"></dialog><div id="drop-indicator" class="drop-indicator" hidden>${icon("add")}<span></span></div>`;
+  <main id="main"><div id="notification" class="notification" hidden><span id="notification-icon"></span><div><span id="notification-text"></span><details id="notification-details" hidden><summary>Detalles técnicos</summary><pre></pre></details></div><button class="icon-button" data-action="dismiss-message" aria-label="Cerrar aviso">${icon("close")}</button></div><section id="home-page" class="home-page"><div id="home-content"></div></section><div class="content-layout"><section id="page-content" class="page-content" hidden></section><aside id="inspector" class="inspector" aria-label="Detalles" hidden></aside></div><button id="activity" class="activity" data-action="show-activity" hidden><span class="activity-dot"></span><span id="activity-text"></span>${icon("arrow")}</button></main><section class="audio-player" id="audio-player" hidden><audio id="audio-engine" preload="metadata"></audio><div id="audio-transport"></div></section></div><aside id="capture-indicator" class="capture-indicator" hidden aria-label="Controles de captura"><span class="capture-status-dot" aria-hidden="true"></span><div class="capture-status-copy"><strong id="capture-status-label" aria-live="polite"></strong><small id="capture-status-source"></small></div><time id="capture-status-time"></time><span id="capture-shortcut-label"></span><button class="button quiet" data-action="screen-capture-open">Captura</button><button class="button secondary" data-action="screen-capture-save-replay" hidden>Guardar</button><button class="button primary" data-action="screen-capture-stop">Detener</button></aside><dialog id="detail-dialog" class="detail-dialog" aria-label="Detalles"></dialog><div id="drop-indicator" class="drop-indicator" hidden>${icon("add")}<span></span></div>`;
 const inspectorBody = document.createElement("div");
 inspectorBody.className = "inspector-body";
 const palette=createPalette({snapshot:()=>snapshot,t,showError,search:desktop?async query=>(await command<import("./library-types").SearchHit[]>("library_search",{query,collection:null,smartId:null})).filter(hit=>hit.kind==="article"||hit.kind==="ocr").map((hit,index)=>({id:`content:${hit.fileId}:${index}`,kind:hit.kind==="article"?t("Artículo","Article"):"OCR",label:hit.title,context:hit.excerpt,run:()=>openContentHit(hit,query)})):undefined,
@@ -203,7 +215,7 @@ function showError(error: unknown): void {
 function preserveFocus(render: () => void): void {
   const active = document.activeElement;
   const id = active instanceof HTMLElement ? active.id : "";
-  const focusKeys = ["selectJob", "selectMedia", "action", "id", "page", "filter", "kind", "layout", "section", "site", "sourceUrl", "toolInput"];
+  const focusKeys = ["index", "field", "selectJob", "selectMedia", "action", "id", "page", "filter", "kind", "layout", "section", "site", "sourceUrl", "toolInput"];
   const attributes = active instanceof HTMLElement ? Object.entries(active.dataset).filter(([key]) => focusKeys.includes(key)) : [];
   const wasInInspector = active instanceof HTMLElement && inspectorBody.contains(active);
   const selection = active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement ? [active.selectionStart, active.selectionEnd] : null;
@@ -306,8 +318,8 @@ function renderCurrent(): void {
     if(page==='platforms'&&platformModule!=='catalog')required('#page-content').insertAdjacentHTML('afterbegin',`<button type="button" class="button quiet" data-action="platform-back">${t('← Plataformas','← Platforms')}</button>`);
     if(page==='library'){
       const container=required('#page-content');
-      const navigation=`<nav class="library-navigation filter-tabs" aria-label="${t('Vistas de Biblioteca','Library views')}">${[['files',t('Archivos','Files')],['collections',t('Colecciones','Collections')],['sources',t('Fuentes','Sources')],['later',t('Para después','For later')],['references',t('Referencias','References')]].map(([section,label])=>`<button data-action="library-section" data-section="${section}" aria-current="${librarySection===section?'page':'false'}">${label}</button>`).join('')}</nav>`;
-      if(librarySection!=='files')container.innerHTML=librarySection==='sources'?sources.render():librarySection==='later'?batches.renderLater():librarySection==='references'?personalServers.renderReferences():libraryFeatures.collectionsView();
+      const navigation=`<nav class="library-navigation filter-tabs" aria-label="${t('Vistas de Biblioteca','Library views')}">${[['files',t('Archivos','Files')],['audio',t('Audio','Audio')],['collections',t('Colecciones','Collections')],['sources',t('Fuentes','Sources')],['later',t('Para después','For later')],['references',t('Referencias','References')]].map(([section,label])=>`<button data-action="library-section" data-section="${section}" aria-current="${librarySection===section?'page':'false'}">${label}</button>`).join('')}</nav>`;
+      if(librarySection!=='files')container.innerHTML=librarySection==='sources'?sources.render():librarySection==='later'?batches.renderLater():librarySection==='references'?personalServers.renderReferences():librarySection==='audio'?audioLibrary.render():libraryFeatures.collectionsView();
       container.insertAdjacentHTML('afterbegin',navigation);
     }
     if(page==='settings'&&(preferences.section==='formats'||preferences.section==='organization'))required('.settings-content').innerHTML=`<h2 id="settings-title">${preferences.section==='formats'?t('Ajustes reutilizables','Reusable presets'):t('Organización','Organization')}</h2>${preferences.section==='formats'?batches.renderPresets():organization.render()}`;
@@ -548,12 +560,13 @@ async function handleAction(action: string, button: HTMLButtonElement): Promise<
   if(await automation.click(action,button)||await screenCapture.click(action,button)||await voice.click(action,button))return;
   if(await imageAssets.click(action,button)||await fileOrganization.click(action,button)||await portable.click(action,button))return;
   if(await articles.click(action,button)||await ocr.click(action,button)||await documentEdits.click(action))return;
+  if(audioPlayer.click(action)||await audioLibrary.click(action,button))return;
   if(await personalServers.handleClick(action,button)||await fileSources.handleClick(action,button))return;
   if(await palettes.click(action)||await advancedFiles.handleClick(action)||await mediaEdits.click(action,button)||await sourceExports.handleClick(action)||await galleryExports.click(action)||await documents.click(action,button)||await telegram.handleClick(action)||await courses.handleClick(action,button)||await transcriptionManager.click(action,button)||await torrents.handleClick(action)||await platforms.handleClick(action,button)||await batches.handleClick(action,button)||await sources.handleClick(action,button)||await organization.handleClick(action,button)||await libraryFeatures.handleClick(button))return;
   switch(action){
     case 'open-library-collection':librarySection='files';library.collection=button.dataset.collection??'';library.offset=0;renderCurrent();break;
     case 'job-next':case 'job-up':case 'job-down':{const job=snapshot.jobs.find(j=>j.id===id);if(job)applySnapshot(await command<Snapshot>('configure_jobs',{ids:[id],priority:job.priority??'normal',schedule:job.schedule??{kind:'immediate'},orderAction:action.slice(4)}));break;}
-    case 'library-section':{const section=button.dataset.section;if(section==='files'||section==='collections'||section==='sources'||section==='later'||section==='references'){librarySection=section;renderCurrent();if(section==='references')await personalServers.load();}break;}
+    case 'library-section':{const section=button.dataset.section;if(section==='files'||section==='collections'||section==='sources'||section==='later'||section==='references'||section==='audio'){librarySection=section;renderCurrent();if(section==='references')await personalServers.load();}break;}
     case 'prepare-single':await batches.prepare(home.input,quickPreset||null);break;
     case 'save-single-later':await batches.prepare(home.input,quickPreset||null,true);break;
     case 'toggle-sidebar':{const settings={...snapshot.settings,sidebarExpanded:!snapshot.settings.sidebarExpanded};if(desktop)await saveSettings(settings);else{snapshot.settings=settings;renderCurrent();}break;}
@@ -609,7 +622,7 @@ async function handleAction(action: string, button: HTMLButtonElement): Promise<
   }
 }
 document.addEventListener('input',event=>{
-  if(event.target instanceof HTMLElement&&(automation.change(event.target)||screenCapture.change(event.target)||voice.change(event.target)||imageAssets.input(event.target)||fileOrganization.input(event.target)||(event.target.id==='portable-query'&&portable.change(event.target))||personalServers.handleInput(event.target)||fileSources.handleInput(event.target)||advancedFiles.handleInput(event.target)||sourceExports.handleInput(event.target)||live.input(event.target)||telegram.handleInput(event.target)||courses.handleInput(event.target)||torrents.handleInput(event.target)||platforms.handleInput(event.target)||batches.handleInput(event.target)||sources.handleInput(event.target)||libraryFeatures.handleInput(event.target)))return;
+  if(event.target instanceof HTMLElement&&(automation.change(event.target)||screenCapture.change(event.target)||voice.change(event.target)||imageAssets.input(event.target)||fileOrganization.input(event.target)||(event.target.id==='portable-query'&&portable.change(event.target))||audioPlayer.input(event.target)||audioLibrary.input(event.target)||personalServers.handleInput(event.target)||fileSources.handleInput(event.target)||advancedFiles.handleInput(event.target)||sourceExports.handleInput(event.target)||live.input(event.target)||telegram.handleInput(event.target)||courses.handleInput(event.target)||torrents.handleInput(event.target)||platforms.handleInput(event.target)||batches.handleInput(event.target)||sources.handleInput(event.target)||libraryFeatures.handleInput(event.target)))return;
   const target=event.target;if(!(target instanceof HTMLInputElement||target instanceof HTMLTextAreaElement))return;
   if(target.id==='url')updateSourceInput(target.value,false);
   else if(target.id==='job-search'){downloads.query=target.value;renderCurrent();}
@@ -623,7 +636,7 @@ document.addEventListener('change',event=>{
   if(target instanceof HTMLSelectElement&&target.id==='library-content-filter'){const value=target.value||'all';if(isLibraryFilter(value)){library.filter=value;library.offset=0;renderCurrent();}return;}
   if(target instanceof HTMLElement&&(automation.change(target)||screenCapture.change(target)||voice.change(target)||imageAssets.change(target)||portable.change(target)||documentEdits.change(target)))return;
   if(target instanceof HTMLElement){if((target instanceof HTMLInputElement||target instanceof HTMLSelectElement)&&(palettes.change(target)||mediaEdits.change(target)||captionEditor.change(target)||documents.change(target)))return;
-  if(personalServers.handleInput(target)||fileSources.handleInput(target)||advancedFiles.handleInput(target)||sourceExports.handleInput(target)||telegram.handleInput(target)||live.input(target)||courses.handleInput(target)||torrents.handleInput(target)||platforms.handleInput(target)||sources.handleInput(target)||libraryFeatures.handleChange(target))return;void batches.handleChange(target).catch(showError);}
+  if(audioPlayer.input(target)||audioLibrary.input(target)||personalServers.handleInput(target)||fileSources.handleInput(target)||advancedFiles.handleInput(target)||sourceExports.handleInput(target)||telegram.handleInput(target)||live.input(target)||courses.handleInput(target)||torrents.handleInput(target)||platforms.handleInput(target)||sources.handleInput(target)||libraryFeatures.handleChange(target))return;void batches.handleChange(target).catch(showError);}
   if(target instanceof HTMLSelectElement&&target.id==='job-schedule-kind'){for(const field of target.closest('form')?.querySelectorAll<HTMLElement>('[data-schedule-fields]')??[])field.hidden=field.dataset.scheduleFields!==target.value;return;}
   if(target instanceof HTMLInputElement){
     const job=target.dataset.selectJob;const media=target.dataset.selectMedia;const tool=target.dataset.toolInput;const url=target.dataset.sourceUrl;
@@ -650,6 +663,7 @@ async function submitForm(form: HTMLFormElement): Promise<void> {
   if(await automation.submit(form)||await screenCapture.submit(form)||await voice.submit(form))return;
   if(await imageAssets.submit(form)||await fileOrganization.submit(form)||await portable.submit(form))return;
   if(await articles.submit(form)||await ocr.submit(form)||await documentEdits.submit(form))return;
+  if(await audioLibrary.submit(form))return;
   if(await personalServers.handleSubmit(form)||await fileSources.handleSubmit(form))return;
   if(await sources.handleSubmit(form)||await organization.handleSubmit(form)||await libraryFeatures.handleSubmit(form))return;
   if(await palettes.submit(form)||await advancedFiles.handleSubmit(form)||await mediaEdits.submit(form)||await captionEditor.submit(form)||await sourceExports.handleSubmit(form)||await documents.submit(form)||await live.submit(form)||await telegram.handleSubmit(form)||await courses.handleSubmit(form)||await torrents.handleSubmit(form)||await platforms.handleSubmit(form))return;
@@ -691,6 +705,7 @@ document.addEventListener('dragover',event=>{event.preventDefault();required('#d
 document.addEventListener('dragleave',event=>{if(event.relatedTarget===null)required('#drop-indicator').hidden=true;});
 document.addEventListener('drop',event=>{event.preventDefault();required('#drop-indicator').hidden=true;void(async()=>{const file=event.dataTransfer?.files[0];if(file){if(file.name.toLowerCase().endsWith('.txt')){if(file.size>1024*1024)throw new Error(t("El archivo de enlaces supera el límite de 1 MB.", "The links file exceeds the 1 MB limit."));navigate('home');updateSourceInput(await file.text());}else notify(t("Arrastra archivos desde el explorador a la aplicación de escritorio.", "Drop files from Explorer into the desktop application."));return;}const value=event.dataTransfer?.getData('text/uri-list')||event.dataTransfer?.getData('text/plain');if(value){navigate('home');updateSourceInput(value);}})().catch(showError);});
 
+audioPlayer.mount();
 renderCurrent();
 if(desktop){
   const nativeWindow=getCurrentWindow();
@@ -716,4 +731,4 @@ if(desktop){
   }catch(error){showError(error);}
 }else{for(const button of document.querySelectorAll<HTMLButtonElement>('.window-actions button'))button.disabled=true;}
 required<HTMLTextAreaElement>('#url').focus({preventScroll:true});
-window.addEventListener('beforeunload',()=>{voice.dispose();disposeGraphics?.();clearTimeout(debounce);clearTimeout(pendingRender);});
+window.addEventListener('beforeunload',()=>{audioPlayer.persist();voice.dispose();disposeGraphics?.();clearTimeout(debounce);clearTimeout(pendingRender);});

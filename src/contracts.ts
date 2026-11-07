@@ -61,7 +61,7 @@ export interface LibraryItem {
   container: string | null; addedAt: number; source: string | null; parentId: string | null; collections: string[]; tags: string[]; missing?: boolean;
   details?: import('./library-types').LibraryDetails;
 }
-export interface Snapshot { settings: Settings; jobs: Job[]; library: LibraryItem[]; collections: string[]; presets?: import('./options').Preset[]; rules?: import('./options').Rule[]; drafts?:import('./batch-types').Draft[]; sources?:import('./source-types').FollowedSource[]; smartCollections?:import('./library-types').SmartCollection[];courses?:import("./courses-ui").Course[] }
+export interface Snapshot { settings: Settings; jobs: Job[]; library: LibraryItem[]; collections: string[]; presets?: import('./options').Preset[]; rules?: import('./options').Rule[]; drafts?:import('./batch-types').Draft[]; sources?:import('./source-types').FollowedSource[]; smartCollections?:import('./library-types').SmartCollection[];courses?:import("./courses-ui").Course[]; audioPlaylists?:import("./library-types").AudioPlaylist[] }
 export interface Startup extends Snapshot { folder: string; enginesReady: boolean; engineError: string | null }
 export interface Capabilities { video: boolean; audio: boolean; images: boolean; batches: boolean; subtitles: boolean; verified: boolean }
 export interface MediaEntry { id: string; title: string; url: string; thumbnail: string | null; duration: number | null }

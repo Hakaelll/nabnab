@@ -23,6 +23,9 @@ pub struct LibraryDetails {
     pub source_published_at: Option<String>,
     pub source_checksum: Option<String>,
     pub audiobook: Option<crate::public_sources::AudiobookChapter>,
+    pub audio: Option<crate::audio_library::Tags>,
+    pub lyrics: Option<Vec<crate::audio_library::Lyric>>,
+    pub last_played_at: Option<u64>,
     pub web_archive_ref: Option<String>,
     pub article_annotations: Vec<crate::web_archive::Annotation>,
     pub ocr_ref: Option<String>,
@@ -393,6 +396,9 @@ pub fn library_playback(
     }
     edit_item(&state, &id, |item| {
         item.details.playback_position = position.min(item.duration.unwrap_or(position));
+        if item.kind == "audio" && position > 0.0 {
+            item.details.last_played_at = Some(crate::queue::now());
+        }
         Ok(())
     })
 }

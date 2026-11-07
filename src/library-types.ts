@@ -8,6 +8,16 @@ export interface ClipReference { requestedStart: number; requestedEnd: number; a
 export interface NarrationReference { planRef: string | null; textHash: string; sourceVersion: string; voiceName: string; language: string; engineFingerprint: string }
 export interface RecordingReference { captureRef: string | null; sourceLabel: string; kind: string; durationMs: number; interrupted: boolean; reason: string | null }
 export interface AudiobookChapter { bookId: string; bookTitle: string; chapter: number; reader: string | null; language: string | null }
+export interface AudioTags {
+  title: string | null; artist: string | null; albumArtist: string | null; album: string | null;
+  genre: string | null; disc: number | null; track: number | null; embeddedCover: boolean;
+}
+export type AudioPlaylistEntry =
+  | { kind: "local"; id: string; title: string }
+  | { kind: "remote"; url: string; title: string }
+  | { kind: "missing"; locator: string; title: string };
+export interface AudioPlaylist { id: string; name: string; entries: AudioPlaylistEntry[] }
+export interface Lyric { time: number; text: string }
 export interface LibraryDetails {
   contentId: string | null; creator: string | null; platform: string | null; sourceIds: string[];sourceUrl?:string|null;license?:string|null;attribution?:string|null;webArchiveRef?:string|null;articleAnnotations?:import("./articles-ui").ArticleAnnotation[];ocrRef?:string|null;
   chapters: Chapter[]; tracks: LocalTrack[]; playbackPosition: number; favorite: boolean;
@@ -15,6 +25,7 @@ export interface LibraryDetails {
   narration?: NarrationReference | null; recording?: RecordingReference | null;
   sourceVersion?: string | null; sourcePublishedAt?: string | null; sourceChecksum?: string | null;
   audiobook?: AudiobookChapter | null;
+  audio?: AudioTags | null; lyrics?: Lyric[] | null; lastPlayedAt?: number | null;
 }
 export type SmartCondition =
   | { kind: "kind" | "source" | "platform" | "tag" | "subtitleLanguage"; value: string }

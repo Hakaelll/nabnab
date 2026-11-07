@@ -132,7 +132,7 @@ pub fn serve(app: &AppHandle, request: Request<Vec<u8>>) -> Response<Vec<u8>> {
         "webm" => "video/webm",
         "mov" => "video/quicktime",
         "mp3" => "audio/mpeg",
-        "m4a" | "aac" => "audio/mp4",
+        "m4a" | "m4b" | "aac" => "audio/mp4",
         "opus" | "ogg" => "audio/ogg",
         "wav" => "audio/wav",
         "flac" => "audio/flac",

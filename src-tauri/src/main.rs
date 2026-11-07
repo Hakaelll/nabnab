@@ -53,6 +53,7 @@ mod federated;
 mod federated_auth;
 mod library;
 mod library_features;
+mod audio_library;
 mod local_media;
 mod media;
 mod model;
@@ -126,6 +127,7 @@ struct Snapshot {
     sources: Vec<sources::FollowedSource>,
     smart_collections: Vec<library_features::SmartCollection>,
     courses: Vec<courses::Course>,
+    audio_playlists: Vec<audio_library::Playlist>,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -158,6 +160,7 @@ fn snapshot(state: &AppState) -> Result<Snapshot, String> {
         sources: repo.data.sources.clone(),
         smart_collections: repo.data.smart_collections.clone(),
         courses: repo.data.courses.clone(),
+        audio_playlists: repo.data.audio_playlists.clone(),
     })
 }
 fn config_root(state: &AppState) -> Result<PathBuf, String> {
@@ -722,7 +725,7 @@ async fn pick_paths(app: AppHandle, folders: bool) -> Result<Vec<PathBuf>, Strin
                 .add_filter(
                     "Multimedia",
                     &[
-                        "mp4", "mkv", "webm", "mov", "avi", "m4v", "mp3", "m4a", "aac", "opus",
+                        "mp4", "mkv", "webm", "mov", "avi", "m4v", "mp3", "m4a", "m4b", "aac", "opus",
                         "ogg", "wav", "flac", "jpg", "jpeg", "png", "webp", "gif", "bmp",
                     ],
                 )
@@ -779,7 +782,11 @@ async fn import_selected(
                             metadata.collections = item.collections.clone();
                             metadata.tags = item.tags.clone();
                             let chapters = metadata.details.chapters.clone();
+                            let audio = metadata.details.audio.take();
                             metadata.details = item.details.clone();
+                            if metadata.details.audio.is_none() {
+                                metadata.details.audio = audio;
+                            }
                             if metadata.details.chapters.is_empty() {
                                 metadata.details.chapters = chapters;
                             }
@@ -1255,6 +1262,9 @@ fn main() {
             sources::remove_source,
             library_features::library_search,
             library_features::library_playback,
+            audio_library::audio_tags_edit, audio_library::audio_tags_read,
+            audio_library::audio_playlist_save, audio_library::audio_playlist_remove,
+            audio_library::audio_lyrics, audio_library::audio_lyrics_choose,
             library_features::library_favorite,
             library_features::library_bookmark,
             library_features::smart_collection_save,
