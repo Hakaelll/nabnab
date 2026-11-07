@@ -57,6 +57,7 @@ mod audio_library;
 mod stickers;
 mod upscale;
 mod background;
+mod stems;
 mod personal_archive;
 mod delimited;
 mod local_media;
@@ -109,6 +110,7 @@ pub(crate) struct AppState {
     sticker_preview: stickers::commands::PreviewState,
     upscale: upscale::commands::UpscaleState,
     background: background::commands::BackgroundState,
+    stems: stems::commands::StemsState,
     personal_archive: personal_archive::ArchiveState,
     repository: Mutex<Option<store::Repository>>,
     runtime: queue::Runtime,
@@ -1172,6 +1174,14 @@ pub(crate) fn publish(staging: &Path, file: &str, destination: &Path) -> Result<
     Ok(target)
 }
 fn main() {
+    #[cfg(windows)]
+    if std::env::args_os().nth(1).is_some_and(|argument| argument == "--internal-stems") {
+        if let Err(error) = stems::worker::run(&std::env::args_os().skip(2).collect::<Vec<_>>()) {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+        return;
+    }
     let mut arguments = std::env::args_os().skip(1);
     if arguments.next().is_some_and(|argument| argument == "--internal-background-mask") {
         if let Err(error) = background::worker::run(&arguments.collect::<Vec<_>>()) {
@@ -1202,6 +1212,7 @@ fn main() {
             stickers::commands::sticker_preview, stickers::commands::queue_sticker,
             upscale::commands::upscale_preview, upscale::commands::queue_upscale,
             background::commands::background_preview, background::commands::queue_background,
+            stems::commands::stems_preview, stems::commands::stems_sample, stems::commands::stems_release, stems::commands::queue_stems,
             file_operations::file_analysis,file_operations::queue_file_analysis,file_operations::file_rename_preview,file_operations::queue_file_rename,file_operations::file_rename_history,file_operations::queue_file_undo,file_operations::file_organize_review,file_operations::cancel_file_operation,
             file_operations::portable_preview_export,file_operations::queue_portable_export,file_operations::portable_choose_import,file_operations::portable_preview_import,file_operations::queue_portable_import,file_operations::cancel_portable_preview,
             document_operations::document_edit_info,document_operations::document_edit_preview,document_operations::cancel_document_edit_preview,document_operations::queue_document_edit,

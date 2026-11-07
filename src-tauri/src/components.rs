@@ -91,6 +91,7 @@ pub fn optional_components(app: AppHandle) -> Result<Vec<Component>, String> {
     entries.push(Component{id:"capture",name:"Captura local · Pantalla y repetición",version:"FFmpeg / WASAPI",size:0,installed_size:None,license:"FFmpeg LGPL; WASAPI binding MIT",source:"https://ffmpeg.org/ffmpeg-devices.html#gdigrab",installed:crate::dependencies::engine_root(&app).is_ok(),enabled:root.join("capture.enabled").is_file(),available:cfg!(windows),note:Some("Utiliza el FFmpeg existente y las APIs de Windows. Activar el componente no inicia capturas. Pantalla, audio y micrófono requieren selección explícita en la herramienta.")});
     entries.push(crate::upscale::component::status(&root));
     entries.push(crate::background::component::status(&root));
+    entries.push(crate::stems::component::status(&root));
     Ok(entries)
 }
 #[tauri::command]
@@ -102,6 +103,10 @@ pub async fn install_component(app: AppHandle, state: tauri::State<'_, Arc<crate
     if id == crate::background::component::ID {
         let _access = state.background.component_access()?;
         return crate::background::component::install(&app).await;
+    }
+    if id == crate::stems::component::ID {
+        let _access = state.stems.component_access()?;
+        return crate::stems::component::install(&app).await;
     }
     let id=if id=="files"{"torrent".to_owned()}else{id};
     if id=="ocr" {return crate::ocr_component::install(&app).await;}
@@ -147,7 +152,7 @@ pub async fn install_component(app: AppHandle, state: tauri::State<'_, Arc<crate
 }
 #[tauri::command]
 pub fn enable_component(app: AppHandle, state:tauri::State<Arc<crate::AppState>>, id: String, enabled: bool) -> Result<(), String> {
-    if !matches!(id.as_str(), "gallery" | "torrent" | "files" | "transcription" | "documents" | "telegram" | "ocr" | "voice" | "capture" | "upscale" | "background") {
+    if !matches!(id.as_str(), "gallery" | "torrent" | "files" | "transcription" | "documents" | "telegram" | "ocr" | "voice" | "capture" | "upscale" | "background" | "stems") {
         return Err("Unknown component.".into());
     }
     if id=="torrent"&&enabled {return Err("Activate BitTorrent from its selector after reviewing the P2P notice.".into());}
@@ -155,6 +160,7 @@ pub fn enable_component(app: AppHandle, state:tauri::State<Arc<crate::AppState>>
     if id=="capture"&&enabled {crate::dependencies::engine_root(&app)?;}
     let _upscale = if id == "upscale" { Some(state.upscale.component_access()?) } else { None };
     let _background = if id == "background" { Some(state.background.component_access()?) } else { None };
+    let _stems = if id == "stems" { Some(state.stems.component_access()?) } else { None };
     if !enabled {idle(&state,&id)?;}
     if id=="telegram"&&!enabled {crate::telegram::shutdown();}
     let root = root(&app)?;
@@ -163,6 +169,9 @@ pub fn enable_component(app: AppHandle, state:tauri::State<Arc<crate::AppState>>
     }
     if id == "background" && enabled && !crate::background::component::status(&root).installed {
         return Err("Install the U²-Net model before enabling it.".into());
+    }
+    if id == "stems" && enabled && !crate::stems::component::status(&root).installed {
+        return Err("Install Spleeter before enabling it.".into());
     }
     fs::create_dir_all(&root).map_err(|e| e.to_string())?;
     let path = root.join(format!("{id}.enabled"));
@@ -183,11 +192,12 @@ fn idle(state:&crate::AppState,id:&str)->Result<(),String>{
 
 #[tauri::command]
 pub async fn remove_component(app:AppHandle,state:tauri::State<'_,Arc<crate::AppState>>,id:String)->Result<bool,String>{
-    if !matches!(id.as_str(),"gallery"|"files"|"torrent"|"transcription"|"documents"|"telegram"|"ocr"|"upscale"|"background"){return Err("This component cannot be removed by the package manager.".into());}
+    if !matches!(id.as_str(),"gallery"|"files"|"torrent"|"transcription"|"documents"|"telegram"|"ocr"|"upscale"|"background"|"stems"){return Err("This component cannot be removed by the package manager.".into());}
     idle(&state,&id)?;
     let message = match id.as_str() {
         "upscale" => "Remove Real-ESRGAN and its installed model files? Your images and results will be kept.",
         "background" => "Remove the U²-Net model? Your images and results will be kept.",
+        "stems" => "Remove Spleeter and its models? Your audio files and separated tracks will be kept.",
         _ => "Remove this optional engine? Downloaded files, models and account sessions will be kept.",
     };
     let dialog=app.clone();let approved=tauri::async_runtime::spawn_blocking(move||dialog.dialog().message(message).title("nabnab · Remove component").buttons(MessageDialogButtons::OkCancel).blocking_show()).await.map_err(|_|"The component confirmation could not be shown.")?;
@@ -195,7 +205,9 @@ pub async fn remove_component(app:AppHandle,state:tauri::State<'_,Arc<crate::App
     let root=root(&app)?;
     let _upscale = if id == "upscale" { Some(state.upscale.component_access()?) } else { None };
     let _background = if id == "background" { Some(state.background.component_access()?) } else { None };
-    if id=="gallery"{let file=root.join("gallery-dl.exe");if file.exists(){let file=crate::library::authorized_path(&file)?;fs::remove_file(file).map_err(|e|e.to_string())?;}}else if id=="ocr"{crate::ocr_component::remove(&root)?;}else if id=="upscale"{crate::upscale::component::remove(&root)?;}else if id=="background"{crate::background::component::remove(&root)?;}else{crate::component_archives::remove(&root,if id=="files"{"torrent"}else{&id})?;}
+    let _stems = if id == "stems" { Some(state.stems.component_access()?) } else { None };
+    if id == "stems" { crate::stems::component::remove(&root)?; }
+    if id=="gallery"{let file=root.join("gallery-dl.exe");if file.exists(){let file=crate::library::authorized_path(&file)?;fs::remove_file(file).map_err(|e|e.to_string())?;}}else if id=="ocr"{crate::ocr_component::remove(&root)?;}else if id=="upscale"{crate::upscale::component::remove(&root)?;}else if id=="background"{crate::background::component::remove(&root)?;}else if id!="stems"{crate::component_archives::remove(&root,if id=="files"{"torrent"}else{&id})?;}
     for marker in [format!("{id}.enabled"),if id=="files"{"torrent.enabled".into()}else{format!("{id}.enabled")}] {let path=root.join(marker);if path.exists(){fs::remove_file(path).map_err(|e|e.to_string())?;}}
     Ok(true)
 }

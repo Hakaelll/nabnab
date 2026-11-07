@@ -24,6 +24,8 @@ pub struct LibraryDetails {
     pub source_checksum: Option<String>,
     pub audiobook: Option<crate::public_sources::AudiobookChapter>,
     pub audio: Option<crate::audio_library::Tags>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stems: Option<crate::stems::Reference>,
     pub audio_cover: Option<PathBuf>,
     pub lyrics: Option<Vec<crate::audio_library::Lyric>>,
     pub last_played_at: Option<u64>,

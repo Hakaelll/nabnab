@@ -156,6 +156,7 @@ pub enum Source {
     Sticker { selection: crate::stickers::Selection },
     Upscale { selection: crate::upscale::Selection },
     Background { selection: crate::background::Selection },
+    Stems { selection: crate::stems::Selection },
     Voice {plan_id:String},
     Capture {capture_id:String},
     FileAnalysis {library_ids:Vec<String>,options:crate::file_organization::AnalyzeOptions},
@@ -302,6 +303,7 @@ impl Job {
             Source::Sticker {selection} => selection.validate()?,
             Source::Upscale {selection} => selection.validate()?,
             Source::Background {selection} => selection.validate()?,
+            Source::Stems {selection} => selection.validate()?,
             Source::Attribution {entries} => { if entries.is_empty() || entries.len()>199 {return Err("Invalid attribution selection.".into());} for entry in entries {entry.validate()?;} },
             _=>{}
         }
@@ -352,6 +354,7 @@ impl Job {
             Source::ImageAssets {..} | Source::Sticker {..} => "Images".into(),
             Source::Upscale {..} => "Real-ESRGAN".into(),
             Source::Background {..} => "U²-Net".into(),
+            Source::Stems {..} => "Spleeter".into(),
             Source::Voice {..} => "Local voice".into(),
             Source::Capture {..} => "Screen capture".into(),
             Source::FileAnalysis {..} | Source::FileRename {..} | Source::FileUndo {..} => "Files".into(),
@@ -1040,6 +1043,14 @@ struct Publication {
     target: PathBuf,
     sha256: String,
     item: library::LibraryItem,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    additional_items: Vec<library::LibraryItem>,
+}
+
+impl Publication {
+    fn into_items(self) -> Vec<library::LibraryItem> {
+        std::iter::once(self.item).chain(self.additional_items).collect()
+    }
 }
 const OWNER: &str = "owner.json";
 const JOURNAL: &str = "publication.json";
@@ -1111,7 +1122,11 @@ fn stage(job: &Job) -> Result<PathBuf, String> {
             let journaled = [JOURNAL, "publication.new"]
                 .iter()
                 .any(|name| fs::symlink_metadata(owned.join(name)).is_ok());
-            if matches!(job.source, Source::Transform { .. } | Source::Voice {..} | Source::Capture {..} | Source::ImageAssets {..} | Source::Sticker {..} | Source::Upscale {..} | Source::Background {..} | Source::FileAnalysis {..} | Source::FileRename {..} | Source::FileUndo {..} | Source::PortableExport {..} | Source::PortableImport {..} | Source::CloudFile {..} | Source::PersonalFile {..} | Source::Attribution {..} | Source::WebArchive {..} | Source::DocumentEdit {..} | Source::Ocr {..} | Source::OcrText {..} | Source::AudioTagsCopy {..})
+            if matches!(job.source, Source::Stems { .. }) && owner.run_id != job.run_id && !journaled {
+                cleanup(job, &owned)?;
+                fs::create_dir(&staging).map_err(|e| e.to_string())?;
+                true
+            } else if matches!(job.source, Source::Transform { .. } | Source::Voice {..} | Source::Capture {..} | Source::ImageAssets {..} | Source::Sticker {..} | Source::Upscale {..} | Source::Background {..} | Source::FileAnalysis {..} | Source::FileRename {..} | Source::FileUndo {..} | Source::PortableExport {..} | Source::PortableImport {..} | Source::CloudFile {..} | Source::PersonalFile {..} | Source::Attribution {..} | Source::WebArchive {..} | Source::DocumentEdit {..} | Source::Ocr {..} | Source::OcrText {..} | Source::AudioTagsCopy {..})
                 && owner.run_id != job.run_id
                 && !journaled
             {
@@ -1174,7 +1189,7 @@ fn cleanup(job: &Job, staging: &Path) -> Result<(), String> {
     fs::remove_dir_all(owned)
         .map_err(|e| format!("Could not remove the job's temporary files: {e}"))
 }
-fn file_hash(file: &Path, cancel: &watch::Receiver<bool>) -> Result<String, String> {
+pub(crate) fn file_hash(file: &Path, cancel: &watch::Receiver<bool>) -> Result<String, String> {
     hash_with(file, cancel, Sha256::new())
 }
 fn hash_with<D: Digest>(file: &Path, cancel: &watch::Receiver<bool>, mut hash: D) -> Result<String, String>
@@ -1305,7 +1320,7 @@ async fn reusable_output(
 }
 type PublishedOutput = (
     PathBuf,
-    library::LibraryItem,
+    Vec<library::LibraryItem>,
     tokio::sync::OwnedMutexGuard<()>,
 );
 
@@ -1340,7 +1355,7 @@ async fn publish_verified_output(
     let publication = publication_lock(state, cancel.clone()).await?;
     if let Some(existing) = reusable_output(state, job, &hash, cancel.clone()).await? {
         publication_guard(state, job, &cancel)?;
-        return Ok((existing.path.clone(), existing, publication));
+        return Ok((existing.path.clone(), vec![existing], publication));
     }
     if matches!(job.source,Source::Voice {..} | Source::Capture {..} | Source::ImageAssets {..} | Source::Sticker {..} | Source::Upscale {..} | Source::Background {..} | Source::FileAnalysis {..} | Source::FileRename {..} | Source::FileUndo {..} | Source::PortableExport {..} | Source::PortableImport {..} | Source::PublicFile {..}|Source::CloudFile {..} | Source::PersonalFile {..} | Source::Attribution {..}|Source::WebArchive {..}|Source::DocumentEdit {..}|Source::Ocr {..}|Source::OcrText {..} | Source::AudioTagsCopy {..}) {
         (file,target)=available_file_version(staging,&destination,&file)?;
@@ -1354,6 +1369,7 @@ async fn publish_verified_output(
         target: target.clone(),
         sha256: hash,
         item: item.clone(),
+        additional_items: Vec::new(),
     };
     let journal_job = job.clone();
     let journal_stage = staging.to_owned();
@@ -1366,7 +1382,68 @@ async fn publish_verified_output(
     crate::automation::output_allowed(repo,job,fs::metadata(&file).map_err(|e|e.to_string())?.len())?;
     crate::automation::time_allowed(state,job)?;
     let target = crate::publish(staging, &file.to_string_lossy(), &destination)?;
-    Ok((target, item, publication))
+    Ok((target, vec![item], publication))
+}
+
+async fn publish_stems(
+    state: &AppState,
+    job: &Job,
+    staging: &Path,
+    directory: &Path,
+    mut items: Vec<library::LibraryItem>,
+    cancel: watch::Receiver<bool>,
+) -> Result<PublishedOutput, String> {
+    let (destination, _) = stage_path(job)?;
+    let target = destination.join(directory.file_name().ok_or("Invalid stem set directory.")?);
+    for item in &mut items {
+        let file = crate::checked_output(directory, &item.path.to_string_lossy())?;
+        let hash = digest(file.clone(), cancel.clone()).await?;
+        *item = target_item(item.clone(), target.join(file.file_name().ok_or("Invalid stem filename.")?));
+        item.content_hash = Some(hash);
+    }
+    if items.len() != crate::stems::STEMS.len() {
+        return Err("The stem set is incomplete.".into());
+    }
+    let publication = publication_lock(state, cancel.clone()).await?;
+    let item = items.remove(0);
+    let journal = Publication {
+        schema_version: 1,
+        job_id: job.id.clone(),
+        source_file: directory.to_owned(),
+        target: target.clone(),
+        sha256: item.content_hash.clone().ok_or("Missing stem checksum.")?,
+        item,
+        additional_items: items,
+    };
+    let journal_job = job.clone();
+    let journal_stage = staging.to_owned();
+    let journal = tokio::task::spawn_blocking(move || {
+        write_journal(&journal_job, &journal_stage, &journal)?;
+        Ok::<_, String>(journal)
+    }).await.map_err(|error| error.to_string())??;
+    let guard = state.repository.lock().unwrap();
+    checked_run(guard.as_ref().ok_or("Store unavailable.")?, job, &cancel)?;
+    move_stem_set(directory, &target)?;
+    Ok((target, journal.into_items(), publication))
+}
+
+fn move_stem_set(source: &Path, target: &Path) -> Result<(), String> {
+    let source = library::authorized_path(source)?;
+    if !source.is_dir() || fs::symlink_metadata(target).is_ok() {
+        return Err("The stem set destination already exists or its staging directory changed.".into());
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        let from: Vec<_> = source.as_os_str().encode_wide().chain(Some(0)).collect();
+        let to: Vec<_> = target.as_os_str().encode_wide().chain(Some(0)).collect();
+        if unsafe { windows_sys::Win32::Storage::FileSystem::MoveFileExW(from.as_ptr(), to.as_ptr(), 0) } == 0 {
+            return Err(format!("Could not publish the stem set: {}", std::io::Error::last_os_error()));
+        }
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    Err("Publishing stem sets requires Windows.".into())
 }
 
 fn available_file_version(staging:&Path,destination:&Path,file:&Path)->Result<(PathBuf,PathBuf),String>{
@@ -1393,12 +1470,29 @@ fn validate_journal(job: &Job, staging: &Path, journal: &Publication) -> Result<
         || journal.source_file.parent() != Some(stage.as_path())
         || journal.target.parent() != Some(parent.as_path())
         || journal.source_file.file_name() != journal.target.file_name()
-        || journal.item.path != journal.target
         || journal.item.size == 0
         || journal.sha256.len() != 64
         || !journal.sha256.bytes().all(|b| b.is_ascii_hexdigit())
     {
         return Err("The publication recovery record does not match this job. Existing files were left untouched.".into());
+    }
+    if let Source::Stems { selection } = &job.source {
+        let items = std::iter::once(&journal.item).chain(&journal.additional_items);
+        let valid = journal.additional_items.len() + 1 == crate::stems::STEMS.len()
+            && journal.item.content_hash.as_deref() == Some(journal.sha256.as_str())
+            && items.zip(crate::stems::STEMS).all(|(item, role)| {
+                item.path.parent() == Some(journal.target.as_path())
+                    && item.path.file_name().and_then(|name| name.to_str()) == Some(&format!("{role}.flac"))
+                    && item.size > 0
+                    && item.parent_id.as_deref() == Some(selection.library_id.as_str())
+                    && item.details.stems.as_ref().is_some_and(|stem| stem.set_id == job.id && stem.role == role)
+                    && item.content_hash.as_ref().is_some_and(|hash| hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit()))
+            });
+        if !valid {
+            return Err("The stem set recovery record is invalid.".into());
+        }
+    } else if journal.item.path != journal.target || !journal.additional_items.is_empty() {
+        return Err("The publication recovery record does not match the output.".into());
     }
     Ok(())
 }
@@ -1471,14 +1565,38 @@ async fn recover_publication(
     } else {
         return Ok(None);
     };
-    let journal: Publication = read_owned_json(&journal_path, 1024 * 1024)?;
-    validate_journal(job, staging, &journal)?;
+    let journal_job = job.clone();
+    let journal_stage = staging.to_owned();
+    let journal: Publication = tokio::task::spawn_blocking(move || {
+        let journal = read_owned_json(&journal_path, 1024 * 1024)?;
+        validate_journal(&journal_job, &journal_stage, &journal)?;
+        Ok::<_, String>(journal)
+    }).await.map_err(|error| error.to_string())??;
     let target_exists = fs::symlink_metadata(&journal.target).is_ok();
     let candidate = if target_exists {
         library::authorized_path(&journal.target)?
     } else {
         library::authorized_path(&journal.source_file).map_err(|_|"The recorded output is missing. Locate the file or create a new job; no existing file was replaced.")?
     };
+    if !journal.additional_items.is_empty() {
+        if !candidate.is_dir() || fs::read_dir(&candidate).map_err(|error| error.to_string())?.count() != crate::stems::STEMS.len() {
+            return Err("The recovered stem set is incomplete.".into());
+        }
+        for item in std::iter::once(&journal.item).chain(&journal.additional_items) {
+            let file = candidate.join(item.path.file_name().ok_or("Invalid stem filename.")?);
+            let file = crate::checked_output(&candidate, &library::authorized_path(&file)?.to_string_lossy())?;
+            if crate::portable_zip::regular_file(&file)? != item.size
+                || item.content_hash.as_deref() != Some(digest(file, cancel.clone()).await?.as_str())
+            {
+                return Err("The recovered stem set was modified. Existing files were preserved.".into());
+            }
+        }
+        let publication = publication_lock(state, cancel.clone()).await?;
+        let guard = state.repository.lock().unwrap();
+        checked_run(guard.as_ref().ok_or("Store unavailable.")?, job, &cancel)?;
+        if !target_exists { move_stem_set(&candidate, &journal.target)?; }
+        return Ok(Some((journal.target.clone(), journal.into_items(), publication)));
+    }
     if fs::metadata(&candidate).map_err(|e| e.to_string())?.len() != journal.item.size
         || digest(candidate.clone(), cancel.clone()).await? != journal.sha256
     {
@@ -1494,7 +1612,7 @@ async fn recover_publication(
                 "The recovered output path changed. Existing files were left untouched.".into(),
             );
         }
-        Ok(Some((journal.target, journal.item, publication)))
+        Ok(Some((journal.target, vec![journal.item], publication)))
     } else {
         let target = crate::publish(
             staging,
@@ -1504,7 +1622,7 @@ async fn recover_publication(
                 .parent()
                 .ok_or("Invalid output destination.")?,
         )?;
-        Ok(Some((target, journal.item, publication)))
+        Ok(Some((target, vec![journal.item], publication)))
     }
 }
 
@@ -1668,25 +1786,23 @@ async fn execute(app: AppHandle, state: Arc<AppState>, job: Job, cancel: watch::
                 current.progress = None;
                 current.updated_at = now();
                 match result {
-                    Ok((path, mut item)) => {
-                        for association in &current.associations {
-                            merge_association(&mut item, association);
-                        }
-                        current.outputs = vec![path];
+                    Ok((path, items)) => {
+                        current.outputs = if items.len() == 1 { vec![path] } else { items.iter().map(|item| item.path.clone()).collect() };
                         current.error = None;
                         current.state = JobState::Completed;
-                        if let Source::Ocr {library_id,..}=&job.source { if let Some(reference)=&item.details.ocr_ref { if let Some(original)=repo.data.library.iter_mut().find(|i|&i.id==library_id){original.details.ocr_ref=Some(reference.clone());} } }
+                        let associations = current.associations.clone();
                         success = true;
-                        if !repo.data.library.iter().any(|old| old.path == item.path) {
-                            repo.data.library.push(item);
-                        } else if let Some(existing) = repo
-                            .data
-                            .library
-                            .iter_mut()
-                            .find(|old| old.path == item.path)
-                        {
-                            for association in &repo.data.jobs[index].associations {
-                                merge_association(existing, association);
+                        for mut item in items {
+                            if let Source::Ocr {library_id,..}=&job.source { if let Some(reference)=&item.details.ocr_ref { if let Some(original)=repo.data.library.iter_mut().find(|i|&i.id==library_id){original.details.ocr_ref=Some(reference.clone());} } }
+                            if let Some(existing) = repo.data.library.iter_mut().find(|old| old.path == item.path) {
+                                for association in &associations {
+                                    merge_association(existing, association);
+                                }
+                            } else {
+                                for association in &associations {
+                                    merge_association(&mut item, association);
+                                }
+                                repo.data.library.push(item);
                             }
                         }
                         for item in &repo.data.library {
@@ -1756,7 +1872,9 @@ async fn execute(app: AppHandle, state: Arc<AppState>, job: Job, cancel: watch::
     }
     // Keep a publication journal after persistence failures so an explicit retry can adopt the final file.
     if let Ok(path) = staging {
-        if success || ((*cancel.borrow() || job.automation.is_some()) && matches!(has_published_output(&job, &path), Ok(false))) {
+        let incomplete_stems = matches!(job.source, Source::Stems { .. })
+            && [JOURNAL, "publication.new"].iter().all(|name| fs::symlink_metadata(path.join(name)).is_err());
+        if success || incomplete_stems || ((*cancel.borrow() || job.automation.is_some()) && matches!(has_published_output(&job, &path), Ok(false))) {
             let _ = cleanup(&job, &path);
         }
     }
@@ -1778,6 +1896,9 @@ async fn run(
     publication_guard(state, job, &cancel)?;
     if let Some(recovered) = recover_publication(state, job, staging, cancel.clone()).await? {
         return Ok(recovered);
+    }
+    if let Source::Stems { selection } = &job.source {
+        return modules::run_stems(app, state, job, staging, selection, cancel).await;
     }
     if let Some(output)=modules::run(app,state,job,staging,cancel.clone()).await? {return Ok(output);}
     if let Source::Torrent { reference, manifest_id, index, options } = &job.source {
@@ -1813,7 +1934,7 @@ async fn run(
     let run_id = job.run_id;
     let emit = move |update| progress(&handle, &shared, &id, run_id, update);
     let (mut file, source, parent) = match &job.source {
-        Source::Voice {..} | Source::Capture {..} | Source::ImageAssets {..} | Source::Sticker {..} | Source::Upscale {..} | Source::Background {..} | Source::FileAnalysis {..} | Source::FileRename {..} | Source::FileUndo {..} | Source::PortableExport {..} | Source::PortableImport {..} | Source::PublicFile {..} | Source::CloudFile {..} | Source::PersonalFile {..} | Source::Attribution {..} | Source::WebArchive {..} | Source::DocumentEdit {..} | Source::Ocr {..} | Source::OcrText {..} | Source::AdvancedFile{..} | Source::Palette{..} | Source::AudioPreview{..} | Source::AudioTagsCopy {..} | Source::ProviderExport {..} | Source::CaptionEdit {..} | Source::MediaEdit {..} | Source::Torrent { .. } | Source::Document { .. } | Source::GalleryExport { .. } | Source::Telegram { .. } | Source::Live { .. } => return Err("Module execution was not dispatched.".into()),
+        Source::Voice {..} | Source::Capture {..} | Source::ImageAssets {..} | Source::Sticker {..} | Source::Upscale {..} | Source::Background {..} | Source::Stems {..} | Source::FileAnalysis {..} | Source::FileRename {..} | Source::FileUndo {..} | Source::PortableExport {..} | Source::PortableImport {..} | Source::PublicFile {..} | Source::CloudFile {..} | Source::PersonalFile {..} | Source::Attribution {..} | Source::WebArchive {..} | Source::DocumentEdit {..} | Source::Ocr {..} | Source::OcrText {..} | Source::AdvancedFile{..} | Source::Palette{..} | Source::AudioPreview{..} | Source::AudioTagsCopy {..} | Source::ProviderExport {..} | Source::CaptionEdit {..} | Source::MediaEdit {..} | Source::Torrent { .. } | Source::Document { .. } | Source::GalleryExport { .. } | Source::Telegram { .. } | Source::Live { .. } => return Err("Module execution was not dispatched.".into()),
         Source::Download {
             url_ref,
             format,
@@ -3167,6 +3288,7 @@ mod tests {
             target,
             sha256: file_hash(&file, cancel).unwrap(),
             item,
+            additional_items: Vec::new(),
         };
         write_journal(job, &staging, &journal).unwrap();
         (staging, journal)
@@ -3321,10 +3443,11 @@ mod tests {
         );
         action(&again, &[id], "retry").unwrap();
         let (retry, cancel) = reserve(&again).unwrap();
-        let (output, item, _publication) = recover_publication(&again, &retry, &staging, cancel)
+        let (output, mut items, _publication) = recover_publication(&again, &retry, &staging, cancel)
             .await
             .unwrap()
             .unwrap();
+        let item = items.remove(0);
         assert_eq!(output, journal.target);
         assert_eq!(fs::read(&output).unwrap(), b"verified fixture bytes");
         assert_eq!(item.path, output);

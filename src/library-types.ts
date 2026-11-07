@@ -27,6 +27,7 @@ export interface LibraryDetails {
   audiobook?: AudiobookChapter | null;
   audio?: AudioTags | null; lyrics?: Lyric[] | null; lastPlayedAt?: number | null;
   audioCover?: string | null;
+  stems?: { setId: string; role: "Vocals" | "Instrumental"; model: string } | null;
 }
 export type SmartCondition =
   | { kind: "kind" | "source" | "platform" | "tag" | "subtitleLanguage"; value: string }

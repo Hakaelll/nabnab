@@ -71,6 +71,7 @@ Las sesiones se importan por sitio desde un archivo Netscape elegido por el usua
 - [Stickers](docs/STICKERS.md) para exportar imágenes y clips con los perfiles de Telegram y WhatsApp.
 - [Ampliación de imágenes](docs/IMAGE-UPSCALE.md) con Real-ESRGAN local y comparación del mismo recorte.
 - [Eliminar fondo](docs/REMOVE-BACKGROUND.md) con segmentación local, ajuste de máscara y exportación transparente.
+- [Separar pistas](docs/STEMS.md) con escucha sincronizada y exportación local de voz e instrumental.
 - [Red, motores y privacidad](docs/NETWORK.md), [diseño](docs/design-reference.md) y [plan de trabajo](docs/PLAN.md).
 - [Licencias y avisos](THIRD_PARTY_NOTICES.md).
 

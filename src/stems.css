@@ -1,0 +1,20 @@
+.stems-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 10px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+}
+.stems-fields > label { flex: 1 1 165px; min-width: 0; }
+.stems-fields legend, .stems-tool h3 { margin: 0 0 8px; font-size: 14px; font-weight: 600; }
+.stems-sample-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; }
+.stems-sample-controls input { width: 112px; }
+.stems-review { display: grid; gap: 10px; margin: 12px 0 0; }
+.stems-tracks { flex-wrap: wrap; justify-content: flex-start; }
+.stems-transport { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.stems-timeline { flex: 1 1 130px; }
+.stems-timeline input { min-height: 28px; margin: 0; padding: 0; accent-color: var(--action); }
+.stems-time { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.stems-empty { margin-top: 12px; }

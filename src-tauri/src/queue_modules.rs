@@ -1,5 +1,50 @@
 use super::*;
 
+pub(super) async fn run_stems(
+    app: &AppHandle,
+    state: &Arc<AppState>,
+    job: &Job,
+    staging: &Path,
+    selection: &crate::stems::Selection,
+    cancel: watch::Receiver<bool>,
+) -> Result<PublishedOutput, String> {
+    use crate::stems::{self, component};
+    selection.validate()?;
+    let (_, items) = crate::file_operations::context(state)?;
+    let input = stems::commands::selected(&items, &selection.library_id)?;
+    let _slot = state.stems.permit(cancel.clone()).await?;
+    let _processing = processing_permit(state, cancel.clone()).await?;
+    phase(app, state, &job.id, job.run_id, JobState::Processing)?;
+    if digest(input.path.clone(), cancel.clone()).await? != selection.input_hash {
+        return Err("The audio changed after the preview. Generate a new sample.".into());
+    }
+    let runtime = component::enabled(&crate::components::root(app)?)?;
+    let engines = crate::dependencies::engine_root(app)?;
+    let title: String = input.path.file_stem().unwrap_or_default().to_string_lossy().chars().take(48).collect();
+    let label = format!("{title} - Stems - {}", job.id);
+    let directory = staging.join(&label);
+    fs::create_dir(&directory).map_err(|error| error.to_string())?;
+    let scratch = crate::workspaces::Workspace::new(staging)?;
+    let audio = stems::separate(&engines, &runtime, &scratch.path, &directory, &input.path, None, cancel.clone()).await?;
+    if digest(input.path, cancel.clone()).await? != selection.input_hash {
+        return Err("The audio changed during separation. Generate a new sample.".into());
+    }
+    phase(app, state, &job.id, job.run_id, JobState::Verifying)?;
+    let mut items = Vec::with_capacity(audio.tracks.len());
+    for (file, role) in audio.tracks.iter().zip(stems::STEMS) {
+        let info = crate::media::probe(&engines, file, cancel.clone()).await?;
+        let mut item = library::index(file, Some(&info), None, Some(selection.library_id.clone()))?;
+        item.details.stems = Some(stems::Reference {
+            set_id: job.id.clone(),
+            role: role.into(),
+            model: component::VERSION.into(),
+        });
+        item.collections.push(label.clone());
+        items.push(item);
+    }
+    publish_stems(state, job, staging, &directory, items, cancel).await
+}
+
 #[tauri::command]
 pub fn queue_advanced_file(app:AppHandle,state:tauri::State<Arc<AppState>>,url:String,connections:u8,checksum:Option<String>,client_request:String)->Result<Vec<Job>,String>{
     crate::model::validate_url(&url)?;if !(1..=16).contains(&connections){return Err("Choose 1–16 connections.".into());}let checksum=crate::advanced_files::validate_checksum(checksum.as_deref())?;crate::components::executable(&app,"files")?;

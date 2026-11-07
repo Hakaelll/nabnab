@@ -27,6 +27,7 @@ export type JobSource = {kind:"webArchive";reference:string;format:"html"|"epub"
   | {kind:"sticker";selection:{libraryId:string;options:{profile:"telegramImage"|"telegramVideo"|"whatsappImage"|"whatsappAnimated"}}}
   | {kind:"upscale";selection:{libraryId:string;options:{model:"photo"|"illustration";scale:number;tile:number}}}
   | {kind:"background";selection:{libraryId:string;options:{format:"png"|"webp"}}}
+  | {kind:"stems";selection:{libraryId:string;inputHash:string}}
   | {kind:"fileAnalysis";libraryIds:string[];options:{kind:"exact"}|{kind:"similar";maxDistance:number}}
   | {kind:"fileRename";planId:string}
   | {kind:"fileUndo";operationId:string}

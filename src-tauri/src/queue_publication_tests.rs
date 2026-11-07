@@ -123,13 +123,14 @@ async fn concurrent_identical_results_wait_for_indexing_and_publish_one_file() {
             .unwrap();
         first.state = JobState::Completed;
         first.outputs = vec![first_path.clone()];
-        repo.data.library.push(first_item);
+        repo.data.library.extend(first_item);
         repo.save().unwrap();
     }
     drop(publication);
     let (second_path, second_item, publication) = second.await.unwrap().unwrap();
     assert_eq!(second_path, first_path);
-    assert_eq!(second_item.path, first_path);
+    assert_eq!(second_item.len(), 1);
+    assert_eq!(second_item[0].path, first_path);
     assert_eq!(fs::read(&first_path).unwrap(), b"verified identical output");
     let files = fs::read_dir(&destination)
         .unwrap()
@@ -157,4 +158,50 @@ async fn concurrent_identical_results_wait_for_indexing_and_publish_one_file() {
         .to_string_lossy()
         .starts_with("nabnab-publication-"));
     fs::remove_dir_all(resolved).unwrap();
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn a_published_stem_set_recovers_together_and_detects_a_changed_track() {
+    let parent = fs::canonicalize(std::env::temp_dir()).unwrap();
+    let root = parent.join(format!("nabnab-stem-set-{}-{}", std::process::id(), now()));
+    let destination = root.join("media");
+    fs::create_dir_all(&destination).unwrap();
+    let mut repo = Repository::open(&root, &destination).unwrap();
+    let library_id = "a".repeat(64);
+    let mut job = Job::new(
+        Source::Stems { selection: crate::stems::Selection { library_id: library_id.clone(), input_hash: "b".repeat(64) } },
+        "Stems".into(), destination, "stems-test".into(), None,
+    );
+    job.state = JobState::Verifying;
+    job.run_id = 1;
+    let staging = stage(&job).unwrap();
+    let directory = staging.join("Stems");
+    fs::create_dir(&directory).unwrap();
+    let items = crate::stems::STEMS.map(|role| {
+        let file = directory.join(format!("{role}.flac"));
+        fs::write(&file, role.as_bytes()).unwrap();
+        let mut item = library::index(&file, None, None, Some(library_id.clone())).unwrap();
+        item.details.stems = Some(crate::stems::Reference {
+            set_id: job.id.clone(), role: role.into(), model: crate::stems::component::VERSION.into(),
+        });
+        item
+    });
+    repo.data.jobs.push(job.clone());
+    let state = AppState { repository: Mutex::new(Some(repo)), ..Default::default() };
+    let (_sender, cancel) = watch::channel(false);
+    let (published, items, lock) = publish_stems(&state, &job, &staging, &directory, items.to_vec(), cancel.clone()).await.unwrap();
+    drop(lock);
+    assert!(!directory.exists());
+    assert_eq!(fs::read_dir(&published).unwrap().count(), 2);
+    let (recovered, tracks, lock) = recover_publication(&state, &job, &staging, cancel.clone()).await.unwrap().unwrap();
+    assert_eq!(recovered, published);
+    assert_eq!(tracks.iter().map(|item| &item.path).collect::<Vec<_>>(), items.iter().map(|item| &item.path).collect::<Vec<_>>());
+    drop(lock);
+    fs::write(&tracks[0].path, b"Changed").unwrap();
+    let recovery = recover_publication(&state, &job, &staging, cancel).await;
+    assert!(matches!(recovery, Err(error) if error.contains("modified")));
+    assert_eq!(fs::read(&tracks[0].path).unwrap(), b"Changed");
+    drop(state);
+    fs::remove_dir_all(root).unwrap();
 }
