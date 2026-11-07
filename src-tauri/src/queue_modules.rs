@@ -1,5 +1,97 @@
 use super::*;
 
+pub(super) async fn run_translation(
+    app: &AppHandle,
+    state: &Arc<AppState>,
+    job: &Job,
+    selection: &crate::translation::Selection,
+    cancel: watch::Receiver<bool>,
+) -> Result<PublishedOutput, String> {
+    use crate::translation::{self, component};
+    selection.validate()?;
+    let root = {
+        let guard = state.repository.lock().unwrap();
+        guard.as_ref().ok_or("Open nabnab first.")?.root().to_owned()
+    };
+    if translation::existing(&root, &job.id)? {
+        let id = job.id.clone();
+        let data = root.clone();
+        let draft = tokio::task::spawn_blocking(move || translation::read(&data, &id))
+            .await.map_err(|error| error.to_string())??;
+        if &draft.selection != selection {
+            return Err("The recovered translation does not match this job.".into());
+        }
+        let publication = publication_lock(state, cancel.clone()).await?;
+        publication_guard(state, job, &cancel)?;
+        return Ok((root, Vec::new(), publication));
+    }
+    let item = {
+        let guard = state.repository.lock().unwrap();
+        translation::commands::input_item(guard.as_ref().ok_or("Open nabnab first.")?, &selection.input)?
+    };
+    let _access = component::processing_access(cancel.clone()).await?;
+    let _processing = processing_permit(state, cancel.clone()).await?;
+    phase(app, state, &job.id, job.run_id, JobState::Processing)?;
+    let input = selection.input.clone();
+    let name = item.name.clone();
+    let (original, hash) = tokio::task::spawn_blocking(move || translation::source(&item, &input))
+        .await.map_err(|error| error.to_string())??;
+    if hash != selection.source_hash {
+        return Err("The subtitle source changed after preview. Review it again before translating.".into());
+    }
+    let engines = crate::dependencies::engine_root(app)?;
+    let component_root = crate::components::root(app)?;
+    let (translated, contextual_blocks) = translation::translate(&engines, &component_root, &root, selection, &original, cancel.clone()).await?;
+    phase(app, state, &job.id, job.run_id, JobState::Verifying)?;
+    let draft = translation::Draft {
+        id: job.id.clone(), revision: 1, name, selection: selection.clone(),
+        original, translated, contextual_blocks, edited: Default::default(),
+    };
+    let publication = publication_lock(state, cancel.clone()).await?;
+    let shared = state.clone();
+    let job = job.clone();
+    let data = root.clone();
+    tokio::task::spawn_blocking(move || {
+        let guard = shared.repository.lock().unwrap();
+        checked_run(guard.as_ref().ok_or("Store unavailable.")?, &job, &cancel)?;
+        translation::write(&data, &draft)
+    }).await.map_err(|error| error.to_string())??;
+    Ok((root, Vec::new(), publication))
+}
+
+pub(super) async fn run_translation_export(
+    app: &AppHandle,
+    state: &AppState,
+    job: &Job,
+    staging: &Path,
+    options: &crate::translation::Export,
+    cancel: watch::Receiver<bool>,
+) -> Result<PublishedOutput, String> {
+    use crate::translation;
+    let root = {
+        let guard = state.repository.lock().unwrap();
+        translation::commands::completed_root(guard.as_ref().ok_or("Open nabnab first.")?, &options.draft_id)?
+    };
+    let _processing = processing_permit(state, cancel.clone()).await?;
+    phase(app, state, &job.id, job.run_id, JobState::Processing)?;
+    let options = options.clone();
+    let directory = staging.to_owned();
+    let (file, item) = tokio::task::spawn_blocking(move || {
+        let draft = translation::read(&root, &options.draft_id)?;
+        let (file, reference) = translation::export(&draft, &options, &directory)?;
+        let mut item = library::index(&file, None, None, Some(draft.selection.input.library_id))?;
+        let (_, to) = reference.pair.languages();
+        for track in &mut item.details.tracks {
+            track.origin = crate::captions::TrackOrigin::MachineTranslation;
+            track.language = to.into();
+        }
+        item.details.translation = Some(reference);
+        Ok::<_, String>((file, item))
+    }).await.map_err(|error| error.to_string())??;
+    phase(app, state, &job.id, job.run_id, JobState::Verifying)?;
+    publish_verified_output(state, job, staging, &file, item, cancel).await
+}
+
 pub(super) async fn run_stems(
     app: &AppHandle,
     state: &Arc<AppState>,

@@ -253,6 +253,18 @@ pub async fn tool(
 pub async fn run_process(
     executable: PathBuf,
     args: Vec<String>,
+    cancel: watch::Receiver<bool>,
+    request_id: u64,
+    metadata: bool,
+    emit: impl Fn(Progress) + Send + Sync + Clone + 'static,
+) -> Result<String, String> {
+    let mut command = Command::new(executable);
+    command.args(args);
+    run_configured_process(command, cancel, request_id, metadata, emit).await
+}
+
+pub(crate) async fn run_configured_process(
+    mut command: Command,
     mut cancel: watch::Receiver<bool>,
     request_id: u64,
     metadata: bool,
@@ -261,14 +273,12 @@ pub async fn run_process(
     if *cancel.borrow() {
         return Err(CANCELLED.into());
     }
-    let tool_name = executable
+    let tool_name = Path::new(command.as_std().get_program())
         .file_name()
         .unwrap_or_default()
         .to_string_lossy()
         .into_owned();
-    let mut command = Command::new(executable);
     command
-        .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

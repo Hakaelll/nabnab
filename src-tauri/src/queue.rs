@@ -171,6 +171,8 @@ pub enum Source {
     AudioTagsCopy { selection: crate::audio_library::tag_copy::CopySelection },
     ProviderExport {url:String,url_ref:Option<String>,operation:String,format:String},
     CaptionEdit {library_id:String,track_id:String,options:crate::captions_editor::CaptionEditOptions},
+    CaptionTranslation { selection: crate::translation::Selection },
+    CaptionTranslationExport { options: crate::translation::Export },
     MediaEdit {library_ids:Vec<String>,options:crate::media_edits::MediaEditOptions},
     Document { library_ids: Vec<String>, options: crate::documents::DocumentOptions },
     GalleryExport { library_ids: Vec<String>, export_kind: String },
@@ -304,6 +306,10 @@ impl Job {
             Source::Upscale {selection} => selection.validate()?,
             Source::Background {selection} => selection.validate()?,
             Source::Stems {selection} => selection.validate()?,
+            Source::CaptionTranslation { selection } => selection.validate()?,
+            Source::CaptionTranslationExport { options } if !crate::translation::valid_id(&options.draft_id) || options.revision == 0 => {
+                return Err("Invalid subtitle translation export.".into());
+            }
             Source::Attribution {entries} => { if entries.is_empty() || entries.len()>199 {return Err("Invalid attribution selection.".into());} for entry in entries {entry.validate()?;} },
             _=>{}
         }
@@ -355,6 +361,7 @@ impl Job {
             Source::Upscale {..} => "Real-ESRGAN".into(),
             Source::Background {..} => "U²-Net".into(),
             Source::Stems {..} => "Spleeter".into(),
+            Source::CaptionTranslation {..} | Source::CaptionTranslationExport {..} => "Bergamot".into(),
             Source::Voice {..} => "Local voice".into(),
             Source::Capture {..} => "Screen capture".into(),
             Source::FileAnalysis {..} | Source::FileRename {..} | Source::FileUndo {..} => "Files".into(),
@@ -1122,7 +1129,7 @@ fn stage(job: &Job) -> Result<PathBuf, String> {
             let journaled = [JOURNAL, "publication.new"]
                 .iter()
                 .any(|name| fs::symlink_metadata(owned.join(name)).is_ok());
-            if matches!(job.source, Source::Stems { .. }) && owner.run_id != job.run_id && !journaled {
+            if matches!(job.source, Source::Stems { .. } | Source::CaptionTranslation { .. } | Source::CaptionTranslationExport { .. }) && owner.run_id != job.run_id && !journaled {
                 cleanup(job, &owned)?;
                 fs::create_dir(&staging).map_err(|e| e.to_string())?;
                 true
@@ -1230,6 +1237,11 @@ fn target_item(mut item: library::LibraryItem, target: PathBuf) -> library::Libr
         .unwrap_or_default()
         .to_string_lossy()
         .into_owned();
+    for track in &mut item.details.tracks {
+        if track.path.as_deref() == Some(item.path.as_path()) {
+            track.path = Some(target.clone());
+        }
+    }
     item.path = target;
     item
 }
@@ -1357,7 +1369,7 @@ async fn publish_verified_output(
         publication_guard(state, job, &cancel)?;
         return Ok((existing.path.clone(), vec![existing], publication));
     }
-    if matches!(job.source,Source::Voice {..} | Source::Capture {..} | Source::ImageAssets {..} | Source::Sticker {..} | Source::Upscale {..} | Source::Background {..} | Source::FileAnalysis {..} | Source::FileRename {..} | Source::FileUndo {..} | Source::PortableExport {..} | Source::PortableImport {..} | Source::PublicFile {..}|Source::CloudFile {..} | Source::PersonalFile {..} | Source::Attribution {..}|Source::WebArchive {..}|Source::DocumentEdit {..}|Source::Ocr {..}|Source::OcrText {..} | Source::AudioTagsCopy {..}) {
+    if matches!(job.source,Source::Voice {..} | Source::Capture {..} | Source::ImageAssets {..} | Source::Sticker {..} | Source::Upscale {..} | Source::Background {..} | Source::FileAnalysis {..} | Source::FileRename {..} | Source::FileUndo {..} | Source::PortableExport {..} | Source::PortableImport {..} | Source::PublicFile {..}|Source::CloudFile {..} | Source::PersonalFile {..} | Source::Attribution {..}|Source::WebArchive {..}|Source::DocumentEdit {..}|Source::Ocr {..}|Source::OcrText {..} | Source::AudioTagsCopy {..} | Source::CaptionTranslationExport {..}) {
         (file,target)=available_file_version(staging,&destination,&file)?;
     }
     item=target_item(item,target.clone());
@@ -1872,9 +1884,9 @@ async fn execute(app: AppHandle, state: Arc<AppState>, job: Job, cancel: watch::
     }
     // Keep a publication journal after persistence failures so an explicit retry can adopt the final file.
     if let Ok(path) = staging {
-        let incomplete_stems = matches!(job.source, Source::Stems { .. })
+        let incomplete_local_output = matches!(job.source, Source::Stems { .. } | Source::CaptionTranslation { .. } | Source::CaptionTranslationExport { .. })
             && [JOURNAL, "publication.new"].iter().all(|name| fs::symlink_metadata(path.join(name)).is_err());
-        if success || incomplete_stems || ((*cancel.borrow() || job.automation.is_some()) && matches!(has_published_output(&job, &path), Ok(false))) {
+        if success || incomplete_local_output || ((*cancel.borrow() || job.automation.is_some()) && matches!(has_published_output(&job, &path), Ok(false))) {
             let _ = cleanup(&job, &path);
         }
     }
@@ -1899,6 +1911,12 @@ async fn run(
     }
     if let Source::Stems { selection } = &job.source {
         return modules::run_stems(app, state, job, staging, selection, cancel).await;
+    }
+    if let Source::CaptionTranslation { selection } = &job.source {
+        return Box::pin(modules::run_translation(app, state, job, selection, cancel)).await;
+    }
+    if let Source::CaptionTranslationExport { options } = &job.source {
+        return Box::pin(modules::run_translation_export(app, state, job, staging, options, cancel)).await;
     }
     if let Some(output)=modules::run(app,state,job,staging,cancel.clone()).await? {return Ok(output);}
     if let Source::Torrent { reference, manifest_id, index, options } = &job.source {
@@ -1934,7 +1952,7 @@ async fn run(
     let run_id = job.run_id;
     let emit = move |update| progress(&handle, &shared, &id, run_id, update);
     let (mut file, source, parent) = match &job.source {
-        Source::Voice {..} | Source::Capture {..} | Source::ImageAssets {..} | Source::Sticker {..} | Source::Upscale {..} | Source::Background {..} | Source::Stems {..} | Source::FileAnalysis {..} | Source::FileRename {..} | Source::FileUndo {..} | Source::PortableExport {..} | Source::PortableImport {..} | Source::PublicFile {..} | Source::CloudFile {..} | Source::PersonalFile {..} | Source::Attribution {..} | Source::WebArchive {..} | Source::DocumentEdit {..} | Source::Ocr {..} | Source::OcrText {..} | Source::AdvancedFile{..} | Source::Palette{..} | Source::AudioPreview{..} | Source::AudioTagsCopy {..} | Source::ProviderExport {..} | Source::CaptionEdit {..} | Source::MediaEdit {..} | Source::Torrent { .. } | Source::Document { .. } | Source::GalleryExport { .. } | Source::Telegram { .. } | Source::Live { .. } => return Err("Module execution was not dispatched.".into()),
+        Source::Voice {..} | Source::Capture {..} | Source::ImageAssets {..} | Source::Sticker {..} | Source::Upscale {..} | Source::Background {..} | Source::Stems {..} | Source::FileAnalysis {..} | Source::FileRename {..} | Source::FileUndo {..} | Source::PortableExport {..} | Source::PortableImport {..} | Source::PublicFile {..} | Source::CloudFile {..} | Source::PersonalFile {..} | Source::Attribution {..} | Source::WebArchive {..} | Source::DocumentEdit {..} | Source::Ocr {..} | Source::OcrText {..} | Source::AdvancedFile{..} | Source::Palette{..} | Source::AudioPreview{..} | Source::AudioTagsCopy {..} | Source::ProviderExport {..} | Source::CaptionEdit {..} | Source::CaptionTranslation {..} | Source::CaptionTranslationExport {..} | Source::MediaEdit {..} | Source::Torrent { .. } | Source::Document { .. } | Source::GalleryExport { .. } | Source::Telegram { .. } | Source::Live { .. } => return Err("Module execution was not dispatched.".into()),
         Source::Download {
             url_ref,
             format,

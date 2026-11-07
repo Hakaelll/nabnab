@@ -26,6 +26,8 @@ pub struct LibraryDetails {
     pub audio: Option<crate::audio_library::Tags>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stems: Option<crate::stems::Reference>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub translation: Option<crate::translation::Reference>,
     pub audio_cover: Option<PathBuf>,
     pub lyrics: Option<Vec<crate::audio_library::Lyric>>,
     pub last_played_at: Option<u64>,

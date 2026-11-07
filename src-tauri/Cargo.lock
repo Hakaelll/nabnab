@@ -1940,6 +1940,7 @@ dependencies = [
 name = "nabnab"
 version = "0.2.0"
 dependencies = [
+ "flate2",
  "httpdate",
  "md-5",
  "qrcodegen",

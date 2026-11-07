@@ -9,11 +9,20 @@ pub struct Segment {
     pub text: String,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Cue {
+    pub identifier: Option<String>,
+    #[serde(flatten)]
+    pub segment: Segment,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum TrackOrigin {
     Creator,
     Automatic,
+    MachineTranslation,
     Imported,
 }
 
@@ -95,6 +104,10 @@ pub fn readable_text(value: &str) -> String {
 }
 
 pub fn parse(input: &str) -> Result<Vec<Segment>, String> {
+    Ok(parse_cues(input, false)?.into_iter().map(|cue| cue.segment).collect())
+}
+
+pub(crate) fn parse_cues(input: &str, preserve_text: bool) -> Result<Vec<Cue>, String> {
     if input.len() > 16 * 1024 * 1024 {
         return Err("Import subtitle files of at most 16 MB.".into());
     }
@@ -117,6 +130,13 @@ pub fn parse(input: &str) -> Result<Vec<Segment>, String> {
             cursor += 1;
             continue;
         };
+        let identifier = if preserve_text && cursor > 0 {
+            let previous = lines[cursor - 1].trim();
+            let header = cursor == 1 && (previous == "WEBVTT" || previous.starts_with("WEBVTT "));
+            (!previous.is_empty() && !header
+                && !previous.contains("-->") && previous.len() <= 256
+                && !previous.chars().any(char::is_control)).then(|| previous.to_owned())
+        } else { None };
         let start = timestamp(left.trim()).ok_or("A subtitle has an invalid start time.")?;
         let end = timestamp(right.split_whitespace().next().unwrap_or_default())
             .ok_or("A subtitle has an invalid end time.")?;
@@ -129,9 +149,13 @@ pub fn parse(input: &str) -> Result<Vec<Segment>, String> {
             text.push(lines[cursor]);
             cursor += 1;
         }
-        let text = readable_text(&text.join("\n"));
-        if !text.is_empty() {
-            segments.push(Segment { start, end, text });
+        let raw = text.join("\n");
+        let readable = readable_text(&raw);
+        if !readable.is_empty() {
+            segments.push(Cue {
+                identifier,
+                segment: Segment { start, end, text: if preserve_text { raw } else { readable } },
+            });
         }
         if segments.len() > 100_000 {
             return Err("This subtitle track exceeds 100,000 segments.".into());
@@ -140,7 +164,9 @@ pub fn parse(input: &str) -> Result<Vec<Segment>, String> {
     if segments.is_empty() {
         return Err("This file has no readable SRT or VTT subtitle segments.".into());
     }
-    segments.sort_by(|a, b| a.start.total_cmp(&b.start));
+    if !preserve_text {
+        segments.sort_by(|a, b| a.segment.start.total_cmp(&b.segment.start));
+    }
     Ok(segments)
 }
 
@@ -159,7 +185,7 @@ pub fn rebase(segments: &[Segment], start: f64, end: f64) -> Result<Vec<Segment>
         .collect())
 }
 
-fn time(value: f64, separator: char) -> String {
+pub(crate) fn time(value: f64, separator: char) -> String {
     let ms = (value.max(0.0) * 1000.0).round() as u64;
     format!(
         "{:02}:{:02}:{:02}{separator}{:03}",

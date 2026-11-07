@@ -35,6 +35,34 @@ pub fn root(app: &AppHandle) -> Result<PathBuf, String> {
         .map_err(|e| e.to_string())?
         .join("components"))
 }
+
+pub(crate) async fn download_pinned(
+    client: &reqwest::Client,
+    package: (&str, u64, &str),
+    path: &std::path::Path,
+) -> Result<(), String> {
+    use std::io::Write;
+    let (url, size, expected) = package;
+    let mut response = client.get(url).send().await
+        .and_then(reqwest::Response::error_for_status)
+        .map_err(|_| "The official component package could not be downloaded.")?;
+    let mut file = fs::OpenOptions::new().create_new(true).write(true).open(path)
+        .map_err(|error| error.to_string())?;
+    let mut hash = Sha256::new();
+    let mut received = 0;
+    while let Some(chunk) = response.chunk().await.map_err(|_| "The component download was interrupted.")? {
+        received += chunk.len() as u64;
+        if received > size {
+            return Err("The component exceeds its pinned size.".into());
+        }
+        file.write_all(&chunk).map_err(|error| error.to_string())?;
+        hash.update(&chunk);
+    }
+    if received != size || format!("{:x}", hash.finalize()) != expected {
+        return Err("The component download failed its integrity check.".into());
+    }
+    file.sync_all().map_err(|error| error.to_string())
+}
 pub fn executable(app: &AppHandle, id: &str) -> Result<PathBuf, String> {
     let name = match id {
         "gallery" => "gallery-dl.exe",
@@ -92,10 +120,16 @@ pub fn optional_components(app: AppHandle) -> Result<Vec<Component>, String> {
     entries.push(crate::upscale::component::status(&root));
     entries.push(crate::background::component::status(&root));
     entries.push(crate::stems::component::status(&root));
+    let deno = crate::dependencies::engine_root(&app).is_ok();
+    entries.extend(crate::translation::component::Pair::ALL.map(|pair| pair.status(&root, deno)));
     Ok(entries)
 }
 #[tauri::command]
 pub async fn install_component(app: AppHandle, state: tauri::State<'_, Arc<crate::AppState>>, id: String) -> Result<(), String> {
+    if let Some(pair) = crate::translation::component::Pair::for_id(&id) {
+        let _access = crate::translation::component::component_access()?;
+        return crate::translation::component::install(&app, pair).await;
+    }
     if id == crate::upscale::component::ID {
         let _access = state.upscale.component_access()?;
         return crate::upscale::component::install(&app).await;
@@ -152,7 +186,8 @@ pub async fn install_component(app: AppHandle, state: tauri::State<'_, Arc<crate
 }
 #[tauri::command]
 pub fn enable_component(app: AppHandle, state:tauri::State<Arc<crate::AppState>>, id: String, enabled: bool) -> Result<(), String> {
-    if !matches!(id.as_str(), "gallery" | "torrent" | "files" | "transcription" | "documents" | "telegram" | "ocr" | "voice" | "capture" | "upscale" | "background" | "stems") {
+    let pair = crate::translation::component::Pair::for_id(&id);
+    if pair.is_none() && !matches!(id.as_str(), "gallery" | "torrent" | "files" | "transcription" | "documents" | "telegram" | "ocr" | "voice" | "capture" | "upscale" | "background" | "stems") {
         return Err("Unknown component.".into());
     }
     if id=="torrent"&&enabled {return Err("Activate BitTorrent from its selector after reviewing the P2P notice.".into());}
@@ -161,6 +196,7 @@ pub fn enable_component(app: AppHandle, state:tauri::State<Arc<crate::AppState>>
     let _upscale = if id == "upscale" { Some(state.upscale.component_access()?) } else { None };
     let _background = if id == "background" { Some(state.background.component_access()?) } else { None };
     let _stems = if id == "stems" { Some(state.stems.component_access()?) } else { None };
+    let _translation = pair.map(|_| crate::translation::component::component_access()).transpose()?;
     if !enabled {idle(&state,&id)?;}
     if id=="telegram"&&!enabled {crate::telegram::shutdown();}
     let root = root(&app)?;
@@ -172,6 +208,9 @@ pub fn enable_component(app: AppHandle, state:tauri::State<Arc<crate::AppState>>
     }
     if id == "stems" && enabled && !crate::stems::component::status(&root).installed {
         return Err("Install Spleeter before enabling it.".into());
+    }
+    if enabled && pair.is_some_and(|pair| !pair.status(&root, true).installed) {
+        return Err("Install the translation model before enabling it.".into());
     }
     fs::create_dir_all(&root).map_err(|e| e.to_string())?;
     let path = root.join(format!("{id}.enabled"));
@@ -192,12 +231,14 @@ fn idle(state:&crate::AppState,id:&str)->Result<(),String>{
 
 #[tauri::command]
 pub async fn remove_component(app:AppHandle,state:tauri::State<'_,Arc<crate::AppState>>,id:String)->Result<bool,String>{
-    if !matches!(id.as_str(),"gallery"|"files"|"torrent"|"transcription"|"documents"|"telegram"|"ocr"|"upscale"|"background"|"stems"){return Err("This component cannot be removed by the package manager.".into());}
+    let pair = crate::translation::component::Pair::for_id(&id);
+    if pair.is_none() && !matches!(id.as_str(),"gallery"|"files"|"torrent"|"transcription"|"documents"|"telegram"|"ocr"|"upscale"|"background"|"stems"){return Err("This component cannot be removed by the package manager.".into());}
     idle(&state,&id)?;
     let message = match id.as_str() {
         "upscale" => "Remove Real-ESRGAN and its installed model files? Your images and results will be kept.",
         "background" => "Remove the U²-Net model? Your images and results will be kept.",
         "stems" => "Remove Spleeter and its models? Your audio files and separated tracks will be kept.",
+        _ if pair.is_some() => "Remove this translation direction? Drafts and subtitle exports will be kept.",
         _ => "Remove this optional engine? Downloaded files, models and account sessions will be kept.",
     };
     let dialog=app.clone();let approved=tauri::async_runtime::spawn_blocking(move||dialog.dialog().message(message).title("nabnab · Remove component").buttons(MessageDialogButtons::OkCancel).blocking_show()).await.map_err(|_|"The component confirmation could not be shown.")?;
@@ -206,8 +247,10 @@ pub async fn remove_component(app:AppHandle,state:tauri::State<'_,Arc<crate::App
     let _upscale = if id == "upscale" { Some(state.upscale.component_access()?) } else { None };
     let _background = if id == "background" { Some(state.background.component_access()?) } else { None };
     let _stems = if id == "stems" { Some(state.stems.component_access()?) } else { None };
+    let _translation = pair.map(|_| crate::translation::component::component_access()).transpose()?;
     if id == "stems" { crate::stems::component::remove(&root)?; }
-    if id=="gallery"{let file=root.join("gallery-dl.exe");if file.exists(){let file=crate::library::authorized_path(&file)?;fs::remove_file(file).map_err(|e|e.to_string())?;}}else if id=="ocr"{crate::ocr_component::remove(&root)?;}else if id=="upscale"{crate::upscale::component::remove(&root)?;}else if id=="background"{crate::background::component::remove(&root)?;}else if id!="stems"{crate::component_archives::remove(&root,if id=="files"{"torrent"}else{&id})?;}
+    if let Some(pair) = pair { crate::translation::component::remove(&root, pair)?; }
+    if id=="gallery"{let file=root.join("gallery-dl.exe");if file.exists(){let file=crate::library::authorized_path(&file)?;fs::remove_file(file).map_err(|e|e.to_string())?;}}else if id=="ocr"{crate::ocr_component::remove(&root)?;}else if id=="upscale"{crate::upscale::component::remove(&root)?;}else if id=="background"{crate::background::component::remove(&root)?;}else if id!="stems" && pair.is_none(){crate::component_archives::remove(&root,if id=="files"{"torrent"}else{&id})?;}
     for marker in [format!("{id}.enabled"),if id=="files"{"torrent.enabled".into()}else{format!("{id}.enabled")}] {let path=root.join(marker);if path.exists(){fs::remove_file(path).map_err(|e|e.to_string())?;}}
     Ok(true)
 }

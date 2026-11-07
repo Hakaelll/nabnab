@@ -1,5 +1,5 @@
 export interface Chapter { title: string; start: number; end: number }
-export type TrackOrigin = "creator" | "automatic" | "imported";
+export type TrackOrigin = "creator" | "automatic" | "machineTranslation" | "imported";
 export interface Segment { start: number; end: number; text: string }
 export interface RemoteSubtitleTrack { language: string; origin: TrackOrigin; formats: string[] }
 export interface LocalTrack { id: string; language: string; origin: TrackOrigin; path: string | null; segments: Segment[]; formattingLost: boolean }
@@ -28,6 +28,7 @@ export interface LibraryDetails {
   audio?: AudioTags | null; lyrics?: Lyric[] | null; lastPlayedAt?: number | null;
   audioCover?: string | null;
   stems?: { setId: string; role: "Vocals" | "Instrumental"; model: string } | null;
+  translation?: { draftId: string; revision: number; pair: "es-en" | "en-es"; bilingual: boolean; engine: string } | null;
 }
 export type SmartCondition =
   | { kind: "kind" | "source" | "platform" | "tag" | "subtitleLanguage"; value: string }

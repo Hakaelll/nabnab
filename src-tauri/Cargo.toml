@@ -21,6 +21,7 @@ sha2 = "0.10"
 md-5 = "=0.10.6"
 regex = "1"
 quick-xml = "0.42"
+flate2 = "=1.1.10"
 qrcodegen = "1.8"
 httpdate = "1"
 

@@ -1,8 +1,6 @@
 use crate::{components, engine, library, queue, workspaces::Workspace};
-use sha2::{Digest, Sha256};
 use std::{
     fs,
-    io::Write,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -104,43 +102,6 @@ pub fn verify(root: &Path) -> Result<(), String> {
     Ok(())
 }
 
-async fn download(
-    client: &reqwest::Client,
-    package: (&str, u64, &str),
-    path: &Path,
-) -> Result<(), String> {
-    let (url, size, expected) = package;
-    let mut response = client
-        .get(url)
-        .send()
-        .await
-        .and_then(reqwest::Response::error_for_status)
-        .map_err(|_| "The official Spleeter package could not be downloaded.")?;
-    let mut file = fs::OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(path)
-        .map_err(|error| error.to_string())?;
-    let mut hash = Sha256::new();
-    let mut received = 0;
-    while let Some(chunk) = response
-        .chunk()
-        .await
-        .map_err(|_| "The component download was interrupted.")?
-    {
-        received += chunk.len() as u64;
-        if received > size {
-            return Err("The component exceeds its pinned size.".into());
-        }
-        file.write_all(&chunk).map_err(|error| error.to_string())?;
-        hash.update(&chunk);
-    }
-    if received != size || format!("{:x}", hash.finalize()) != expected {
-        return Err("The component download failed its integrity check.".into());
-    }
-    file.sync_all().map_err(|error| error.to_string())
-}
-
 pub async fn install(app: &AppHandle) -> Result<(), String> {
     let tar = tar().ok_or("This component requires Windows x64 with the system tar tool.")?;
     let root = components::root(app)?;
@@ -161,7 +122,7 @@ pub async fn install(app: &AppHandle) -> Result<(), String> {
         (MODEL, MODEL_PREFIX, "1", &FILES[3..]),
     ] {
         let archive = workspace.path.join("component.tar.bz2");
-        download(&client, package, &archive).await?;
+        components::download_pinned(&client, package, &archive).await?;
         let mut args = vec![
             "-xf".into(),
             archive.to_string_lossy().into_owned(),

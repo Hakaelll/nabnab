@@ -163,7 +163,7 @@ fn read_data(path: &Path) -> Result<Data, String> {
     Ok(data)
 }
 
-fn replace_file(from: &Path, to: &Path) -> Result<(), String> {
+pub(crate) fn replace_file(from: &Path, to: &Path) -> Result<(), String> {
     #[cfg(windows)]
     {
         use std::os::windows::ffi::OsStrExt;
@@ -313,7 +313,7 @@ impl Repository {
     }
 }
 
-fn temporary_path(root: &Path, prefix: &str) -> PathBuf {
+pub(crate) fn temporary_path(root: &Path, prefix: &str) -> PathBuf {
     let nonce = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -321,7 +321,7 @@ fn temporary_path(root: &Path, prefix: &str) -> PathBuf {
     root.join(format!("{prefix}-{}-{nonce}.new", std::process::id()))
 }
 
-fn write_temporary(path: &Path, bytes: &[u8]) -> Result<(), String> {
+pub(crate) fn write_temporary(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)

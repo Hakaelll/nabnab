@@ -58,6 +58,7 @@ mod stickers;
 mod upscale;
 mod background;
 mod stems;
+mod translation;
 mod personal_archive;
 mod delimited;
 mod local_media;
@@ -1213,6 +1214,10 @@ fn main() {
             upscale::commands::upscale_preview, upscale::commands::queue_upscale,
             background::commands::background_preview, background::commands::queue_background,
             stems::commands::stems_preview, stems::commands::stems_sample, stems::commands::stems_release, stems::commands::queue_stems,
+            translation::commands::translation_source, translation::commands::queue_translation,
+            translation::commands::translation_drafts, translation::commands::translation_read,
+            translation::commands::translation_edit, translation::commands::translation_remove,
+            translation::commands::queue_translation_export,
             file_operations::file_analysis,file_operations::queue_file_analysis,file_operations::file_rename_preview,file_operations::queue_file_rename,file_operations::file_rename_history,file_operations::queue_file_undo,file_operations::file_organize_review,file_operations::cancel_file_operation,
             file_operations::portable_preview_export,file_operations::queue_portable_export,file_operations::portable_choose_import,file_operations::portable_preview_import,file_operations::queue_portable_import,file_operations::cancel_portable_preview,
             document_operations::document_edit_info,document_operations::document_edit_preview,document_operations::cancel_document_edit_preview,document_operations::queue_document_edit,
