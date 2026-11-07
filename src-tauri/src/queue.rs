@@ -152,6 +152,8 @@ pub enum Source {
     Ocr {library_id:String,options:crate::ocr::OcrOptions},
     OcrText {library_id:String,reference:String,expected_hash:String},
     ImageAssets {library_ids:Vec<String>,options:crate::image_assets::Options,input_hashes:Vec<String>},
+    Voice {plan_id:String},
+    Capture {capture_id:String},
     FileAnalysis {library_ids:Vec<String>,options:crate::file_organization::AnalyzeOptions},
     FileRename {plan_id:String},
     FileUndo {operation_id:String},
@@ -228,6 +230,8 @@ pub struct DownloadProvenance {pub creator:Option<String>,pub source_url:Option<
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Job {
+    #[serde(default)]
+    pub automation: Option<crate::automation::JobAuthorization>,
     pub id: String,
     pub run_id: u64,
     pub client_request: String,
@@ -319,7 +323,7 @@ impl Job {
             self.updated_at = now();
         }
     }
-    fn new(
+    pub(crate) fn new(
         source: Source,
         title: String,
         folder: PathBuf,
@@ -334,6 +338,8 @@ impl Job {
             Source::Attribution {..} => "Wikimedia Commons".into(),
             Source::WebArchive {..} => "Web archive".into(),
             Source::ImageAssets {..} => "Images".into(),
+            Source::Voice {..} => "Local voice".into(),
+            Source::Capture {..} => "Screen capture".into(),
             Source::FileAnalysis {..} | Source::FileRename {..} | Source::FileUndo {..} => "Files".into(),
             Source::PortableExport {..} | Source::PortableImport {..} => "Collections".into(),
             Source::DocumentEdit {..} => "MuPDF".into(),
@@ -356,6 +362,7 @@ impl Job {
             _ => "FFmpeg".into(),
         };
         Self {
+            automation: None,
             id: format!("{time}-{}", SEQUENCE.fetch_add(1, Ordering::SeqCst)),
             run_id: 0,
             client_request,
@@ -420,7 +427,7 @@ pub fn validate_request_id(id: &str) -> Result<(), String> {
     }
     Ok(())
 }
-fn public_origin(input: &str) -> Result<String, String> {
+pub(crate) fn public_origin(input: &str) -> Result<String, String> {
     let normalized = crate::model::validate_url(input)?;
     let parsed = url::Url::parse(&normalized).map_err(|_| "Invalid URL.")?;
     Ok(parsed.origin().ascii_serialization())
@@ -776,12 +783,18 @@ pub fn enqueue_prepared(
 }
 
 pub fn enqueue_tasks(repo:&mut Repository,tasks:Vec<(Source,String)>,request:&str)->Result<Vec<Job>,String>{
+    let folder=repo.data.settings.folder.clone();
+    enqueue_tasks_at(repo,tasks,request,folder)
+}
+pub(crate) fn enqueue_tasks_at(repo:&mut Repository,tasks:Vec<(Source,String)>,request:&str,folder:PathBuf)->Result<Vec<Job>,String>{
     validate_request_id(request)?;
     let previous:Vec<_>=repo.data.jobs.iter().filter(|j|j.client_request==request).cloned().collect();
     if !previous.is_empty(){return Ok(previous);}
     if tasks.is_empty()||tasks.len()>200{return Err("Choose 1–200 tasks.".into());}
     let mut jobs=Vec::new();
-    for(source,title)in tasks{let mut job=Job::new(source,title,repo.data.settings.folder.clone(),request.into(),Some(request.into()));job.protect_source(repo.root())?;jobs.push(job);}
+    library::authorized_path(&folder)?;
+    if !folder.is_dir(){return Err("Choose an existing local output directory.".into());}
+    for(source,title)in tasks{let mut job=Job::new(source,title,folder.clone(),request.into(),Some(request.into()));job.protect_source(repo.root())?;jobs.push(job);}
     let len=repo.data.jobs.len();repo.data.jobs.extend(jobs.clone());if let Err(error)=repo.save(){repo.data.jobs.truncate(len);return Err(error);}Ok(jobs)
 }
 
@@ -862,11 +875,18 @@ pub fn enqueue_tool(
 }
 
 pub fn action(state: &AppState, ids: &[String], action: &str) -> Result<(), String> {
+    action_authorized(state,ids,action,None)
+}
+pub(crate) fn automation_cancel(state:&AppState,id:&str,client_id:&str)->Result<(),String>{
+    action_authorized(state,&[id.to_owned()],"cancel",Some(client_id))
+}
+fn action_authorized(state: &AppState, ids: &[String], action: &str, client_id:Option<&str>) -> Result<(), String> {
     if ids.len() > 1000 || !matches!(action, "cancel" | "retry" | "pause") {
         return Err("Invalid queue action.".into());
     }
     let mut guard = state.repository.lock().unwrap();
     let repo = guard.as_mut().ok_or("Open the app first.")?;
+    if let Some(client_id)=client_id{crate::automation::authorize_cancel(repo,client_id,ids)?;}
     let mut indices = Vec::new();
     for id in ids {
         let index = repo
@@ -881,6 +901,7 @@ pub fn action(state: &AppState, ids: &[String], action: &str) -> Result<(), Stri
     }
     if action == "retry" {
         for index in &indices {
+            if repo.data.jobs[*index].automation.is_some(){return Err("Automation approvals are single use. Prepare and approve a new plan to run this operation again.".into());}
             if let Source::Download { url, .. } = &repo.data.jobs[*index].source {
                 check_cooldown(repo, url).map_err(|failure| failure.technical)?;
             }
@@ -906,6 +927,7 @@ pub fn action(state: &AppState, ids: &[String], action: &str) -> Result<(), Stri
                 cancellations.push(job.id.clone());
             }
             "pause" if job.state == JobState::Pending => job.state = JobState::Paused,
+            "pause" if job.state.active()&&matches!(job.source,Source::Voice {..})=>{job.state=JobState::Paused;job.progress=None;job.next_retry_at=None;cancellations.push(job.id.clone());},
             "pause" if job.state==JobState::Downloading&&matches!(job.source,Source::Torrent{..}|Source::AdvancedFile{..})=>{job.state=JobState::Paused;job.progress=None;job.next_retry_at=None;cancellations.push(job.id.clone());},
             "retry"
                 if matches!(
@@ -1074,7 +1096,7 @@ fn stage(job: &Job) -> Result<PathBuf, String> {
             let journaled = [JOURNAL, "publication.new"]
                 .iter()
                 .any(|name| fs::symlink_metadata(owned.join(name)).is_ok());
-            if matches!(job.source, Source::Transform { .. } | Source::ImageAssets {..} | Source::FileAnalysis {..} | Source::FileRename {..} | Source::FileUndo {..} | Source::PortableExport {..} | Source::PortableImport {..} | Source::CloudFile {..} | Source::Attribution {..} | Source::WebArchive {..} | Source::DocumentEdit {..} | Source::Ocr {..} | Source::OcrText {..})
+            if matches!(job.source, Source::Transform { .. } | Source::Voice {..} | Source::Capture {..} | Source::ImageAssets {..} | Source::FileAnalysis {..} | Source::FileRename {..} | Source::FileUndo {..} | Source::PortableExport {..} | Source::PortableImport {..} | Source::CloudFile {..} | Source::Attribution {..} | Source::WebArchive {..} | Source::DocumentEdit {..} | Source::Ocr {..} | Source::OcrText {..})
                 && owner.run_id != job.run_id
                 && !journaled
             {
@@ -1285,6 +1307,7 @@ async fn publish_verified_output(
     cancel: watch::Receiver<bool>,
 ) -> Result<PublishedOutput, String> {
     let mut file = crate::checked_output(staging, &file.to_string_lossy())?;
+    if job.automation.is_some(){crate::automation::verify_input(state,job)?;let guard=state.repository.lock().unwrap();crate::automation::output_allowed(guard.as_ref().ok_or("Store unavailable.")?,job,fs::metadata(&file).map_err(|e|e.to_string())?.len())?;}
     let (destination, _) = stage_path(job)?;
     let mut target = destination.join(file.file_name().ok_or("Invalid output filename.")?);
     let mut item = item;
@@ -1294,7 +1317,7 @@ async fn publish_verified_output(
         publication_guard(state, job, &cancel)?;
         return Ok((existing.path.clone(), existing, publication));
     }
-    if matches!(job.source,Source::ImageAssets {..} | Source::FileAnalysis {..} | Source::FileRename {..} | Source::FileUndo {..} | Source::PortableExport {..} | Source::PortableImport {..} | Source::PublicFile {..}|Source::CloudFile {..}|Source::Attribution {..}|Source::WebArchive {..}|Source::DocumentEdit {..}|Source::Ocr {..}|Source::OcrText {..}) {
+    if matches!(job.source,Source::Voice {..} | Source::Capture {..} | Source::ImageAssets {..} | Source::FileAnalysis {..} | Source::FileRename {..} | Source::FileUndo {..} | Source::PortableExport {..} | Source::PortableImport {..} | Source::PublicFile {..}|Source::CloudFile {..}|Source::Attribution {..}|Source::WebArchive {..}|Source::DocumentEdit {..}|Source::Ocr {..}|Source::OcrText {..}) {
         (file,target)=available_file_version(staging,&destination,&file)?;
     }
     item=target_item(item,target.clone());
@@ -1311,6 +1334,8 @@ async fn publish_verified_output(
     let guard = state.repository.lock().unwrap();
     let repo = guard.as_ref().ok_or("Store unavailable.")?;
     checked_run(repo, job, &cancel)?;
+    crate::automation::output_allowed(repo,job,fs::metadata(&file).map_err(|e|e.to_string())?.len())?;
+    crate::automation::time_allowed(state,job)?;
     let target = crate::publish(staging, &file.to_string_lossy(), &destination)?;
     Ok((target, item, publication))
 }
@@ -1383,6 +1408,7 @@ fn publication_guard(
     job: &Job,
     cancel: &watch::Receiver<bool>,
 ) -> Result<(), String> {
+    crate::automation::time_allowed(state,job)?;
     if *cancel.borrow() {
         return Err(engine::CANCELLED.into());
     }
@@ -1391,6 +1417,7 @@ fn publication_guard(
     checked_run(repo, job, cancel)
 }
 fn checked_run(repo: &Repository, job: &Job, cancel: &watch::Receiver<bool>) -> Result<(), String> {
+    crate::automation::job_allowed(repo,job)?;
     if *cancel.borrow()
         || !repo
             .data
@@ -1505,7 +1532,7 @@ fn reserve(state: &AppState) -> Option<(Job, watch::Receiver<bool>)> {
         .filter(|j| j.state.active() || active.contains_key(&j.id))
         .collect();
     if running.iter().any(|j| j.source.exclusive()) { return None; }
-    let exclusive_waiting = repo.data.jobs.iter().any(|j| j.source.exclusive() && j.state == JobState::Pending && j.schedule.eligible(now()) && j.next_retry_at.is_none_or(|time| time <= now()));
+    let exclusive_waiting = !state.headless && repo.data.jobs.iter().any(|j| j.source.exclusive() && j.state == JobState::Pending && j.schedule.eligible(now()) && j.next_retry_at.is_none_or(|time| time <= now()));
     let network = running.iter().filter(|j| j.source.network()).count();
     let local = running.iter().filter(|j| !j.source.network()).count();
     let next = repo
@@ -1515,6 +1542,7 @@ fn reserve(state: &AppState) -> Option<(Job, watch::Receiver<bool>)> {
         .enumerate()
         .filter(|(_, j)| {
             j.state == JobState::Pending
+                && (!state.headless || j.automation.is_some())
                 && (!exclusive_waiting || j.source.exclusive())
                 && (!j.source.exclusive() || running.is_empty())
                 && j.schedule.eligible(now())
@@ -1556,12 +1584,29 @@ fn reserve(state: &AppState) -> Option<(Job, watch::Receiver<bool>)> {
     Some((selected, receiver))
 }
 
+async fn run_budgeted(app:&AppHandle,state:&Arc<AppState>,job:&Job,staging:&Path,cancel:watch::Receiver<bool>)->Result<PublishedOutput,String>{
+    if job.automation.is_none(){return run(app,state,job,staging,cancel).await;}
+    crate::automation::begin_run(state,job)?;
+    let started=std::time::Instant::now();
+    crate::automation::verify_input(state,job)?;
+    let work=run(app,state,job,staging,cancel);tokio::pin!(work);
+    loop{tokio::select!{
+        result=&mut work=>return result,
+        _=tokio::time::sleep(std::time::Duration::from_millis(100))=>{
+            if let Err(error)=crate::automation::runtime_guard(state,job,staging,started.elapsed()){
+                if let Some(sender)=state.runtime.active.lock().unwrap().get(&job.id){let _=sender.send(true);}
+                let _=work.await;return Err(error);
+            }
+        }
+    }}
+}
+
 async fn execute(app: AppHandle, state: Arc<AppState>, job: Job, cancel: watch::Receiver<bool>) {
     let initial = job.clone();
     let _ = app.emit("job-update", initial);
     let staging = stage(&job);
     let result = match &staging {
-        Ok(staging) => run(&app, &state, &job, staging, cancel.clone()).await,
+        Ok(staging) => run_budgeted(&app, &state, &job, staging, cancel.clone()).await,
         Err(e) => Err(e.clone()),
     };
     // Keep the publication decision exclusive until the completed job and library entry are saved.
@@ -1641,6 +1686,7 @@ async fn execute(app: AppHandle, state: Arc<AppState>, job: Job, cancel: watch::
                         if error.code == "rate_limited" {
                             error.retry_after = Some(cooldown_seconds(error.retry_after));
                         }
+                        if current.automation.is_some(){error.retryable=false;}
                         if error.retryable
                             && current.attempt < 3
                             && current.state != JobState::Cancelled
@@ -1673,9 +1719,15 @@ async fn execute(app: AppHandle, state: Arc<AppState>, job: Job, cancel: watch::
         }
     }
     drop(publication);
+    if success {
+        if let Source::Capture {capture_id}=&job.source {
+            let root=state.repository.lock().unwrap().as_ref().map(|repo|repo.root().to_owned());
+            if let Some(root)=root{if let Err(error)=crate::screen_capture::mark_published(&root,capture_id){let _=app.emit("app-warning",format!("Capture published; its private recovery cache could not be cleared: {error}"));}}
+        }
+    }
     // Keep a publication journal after persistence failures so an explicit retry can adopt the final file.
     if let Ok(path) = staging {
-        if success || (*cancel.borrow() && matches!(has_published_output(&job, &path), Ok(false))) {
+        if success || ((*cancel.borrow() || job.automation.is_some()) && matches!(has_published_output(&job, &path), Ok(false))) {
             let _ = cleanup(&job, &path);
         }
     }
@@ -1683,6 +1735,7 @@ async fn execute(app: AppHandle, state: Arc<AppState>, job: Job, cancel: watch::
         let _ = app.emit("library-update", ());
     }
     state.runtime.active.lock().unwrap().remove(&job.id);
+    crate::automation::end_run(&state,&job);
     state.runtime.notify.notify_one();
 }
 
@@ -1716,7 +1769,7 @@ async fn run(
     }
     let mut direct_download = match &job.source {
         Source::Download { url, .. } => {
-            providers::identify(url)?.id == providers::ProviderId::Generic
+            job.automation.is_some() || providers::identify(url)?.id == providers::ProviderId::Generic
         }
         _ => false,
     };
@@ -1731,7 +1784,7 @@ async fn run(
     let run_id = job.run_id;
     let emit = move |update| progress(&handle, &shared, &id, run_id, update);
     let (mut file, source, parent) = match &job.source {
-        Source::ImageAssets {..} | Source::FileAnalysis {..} | Source::FileRename {..} | Source::FileUndo {..} | Source::PortableExport {..} | Source::PortableImport {..} | Source::PublicFile {..} | Source::CloudFile {..} | Source::Attribution {..} | Source::WebArchive {..} | Source::DocumentEdit {..} | Source::Ocr {..} | Source::OcrText {..} | Source::AdvancedFile{..} | Source::Palette{..} | Source::AudioPreview{..} | Source::ProviderExport {..} | Source::CaptionEdit {..} | Source::MediaEdit {..} | Source::Torrent { .. } | Source::Document { .. } | Source::GalleryExport { .. } | Source::Telegram { .. } | Source::Live { .. } => return Err("Module execution was not dispatched.".into()),
+        Source::Voice {..} | Source::Capture {..} | Source::ImageAssets {..} | Source::FileAnalysis {..} | Source::FileRename {..} | Source::FileUndo {..} | Source::PortableExport {..} | Source::PortableImport {..} | Source::PublicFile {..} | Source::CloudFile {..} | Source::Attribution {..} | Source::WebArchive {..} | Source::DocumentEdit {..} | Source::Ocr {..} | Source::OcrText {..} | Source::AdvancedFile{..} | Source::Palette{..} | Source::AudioPreview{..} | Source::ProviderExport {..} | Source::CaptionEdit {..} | Source::MediaEdit {..} | Source::Torrent { .. } | Source::Document { .. } | Source::GalleryExport { .. } | Source::Telegram { .. } | Source::Live { .. } => return Err("Module execution was not dispatched.".into()),
         Source::Download {
             url_ref,
             format,
@@ -1764,9 +1817,9 @@ async fn run(
                 None
             };
             phase(app, state, &job.id, run_id, JobState::Downloading)?;
-            let direct_input=if direct_download {match crate::direct::download_with_referer(&url,staging,job.provenance.as_ref().and_then(|p|p.referer.as_deref()),cancel.clone(),run_id,emit.clone()).await{Ok(file)=>Some(file),Err(error) if crate::direct::engine_fallback(&error)=>{direct_download=false;None},Err(error)=>return Err(error)}}else{None};
+            let direct_input=if direct_download {match crate::direct::download_with_referer(&url,staging,job.provenance.as_ref().and_then(|p|p.referer.as_deref()),cancel.clone(),run_id,emit.clone()).await{Ok(file)=>Some(file),Err(error) if crate::direct::engine_fallback(&error) && job.automation.is_none()=>{direct_download=false;None},Err(error)=>return Err(error)}}else{None};
             let file = if let Some(file)=direct_input {file} else {
-                let cookies = crate::sessions::materialize(&cookie_root, &url)?;
+                let cookies = if job.automation.is_some(){None}else{crate::sessions::materialize(&cookie_root, &url)?};
                 let mut args = engine::download_args(&root, *format, *height, staging, &url);
                 if let Some(options) = work {
                     let suffix = options
@@ -2526,6 +2579,19 @@ mod tests {
         let repo = Repository::open(&root, &root.join("media")).unwrap();
         (root, repo)
     }
+    #[tokio::test]
+    async fn automation_deadline_is_checked_at_publication_even_without_a_timer_tick(){
+        let(root,state,job)=crate::automation::tests::active_job();
+        crate::automation::begin_run(&state,&job).unwrap();
+        let staged=stage(&job).unwrap();let file=staged.join("frame.png");fs::write(&file,include_bytes!("../icons/32x32.png")).unwrap();
+        let item=library::index(&file,None,None,None).unwrap();
+        state.automation_deadlines.lock().unwrap().insert(job.id.clone(),(job.run_id,std::time::Instant::now()-std::time::Duration::from_secs(1)));
+        let(_sender,cancel)=watch::channel(false);
+        let error=match publish_verified_output(&state,&job,&staged,&file,item,cancel).await{Err(error)=>error,Ok(_)=>panic!("An expired operation was published")};
+        assert!(error.contains("runtime budget"));assert!(!job.folder.join("frame.png").exists());
+        state.repository.lock().unwrap().take();drop(state);fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn request_replay_and_recovery_are_safe() {
         let (root, mut repo) = fixture();

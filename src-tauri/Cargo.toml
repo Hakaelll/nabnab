@@ -3,6 +3,7 @@ name = "nabnab"
 version = "0.2.0"
 description = "Local media downloads, library and tools"
 edition = "2021"
+default-run = "nabnab"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -12,7 +13,8 @@ tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["process", "io-util", "sync", "time", "macros", "net"] }
+tokio = { version = "1", features = ["process", "io-util", "io-std", "sync", "time", "macros", "net"] }
+rmcp = { version = "=3.9.0", default-features = false, features = ["server", "transport-io"] }
 url = "2"
 reqwest = { version = "0.13", default-features = false, features = ["native-tls-no-alpn"] }
 sha2 = "0.10"
@@ -22,7 +24,9 @@ qrcodegen = "1.8"
 httpdate = "1"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_Security", "Win32_System_Threading", "Win32_Storage_FileSystem", "Win32_Security_Cryptography", "Win32_Security_Authorization", "Win32_System_SystemInformation", "Win32_System_Registry", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+wasapi = "=0.26.0"
+windows = { version = "=0.62.2", features = ["Win32_Media_Audio", "Foundation", "Graphics_Capture", "Graphics_DirectX", "Graphics_DirectX_Direct3D11", "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D11", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common", "Win32_System_WinRT", "Win32_System_WinRT_Direct3D11", "Win32_System_WinRT_Graphics_Capture"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_Security", "Win32_System_Threading", "Win32_Storage_FileSystem", "Win32_Security_Cryptography", "Win32_Security_Authorization", "Win32_System_SystemInformation", "Win32_System_Registry", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_Graphics_Dwm", "Win32_System_Performance", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_Pipes", "Win32_UI_HiDpi", "Win32_System_LibraryLoader"] }
 
 [profile.release]
 codegen-units = 1

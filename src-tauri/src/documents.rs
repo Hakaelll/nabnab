@@ -150,6 +150,25 @@ pub(crate) async fn inspect(
     Ok(info)
 }
 
+pub(crate) async fn narration_text(
+    mutool: &Path,
+    input: &Path,
+    staging: &Path,
+    cancel: watch::Receiver<bool>,
+    request_id: u64,
+) -> Result<String, String> {
+    let input = document_path(input, false)?;
+    let info = inspect(mutool, &input, staging, cancel.clone(), request_id).await?;
+    if !info.copy { return Err("This document does not permit text extraction.".into()); }
+    let text = engine::run_process(mutool.to_owned(), vec![
+        "draw".into(), "-q".into(), "-W".into(), "600".into(), "-H".into(), "800".into(),
+        "-S".into(), "12".into(), "-F".into(), "txt".into(), cli_path(&input),
+    ], cancel, request_id, true, |_| {}).await?;
+    if text.len() > 4 * 1024 * 1024 { return Err("The document text exceeds the narration limit. Choose a shorter excerpt or export selected pages first.".into()); }
+    if text.trim().is_empty() { return Err("No readable text was found. Run OCR on scanned pages before narrating them.".into()); }
+    Ok(text.replace('\u{c}', "\n\n"))
+}
+
 pub fn validate_options(options: &DocumentOptions) -> Result<(), String> {
     if !matches!(
         options.operation.as_str(),

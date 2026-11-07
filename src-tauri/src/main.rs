@@ -6,6 +6,16 @@ mod portable_zip;
 mod file_organization;
 mod image_assets;
 mod workspaces;
+mod screen_capture;
+mod automation;
+mod automation_wire;
+mod automation_credentials;
+mod automation_pipe;
+mod capture_operations;
+mod capture_shortcut;
+mod voice;
+mod voice_sources;
+mod voice_operations;
 mod portable_collections;
 mod file_operations;
 mod document_edits;
@@ -80,6 +90,10 @@ use tokio::sync::watch;
 
 #[derive(Default)]
 pub(crate) struct AppState {
+    headless: bool,
+    automation_deadlines: Mutex<std::collections::HashMap<String,(u64,std::time::Instant)>>,
+    automation_pipe: Mutex<Option<automation_pipe::Server>>,
+    capture: capture_operations::HostState,
     document_previews: document_operations::PreviewState,
     file_previews: file_operations::PreviewState,
     file_sources: file_sources::BrowserState,
@@ -158,38 +172,46 @@ pub(crate) fn test_data_dir() -> Option<PathBuf> {
         std::env::var_os("NABNAB_TEST_DATA_DIR")
             .map(PathBuf::from)
             .filter(|p| p.is_absolute())
+            .or_else(||std::env::var_os("NABNAB_DATA_DIR").map(PathBuf::from).filter(|p|p.is_absolute()))
     }
     #[cfg(not(debug_assertions))]
     {
-        None
+        std::env::var_os("NABNAB_DATA_DIR").map(PathBuf::from).filter(|p|p.is_absolute())
     }
 }
 
-#[tauri::command]
-async fn startup(app: AppHandle, state: State<'_, Arc<AppState>>) -> Result<Startup, String> {
-    {
-        let mut guard = state.repository.lock().unwrap();
-        if guard.is_none() {
-            let root = match test_data_dir() {
-                Some(path) => path,
-                None => app.path().app_config_dir().map_err(|e| e.to_string())?,
-            };
-            let default = app.path().download_dir().map_err(|e| e.to_string())?;
-            let repo = store::Repository::open(&root, &default)?;
-            sessions::cleanup(&root)?;
-            *guard = Some(repo);
-        }
+fn open_repository(app: &AppHandle, state: &AppState) -> Result<store::Settings, String> {
+    let mut guard = state.repository.lock().unwrap();
+    if let Some(repo) = guard.as_ref() {
+        return Ok(repo.data.settings.clone());
     }
-    let settings = snapshot(&state)?.settings;
-    preferences::apply(&app, &settings)?;
-    if !state.runtime.started.load(Ordering::SeqCst) && settings.processing_limit > 1 {
+    let root = match test_data_dir() {
+        Some(path) => path,
+        None => app.path().app_config_dir().map_err(|e| e.to_string())?,
+    };
+    let default = app.path().download_dir().map_err(|e| e.to_string())?;
+    let repo = store::Repository::open(&root, &default)?;
+    sessions::cleanup(&root)?;
+    let settings = repo.data.settings.clone();
+    *guard = Some(repo);
+    Ok(settings)
+}
+fn start_queue(app: &AppHandle, state: &Arc<AppState>, processing_limit: usize) {
+    if !state.runtime.started.load(Ordering::SeqCst) && processing_limit > 1 {
         state
             .runtime
             .processing
-            .add_permits(settings.processing_limit - 1);
+            .add_permits(processing_limit - 1);
     }
-    queue::start(app.clone(), state.inner().clone());
+    queue::start(app.clone(), state.clone());
+}
+#[tauri::command]
+async fn startup(app: AppHandle, state: State<'_, Arc<AppState>>) -> Result<Startup, String> {
+    let settings = open_repository(&app, &state)?;
+    preferences::apply(&app, &settings)?;
+    start_queue(&app, state.inner(), settings.processing_limit);
     sources::start(app.clone(), state.inner().clone());
+    if let Err(error)=automation::start(&app,state.inner()){let _=app.emit("app-warning",error);}
     if let Err(error) = browser::start(&app, &state.bridge) {
         let _ = app.emit("app-warning", error);
     }
@@ -702,6 +724,8 @@ async fn pick_paths(app: AppHandle, folders: bool) -> Result<Vec<PathBuf>, Strin
                         "ogg", "wav", "flac", "jpg", "jpeg", "png", "webp", "gif", "bmp",
                     ],
                 )
+                .add_filter("Documentos y texto", &["pdf", "epub", "txt", "md", "csv", "doc", "docx", "odt", "ppt", "pptx", "odp", "xls", "xlsx", "ods", "rtf"])
+                .add_filter("Subtítulos", &["srt", "vtt"])
                 .blocking_pick_files()
         };
         selected
@@ -1129,6 +1153,13 @@ pub(crate) fn publish(staging: &Path, file: &str, destination: &Path) -> Result<
     Ok(target)
 }
 fn main() {
+    if std::env::args().skip(1).eq(["--automation-worker"]) {
+        if let Err(error) = automation::run_worker(tauri::generate_context!()) {
+            eprintln!("{error}");
+            std::process::exit(3);
+        }
+        return;
+    }
     let state = Arc::new(AppState::default());
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -1138,6 +1169,8 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             web_archive::archive_document,web_archive::archive_add_annotation,web_archive::archive_remove_annotation,web_archive::queue_article_export,
+            capture_operations::screen_capture_status,capture_operations::screen_capture_sources,capture_operations::screen_capture_preview,capture_operations::cancel_screen_capture_preview,capture_operations::screen_capture_start,capture_operations::screen_capture_stop,capture_operations::screen_capture_save_replay,capture_operations::screen_capture_screenshot,capture_operations::screen_capture_recoverable,capture_operations::queue_screen_capture_recovery,
+            voice_operations::voice_status,voice_operations::voice_prepare,voice_operations::voice_sample,voice_operations::voice_plan_status,voice_operations::voice_segment_audio,voice_operations::queue_voice,voice_operations::voice_pause_job,voice_operations::cancel_voice_request,
             file_operations::image_assets_inspect,file_operations::image_assets_preview,file_operations::queue_image_assets,file_operations::cancel_image_assets_preview,
             file_operations::file_analysis,file_operations::queue_file_analysis,file_operations::file_rename_preview,file_operations::queue_file_rename,file_operations::file_rename_history,file_operations::queue_file_undo,file_operations::file_organize_review,file_operations::cancel_file_operation,
             file_operations::portable_preview_export,file_operations::queue_portable_export,file_operations::portable_choose_import,file_operations::portable_preview_import,file_operations::queue_portable_import,file_operations::cancel_portable_preview,
@@ -1159,6 +1192,7 @@ fn main() {
             components::enable_component, components::remove_component,
             gallery_auth::set_gallery_token, gallery_auth::gallery_auth_status, galleries::gallery_preview, galleries::inspect_gallery,
             galleries::queue_gallery,
+            automation::automation_status,automation::automation_enable,automation::automation_choose_root,automation::automation_remove_root,automation::automation_save_client,automation::automation_revoke_client,automation::automation_approve_plan,
             startup,
             get_snapshot,
             inspect_media,
@@ -1254,6 +1288,8 @@ fn main() {
                         let _ = sender.send(true);
                     }
                 }
+                capture_operations::shutdown(&state);
+                state.automation_pipe.lock().unwrap().take();
                 browser::stop(&state.bridge);
             }
             _ => {}

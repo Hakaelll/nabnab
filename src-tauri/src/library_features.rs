@@ -22,12 +22,34 @@ pub struct LibraryDetails {
     pub web_archive_ref: Option<String>,
     pub article_annotations: Vec<crate::web_archive::Annotation>,
     pub ocr_ref: Option<String>,
+    pub narration: Option<NarrationReference>,
+    pub recording: Option<RecordingReference>,
     pub chapters: Vec<Chapter>,
     pub tracks: Vec<LocalTrack>,
     pub playback_position: f64,
     pub favorite: bool,
     pub bookmarks: Vec<Bookmark>,
     pub clip: Option<ClipReference>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NarrationReference {
+    pub plan_ref: Option<String>,
+    pub text_hash: String,
+    pub source_version: String,
+    pub voice_name: String,
+    pub language: String,
+    pub engine_fingerprint: String,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RecordingReference {
+    pub capture_ref: Option<String>,
+    pub source_label: String,
+    pub kind: String,
+    pub duration_ms: u64,
+    pub interrupted: bool,
+    pub reason: Option<String>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -55,6 +77,7 @@ pub fn transform_details(
         platform: parent.details.platform.clone(),
         source_ids: parent.details.source_ids.clone(),
         source_url:parent.details.source_url.clone(),
+        narration: parent.details.narration.clone().filter(|_| !matches!(options, crate::tools::ToolOptions::Transcribe {..})).map(|mut reference| { reference.plan_ref = None; reference }),
         chapters: parent.details.chapters.clone(),
         tracks: parent.details.tracks.clone(),
         ..LibraryDetails::default()

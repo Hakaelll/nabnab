@@ -1,5 +1,9 @@
+import {createAutomation} from "./automation-ui";
 import "./style.css";
 import "./sections.css";
+import "./capture-shell.css";
+import {createScreenCapture,captureIsActive,type CaptureState} from "./screen-capture-ui";
+import {createVoice} from "./voice-ui";
 import {createImageAssets} from "./image-assets-ui";
 import {createFileOrganization} from "./file-organization-ui";
 import {createPortableCollections} from "./portable-collections-ui";
@@ -61,12 +65,13 @@ let thumbnailWorkers=0;
 const home: HomeState = { input: "", media: null, loading: false, selectedUrls: new Set(), format: "mp4", quality: "", audioBitrate: "192", subtitleLanguage: "", submitting: false };
 const downloads: DownloadView = { query: "", filter: "all", selected: new Set(), detailId: null };
 const library: LibraryView = { query: "", filter: "all", sort: "newest", layout: "grid", collection: "", offset: 0, selected: new Set(), detailId: null };
-let localToolModule:"media"|"documents"|"pdfEdits"|"ocr"|"composition"|"palettes"|"imageAssets"|"fileOrganization"|"portable"="media";
+let localToolModule:"media"|"documents"|"pdfEdits"|"ocr"|"composition"|"palettes"|"imageAssets"|"fileOrganization"|"portable"|"screenCapture"|"voice"="media";
 const tools: ToolsView = { kind: "convert", ids: new Set(), options: defaultToolOptions("convert"), picking: false };
 const preferences: SettingsView = { section: "general", engines: null, sessions: null, bridge: null, pairing: null, cache: null, working: false };
 const t: Copy = (spanish, english) => snapshot.settings.language === "es" ? spanish : english;
 let librarySection:'files'|'collections'|'sources'|'later'='files';
 let quickPreset='';
+let toolSearch='';
 let quickRequest=0;
 let quickLoading=false;
 let libraryContentHits:import("./library-types").SearchHit[]=[];
@@ -91,6 +96,11 @@ const ocr=createOcr({command,snapshot:()=>snapshot,refresh,render:renderLibraryM
 const imageAssets=createImageAssets({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t});
 const fileOrganization=createFileOrganization({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t});
 const portable=createPortableCollections({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t});
+type CaptureStatus=CaptureState&{shortcutLabel?:string|null;shortcutReason?:string|null};
+let captureStatus:CaptureStatus|null=null;
+const screenCapture=createScreenCapture({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t,onStatus:showCaptureStatus,settings:()=>{preferences.section='engines';navigate('settings');void loadSettingsSection().catch(showError);},chooseFolder:()=>{void chooseFolder().then(renderCurrent).catch(showError);}});
+const automation=createAutomation({command,render:renderCurrent,notify,t,desktop,copy:copyText,review:()=>{preferences.section="automation";navigate("settings");}});
+const voice=createVoice({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t,settings:()=>{preferences.section='engines';navigate('settings');void loadSettingsSection().catch(showError);},chooseFolder:()=>{void chooseFolder().then(renderCurrent).catch(showError);}});
 const documentEdits=createDocumentEdits({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t});
 const documents=createDocuments({command,snapshot:()=>snapshot,refresh,render:renderLibraryModules,t});
 const galleryExports=createGalleryExports({command,selected:()=>[...library.selected],refresh,notify,t});
@@ -122,9 +132,10 @@ function enterSurface(element: HTMLElement, axis: "x" | "y" = "y"): void {
   void animation.finished.catch(() => {}).then(() => { if (surfaceAnimations.get(element) === animation) surfaceAnimations.delete(element); });
 }
 function checked(id: string): boolean { const element = document.getElementById(id); return element instanceof HTMLInputElement && element.checked; }
+function isLibraryFilter(value:string|undefined):value is LibraryView['filter']{return ['all','video','audio','image','subtitle','document','file','article','ocr','recording','narration'].includes(value??'');}
 function isPage(value: string | undefined): value is Page { return value === "platforms" || value === "home" || value === "downloads" || value === "library" || value === "tools" || value === "settings"; }
 function isTool(value: string | undefined): value is ToolKind { return ["transcribe","animate","frame","contactSheet","rotate","crop","mute","audioProcess","imageConvert"].includes(value??"") || value === "convert" || value === "extractAudio" || value === "trim" || value === "compress"; }
-function isSettingsSection(value: string | undefined): value is SettingsSection { return value === "connections" || value === "general" || value === "downloads" || value === "formats" || value === 'organization' || value === "engines" || value === "sessions" || value === "appearance" || value === "browser" || value === "about"; }
+function isSettingsSection(value: string | undefined): value is SettingsSection { return value === "automation" || value === "connections" || value === "general" || value === "downloads" || value === "formats" || value === 'organization' || value === "engines" || value === "sessions" || value === "appearance" || value === "browser" || value === "about"; }
 async function command<T>(name: string, args?: Record<string, unknown>): Promise<T> {
   if (!desktop) throw new Error(t("Esta acción requiere la aplicación de escritorio nabnab.", "This action requires the nabnab desktop app."));
   return invoke<T>(name, args);
@@ -135,7 +146,7 @@ required("#app").innerHTML = `<canvas id="field" aria-hidden="true"></canvas><he
   <button id="maximize" aria-label="Maximizar" title="Maximizar"><svg class="maximize-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="3.5" width="9" height="9" rx=".5"/></svg><svg class="restore-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 5.5v-2h7v7h-2"/><rect x="3.5" y="5.5" width="7" height="7" rx=".5"/></svg></button>
   <button id="close" aria-label="Cerrar" title="Cerrar"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg></button>
   </div></header><div class="app-shell"><nav class="sidebar" aria-label="Navegación principal"><button id="toggle-sidebar" class="sidebar-toggle icon-button" data-action="toggle-sidebar" title="Contraer navegación" aria-label="Contraer navegación">${icon("menu")}</button><div class="nav-primary"></div><div class="nav-secondary"></div></nav>
-  <main id="main"><div id="notification" class="notification" hidden><span id="notification-icon"></span><div><span id="notification-text"></span><details id="notification-details" hidden><summary>Detalles técnicos</summary><pre></pre></details></div><button class="icon-button" data-action="dismiss-message" aria-label="Cerrar aviso">${icon("close")}</button></div><section id="home-page" class="home-page"><div id="home-content"></div></section><div class="content-layout"><section id="page-content" class="page-content" hidden></section><aside id="inspector" class="inspector" aria-label="Detalles" hidden></aside></div><button id="activity" class="activity" data-action="show-activity" hidden><span class="activity-dot"></span><span id="activity-text"></span>${icon("arrow")}</button></main></div><dialog id="detail-dialog" class="detail-dialog" aria-label="Detalles"></dialog><div id="drop-indicator" class="drop-indicator" hidden>${icon("add")}<span></span></div>`;
+  <main id="main"><div id="notification" class="notification" hidden><span id="notification-icon"></span><div><span id="notification-text"></span><details id="notification-details" hidden><summary>Detalles técnicos</summary><pre></pre></details></div><button class="icon-button" data-action="dismiss-message" aria-label="Cerrar aviso">${icon("close")}</button></div><section id="home-page" class="home-page"><div id="home-content"></div></section><div class="content-layout"><section id="page-content" class="page-content" hidden></section><aside id="inspector" class="inspector" aria-label="Detalles" hidden></aside></div><button id="activity" class="activity" data-action="show-activity" hidden><span class="activity-dot"></span><span id="activity-text"></span>${icon("arrow")}</button></main></div><aside id="capture-indicator" class="capture-indicator" hidden aria-label="Controles de captura"><span class="capture-status-dot" aria-hidden="true"></span><div class="capture-status-copy"><strong id="capture-status-label" aria-live="polite"></strong><small id="capture-status-source"></small></div><time id="capture-status-time"></time><span id="capture-shortcut-label"></span><button class="button quiet" data-action="screen-capture-open">Captura</button><button class="button secondary" data-action="screen-capture-save-replay" hidden>Guardar</button><button class="button primary" data-action="screen-capture-stop">Detener</button></aside><dialog id="detail-dialog" class="detail-dialog" aria-label="Detalles"></dialog><div id="drop-indicator" class="drop-indicator" hidden>${icon("add")}<span></span></div>`;
 const inspectorBody = document.createElement("div");
 inspectorBody.className = "inspector-body";
 const palette=createPalette({snapshot:()=>snapshot,t,showError,search:desktop?async query=>(await command<import("./library-types").SearchHit[]>("library_search",{query,collection:null,smartId:null})).filter(hit=>hit.kind==="article"||hit.kind==="ocr").map((hit,index)=>({id:`content:${hit.fileId}:${index}`,kind:hit.kind==="article"?t("Artículo","Article"):"OCR",label:hit.title,context:hit.excerpt,run:()=>openContentHit(hit,query)})):undefined,
@@ -149,6 +160,7 @@ const palette=createPalette({snapshot:()=>snapshot,t,showError,search:desktop?as
 
 function notify(text: string, kind: "info" | "success" | "error" = "info", detail = ""): void {
   const container = required("#notification");
+  container.querySelector(".automation-pending-notice")?.remove();
   container.hidden = !text; container.dataset.kind = kind;
   container.setAttribute("role", kind === "error" ? "alert" : "status");
   required("#notification-text").textContent = text;
@@ -161,6 +173,7 @@ function notify(text: string, kind: "info" | "success" | "error" = "info", detai
 function showError(error: unknown): void {
   if (isCancelled(error)) return;
   const messages: Record<string, [string, string]> = {
+    budget_exceeded: ["Se ha superado el límite aprobado. Prepara otro plan con el tamaño o el tiempo necesarios.", "The approved budget was exceeded. Prepare another plan with the required size or time."],
     rate_limited: ["El servidor está limitando las solicitudes. Espera antes de reintentar.", "The server is limiting requests. Wait before retrying."],
     authentication: ["El contenido requiere una sesión autorizada. Revisa Sesiones y privacidad.", "This content requires an authorized session. Review Sessions and privacy."],
     forbidden: ["El origen ha denegado el acceso. Revisa los requisitos de sesión.", "The source denied access. Review session requirements."],
@@ -267,6 +280,7 @@ function renderInspector(force=false): void {
   if(force||key!==inspectorKey){inspectorBody.innerHTML=job?jobInspector(job,snapshot,t):item?mediaInspector(item,snapshot,t):"";inspectorKey=key;
     if(item?.kind==='article')inspectorBody.insertAdjacentHTML("beforeend",articles.renderInspector(item));
     if(item?.details?.ocrRef)inspectorBody.insertAdjacentHTML("beforeend",ocr.renderInspector(item));
+    if(item&&(item.kind==='article'||item.details?.ocrRef||item.kind==='document'&&/\.(pdf|epub|txt|md)$/i.test(item.name)))inspectorBody.insertAdjacentHTML('beforeend',`<section class="local-narration-action"><button class="button secondary" data-action="voice-from-library" data-id="${h(item.id)}">${icon('audio')}${t('Preparar narración local','Prepare local narration')}</button></section>`);
     if(job&&['pending','paused'].includes(job.state))inspectorBody.insertAdjacentHTML('beforeend',`<form id="job-scheduling" class="settings-form" data-id="${h(job.id)}"><h3>${t('Prioridad y programación','Priority and schedule')}</h3>${schedulingFields('job',job.priority??'normal',job.schedule??{kind:'immediate'},localTimezone,t)}<button type="submit" class="button secondary">${t('Guardar programación','Save schedule')}</button><div class="button-group"><button type="button" class="button quiet" data-action="job-next" data-id="${h(job.id)}">${t('Ejecutar a continuación','Run next')}</button><button type="button" class="button quiet" data-action="job-up" data-id="${h(job.id)}">${t('Subir','Move up')}</button><button type="button" class="button quiet" data-action="job-down" data-id="${h(job.id)}">${t('Bajar','Move down')}</button></div></form>`);
   }
   if(window.innerWidth>=1120){if(dialog.open)dialog.close();aside.hidden=false;if(inspectorBody.parentElement!==aside)aside.append(inspectorBody);required(".content-layout").classList.add("has-inspector");}
@@ -276,6 +290,7 @@ function renderInspector(force=false): void {
 }
 function renderLibraryModules():void{preserveFocus(()=>{renderCurrent();renderInspector(true);libraryFeatures.bind();});}
 function renderCurrent(): void {
+  const directoryScroll=document.querySelector<HTMLElement>('.tool-directory')?.scrollTop??0;
   preserveFocus(()=>{
     updateNavigation();required('#field').hidden=page!=='home';required("#home-page").hidden=page!=="home";required("#page-content").hidden=page==='home';
     if(page==='home')renderHome();
@@ -293,18 +308,26 @@ function renderCurrent(): void {
       const groups=[
         {title:t('Documentos','Documents'),items:[['documents',t('Operaciones PDF','PDF operations'),'document'],['pdfEdits',t('Editar PDF','Edit PDF'),'document'],['ocr',t('Reconocer texto · OCR','Recognize text · OCR'),'document']]},
         {title:t('Imagen y composición','Image and composition'),items:[['imageAssets',t('Capturas, iconos y atlas','Screenshots, icons and atlas'),'image'],['palettes',t('Paleta de imagen','Image palette'),'image'],['composition',t('Componer medios','Compose media'),'video']]},
-        {title:t('Archivos y colecciones','Files and collections'),items:[['fileOrganization',t('Revisar y renombrar','Review and rename'),'library'],['portable',t('Colección portátil','Portable collection'),'folder']]}
+        {title:t('Archivos y colecciones','Files and collections'),items:[['fileOrganization',t('Revisar y renombrar','Review and rename'),'library'],['portable',t('Colección portátil','Portable collection'),'folder']]},
+        {title:t('Captura','Capture'),items:[['screenCapture',t('Pantalla y repetición','Screen and replay'),'video']]},
+        {title:t('Voz','Voice'),items:[['voice',t('Narración local','Local narration'),'audio']]}
       ] satisfies {title:string;items:[string,string,Parameters<typeof icon>[0]][]}[];
-      const moduleNav=groups.map(group=>`<section class="tool-group local-tool-group"><h2>${group.title}</h2><div class="tool-navigation">${group.items.map(([id,label,glyph])=>`<button type="button" id="local-tool-${id}" data-action="tool-module" data-id="${id}" data-tool-name="${h(label.toLocaleLowerCase())}" aria-pressed="${localToolModule===id}">${icon(glyph)}<span>${label}</span></button>`).join('')}</div></section>`).join('');
+      const moduleNav=groups.map(group=>`<section class="tool-group local-tool-group"><h2>${group.title}</h2><div class="tool-navigation">${group.items.map(([id,label,glyph])=>`<button type="button" id="local-tool-${id}" data-action="tool-module" data-id="${id}" data-tool-name="${h((group.title+' '+label+(id==='voice'?' tts speech voz':id==='screenCapture'?' grabar recording screenshot':'')).toLocaleLowerCase())}" aria-pressed="${localToolModule===id}">${icon(glyph)}<span>${label}</span></button>`).join('')}</div></section>`).join('');
       directory.querySelector('.tool-search')?.insertAdjacentHTML('afterend',moduleNav);
       if(localToolModule!=='media'){
         for(const button of directory.querySelectorAll('[data-action="tool-kind"]'))button.setAttribute('aria-pressed','false');
-        required('.tool-workspace').innerHTML=localToolModule==='documents'?documentToolsPanel(snapshot,t):localToolModule==='pdfEdits'?documentEdits.render():localToolModule==='ocr'?ocr.renderTools():localToolModule==='composition'?mediaEditsPanel(snapshot,t):localToolModule==='imageAssets'?imageAssets.render():localToolModule==='fileOrganization'?fileOrganization.renderTools():localToolModule==='portable'?portable.render():palettesPanel(snapshot,t);
+        required('.tool-workspace').innerHTML=localToolModule==='documents'?documentToolsPanel(snapshot,t):localToolModule==='pdfEdits'?documentEdits.render():localToolModule==='ocr'?ocr.renderTools():localToolModule==='composition'?mediaEditsPanel(snapshot,t):localToolModule==='imageAssets'?imageAssets.render():localToolModule==='fileOrganization'?fileOrganization.renderTools():localToolModule==='portable'?portable.render():localToolModule==='screenCapture'?screenCapture.render():localToolModule==='voice'?voice.render():palettesPanel(snapshot,t);
       }
     }
+    if(page==='tools'){
+      const search=document.getElementById('tool-search');if(search instanceof HTMLInputElement)search.value=toolSearch;
+      filterToolDirectory();
+      const directory=document.querySelector<HTMLElement>('.tool-directory');if(directory){directory.scrollTop=directoryScroll;const selected=directory.querySelector<HTMLElement>('[aria-pressed="true"]');if(selected?.getClientRects().length){const bounds=directory.getBoundingClientRect(),item=selected.getBoundingClientRect();const top=directory.querySelector('.tool-search')?.getBoundingClientRect().bottom??bounds.top;if(item.bottom>bounds.bottom)directory.scrollTop+=item.bottom-bounds.bottom+8;else if(item.top<top)directory.scrollTop-=top-item.top+8;}}
+    }
     if(page==='settings'&&preferences.section==='engines')required('.settings-content').insertAdjacentHTML('beforeend',platforms.renderComponents());
+    if(page==='settings'&&preferences.section==='automation')required('.settings-content').insertAdjacentHTML('beforeend',automation.render());
     if(page==='settings'&&preferences.section==='connections')required('.settings-content').insertAdjacentHTML('beforeend',fileSources.renderConnections());
-    renderInspector();libraryFeatures.bind();if(page==='platforms'&&platformModule==='catalog')platforms.bind();if(page==='platforms'&&platformModule==='courses')courses.bind();updateActivity();observeThumbnails();
+    renderInspector();libraryFeatures.bind();if(page==='platforms'&&platformModule==='catalog')platforms.bind();if(page==='platforms'&&platformModule==='courses')courses.bind();updateActivity();observeThumbnails();screenCapture.bind();voice.bind();
   });
 }
 function observeThumbnails(): void {
@@ -321,7 +344,27 @@ async function pumpThumbnails(): Promise<void> {
     void(async()=>{try{const url=thumbnailUrls.get(id)??await command<string>('thumbnail',{id});if(thumbnailUrls.size>=120)thumbnailUrls.delete(thumbnailUrls.keys().next().value??'');thumbnailUrls.set(id,url);if(!element.isConnected)return;const image=document.createElement('img');image.alt='';image.decoding='async';image.onload=()=>{if(element.isConnected)element.replaceChildren(image);};image.src=url;}catch{/* Missing or unsupported thumbnails retain their file-type icon. */}finally{thumbnailWorkers--;void pumpThumbnails();}})();
   }
 }
+function filterToolDirectory():void{
+  const query=toolSearch.toLocaleLowerCase();
+  for(const item of document.querySelectorAll<HTMLElement>('[data-tool-name]'))item.hidden=!item.dataset.toolName?.includes(query);
+  for(const group of document.querySelectorAll<HTMLElement>('.tool-group'))group.hidden=![...group.querySelectorAll<HTMLElement>('[data-tool-name]')].some(item=>!item.hidden);
+}
+function showCaptureStatus(value:CaptureStatus):void{
+  captureStatus=value;
+  const indicator=required('#capture-indicator');
+  const active=captureIsActive(value);indicator.hidden=!active;indicator.dataset.mode=value.phase;
+  if(!active)return;
+  const label=value.phase==='replay'?t('Búfer de repetición activo','Replay buffer active'):value.phase==='starting'?t('Iniciando captura…','Starting capture…'):value.phase==='stopping'?t('Finalizando captura…','Stopping capture…'):t('Grabando pantalla','Recording screen');
+  const target=required('#capture-status-label');if(target.textContent!==label)target.textContent=label;
+  required('#capture-status-source').textContent=value.sourceLabel??'';
+  const seconds=Math.max(0,Math.floor(value.elapsedMs/1000));required('#capture-status-time').textContent=String(Math.floor(seconds/60)).padStart(2,'0')+':'+String(seconds%60).padStart(2,'0');
+  required('#capture-shortcut-label').textContent=value.phase==='replay'?value.shortcutLabel??'':'';
+  const open=indicator.querySelector<HTMLButtonElement>('[data-action="screen-capture-open"]');if(open)open.textContent=t('Captura','Capture');
+  const save=indicator.querySelector<HTMLButtonElement>('[data-action="screen-capture-save-replay"]');if(save){save.hidden=value.phase!=='replay';save.disabled=value.availableSeconds<=0;save.textContent=t('Guardar repetición','Save replay');}
+  const stop=indicator.querySelector<HTMLButtonElement>('[data-action="screen-capture-stop"]');if(stop){stop.disabled=value.phase==='stopping';stop.textContent=t('Detener','Stop');}
+}
 function updateActivity(): void {
+  if(captureStatus)showCaptureStatus(captureStatus);
   const working=snapshot.jobs.filter(job=>activeStates.includes(job.state));const pending=snapshot.jobs.filter(job=>job.state==='pending');
   required("#activity").hidden=page==='downloads'||working.length+pending.length===0;
   required("#activity-text").textContent=working.length?`${working.length} ${t("en curso", "in progress")} · ${stateLabel(working[0].state,t)}`:`${pending.length} ${t("pendientes", "pending")}`;
@@ -336,6 +379,7 @@ function applySnapshot(next: Snapshot): void {
 async function refresh(): Promise<void> { applySnapshot(await command<Snapshot>("get_snapshot")); }
 function navigate(next: Page): void {
   if(page==='platforms'&&platformModule==='courses')courses.savePlayback();
+  if(next!=='tools')voice.deactivate();
   const changed=page!==next;cancelSurfaceMotion();
   if(page==='tools'){try{tools.options=readToolOptions();}catch{/* Keep the last valid options while a draft is incomplete. */}}
   scrollPositions.set(page,required("#main").scrollTop);page=next;inspectorKey="";
@@ -421,6 +465,7 @@ async function actOnJobs(ids: string[], action: "cancel"|"retry"|"pause"): Promi
 async function loadSettingsSection(): Promise<void> {
   if(!desktop)return;const section=preferences.section;
   if(section==='engines'){await platforms.loadComponents();preferences.engines=await command<EngineStatus[]>("engine_status");enginesReady=preferences.engines.length>=4&&preferences.engines.every(engine=>engine.status==='installed');}
+  else if(section==='automation')await automation.open();
   else if(section==='connections')await fileSources.loadConnections();
   else if(section==='sessions'){preferences.sessions=await command<SessionStatus[]>("sessions_status");preferences.cache=await command<{bytes:number;files:number}>("cache_status");}
   else if(section==='browser')preferences.bridge=await command<BridgeStatus>("bridge_status");
@@ -473,9 +518,11 @@ async function handleAction(action: string, button: HTMLButtonElement): Promise<
   if(action==='emblem-activate'){const color=handleEmblemClick();if(color.toggled)renderHome();return;}
   if(action==='open-fileSources'){platformModule='fileSources';navigate('platforms');await fileSources.open();if(id==='drive'||id==='onedrive'||id==='dropbox'){const tabButton=document.createElement('button');tabButton.dataset.tab=id;await fileSources.handleClick('file-source-tab',tabButton);}return;}
   if(action==='open-files'){platformModule='files';navigate('platforms');await advancedFiles.load();return;}
-  if(action==='tool-module'){const module=button.dataset.id;if(module==='documents'||module==='pdfEdits'||module==='ocr'||module==='composition'||module==='palettes'||module==='imageAssets'||module==='fileOrganization'||module==='portable'){localToolModule=module;renderCurrent();}return;}
+  if(action==='tool-module'){const module=button.dataset.id;if(module==='documents'||module==='pdfEdits'||module==='ocr'||module==='composition'||module==='palettes'||module==='imageAssets'||module==='fileOrganization'||module==='portable'||module==='screenCapture'||module==='voice'){if(module!=='voice')voice.deactivate();localToolModule=module;renderCurrent();if(module==='screenCapture')await screenCapture.open();if(module==='voice')await voice.open();}return;}
   if(action==='organize-selected'){localToolModule='fileOrganization';navigate('tools');fileOrganization.open([...library.selected]);return;}
   if(action==='portable-selected'){localToolModule='portable';navigate('tools');portable.open([...library.selected]);return;}
+  if(action==='screen-capture-open'){toolSearch='';voice.deactivate();localToolModule='screenCapture';navigate('tools');await screenCapture.open();return;}
+  if(action==='voice-from-library'){toolSearch='';await articles.click('article-close',button);localToolModule='voice';navigate('tools');await voice.open({kind:'library',id});return;}
   if(action==='tool-audio-preview'){tools.options=readToolOptions();const libraryId=[...tools.ids][0];if(libraryId){await command('queue_audio_preview',{libraryId,options:tools.options,clientRequest:crypto.randomUUID()});await refresh();notify(t('Escucha previa añadida a Descargas. El resultado aparecerá en Biblioteca.','Audio preview added to Downloads. The result will appear in Library.'));}return;}
   if(action==='open-source-exports'){platformModule='exports';navigate('platforms');sourceExports.open();return;}
   if(action==='open-live'){platformModule='live';navigate('platforms');return;}
@@ -485,6 +532,7 @@ async function handleAction(action: string, button: HTMLButtonElement): Promise<
   if(action==='open-podcasts'){librarySection='sources';navigate('library');sources.openAdd('', 'podcast');return;}
   if(action==='open-torrents'||action==='open-torrent'){platformModule='torrent';navigate('platforms');await torrents.load();renderCurrent();return;}
   if(action==='platform-back'){showPlatformsCatalog();return;}
+  if(await automation.click(action,button)||await screenCapture.click(action,button)||await voice.click(action,button))return;
   if(await imageAssets.click(action,button)||await fileOrganization.click(action,button)||await portable.click(action,button))return;
   if(await articles.click(action,button)||await ocr.click(action,button)||await documentEdits.click(action))return;
   if(await fileSources.handleClick(action,button))return;
@@ -512,7 +560,7 @@ async function handleAction(action: string, button: HTMLButtonElement): Promise<
     case 'retry-selected':await actOnJobs(snapshot.jobs.filter(job=>downloads.selected.has(job.id)&&['error','cancelled'].includes(job.state)).map(job=>job.id),'retry');break;
     case 'clear-job-selection':downloads.selected.clear();renderCurrent();break;
     case 'copy-job-error':{const job=snapshot.jobs.find(job=>job.id===id);if(job?.error)await copyText(job.error.technical);break;}
-    case 'library-filter':{const value=button.dataset.filter;if(value==='all'||value==='video'||value==='audio'||value==='image'||value==='subtitle'||value==='document'||value==='file'||value==='article'||value==='ocr'){library.filter=value;library.offset=0;renderCurrent();}break;}
+    case 'library-filter':{const value=button.dataset.filter;if(isLibraryFilter(value)){library.filter=value;library.offset=0;renderCurrent();}break;}
     case 'library-layout':if(button.dataset.layout==='grid'||button.dataset.layout==='list'){library.layout=button.dataset.layout;renderCurrent();}break;
     case 'library-next':library.offset+=60;renderCurrent();focusLibraryPage();break;
     case 'library-previous':library.offset=Math.max(0,library.offset-60);renderCurrent();focusLibraryPage();break;
@@ -548,18 +596,19 @@ async function handleAction(action: string, button: HTMLButtonElement): Promise<
   }
 }
 document.addEventListener('input',event=>{
-  if(event.target instanceof HTMLElement&&(imageAssets.input(event.target)||fileOrganization.input(event.target)||(event.target.id==='portable-query'&&portable.change(event.target))||fileSources.handleInput(event.target)||advancedFiles.handleInput(event.target)||sourceExports.handleInput(event.target)||live.input(event.target)||telegram.handleInput(event.target)||courses.handleInput(event.target)||torrents.handleInput(event.target)||platforms.handleInput(event.target)||batches.handleInput(event.target)||sources.handleInput(event.target)||libraryFeatures.handleInput(event.target)))return;
+  if(event.target instanceof HTMLElement&&(automation.change(event.target)||screenCapture.change(event.target)||voice.change(event.target)||imageAssets.input(event.target)||fileOrganization.input(event.target)||(event.target.id==='portable-query'&&portable.change(event.target))||fileSources.handleInput(event.target)||advancedFiles.handleInput(event.target)||sourceExports.handleInput(event.target)||live.input(event.target)||telegram.handleInput(event.target)||courses.handleInput(event.target)||torrents.handleInput(event.target)||platforms.handleInput(event.target)||batches.handleInput(event.target)||sources.handleInput(event.target)||libraryFeatures.handleInput(event.target)))return;
   const target=event.target;if(!(target instanceof HTMLInputElement||target instanceof HTMLTextAreaElement))return;
   if(target.id==='url')updateSourceInput(target.value,false);
   else if(target.id==='job-search'){downloads.query=target.value;renderCurrent();}
   else if(target.id==='library-search'){library.query=target.value;library.offset=0;library.contentMatches=undefined;libraryContentHits=[];renderCurrent();clearTimeout(contentSearchTimer);const request=++contentSearchGeneration;if(library.query.trim().length>=2)contentSearchTimer=setTimeout(()=>{void command<import('./library-types').SearchHit[]>('library_search',{query:library.query,collection:library.collection&&!library.collection.startsWith('smart:')&&!library.collection.startsWith('__')?library.collection:null,smartId:library.collection.startsWith('smart:')?library.collection.slice(6):null}).then(hits=>{if(request!==contentSearchGeneration)return;libraryContentHits=hits;library.contentMatches=new Set(hits.map(hit=>hit.fileId));if(page==='library')renderCurrent();}).catch(showError);},250);}
-  else if(target.id==='tool-search'){const query=target.value.toLocaleLowerCase();for(const item of document.querySelectorAll('[data-tool-name]'))if(item instanceof HTMLElement)item.hidden=!item.dataset.toolName?.includes(query);for(const group of document.querySelectorAll('.tool-group'))if(group instanceof HTMLElement)group.hidden=![...group.querySelectorAll('[data-tool-name]')].some(item=>item instanceof HTMLElement&&!item.hidden);}
+  else if(target.id==='tool-search'){toolSearch=target.value;filterToolDirectory();}
   else if(target.id==='tool-picker-search'){const query=target.value.toLocaleLowerCase();for(const item of document.querySelectorAll<HTMLElement>('[data-picker-name]'))item.hidden=!item.dataset.pickerName?.includes(query);}
 });
 document.addEventListener('change',event=>{
   const target=event.target;
   if((target instanceof HTMLInputElement||target instanceof HTMLSelectElement||target instanceof HTMLTextAreaElement)&&(articles.change(target)||ocr.change(target)))return;
-  if(target instanceof HTMLElement&&(imageAssets.change(target)||portable.change(target)||documentEdits.change(target)))return;
+  if(target instanceof HTMLSelectElement&&target.id==='library-content-filter'){const value=target.value||'all';if(isLibraryFilter(value)){library.filter=value;library.offset=0;renderCurrent();}return;}
+  if(target instanceof HTMLElement&&(automation.change(target)||screenCapture.change(target)||voice.change(target)||imageAssets.change(target)||portable.change(target)||documentEdits.change(target)))return;
   if(target instanceof HTMLElement){if((target instanceof HTMLInputElement||target instanceof HTMLSelectElement)&&(palettes.change(target)||mediaEdits.change(target)||captionEditor.change(target)||documents.change(target)))return;
   if(fileSources.handleInput(target)||advancedFiles.handleInput(target)||sourceExports.handleInput(target)||telegram.handleInput(target)||live.input(target)||courses.handleInput(target)||torrents.handleInput(target)||platforms.handleInput(target)||sources.handleInput(target)||libraryFeatures.handleChange(target))return;void batches.handleChange(target).catch(showError);}
   if(target instanceof HTMLSelectElement&&target.id==='job-schedule-kind'){for(const field of target.closest('form')?.querySelectorAll<HTMLElement>('[data-schedule-fields]')??[])field.hidden=field.dataset.scheduleFields!==target.value;return;}
@@ -585,6 +634,7 @@ document.addEventListener('change',event=>{
 });
 document.addEventListener('submit',event=>{const form=event.target;if(form instanceof HTMLFormElement){event.preventDefault();void submitForm(form).catch(showError);}});
 async function submitForm(form: HTMLFormElement): Promise<void> {
+  if(await automation.submit(form)||await screenCapture.submit(form)||await voice.submit(form))return;
   if(await imageAssets.submit(form)||await fileOrganization.submit(form)||await portable.submit(form))return;
   if(await articles.submit(form)||await ocr.submit(form)||await documentEdits.submit(form))return;
   if(await fileSources.handleSubmit(form))return;
@@ -620,7 +670,7 @@ window.addEventListener('resize',()=>preserveFocus(()=>renderInspector()));
 
 async function receivePaths(paths: string[]): Promise<void> {
   required('#drop-indicator').hidden=true;
-  const textFiles=paths.filter(path=>path.toLowerCase().endsWith('.txt'));const mediaFiles=paths.filter(path=>!path.toLowerCase().endsWith('.txt'));
+  const textFiles=page==='home'?paths.filter(path=>path.toLowerCase().endsWith('.txt')):[];const mediaFiles=paths.filter(path=>!textFiles.includes(path));
   for(const path of textFiles)await importUrlFile(path);
   if(mediaFiles.length){const previous=new Set(snapshot.library.map(item=>item.id));const next=await command<Snapshot>('import_paths',{paths:mediaFiles});for(const item of next.library)if(!previous.has(item.id)&&item.kind!=='image')tools.ids.add(item.id);snapshot=next;navigate(tools.ids.size?'tools':'library');notify(t("Archivo importado. El original no se ha modificado.", "File imported. The original was not modified."),'success');}
 }
@@ -638,15 +688,19 @@ if(desktop){
   try{
     await nativeWindow.onResized(updateMaximize);await updateMaximize();
     await nativeWindow.onDragDropEvent(event=>{if(event.payload.type==='drop')void receivePaths(event.payload.paths).catch(showError);else required('#drop-indicator').hidden=event.payload.type!=='enter'&&event.payload.type!=='over';});
+    await listen<CaptureStatus>('capture-update',({payload})=>{const previous=captureStatus?.phase;screenCapture.acceptStatus(payload);if(page==='tools'&&localToolModule==='screenCapture'&&(captureIsActive(payload)||previous!==payload.phase))renderCurrent();if(previous!==payload.phase&&(payload.phase==='interrupted'||payload.phase==='error')){notify(payload.readyCapture?t('La captura se interrumpió. Revisa el archivo parcial en Captura.','Capture was interrupted. Review the partial file in Capture.'):t('No se pudo continuar la captura. Revisa Captura.','Capture could not continue. Review Capture.'),'error',payload.reason??'');if(page==='tools'&&localToolModule==='screenCapture')void screenCapture.open().catch(showError);}});
+    await listen('capture-saved',()=>{notify(t('Repetición enviada a Descargas.','Replay sent to Downloads.'),'success');void refresh().catch(showError);});
+    await listen<string>('capture-error',({payload})=>showError(payload));
     await listen<Job>('job-update',({payload})=>{const current=snapshot.jobs.find(job=>job.id===payload.id);if(current&&(current.runId>payload.runId||(current.runId===payload.runId&&current.updatedAt>payload.updatedAt)))return;snapshot.jobs=current?snapshot.jobs.map(job=>job.id===payload.id?payload:job):[...snapshot.jobs,payload];scheduleJobsRender();});
     await listen('library-update',()=>void refresh().catch(showError));
     await listen('sources-changed',()=>void refresh().catch(showError));
+    await listen('automation-update',()=>void automation.onUpdate().then(pending=>{if(pending)required('#notification-text').insertAdjacentHTML('afterend',`<button type="button" class="button quiet automation-pending-notice" data-action="automation-open-settings">${t('Revisar solicitud','Review request')}</button>`);}).catch(showError));
     await listen('queue-changed',()=>void refresh().catch(showError));
     await listen('drafts-changed',()=>void refresh().catch(showError));
     await listen<string>('browser-draft',({payload})=>void(async()=>{await refresh();const draft=snapshot.drafts?.find(d=>d.id===payload);if(!draft)return;if(draft.savedForLater){notify(t('Enlaces guardados en Biblioteca > Para después.','Links saved in Library > For later.'),'success');}else{navigate('home');await batches.open(draft);}})().catch(showError));
     await listen<string>('app-warning',({payload})=>notify(payload));
-    const state=await command<Startup>('startup');snapshot=state;enginesReady=state.enginesReady;localTimezone=await command<string>('local_timezone').catch(()=> 'UTC');renderCurrent();if(state.engineError)notify(t("Algunos motores requieren preparación. Revisa Motores en Ajustes.", "Some engines require preparation. Review Engines in Settings."),'info',state.engineError);
+    const state=await command<Startup>('startup');snapshot=state;enginesReady=state.enginesReady;void command<CaptureStatus>('screen_capture_status').then(value=>{if(value)screenCapture.acceptStatus(value);}).catch(()=>{});localTimezone=await command<string>('local_timezone').catch(()=> 'UTC');renderCurrent();if(state.engineError)notify(t("Algunos motores requieren preparación. Revisa Motores en Ajustes.", "Some engines require preparation. Review Engines in Settings."),'info',state.engineError);
   }catch(error){showError(error);}
 }else{for(const button of document.querySelectorAll<HTMLButtonElement>('.window-actions button'))button.disabled=true;}
 required<HTMLTextAreaElement>('#url').focus({preventScroll:true});
-window.addEventListener('beforeunload',()=>{disposeGraphics?.();clearTimeout(debounce);clearTimeout(pendingRender);});
+window.addEventListener('beforeunload',()=>{voice.dispose();disposeGraphics?.();clearTimeout(debounce);clearTimeout(pendingRender);});

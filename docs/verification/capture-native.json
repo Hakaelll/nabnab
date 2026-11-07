@@ -1,0 +1,81 @@
+{
+  "scope": "Actual native IPC/FFmpeg/queue/library. Only this fresh app process's own HWND; microphone/system audio always off. Backend 66-second replay proof is tested separately.",
+  "checks": [
+    {
+      "case": "Explicit component, opaque source/preview boundary, real accelerated-window PNG pixels queued and published",
+      "passed": true,
+      "dimensions": [
+        1475,
+        975
+      ],
+      "pngSha256": "28f16f67856a86c0672e1d4abc370fa8cd332b4db923b95ce76094fb7a621658",
+      "previewContent": {
+        "sampledColors": 256,
+        "nonUniformRatio": 0.9997490157480315
+      },
+      "screenshotContent": {
+        "sampledColors": 256,
+        "nonUniformRatio": 0.9999166145507609
+      }
+    },
+    {
+      "case": "Duration-limit capture binds destination before start; actual video UI pixels, ffprobe metadata and cache lifecycle",
+      "passed": true,
+      "duration": 4.266,
+      "destinationBound": true,
+      "dimensions": [
+        1476,
+        976
+      ],
+      "videoContent": {
+        "sampledColors": 256,
+        "nonUniformRatio": 0.99979174996668
+      }
+    },
+    {
+      "case": "Published recording loads real metadata in the native nabmedia Library player without playback",
+      "passed": true,
+      "playback": {
+        "state": "loadedmetadata",
+        "readyState": 4,
+        "width": 1476,
+        "height": 976,
+        "duration": 4.266,
+        "paused": true,
+        "source": "http://nabmedia.localhost/1ce7e38508adb5e334d625bd6b7f277c280d8a2179048a6e8a2fceca4c0a75ff"
+      }
+    },
+    {
+      "case": "Persistent recording indicator and Stop remain usable from Home",
+      "passed": true
+    },
+    {
+      "case": "Opt-in replay snapshots only elapsed media, queues a stable result, and releases its OS shortcut when stopped",
+      "passed": true,
+      "shortcut": "Ctrl+Shift+F8",
+      "savedSeconds": 1.999
+    },
+    {
+      "case": "Replay duration autostop releases the global hotkey; previously published PNG remains unchanged",
+      "passed": true,
+      "shortcut": "Ctrl+Shift+F8"
+    },
+    {
+      "case": "Resizing only the owned app window yields a preserved interruption; explicit partial recovery keeps partial metadata",
+      "passed": true
+    }
+  ],
+  "errors": [],
+  "backendChecks": {
+    "syntheticWindowOnly": true,
+    "replay": {
+      "activatedSeconds": 66,
+      "requestedSeconds": 60,
+      "measuredSeconds": 59.999,
+      "closedSegments": 30,
+      "discardedLiveSegmentsAfterStop": true
+    },
+    "resizeAndCloseRecovery": true,
+    "syntheticAudioOffsetsAndSeparateTracks": true
+  }
+}

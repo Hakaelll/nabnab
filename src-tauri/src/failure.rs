@@ -52,6 +52,8 @@ impl Failure {
         let has = |items: &[&str]| items.iter().any(|s| text.contains(s));
         let (code, message, retryable) = if raw == crate::engine::CANCELLED {
             ("cancelled", "Download cancelled.", false)
+        } else if text.starts_with("automation") && text.contains("budget") {
+            ("budget_exceeded", "The approved automation budget was exceeded. Prepare a new plan with appropriate limits.", false)
         } else if text.starts_with("the rename operation stopped with partial results.") {
             ("partial_operation", "Some files could not be renamed. Open Review and rename → History to review, resume or undo the recorded operation.", false)
         } else if has(&["429", "too many requests", "rate_limited"]) {

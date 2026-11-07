@@ -477,3 +477,7 @@ Referencia anterior, sustituida por el campo más espaciado descrito al inicio d
 ## Verificación del fondo de Inicio
 
 La comparación de `tests/home-motion.browser.mjs --before` carga los módulos gráficos del commit `011d9bc` en la misma interfaz y a las mismas dimensiones que la versión nueva. Se revisaron 1180 × 780 y 900 × 620. La prueba comprueba cambios reales en los píxeles, liberación del bucle al salir de Inicio, fondo estático con movimiento reducido y escritura por teclado. Las capturas están en `artifacts/home-motion`; son fixtures de IPC, no evidencia de acceso a una plataforma.
+
+## Captura, voz y automatización
+
+Los módulos nuevos reutilizan el directorio de Herramientas, la jerarquía tipográfica y las superficies redondeadas de la entrega C. Captura antepone una fuente visual y una acción explícita; Voz separa el texto de la configuración y conserva un reproductor estable durante las actualizaciones. El indicador global de grabación mantiene los controles a mano al cambiar de sección. Automatización vive en Ajustes y prioriza permisos legibles y revisión de cada plan. La navegación secundaria de Ajustes permanece visible al recorrer contenido largo. Las pruebas de interfaz cubren 1180 × 780 y 900 × 620; las capturas de fixtures no se usan como prueba de captura nativa o acceso a cuentas.

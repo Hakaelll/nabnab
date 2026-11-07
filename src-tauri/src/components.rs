@@ -84,6 +84,8 @@ pub fn optional_components(app: AppHandle) -> Result<Vec<Component>, String> {
     }];
     entries.extend(crate::component_archives::PACKAGES.iter().map(|p|{let id=if p.id=="torrent"{"files"}else{p.id};Component{id,name:p.name,version:p.version,size:p.bytes as u64,license:p.license,source:p.url,installed:crate::component_archives::installed(&root,p.id),enabled:root.join(format!("{id}.enabled")).exists(),available:cfg!(target_os="windows")&&cfg!(target_arch="x86_64"),note:if p.id=="torrent"{Some("Instalar Archivos no activa BitTorrent; P2P requiere consentimiento en su selector.")}else if p.id=="telegram"{Some("Paquete tdlib.native de ForNeVeR en NuGet. Requiere Microsoft Visual C++ Redistributable 2019 o posterior; no inicia sesión.")}else{None}}}));
     entries.push(Component{id:"ocr",name:"OCR local · Tesseract",version:crate::ocr_component::VERSION,size:crate::ocr_component::DOWNLOAD_BYTES,license:crate::ocr_component::LICENSE,source:crate::ocr_component::SOURCE,installed:crate::ocr_component::installed(&root),enabled:root.join("ocr.enabled").is_file(),available:cfg!(all(target_os="windows",target_arch="x86_64")),note:Some("Motor local opcional. Modelos español/inglés por separado, con consentimiento y tamaño visible.")});
+    entries.push(Component{id:"voice",name:"Voz local · Windows Desktop",version:"System.Speech / SAPI",size:0,license:"Microsoft Windows terms",source:"https://learn.microsoft.com/dotnet/api/system.speech.synthesis.speechsynthesizer",installed:cfg!(windows),enabled:root.join("voice.enabled").is_file(),available:cfg!(windows),note:Some("Usa voces Microsoft Desktop ya instaladas y compatibles con uso offline. No descarga modelos ni utiliza Edge TTS. Las voces e idiomas se gestionan en Windows; nabnab solo activa esta función.")});
+    entries.push(Component{id:"capture",name:"Captura local · Pantalla y repetición",version:"FFmpeg / WASAPI",size:0,license:"FFmpeg LGPL; WASAPI binding MIT",source:"https://ffmpeg.org/ffmpeg-devices.html#gdigrab",installed:crate::dependencies::engine_root(&app).is_ok(),enabled:root.join("capture.enabled").is_file(),available:cfg!(windows),note:Some("Utiliza el FFmpeg existente y las APIs de Windows. Activar el componente no inicia capturas. Pantalla, audio y micrófono requieren selección explícita en la herramienta.")});
     Ok(entries)
 }
 #[tauri::command]
@@ -132,10 +134,12 @@ pub async fn install_component(app: AppHandle, id: String) -> Result<(), String>
 }
 #[tauri::command]
 pub fn enable_component(app: AppHandle, state:tauri::State<Arc<crate::AppState>>, id: String, enabled: bool) -> Result<(), String> {
-    if !matches!(id.as_str(), "gallery" | "torrent" | "files" | "transcription" | "documents" | "telegram" | "ocr") {
+    if !matches!(id.as_str(), "gallery" | "torrent" | "files" | "transcription" | "documents" | "telegram" | "ocr" | "voice" | "capture") {
         return Err("Unknown component.".into());
     }
     if id=="torrent"&&enabled {return Err("Activate BitTorrent from its selector after reviewing the P2P notice.".into());}
+    if matches!(id.as_str(),"voice"|"capture")&&!cfg!(windows){return Err("This local component requires Windows.".into());}
+    if id=="capture"&&enabled {crate::dependencies::engine_root(&app)?;}
     if !enabled {idle(&state,&id)?;}
     if id=="telegram"&&!enabled {crate::telegram::shutdown();}
     let root = root(&app)?;
@@ -151,7 +155,8 @@ pub fn enable_component(app: AppHandle, state:tauri::State<Arc<crate::AppState>>
 }
 
 fn idle(state:&crate::AppState,id:&str)->Result<(),String>{
-    let active={let guard=state.repository.lock().unwrap();guard.as_ref().is_some_and(|repo|repo.data.jobs.iter().any(|job|job.state.active()&&match(&job.source,id){(crate::queue::Source::Torrent{..},"torrent"|"files")=>true,(crate::queue::Source::Document{..}|crate::queue::Source::DocumentEdit{..},"documents")=>true,(crate::queue::Source::Ocr{..},"documents"|"ocr")=>true,(crate::queue::Source::Telegram{..},"telegram")=>true,(crate::queue::Source::Transform{options:crate::tools::ToolOptions::Transcribe{..},..},"transcription")=>true,(_,"gallery")=>job.content_id.as_deref().is_some_and(|v|v.starts_with("gallery:")),_=>false}))};
+    if id=="capture"&&crate::capture_operations::active(state){return Err("Stop the recording or replay buffer before disabling screen capture.".into());}
+    let active={let guard=state.repository.lock().unwrap();guard.as_ref().is_some_and(|repo|repo.data.jobs.iter().any(|job|job.state.active()&&match(&job.source,id){(crate::queue::Source::Voice{..},"voice")=>true,(crate::queue::Source::Torrent{..},"torrent"|"files")=>true,(crate::queue::Source::Document{..}|crate::queue::Source::DocumentEdit{..},"documents")=>true,(crate::queue::Source::Ocr{..},"documents"|"ocr")=>true,(crate::queue::Source::Telegram{..},"telegram")=>true,(crate::queue::Source::Transform{options:crate::tools::ToolOptions::Transcribe{..},..},"transcription")=>true,(_,"gallery")=>job.content_id.as_deref().is_some_and(|v|v.starts_with("gallery:")),_=>false}))};
     if active || id=="gallery"&&crate::gallery_sources::active_checks(state){return Err("This component has active work. Stop it or wait for it to finish before disabling or removing the component.".into());}Ok(())
 }
 

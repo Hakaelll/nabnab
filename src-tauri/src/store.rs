@@ -64,6 +64,8 @@ impl Settings {
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Data {
+    #[serde(default)]
+    pub automation: crate::automation::Data,
     pub schema_version: u32,
     pub settings: Settings,
     #[serde(default)]
@@ -109,6 +111,7 @@ impl Data {
             ));
         }
         self.settings.validate()?;
+        crate::automation::validate(&self.automation)?;
         if self.courses.len()>1000 {return Err("Course library exceeds its limit.".into());}
         for course in &self.courses {course.validate()?;}
         if self.cooldowns.len() > crate::queue::MAX_PROVIDER_COOLDOWNS
@@ -233,6 +236,7 @@ impl Repository {
                 default_folder.to_owned()
             };
             Data {
+                automation: crate::automation::Data::default(),
                 schema_version: SCHEMA_VERSION,
                 settings: Settings {
                     folder,

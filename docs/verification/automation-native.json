@@ -1,0 +1,25 @@
+{
+  "scope": "Real CLI named pipe and officialSDK MCP; synthetic local fixtures; initial root/collections preseeded only; native folder picker not exercised; no downloads/capture/clipboard/accounts",
+  "checks": [
+    {
+      "case": "Closed framed protocol, absent/disabled owner, pending-client denial, DPAPI-backed CLI and collection/document/path privacy",
+      "passed": true
+    },
+    {
+      "case": "Immutable client-bound one-use approval, local extraction/frame outputs, foreign-job isolation and enforced byte/runtime grants",
+      "passed": true,
+      "mp3": "Permitted synthetic video.audio.mp3",
+      "frame": "Permitted synthetic video.frame.png",
+      "overBudgetPublished": false
+    },
+    {
+      "case": "Official SDK initialize/tools-list/tools-call over clean stdio, search-only grant independent of jobs.status and live revocation",
+      "passed": true
+    },
+    {
+      "case": "Explicit windowless owner refuses competing ownership and new approvals, runs one preapproved plan, and keeps the same queue and library",
+      "passed": true
+    }
+  ],
+  "errors": []
+}

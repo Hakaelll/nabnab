@@ -49,7 +49,30 @@ pub fn queue_media_edit(app:AppHandle,state:tauri::State<Arc<AppState>>,ids:Vec<
 pub(super) async fn run(app:&AppHandle,state:&Arc<AppState>,job:&Job,staging:&Path,cancel:watch::Receiver<bool>)->Result<Option<PublishedOutput>,String>{
     let handle=app.clone();let shared=state.clone();let id=job.id.clone();let run_id=job.run_id;
     let emit=move|update|progress(&handle,&shared,&id,run_id,update);
+    let mut narration=None;
+    let mut capture_info=None;
     let output=match &job.source{
+        Source::Voice {plan_id}=>{
+            if !crate::components::root(app)?.join("voice.enabled").is_file(){return Err("Enable Local voice in Settings → Components before generating narration.".into());}
+            let (root,_)=crate::file_operations::context(state)?;
+            let plan=crate::voice::read_plan(&root,plan_id)?;
+            let _permit=processing_permit(state,cancel.clone()).await?;phase(app,state,&job.id,run_id,JobState::Processing)?;
+            let output=crate::voice::execute(&root,plan_id,staging,cancel.clone(),run_id,emit.clone()).await?;
+            let file=output.file.clone();let parent=plan.origin.library_id.clone();
+            narration=Some((plan,output));
+            Some((file,None,parent))
+        },
+        Source::Capture {capture_id}=>{
+            let (root,_)=crate::file_operations::context(state)?;
+            let journal=crate::screen_capture::readjournal(&root,capture_id)?;
+            if crate::library::authorized_path(&journal.destination)?!=crate::library::authorized_path(&job.folder)?{return Err("The capture's authorized output directory changed. Review its recovery before continuing.".into());}
+            let _permit=processing_permit(state,cancel.clone()).await?;phase(app,state,&job.id,run_id,JobState::Processing)?;
+            let engines=crate::dependencies::engine_root(app)?;
+            let file=crate::screen_capture::finalize(&root,&engines,capture_id,staging,cancel.clone(),run_id,emit.clone()).await?;
+            let info=crate::media::probe(&engines,&file,cancel.clone()).await?;
+            capture_info=Some(info);
+            Some((file,None,None))
+        },
         Source::ImageAssets {library_ids,options,input_hashes}=>{
             let (_,library)=crate::file_operations::context(state)?;
             let inputs=crate::file_operations::selected(&library,library_ids,256)?;
@@ -208,8 +231,8 @@ pub(super) async fn run(app:&AppHandle,state:&Arc<AppState>,job:&Job,staging:&Pa
     };
     let Some((file,source,parent))=output else{return Ok(None);};
     phase(app,state,&job.id,run_id,JobState::Verifying)?;
-    let mut item=library::index(&file,None,source,parent).or_else(|_|library::index_file(&file))?;
-    if matches!(job.source,Source::DocumentEdit {..}|Source::Ocr {..}|Source::OcrText {..}) {
+    let mut item=library::index(&file,capture_info.as_ref(),source,parent).or_else(|_|library::index_file(&file))?;
+    if matches!(job.source,Source::Voice {..}|Source::DocumentEdit {..}|Source::Ocr {..}|Source::OcrText {..}) {
         if let Some(parent)=&item.parent_id {
             let guard=state.repository.lock().unwrap();
             if let Some(original)=guard.as_ref().and_then(|repo|repo.data.library.iter().find(|i|&i.id==parent)) {
@@ -218,7 +241,20 @@ pub(super) async fn run(app:&AppHandle,state:&Arc<AppState>,job:&Job,staging:&Pa
             }
         }
     }
+    if let Some((plan,output))=narration {
+        item.duration=output.chapters.last().map(|chapter|chapter.end);
+        item.audio_codec=Some("pcm_s16le".into());
+        item.details.chapters=output.chapters;
+        item.details.narration=Some(crate::library_features::NarrationReference {plan_ref:Some(plan.id),text_hash:plan.text_hash,source_version:plan.source_version,voice_name:plan.voice_name,language:plan.language,engine_fingerprint:plan.engine_fingerprint});
+    }
     match &job.source {
+        Source::Capture {capture_id}=>{
+            let (root,_)=crate::file_operations::context(state)?;
+            let journal=crate::screen_capture::readjournal(&root,capture_id)?;
+            if journal.kind!="image"&&!item.duration.is_some_and(|duration|duration.is_finite()&&duration>0.0){return Err("The finalized capture has no verified duration. Its recovery files were preserved.".into());}
+            let duration_ms=if journal.kind=="image"{0}else{(item.duration.unwrap_or_default()*1000.0).round() as u64};
+            item.details.recording=Some(crate::library_features::RecordingReference{capture_ref:Some(capture_id.clone()),source_label:journal.source_label,kind:journal.kind,duration_ms,interrupted:journal.interrupted,reason:journal.reason});
+        },
         Source::Ocr {..}=>{item.details.ocr_ref=Some(format!("ocr:{}-{}",job.id,job.run_id));},
         Source::OcrText {reference,..}=>{item.details.ocr_ref=Some(reference.clone());},
         Source::WebArchive {reference,collection,tags,parent_id,..}=>{

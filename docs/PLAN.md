@@ -42,8 +42,8 @@ Cada unidad se verifica antes de commit y push. No se certifica una plataforma m
 - [x] A: fuentes públicas y conectores OAuth, selección y cola compartida. OAuth requiere una aplicación registrada y una cuenta autorizada; no se certifica acceso a cuentas mediante fixtures.
 - [x] B: archivo web, lector/anotaciones, OCR y edición PDF; recorrido nativo con motores locales.
 - [x] C: comparación y renombrado de archivos, assets de imágenes y colecciones portables; recorrido nativo con integridad de originales.
-- [ ] D: pantalla, búfer de repetición y voz local.
-- [ ] E: CLI/MCP, permisos y recorrido autorizado.
+- [x] D: captura de pantalla, repetición y voz local. [Captura](verification/capture-native.json) y [voz](verification/voice-native.json) verificadas con perfiles aislados.
+- [x] E: CLI/MCP, permisos y trabajador explícito sin ventana. [Recorrido autorizado](verification/automation-native.json) con un único propietario de la cola.
 
 ## Riesgos que deben probarse
 

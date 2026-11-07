@@ -8,15 +8,13 @@ La ampliación de [productividad local](docs/PRODUCTIVITY.md) añade preparació
 
 La [ampliación de fuentes y herramientas](docs/EXPANSION.md) añade selección de galerías y adjuntos, RSS, archivos avanzados y BitTorrent, Telegram opcional, cursos y herramientas locales de documentos, imágenes, vídeo, audio y transcripción. La guía distingue capacidades implementadas, componentes necesarios y recorridos pendientes con cuentas autorizadas.
 
-La entrega A de [archivos online y herramientas locales](docs/ONLINE-LOCAL.md) incorpora GitHub Releases, Internet Archive, Commons y conectores Drive, OneDrive y Dropbox, con selección explícita, cola compartida y metadatos en Biblioteca. Las conexiones cloud requieren una aplicación OAuth legítima y consentimiento; la guía distingue pruebas públicas reales y pruebas de interfaz.
-
-La entrega B añade archivo web desde la extensión, lector offline con notas por versión, OCR local opcional y edición PDF con previsualización. Los apartados incorporan un directorio de herramientas, preferencias agrupadas y controles con una jerarquía más clara. La misma guía incluye comparaciones antes/después y resultados de los trabajos nativos con originales sintéticos.
+La ampliación de [archivos online y herramientas locales](docs/ONLINE-LOCAL.md) incorpora fuentes públicas, conectores de almacenamiento, archivo web, OCR y edición PDF. Incluye organización de archivos, herramientas de imágenes, captura con repetición, voz local y automatización por CLI y MCP. La guía enlaza los requisitos OAuth, las capturas y las pruebas de cada recorrido.
 
 ## Interfaz
 
 El acabado glass integra la navegación con el campo de caracteres original. Incluye preferencias para reducir movimiento y transparencias. Estas capturas muestran la interfaz con datos de prueba; los recorridos nativos y de plataformas se registran por separado.
 
-![Inicio de nabnab](docs/interface-monochrome.png)
+![Inicio de nabnab](docs/home-motion-after.png)
 
 ![Previsualización y opciones](docs/nabnab-preview.png)
 

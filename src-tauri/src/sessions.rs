@@ -563,6 +563,12 @@ pub fn resolve_url(root: &Path, reference: &str) -> Result<OperationalUrl, Strin
     Ok(OperationalUrl(secret))
 }
 
+pub(crate) fn remove_uncommitted_url(root: &Path, reference: &str) -> Result<(), String> {
+    if !valid_url_reference(reference) { return Err("Invalid protected URL reference.".into()); }
+    let directory=private_directory(root,"job-urls")?;
+    fs::remove_file(directory.join(format!("{reference}.bin"))).map_err(|_|"Could not remove an uncommitted source reference.".into())
+}
+
 pub fn protect_repository_backup(root: &Path, bytes: &[u8]) -> Result<(), String> {
     if bytes.len() > MAX_BACKUP_BYTES {
         return Err(

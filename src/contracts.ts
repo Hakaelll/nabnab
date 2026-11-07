@@ -21,6 +21,8 @@ export type ToolOptions =
   | {kind:'imageConvert';format:'jpg'|'png'|'webp';width:number;quality:number;stripMetadata:boolean};
 export type ToolKind = ToolOptions["kind"];
 export type JobSource = {kind:"webArchive";reference:string;format:"html"|"epub"|"md";collection:string;tags:string[];parentId:string|null}
+  | {kind:"voice";planId:string}
+  | {kind:"capture";captureId:string}
   | {kind:"imageAssets";libraryIds:string[];options:{kind:string};inputHashes:string[]}
   | {kind:"fileAnalysis";libraryIds:string[];options:{kind:"exact"}|{kind:"similar";maxDistance:number}}
   | {kind:"fileRename";planId:string}
@@ -72,9 +74,9 @@ export interface HomeState {
   format: OutputFormat; quality: string; audioBitrate: string; subtitleLanguage: string; submitting: boolean;
 }
 export interface DownloadView { query: string; filter: "activity" | "pending" | "completed" | "error" | "all"; selected: Set<string>; detailId: string | null }
-export interface LibraryView { contentMatches?:Set<string>;query: string; filter: "all" | "video" | "audio" | "image" | "subtitle" | "document" | "file" | "article" | "ocr"; sort: "newest" | "name" | "duration" | "size"; layout: "grid" | "list"; collection: string; offset: number; selected: Set<string>; detailId: string | null }
+export interface LibraryView { contentMatches?:Set<string>;query: string; filter: "all" | "video" | "audio" | "image" | "subtitle" | "document" | "file" | "article" | "ocr" | "recording" | "narration"; sort: "newest" | "name" | "duration" | "size"; layout: "grid" | "list"; collection: string; offset: number; selected: Set<string>; detailId: string | null }
 export interface ToolsView { kind: ToolKind; ids: Set<string>; options: ToolOptions; picking: boolean }
-export type SettingsSection = "connections" | "general" | "downloads" | "formats" | "organization" | "engines" | "sessions" | "appearance" | "browser" | "about";
+export type SettingsSection = "automation" | "connections" | "general" | "downloads" | "formats" | "organization" | "engines" | "sessions" | "appearance" | "browser" | "about";
 export interface SettingsView { section: SettingsSection; engines: EngineStatus[] | null; sessions: SessionStatus[] | null; bridge: BridgeStatus | null; pairing: { token: string; port: number } | null; cache: { bytes: number; files: number } | null; working: boolean }
 
 export const initialSettings: Settings = { folder: "", language: "es", networkLimit: 3, processingLimit: 1, reducedMotion: false, reducedTransparency: false, sidebarExpanded: true, trayEnabled: false, closeToTray: false, startWithWindows: false };

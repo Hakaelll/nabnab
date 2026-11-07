@@ -1,0 +1,79 @@
+{
+  "scope": "Real native IPC/queue/installed SAPI voices and copied verified local MuPDF; synthetic local inputs; no speaker playback, accounts, clipboard or remote providers",
+  "checks": [
+    {
+      "case": "Disabled guard, unavailable voice rejection and real installed Spanish/English WAV samples without playback",
+      "passed": true,
+      "samples": [
+        {
+          "voice": "Microsoft Helena Desktop",
+          "language": "es-ES",
+          "duration": 5.617142857142857,
+          "bytes": 247760
+        },
+        {
+          "voice": "Microsoft Zira Desktop",
+          "language": "en-US",
+          "duration": 5.188253968253968,
+          "bytes": 228846
+        }
+      ]
+    },
+    {
+      "case": "Common queue Processing pause, ready-segment IPC before final, resume and preserved cache bytes",
+      "passed": true,
+      "chapters": 40,
+      "duration": 378.3639002267574,
+      "firstSegmentHash": "2b82165f17a216d61efa66824293e3e1dc59a71f0ea6dfcdf900a182b1d7cf10"
+    },
+    {
+      "case": "Immutable article and version-bound note, UTF-8 TXT, external PDF and EPUB extraction, related WAV provenance and real chapter durations",
+      "passed": true,
+      "narrations": [
+        {
+          "source": "article",
+          "id": "0745763acdc88f053bb7e9fc6ddc913b6cc1e3c8358a00affca6e61ee3049e5f",
+          "parentId": "bba3ecfb4558e821ab845cbbbc4cf3616be468cb83abea8850d7dcb3218a87b7",
+          "chapters": 2,
+          "duration": 7.655963718820861
+        },
+        {
+          "source": "note",
+          "id": "ae239a63de32f8c6f11f974ed131a55264d28ddbe6ff51605fd5007ad1e01926",
+          "parentId": "bba3ecfb4558e821ab845cbbbc4cf3616be468cb83abea8850d7dcb3218a87b7",
+          "chapters": 1,
+          "duration": 4.507619047619047
+        },
+        {
+          "source": "txt",
+          "id": "c3e617eaf52a5df4df5dde4dc7400c506f65fd9b634f1317ec9dfe1124f83e9d",
+          "parentId": "01b4bdd1bcdb44fded6dd4683a3fb69ab16be7f8d64c79f84b1b7b664f2372ea",
+          "chapters": 1,
+          "duration": 5.177097505668934
+        },
+        {
+          "source": "external-pdf",
+          "id": "5776ee5ff36b64d2a3de516c8bc807988e9cad0163808d6e0f3adea314526ce9",
+          "parentId": "34b4f07afed6d5d9f38a9188049d25ffc1a9e3a93e64ce10a8280527bebb692b",
+          "chapters": 1,
+          "duration": 4.142766439909297
+        },
+        {
+          "source": "external-epub",
+          "id": "a64b74fb3931fcc839268ce7df68ed9d4fe6fbd965566cb785ccec6f2af1fead",
+          "parentId": "c6ea4adad156191d90e086f256af20bb679acd191a46acc28fef264162bbcc17",
+          "chapters": 8,
+          "duration": 33.68775510204082
+        }
+      ],
+      "externalDocumentEngine": "Copied previously verified MuPDF1.28.5 into isolated test data; no product installation or download"
+    },
+    {
+      "case": "Native narration library filter, prepared-source and completed-segment UI, unchanged originals and no media playback",
+      "passed": true,
+      "narrationItems": 6
+    }
+  ],
+  "errors": [],
+  "remote": []
+}

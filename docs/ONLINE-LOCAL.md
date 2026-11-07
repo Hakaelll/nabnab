@@ -84,8 +84,30 @@ La biblioteca y el inspector también se refinan; estas dos capturas usan fixtur
 
 ![Inspector refinado](sections-inspector-after.png)
 
-## Entregas siguientes
+## Entrega D: pantalla y voz
 
-D, captura y voz local; E, CLI/MCP y permisos siguen pendientes de implementación. Las funciones de fases anteriores no se contabilizan como novedades.
+[Pantalla y repetición](SCREEN-CAPTURE.md) incorpora selección explícita de ventana, pantalla o región, vista previa y audio del sistema/micrófono separados y desactivados inicialmente. La grabación empieza directamente y conserva segmentos recuperables; el resultado pasa por Descargas y Biblioteca. Un indicador permanece visible al cambiar de sección, con tiempo y botón de detener. El búfer de 30, 60 o 120 segundos requiere activación expresa y muestra su límite de disco; su atajo solo guarda tiempo que ya se haya capturado.
 
-Comprobación final de esta entrega: 303 pruebas nativas y 27 pruebas JavaScript pasadas; TypeScript, identidad y compilaciones web/escritorio correctas. El recorrido nativo se repitió sobre la compilación final y pasó los cinco grupos funcionales con cero errores del navegador. Los controles de cada módulo distinguen su prueba de interfaz simulada de esta ejecución real.
+Las ventanas aceleradas utilizan Windows Graphics Capture. La prueba integrada exige contenido visible en la vista previa, PNG y vídeo; ya no acepta una superficie uniforme solo porque el contenedor sea válido. El reproductor nativo cargó los metadatos del MKV real, sin iniciar reproducción. Se comprobaron destino fijado al comenzar, controles globales, liberación del atajo y recuperación parcial explícita. [Siete grupos nativos](verification/capture-native.json).
+
+![Contenido real de la ventana de prueba capturado con Windows Graphics Capture](capture-frame-native.png)
+
+[Voz local](LOCAL-VOICE.md) usa voces Microsoft Desktop instaladas en Windows, sin servicio remoto ni descarga oculta. Permite elegir texto, artículo, nota, TXT, PDF o EPUB; revisar la fuente y configuración; oír una muestra; generar por segmentos, pausar y reanudar desde la caché. La salida WAV conserva capítulos con tiempos reales y procedencia. Los nombres usan el título y el idioma para facilitar su lectura en Biblioteca.
+
+El recorrido nativo generó muestras con Helena y Zira y resultados relacionados con cinco tipos de fuente. Verificó 40 segmentos, pausa y reanudación conservando los bytes de la caché, y rechazo de una nota asociada a otra versión del artículo. No se reprodujeron altavoces ni se capturó audio personal. [Cuatro grupos nativos de voz](verification/voice-native.json).
+
+![Filtro de narraciones en Biblioteca, recorrido nativo](voice-library-native.png)
+
+Biblioteca añade filtros de grabaciones y narraciones al selector de contenido existente. Herramientas conserva su directorio y búsqueda al actualizar estos estados. Ajustes mantiene visible su navegación al recorrer formularios largos.
+
+## Entrega E: automatización autorizada
+
+[CLI y MCP local](LOCAL-AUTOMATION.md) utilizan una tubería privada de Windows para hablar con la aplicación abierta o con un trabajador iniciado expresamente desde la CLI. Solo uno puede poseer la cola y el repositorio. El MCP emplea el SDK Rust oficial fijado y transporte stdio. La función está desactivada inicialmente; cada cliente necesita autorización local, capacidades, colecciones y destinos elegidos expresamente.
+
+Preparar un plan no lo ejecuta. Ajustes → Automatización muestra operación, entrada, destino, colección, límites y caducidad para aprobar o denegar. Después, el cliente puede consumir una vez ese identificador; no puede sustituir parámetros al encolarlo. La revocación y los límites se vuelven a comprobar al ejecutar y antes de publicar.
+
+Las respuestas omiten texto completo, rutas privadas, tokens y sesiones. Los documentos necesitan un permiso adicional para sus metadatos. El catálogo inicial permite archivos multimedia HTTP directos, extracción local a MP3/M4A y fotogramas; no incluye shell, rutas libres, instalación, grabación o micrófono. Un cliente de IA externo puede reenviar a su proveedor los resultados recibidos; el transporte local no evita esa acción.
+
+La interfaz de permisos y revisión está renderizada a 1180 × 780 y 900 × 620 con fixtures de IPC. El recorrido nativo verificó la autorización inicial, el aislamiento de colecciones, una extracción MP3 y un fotograma PNG, el rechazo de una salida que supera el límite, la revocación de una sesión MCP en curso y la ejecución de un plan aprobado desde el trabajador sin ventana. [Cuatro grupos nativos](verification/automation-native.json).
+
+![Revisión de un plan de automatización con datos de prueba](automation-review-fixture.png)

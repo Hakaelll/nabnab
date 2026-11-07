@@ -100,7 +100,7 @@ body[data-page="tools"] #page-content > :is(.expanded-tool,.document-edits,.ocr-
 
 /* Preferences are grouped by the decision being made, rather than a list of boxes. */
 body[data-page="settings"] .settings-layout { grid-template-columns: 174px minmax(0,1fr); gap: 36px; max-width: 1040px; align-items: start; }
-body[data-page="settings"] .settings-navigation { gap: 24px; padding-top: 3px; }
+body[data-page="settings"] .settings-navigation { position: sticky; top: 20px; align-self: start; max-height: calc(100dvh - 76px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; gap: 24px; padding-block: 3px 8px; }
 body[data-page="settings"] .settings-nav-group { display: grid; gap: 3px; }
 body[data-page="settings"] .settings-nav-group h2 { font-size: 11px; font-weight: 500; line-height: 1.5; color: var(--auxiliary); padding: 0 12px; margin: 0 0 8px; }
 body[data-page="settings"] .settings-navigation button { width: 100%; min-height: 38px; border-radius: 10px; padding: 10px 12px; line-height: 1.4; }
@@ -159,7 +159,7 @@ body[data-page="settings"] .optional-components { border-color: var(--section-ed
   body[data-page="platforms"] #page-content .platform-filters { flex-direction: row; flex-wrap: wrap; margin-bottom: 16px; }
   body[data-page="platforms"] .platform-footnote { margin-left: 0; }
   body[data-page="settings"] .settings-layout { display: block; }
-  body[data-page="settings"] .settings-navigation { display: flex; flex-direction: row; gap: 16px; overflow-x: auto; margin-bottom: 22px; }
+  body[data-page="settings"] .settings-navigation { position: static; max-height: none; display: flex; flex-direction: row; gap: 16px; overflow-x: auto; overflow-y: visible; margin-bottom: 22px; }
   body[data-page="settings"] .settings-nav-group { flex: 0 0 190px; }
 }
 @media (forced-colors:active) {
@@ -217,6 +217,7 @@ body[data-page="settings"] .setting-row > div { min-width: 0; }
 body[data-page="settings"] .setting-row .path { overflow-wrap: anywhere; }
 body[data-page="settings"] .preference-group h3 { font-weight: 600; }
 body[data-page="tools"] .tool-directory { position: sticky; top: 20px; max-height: calc(100dvh - 76px); overflow-y: auto; overscroll-behavior: contain; padding-right: 4px; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+body[data-page="tools"] .tool-directory .tool-search { position: sticky; top: 0; z-index: 2; background: var(--background); padding-block: 2px 12px; margin-bottom: 12px; }
 body[data-page="platforms"] #page-content .platform-filters { position: sticky; top: 20px; }
 @media (hover:hover) {
   body[data-page="library"] .media-grid .media-item:hover { border-color: #ffffff24; background: #ffffff02; }

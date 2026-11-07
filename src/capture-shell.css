@@ -1,0 +1,12 @@
+.capture-indicator { position: fixed; right: 24px; bottom: 20px; z-index: 35; display: flex; align-items: center; gap: 12px; max-width: calc(100vw - 248px); padding: 12px 14px; border: 1px solid #db8a8a38; border-radius: 15px; background: #151619; box-shadow: 0 8px 28px #0005; color: var(--text); }
+.capture-status-dot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 7px; background: #ef9a9a; }
+.capture-indicator[data-mode="replay"] { border-color: #9dbce538; }
+.capture-indicator[data-mode="replay"] .capture-status-dot { background: #9dbce5; }
+.capture-status-copy { display: grid; gap: 3px; min-width: 0; }
+.capture-status-copy strong { font-size: 12px; font-weight: 600; }
+.capture-status-copy small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 190px; font-size: 11px; }
+#capture-status-time { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--muted); }
+#capture-shortcut-label { font-size: 10px; color: var(--muted); white-space: nowrap; }
+.capture-indicator .button { font-size: 11px; min-height: 33px; padding: 7px 10px; }
+@media (max-width: 1050px) { .capture-indicator { right: 18px; gap: 9px; flex-wrap: wrap; max-width: 430px; } .capture-status-copy small { max-width: 160px; } }
+@media (forced-colors: active) { .capture-indicator { background: Canvas; color: CanvasText; border-color: CanvasText; } .capture-status-dot { background: Highlight; } }
