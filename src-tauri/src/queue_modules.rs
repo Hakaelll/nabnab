@@ -185,6 +185,11 @@ pub(super) async fn run(app:&AppHandle,state:&Arc<AppState>,job:&Job,staging:&Pa
             if files.len()!=1 {return Err("Select individual files after reviewing the folder contents.".into());}
             Some((files.into_iter().next().ok_or("No cloud file was downloaded.")?,None,None))
         },
+        Source::PersonalFile {selection} => {
+            phase(app, state, &job.id, run_id, JobState::Downloading)?;
+            let file = crate::personal_servers::execute(state, selection, staging, run_id, cancel.clone()).await?;
+            Some((file, None, None))
+        },
         Source::Attribution {entries} => {
             let _permit=processing_permit(state,cancel.clone()).await?;
             phase(app,state,&job.id,run_id,JobState::Processing)?;
@@ -297,6 +302,10 @@ pub(super) async fn run(app:&AppHandle,state:&Arc<AppState>,job:&Job,staging:&Pa
         Source::CloudFile {selection,collection} => {
             item.details.content_id=Some(format!("cloud:{}:{}:{}",selection.provider.name(),selection.account_id,selection.id));
             if !collection.is_empty(){item.collections.push(collection.clone());}
+        },
+        Source::PersonalFile {selection} => {
+            item.details.content_id = Some(selection.content_id());
+            item.details.platform = Some("Personal server".into());
         },
         Source::Attribution {entries} => if let Some(first)=entries.first(){if !first.collection.is_empty(){item.collections.push(first.collection.clone());}},
         _=>{}

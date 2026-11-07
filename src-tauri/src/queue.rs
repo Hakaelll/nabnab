@@ -148,6 +148,7 @@ pub enum Source {
     AdvancedFile {url:String,url_ref:Option<String>,connections:u8,checksum:Option<String>},
     PublicFile { selection: crate::file_sources::PublicSelection },
     CloudFile { selection: crate::cloud_storage::Selection, collection: String },
+    PersonalFile { selection: crate::personal_servers::Selection },
     DocumentEdit {library_id:String,options:crate::document_edits::Options,input_hash:String},
     Ocr {library_id:String,options:crate::ocr::OcrOptions},
     OcrText {library_id:String,reference:String,expected_hash:String},
@@ -180,12 +181,13 @@ pub enum Source {
 impl Source {
     fn exclusive(&self) -> bool { matches!(self, Self::FileRename {..} | Self::FileUndo {..}) }
     fn network(&self) -> bool {
-        matches!(self, Self::Download { .. } | Self::Torrent { .. } | Self::Telegram { .. } | Self::Live { .. } | Self::ProviderExport {..} | Self::AdvancedFile {..} | Self::PublicFile {..} | Self::CloudFile {..})
+        matches!(self, Self::Download { .. } | Self::Torrent { .. } | Self::Telegram { .. } | Self::Live { .. } | Self::ProviderExport {..} | Self::AdvancedFile {..} | Self::PublicFile {..} | Self::CloudFile {..} | Self::PersonalFile {..})
     }
     fn domain(&self) -> String {
         match self {
             Self::PublicFile {selection} => providers::scope(&selection.source_url).unwrap_or_default(),
             Self::CloudFile {selection,..} => format!("cloud:{:?}",selection.provider),
+            Self::PersonalFile {selection} => format!("personal:{}", selection.server_id()),
             Self::Download { url, .. } => providers::scope(url).unwrap_or_default(),
             Self::Torrent { .. } => "BitTorrent".into(),
             Self::AdvancedFile{url,..}=>providers::scope(url).unwrap_or_default(),
@@ -291,6 +293,7 @@ impl Job {
         match &self.source {
             Source::PublicFile {selection} => selection.validate()?,
             Source::CloudFile {selection,..} => crate::cloud_storage::validate_selection(selection)?,
+            Source::PersonalFile {selection} => selection.validate()?,
             Source::Attribution {entries} => { if entries.is_empty() || entries.len()>199 {return Err("Invalid attribution selection.".into());} for entry in entries {entry.validate()?;} },
             _=>{}
         }
@@ -335,6 +338,7 @@ impl Job {
         let provider = match &source {
             Source::PublicFile {selection} => url::Url::parse(&selection.source_url).ok().and_then(|u|u.host_str().map(str::to_owned)).unwrap_or_else(||"Public files".into()),
             Source::CloudFile {selection,..} => format!("{:?}",selection.provider),
+            Source::PersonalFile {..} => "Personal server".into(),
             Source::Attribution {..} => "Wikimedia Commons".into(),
             Source::WebArchive {..} => "Web archive".into(),
             Source::ImageAssets {..} => "Images".into(),
@@ -1096,7 +1100,7 @@ fn stage(job: &Job) -> Result<PathBuf, String> {
             let journaled = [JOURNAL, "publication.new"]
                 .iter()
                 .any(|name| fs::symlink_metadata(owned.join(name)).is_ok());
-            if matches!(job.source, Source::Transform { .. } | Source::Voice {..} | Source::Capture {..} | Source::ImageAssets {..} | Source::FileAnalysis {..} | Source::FileRename {..} | Source::FileUndo {..} | Source::PortableExport {..} | Source::PortableImport {..} | Source::CloudFile {..} | Source::Attribution {..} | Source::WebArchive {..} | Source::DocumentEdit {..} | Source::Ocr {..} | Source::OcrText {..})
+            if matches!(job.source, Source::Transform { .. } | Source::Voice {..} | Source::Capture {..} | Source::ImageAssets {..} | Source::FileAnalysis {..} | Source::FileRename {..} | Source::FileUndo {..} | Source::PortableExport {..} | Source::PortableImport {..} | Source::CloudFile {..} | Source::PersonalFile {..} | Source::Attribution {..} | Source::WebArchive {..} | Source::DocumentEdit {..} | Source::Ocr {..} | Source::OcrText {..})
                 && owner.run_id != job.run_id
                 && !journaled
             {
@@ -1327,7 +1331,7 @@ async fn publish_verified_output(
         publication_guard(state, job, &cancel)?;
         return Ok((existing.path.clone(), existing, publication));
     }
-    if matches!(job.source,Source::Voice {..} | Source::Capture {..} | Source::ImageAssets {..} | Source::FileAnalysis {..} | Source::FileRename {..} | Source::FileUndo {..} | Source::PortableExport {..} | Source::PortableImport {..} | Source::PublicFile {..}|Source::CloudFile {..}|Source::Attribution {..}|Source::WebArchive {..}|Source::DocumentEdit {..}|Source::Ocr {..}|Source::OcrText {..}) {
+    if matches!(job.source,Source::Voice {..} | Source::Capture {..} | Source::ImageAssets {..} | Source::FileAnalysis {..} | Source::FileRename {..} | Source::FileUndo {..} | Source::PortableExport {..} | Source::PortableImport {..} | Source::PublicFile {..}|Source::CloudFile {..} | Source::PersonalFile {..} | Source::Attribution {..}|Source::WebArchive {..}|Source::DocumentEdit {..}|Source::Ocr {..}|Source::OcrText {..}) {
         (file,target)=available_file_version(staging,&destination,&file)?;
     }
     item=target_item(item,target.clone());
@@ -1794,7 +1798,7 @@ async fn run(
     let run_id = job.run_id;
     let emit = move |update| progress(&handle, &shared, &id, run_id, update);
     let (mut file, source, parent) = match &job.source {
-        Source::Voice {..} | Source::Capture {..} | Source::ImageAssets {..} | Source::FileAnalysis {..} | Source::FileRename {..} | Source::FileUndo {..} | Source::PortableExport {..} | Source::PortableImport {..} | Source::PublicFile {..} | Source::CloudFile {..} | Source::Attribution {..} | Source::WebArchive {..} | Source::DocumentEdit {..} | Source::Ocr {..} | Source::OcrText {..} | Source::AdvancedFile{..} | Source::Palette{..} | Source::AudioPreview{..} | Source::ProviderExport {..} | Source::CaptionEdit {..} | Source::MediaEdit {..} | Source::Torrent { .. } | Source::Document { .. } | Source::GalleryExport { .. } | Source::Telegram { .. } | Source::Live { .. } => return Err("Module execution was not dispatched.".into()),
+        Source::Voice {..} | Source::Capture {..} | Source::ImageAssets {..} | Source::FileAnalysis {..} | Source::FileRename {..} | Source::FileUndo {..} | Source::PortableExport {..} | Source::PortableImport {..} | Source::PublicFile {..} | Source::CloudFile {..} | Source::PersonalFile {..} | Source::Attribution {..} | Source::WebArchive {..} | Source::DocumentEdit {..} | Source::Ocr {..} | Source::OcrText {..} | Source::AdvancedFile{..} | Source::Palette{..} | Source::AudioPreview{..} | Source::ProviderExport {..} | Source::CaptionEdit {..} | Source::MediaEdit {..} | Source::Torrent { .. } | Source::Document { .. } | Source::GalleryExport { .. } | Source::Telegram { .. } | Source::Live { .. } => return Err("Module execution was not dispatched.".into()),
         Source::Download {
             url_ref,
             format,

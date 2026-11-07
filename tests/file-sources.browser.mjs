@@ -18,6 +18,8 @@ const setup = `
   const settings={folder:"C:/Downloads/nabnab-fixture",language:"es",networkLimit:3,processingLimit:1,reducedMotion:true,reducedTransparency:true,sidebarExpanded:true,trayEnabled:false,closeToTray:false,startWithWindows:false};
   const state={settings,jobs:[],library:[],collections:[],drafts:[],sources:[],rules:[],smartCollections:[],presets:[]};
   const fixture=window.fileSourceFixture={state,calls:[],pending:null};
+  const personal={servers:[],references:[]};
+  const stamp={size:4096,modified:"2026-11-07",etag:'"version-1"'};
   const connections=["drive","onedrive","dropbox"].map(provider=>({provider,configured:false,connected:false,accountId:null,scope:provider==="drive"?"drive.readonly":provider==="onedrive"?"Files.Read offline_access":"files.metadata.read files.content.read sharing.read account_info.read",redirectUri:"http://127.0.0.1:53687/callback"}));
   const asset=(id,filename,extra={})=>({id,sourceUrl:"https://github.com/example/nabnab-fixture/releases/tag/v1.0",downloadUrl:"https://example.org/"+filename,filename,mime:"application/zip",size:1048576,title:filename,version:"v1.0",original:true,author:null,license:null,attribution:null,sha256:null,platform:null,architecture:null,...extra});
   const sourcePage=(url,extra={})=>({provider:"github",sourceUrl:url,title:"nabnab-fixture",description:"Public source fixture. No remote provider access is represented.",rights:null,entries:[],assets:[],nextCursor:null,warnings:[],...extra});
@@ -35,6 +37,18 @@ const setup = `
     if(cmd==="cloud_revoke"){const connection=connections.find(value=>value.provider===args.provider);connection.connected=false;connection.accountId=null;return;}
     if(cmd==="cloud_browse")return {entries:args.folder?[binary("nested","Inside folder.pdf")]:[{selection:{provider:"drive",accountId:"fixture-account",id:"folder",exportMime:null,version:null},name:"Documents",kind:"folder",mime:"application/vnd.google-apps.folder",size:null,location:"My Drive",exports:[],downloadable:false},native(),binary("pdf","Original.pdf")],nextCursor:null,partial:false,warnings:[]};
     if(cmd==="cloud_preview_folder")return {entries:[binary("scan","Scan.pdf"),native("nested-doc","Nested document")],nextCursor:null,partial:true,warnings:["Fixture folder limit reached. Only reviewed files are included."]};
+    if(cmd==="personal_servers_status")return copy(personal);
+    if(cmd==="personal_server_webdav"){personal.servers.push({id:"dav-fixture",name:args.name,kind:"webdav",location:args.root});return copy(personal);}
+    if(cmd==="personal_server_choose_key")return "C:/fixture/id_ed25519";
+    if(cmd==="personal_server_probe_sftp")return {challenge:args.requestId,fingerprint:"SHA256:fixture-fingerprint"};
+    if(cmd==="personal_server_trust_sftp"){personal.servers.push({id:"sftp-fixture",name:args.name,kind:"sftp",location:"sftp.example:22/media"});return copy(personal);}
+    if(cmd==="personal_server_nas")return null;
+    if(cmd==="personal_server_browse")return args.path.length
+      ? [{path:["Docs","notes.pdf"],directory:false,stamp,mime:"application/pdf"}]
+      : [{path:["Docs"],directory:true,stamp:{size:null,modified:null,etag:null},mime:null}];
+    if(cmd==="personal_server_index"){personal.references=[{id:"ref-fixture",serverName:"Estudio",selection:{serverId:args.serverId,path:args.paths[0],stamp}}];return copy(personal);}
+    if(cmd==="personal_server_copy")return [];
+    if(cmd==="personal_server_remove"){personal.servers=personal.servers.filter(server=>server.id!==args.id);return copy(personal);}
     if(cmd==="queue_public_files"||cmd==="queue_cloud_files")return [];
     if(cmd==="public_source_inspect"){
       if(args.url.startsWith("https://arxiv.org/search/"))return sourcePage(args.url,{provider:"arxiv",title:"arXiv · fixture search",entries:[{id:"arxiv:2401.00001v2",title:"A versioned paper",url:"https://arxiv.org/abs/2401.00001",prerelease:false,publishedAt:"2024-01-02"}]});
@@ -223,6 +237,56 @@ try {
     await page.locator("#settings-title").filter({hasText:"Conexiones de archivos"}).waitFor();
     assert.equal(await page.locator(".cloud-connection").count(),3);
     report.push("Settings file connections navigation and status rendering passed.");
+
+    await page.getByRole("button", {name:"Nextcloud / WebDAV",exact:true}).click();
+    await page.locator("#personal-name").fill("Estudio");
+    await page.locator("#personal-root").fill("https://home.example:8443/remote.php/dav/files/reader/");
+    await page.locator("#personal-username").fill("reader");
+    await page.locator("#personal-password").fill("fixture-app-password");
+    await page.getByRole("button", {name:"Guardar conexión",exact:true}).click();
+    await page.getByRole("button", {name:/Estudio.*Nextcloud/}).click();
+    await page.getByRole("button", {name:"Docs",exact:true}).click();
+    await page.getByRole("checkbox", {name:/notes.pdf/}).check();
+    for (const [width, height] of [[1180, 780], [900, 620]]) {
+      await page.setViewportSize({width,height});
+      await page.locator(".personal-review").scrollIntoViewIfNeeded();
+      await checkNoHorizontalOverflow(`Personal server ${width}`);
+      await page.screenshot({path:`${directory}/personal-server-${width}x${height}-fixture.png`});
+    }
+    await page.getByRole("button", {name:"Indexar referencia",exact:true}).click();
+    await page.getByRole("button", {name:"Referencias guardadas",exact:true}).click();
+    await page.getByRole("button", {name:/notes.pdf.*Remota/}).click();
+    await page.getByRole("button", {name:"Obtener copia local",exact:true}).click();
+    await page.waitForFunction(() => window.fileSourceFixture.calls.some(call => call.cmd === "personal_server_copy"));
+    const copyArgs = await page.evaluate(() => window.fileSourceFixture.calls.find(call => call.cmd === "personal_server_copy").args);
+    assert.equal(copyArgs.referenceId,"ref-fixture");
+    assert.equal(copyArgs.paths,null);
+    assert(!JSON.stringify(copyArgs).includes("fixture-app-password"));
+    await page.locator("[data-page='settings']").click();
+    await page.locator("[data-action='settings-section'][data-section='connections']").click();
+    await page.locator("[data-action='personal-remove'][data-id='dav-fixture']").click();
+    await page.locator("[data-action='personal-remove'][data-id='dav-fixture']").waitFor({state:"detached"});
+    await page.getByRole("button", {name:"SFTP",exact:true}).click();
+    await page.locator("#personal-name").fill("Servidor SSH");
+    await page.locator("#personal-host").fill("sftp.example");
+    await page.locator("#personal-username").fill("reader");
+    await page.locator("#personal-root").fill("/media");
+    await page.getByRole("button", {name:"Elegir clave",exact:true}).click();
+    await page.getByRole("button", {name:"Comprobar huella",exact:true}).click();
+    await page.getByText("SHA256:fixture-fingerprint",{exact:true}).waitFor();
+    assert.equal(await page.evaluate(() => window.fileSourceFixture.calls.some(call => call.cmd==="personal_server_trust_sftp")),false);
+    await page.getByRole("button", {name:"Confiar y guardar",exact:true}).click();
+    await page.getByRole("button", {name:/Servidor SSH.*SFTP/}).waitFor();
+    await page.getByRole("button", {name:"Carpeta de red / NAS",exact:true}).click();
+    await page.locator("#personal-name").fill("Red");
+    await page.getByRole("button", {name:"Elegir carpeta",exact:true}).click();
+    await page.waitForFunction(() => window.fileSourceFixture.calls.some(call => call.cmd==="personal_server_nas"));
+    assert.equal(await page.getByRole("button", {name:/^Red.*NAS/}).count(),0);
+    await page.locator("[data-page='library']").click();
+    await page.locator("[data-action='library-section'][data-section='references']").click();
+    await page.getByRole("button", {name:/notes.pdf.*Servidor desconectado/}).click();
+    assert.equal(await page.getByRole("button", {name:"Obtener copia local",exact:true}).isDisabled(),true);
+    report.push("Personal server configuration, root-scoped browsing, reference indexing, explicit copy, disconnected references, SFTP confirmation and NAS picker cancellation passed.");
     const documentFormats = await page.evaluate(async () => {
       const { createDocuments, documentReaderPanel } = await import("/src/documents-ui.ts");
       const commands = [];

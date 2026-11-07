@@ -136,3 +136,69 @@ label.file-source-row { cursor: pointer; }
 .file-source-checksum {
   overflow-wrap: anywhere;
 }
+.personal-servers {
+  display: grid;
+  gap: 16px;
+}
+.personal-server-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: end;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--edge-quiet);
+  border-radius: 12px;
+}
+.personal-server-form label {
+  display: grid;
+  gap: 6px;
+}
+.personal-server-form > button,
+.personal-server-form > .field-note {
+  justify-self: start;
+}
+.personal-key, .personal-trust {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+.personal-key .path, .personal-trust code {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.personal-server-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid var(--edge-quiet);
+}
+.personal-server-row:last-child {
+  border-bottom: 0;
+}
+.personal-server-row.is-selected {
+  background: var(--surface);
+}
+.personal-server-row small,
+.personal-servers .file-source-result-heading .path {
+  overflow-wrap: anywhere;
+}
+.personal-review {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.personal-review .field-note {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+@media (max-width: 1020px) {
+  .personal-review {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .personal-review > .button.primary {
+    grid-column: auto;
+    grid-row: auto;
+    justify-self: start;
+  }
+}

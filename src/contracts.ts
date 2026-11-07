@@ -35,6 +35,7 @@ export type JobSource = {kind:"webArchive";reference:string;format:"html"|"epub"
   | { kind: "download"; url: string; format: OutputFormat; height: number | null; audioBitrate: number | null; subtitleLanguage?: string | null }
   | { kind: "transform"; libraryId: string; options: ToolOptions }
   | {kind:"publicFile";selection:{sourceUrl:string;assetId:string;filename:string;collection:string;author:string|null;license:string|null;attribution:string|null;sha256:string|null;version:string|null;size:number|null}}
+  | {kind:"personalFile";selection:import("./personal-servers-ui").PersonalSelection}
   | {kind:"cloudFile";selection:import("./file-sources-ui").CloudSelection;collection:string}
   | {kind:"attribution";entries:{sourceUrl:string;filename:string}[]}
   | {kind:'advancedFile';url:string;connections:number;checksum:string|null}

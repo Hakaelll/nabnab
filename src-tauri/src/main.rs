@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod batch;
 mod file_sources;
+mod personal_servers;
 mod web_archive;
 mod portable_zip;
 mod file_organization;
@@ -97,6 +98,7 @@ pub(crate) struct AppState {
     document_previews: document_operations::PreviewState,
     file_previews: file_operations::PreviewState,
     file_sources: file_sources::BrowserState,
+    personal_servers: personal_servers::BrowserState,
     repository: Mutex<Option<store::Repository>>,
     runtime: queue::Runtime,
     metadata: Mutex<Option<(u64, watch::Sender<bool>)>>,
@@ -1180,6 +1182,10 @@ fn main() {
             file_sources::public_source_inspect, file_sources::cancel_file_source_inspection,
             file_sources::queue_public_files, file_sources::cloud_status, file_sources::cloud_configure,
             file_sources::cloud_connect, file_sources::cloud_revoke, file_sources::cloud_browse, file_sources::cloud_preview_folder, file_sources::queue_cloud_files,
+            personal_servers::personal_servers_status, personal_servers::personal_server_webdav, personal_servers::personal_server_choose_key,
+            personal_servers::personal_server_nas, personal_servers::personal_server_probe_sftp, personal_servers::personal_server_trust_sftp,
+            personal_servers::personal_server_remove, personal_servers::personal_server_browse, personal_servers::personal_server_index,
+            personal_servers::personal_server_copy,
             transcription::remove_transcription_model, transcription::transcription_models, transcription::install_transcription_model,
             courses::members::save_course_token, courses::members::inspect_member_course, courses::inspect_course, courses::queue_course_assets, courses::list_courses, courses::import_local_course, courses::course_learned, courses::save_course_note,
             courses::browser::open_course_site, courses::browser::import_course_materials,

@@ -4,7 +4,7 @@ import type { AudiobookChapter } from "./library-types";
 import { action, icon, option } from "./views-common";
 
 type CloudProvider = "drive" | "onedrive" | "dropbox";
-type SourceTab = "public" | CloudProvider;
+type SourceTab = "public" | "personal" | CloudProvider;
 type CatalogSearch = "arxiv" | "librivox";
 export interface PublicAsset {
   id: string; sourceUrl: string; filename: string; mime: string; size: number | null;
@@ -35,6 +35,7 @@ interface ConnectionStatus {
 interface FileSourceHooks {
   command<T>(name: string, args?: Record<string, unknown>): Promise<T>;
   refresh(): Promise<void>; render(): void; t: Copy;
+  renderPersonal(): string; loadPersonal(): Promise<void>;
   notify(message: string, kind?: "info" | "success" | "error"): void;
   showError(error: unknown): void; folder(): string; chooseFolder?(): void; followSource?(url: string, kind: "github" | "publicSearch"): void;
 }
@@ -191,11 +192,13 @@ export function createFileSources(hooks: FileSourceHooks) {
   }
   function render(): string {
     const isPublic = tab === "public";
+    const header = `<section class="file-sources"><div class="page-heading"><div><h1>${t("Archivos y documentos", "Files and documents")}</h1><p>${t("Explora el origen, elige archivos y consérvalos en tu biblioteca.", "Browse the source, choose files and keep them in your library.")}</p></div></div><nav class="file-source-tabs" aria-label="${t("Origen de archivos", "File source")}">${[{ id: "public", name: t("Fuentes públicas", "Public sources") }, ...providers, { id: "personal", name: t("Servidores personales", "Personal servers") }].map(provider => `<button type="button" data-action="file-source-tab" data-tab="${provider.id}" ${tab === provider.id ? 'aria-current="page"' : ""} ${busy ? "disabled" : ""}>${h(provider.name)}</button>`).join("")}</nav>`;
+    if (tab === "personal") return `${header}${hooks.renderPersonal()}</section>`;
     const provider: CloudProvider = tab === "public" ? "drive" : tab;
     const isSearch = isCatalogSearch(publicPage);
     const hasPage = isPublic ? Boolean(publicPage) : Boolean(cloudPage);
     const cursor = isPublic ? publicPage?.nextCursor : cloudPage?.nextCursor;
-    return `<section class="file-sources"><div class="page-heading"><div><h1>${t("Archivos y documentos", "Files and documents")}</h1><p>${t("Explora el origen, elige archivos y consérvalos en tu biblioteca.", "Browse the source, choose files and keep them in your library.")}</p></div></div><nav class="file-source-tabs" aria-label="${t("Origen de archivos", "File source")}">${[{ id: "public", name: t("Fuentes públicas", "Public sources") }, ...providers].map(provider => `<button type="button" data-action="file-source-tab" data-tab="${provider.id}" ${tab === provider.id ? 'aria-current="page"' : ""} ${busy ? "disabled" : ""}>${h(provider.name)}</button>`).join("")}</nav>
+    return `${header}
       ${isPublic ? `<form id="file-source-form" class="file-source-form"><label for="file-source-url">${t("Enlace, identificador o DOI", "Link, identifier or DOI")}</label><div><input id="file-source-url" type="text" required value="${h(url)}" maxlength="8192" placeholder="https://… · arXiv:2401.00001 · 10.5281/zenodo.1234" autocomplete="off" spellcheck="false" ${busy ? "disabled" : ""}><button type="submit" class="button secondary" ${busy ? "disabled" : ""}>${icon("search")}${t("Explorar", "Browse")}</button></div><p class="field-note">GitHub Releases · Internet Archive · Wikimedia Commons · arXiv · Zenodo · LibriVox</p></form>${catalogSearch()}` : `<div class="file-source-cloud-toolbar"><div><strong>${h(cloudName(provider))}</strong><p class="field-note">${t("Solo los archivos a los que tu cuenta tiene acceso.", "Only files your account can access.")}</p></div>${action("file-source-cloud-root", t("Mis archivos", "My files"), "folder", "secondary", busy || !status(provider)?.connected ? "disabled" : "")}${action("cloud-configure-open", t("Conexión", "Connection"), "settings", "quiet", `data-provider="${tab}" ${busy ? "disabled" : ""}`)}</div><form id="cloud-shared-form" class="file-source-form"><label for="cloud-shared-url">${t("Enlace compartido, opcional", "Shared link, optional")}</label><div><input id="cloud-shared-url" type="url" value="${h(sharedUrl ?? "")}" maxlength="8192" placeholder="https://…" autocomplete="off" spellcheck="false" ${busy ? "disabled" : ""}><button class="button secondary" type="submit" ${busy || !status(provider)?.connected ? "disabled" : ""}>${t("Abrir enlace", "Open link")}</button></div></form>${connectionEditor === tab || !status(provider)?.connected ? connectionCard(provider) : ""}`}
       ${error ? `<div class="file-source-error" role="alert">${icon("error")}<span>${h(error)}</span></div>` : ""}${busy === "inspect" || busy === "connect" ? `<div class="file-source-progress" role="status"><span>${busy === "connect" ? t("Esperando autorización en el navegador…", "Waiting for browser authorization…") : t("Consultando archivos del origen…", "Reading source files…")}</span>${action("file-source-cancel", t("Cancelar", "Cancel"), "close", "quiet")}</div>` : ""}
       ${hasPage ? `<div class="file-source-results"><div class="file-source-result-heading"><div><span class="file-source-eyebrow">${isPublic ? h(publicPage ? publicNames[publicPage.provider] : "") : h(cloudName(provider))}</span><h2>${h(isPublic ? publicPage?.title ?? "" : trail.at(-1)?.name ?? t("Mis archivos", "My files"))}</h2></div>${isPublic && (publicPage?.provider === "github" || isSearch) && hooks.followSource ? action("file-source-follow", isSearch ? t("Seguir búsqueda", "Follow search") : t("Seguir versiones", "Follow releases"), "add", "quiet", busy ? "disabled" : "") : ""}${!isPublic && trail.length ? action("file-source-parent", t("Volver", "Back"), undefined, "quiet", busy ? "disabled" : "") : ""}</div>${isPublic && publicPage?.description ? `<p class="file-source-description">${h(publicPage.description)}</p>` : ""}${isPublic && publicPage?.rights ? `<p class="field-note">${t("Derechos indicados por el origen", "Rights stated by the source")}: ${h(publicPage.rights)}</p>` : ""}${warningList(isPublic ? publicPage?.warnings ?? [] : cloudPage?.warnings ?? [])}
@@ -269,6 +272,7 @@ export function createFileSources(hooks: FileSourceHooks) {
     switch (name) {
       case "file-source-tab": {
         const value = element.dataset.tab;
+        if (value === "personal") { openPersonal(); await hooks.loadPersonal(); break; }
         if (busy || value !== "public" && (!value || !isCloud(value))) break;
         tab = value; error = ""; cloudPage = null; publicPage = null; url = ""; folder = null; sharedUrl = null; trail = []; clearSelection(); hooks.render();
         if (value !== "public") { await loadConnections(); if (status(value)?.connected) await browseCloud(); }
@@ -357,6 +361,7 @@ export function createFileSources(hooks: FileSourceHooks) {
     }
     return true;
   }
+  function openPersonal() { tab = "personal"; hooks.render(); }
   function openCatalog(id: CatalogSearch | "zenodo") {
     if (busy) return;
     tab = "public";
@@ -380,5 +385,5 @@ export function createFileSources(hooks: FileSourceHooks) {
     if (cloud) { tab = cloud; sharedUrl = input; await loadConnections(); if (status(cloud)?.connected) await browseCloud(); else hooks.render(); }
     else { tab = "public"; url = input; searchMode = null; sharedUrl = null; await inspectPublic(); }
   }
-  return { render, handleClick, handleSubmit, handleInput, open, openCatalog, renderConnections, loadConnections };
+  return { render, handleClick, handleSubmit, handleInput, open, openCatalog, openPersonal, renderConnections, loadConnections };
 }
