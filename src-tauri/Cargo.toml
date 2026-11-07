@@ -18,6 +18,7 @@ rmcp = { version = "=3.9.0", default-features = false, features = ["server", "tr
 url = "2"
 reqwest = { version = "0.13", default-features = false, features = ["native-tls-no-alpn"] }
 sha2 = "0.10"
+md-5 = "=0.10.6"
 regex = "1"
 quick-xml = "0.42"
 qrcodegen = "1.8"

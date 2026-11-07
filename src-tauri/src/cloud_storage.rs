@@ -343,7 +343,7 @@ fn random() -> Result<String, String> {
     }
     Ok(base64(&bytes))
 }
-fn browser(input: &str) -> Result<(), String> {
+pub(crate) fn browser(input: &str) -> Result<(), String> {
     #[cfg(windows)]
     {
         use std::os::windows::ffi::OsStrExt;
@@ -363,14 +363,14 @@ fn browser(input: &str) -> Result<(), String> {
             )
         };
         if result as isize <= 32 {
-            return Err("Could not open the system browser for authorization.".into());
+            return Err("Could not open the system browser.".into());
         }
         Ok(())
     }
     #[cfg(not(windows))]
     {
         let _ = input;
-        Err("Desktop OAuth is available in the Windows build.".into())
+        Err("Opening the system browser is available in the Windows build.".into())
     }
 }
 async fn cancelled(mut cancel: watch::Receiver<bool>) {

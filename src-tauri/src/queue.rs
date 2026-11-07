@@ -1160,8 +1160,13 @@ fn cleanup(job: &Job, staging: &Path) -> Result<(), String> {
         .map_err(|e| format!("Could not remove the job's temporary files: {e}"))
 }
 fn file_hash(file: &Path, cancel: &watch::Receiver<bool>) -> Result<String, String> {
+    hash_with(file, cancel, Sha256::new())
+}
+fn hash_with<D: Digest>(file: &Path, cancel: &watch::Receiver<bool>, mut hash: D) -> Result<String, String>
+where
+    sha2::digest::Output<D>: std::fmt::LowerHex,
+{
     let mut file = fs::File::open(file).map_err(|e| e.to_string())?;
-    let mut hash = Sha256::new();
     let mut bytes = [0u8; 64 * 1024];
     loop {
         if *cancel.borrow() {
@@ -1177,6 +1182,11 @@ fn file_hash(file: &Path, cancel: &watch::Receiver<bool>) -> Result<String, Stri
 }
 pub(crate) async fn digest(file: PathBuf, cancel: watch::Receiver<bool>) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || file_hash(&file, &cancel))
+        .await
+        .map_err(|e| e.to_string())?
+}
+async fn md5_digest(file: PathBuf, cancel: watch::Receiver<bool>) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || hash_with(&file, &cancel, md5::Md5::new()))
         .await
         .map_err(|e| e.to_string())?
 }

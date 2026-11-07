@@ -3,6 +3,10 @@ use serde_json::Value;
 use std::time::Duration;
 use tokio::sync::watch;
 
+mod arxiv;
+mod librivox;
+mod zenodo;
+
 const PAGE_SIZE: usize = 50;
 const MAX_PAGES: usize = 100;
 const MAX_JSON: usize = 8 * 1024 * 1024;
@@ -13,6 +17,19 @@ pub enum Provider {
     Github,
     Archive,
     Commons,
+    Arxiv,
+    Zenodo,
+    Librivox,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AudiobookChapter {
+    pub book_id: String,
+    pub book_title: String,
+    pub chapter: u32,
+    pub reader: Option<String>,
+    pub language: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -33,6 +50,9 @@ pub struct Asset {
     pub sha256: Option<String>,
     pub platform: Option<String>,
     pub architecture: Option<String>,
+    pub published_at: Option<String>,
+    pub checksum: Option<String>,
+    pub audiobook: Option<AudiobookChapter>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -73,6 +93,9 @@ enum Target {
         title: String,
         category: bool,
     },
+    Arxiv(arxiv::ArxivTarget),
+    Zenodo(zenodo::ZenodoTarget),
+    Librivox(librivox::LibrivoxTarget),
 }
 
 fn percent_decode(input: &str) -> Result<String, String> {
@@ -108,12 +131,14 @@ fn identifier(value: &str) -> bool {
 }
 
 fn target(input: &str) -> Result<Target, String> {
+    let input = input.trim();
     if input.len() > 4096 || input.chars().any(char::is_control) {
         return Err(
             "The public source URL exceeds its limit or contains control characters.".into(),
         );
     }
-    let parsed = url::Url::parse(&crate::model::validate_url(input)?)
+    let normalized = arxiv::normalize(input).or_else(|| zenodo::normalize(input));
+    let parsed = url::Url::parse(&crate::model::validate_url(normalized.as_deref().unwrap_or(input))?)
         .map_err(|_| "Use a supported public source URL.")?;
     if parsed.port().is_some() || !matches!(parsed.scheme(), "https" | "http") {
         return Err(
@@ -128,6 +153,9 @@ fn target(input: &str) -> Result<Target, String> {
         .map(percent_decode)
         .collect::<Result<_, _>>()?;
     match parsed.host_str().unwrap_or_default() {
+        "arxiv.org" | "www.arxiv.org" | "export.arxiv.org" => arxiv::parse(&parsed, &parts).map(Target::Arxiv),
+        "zenodo.org" | "www.zenodo.org" | "doi.org" | "dx.doi.org" => zenodo::parse(&parsed, &parts).map(Target::Zenodo),
+        "librivox.org" | "www.librivox.org" => librivox::parse(&parsed, &parts).map(Target::Librivox),
         "github.com" | "www.github.com" => {
             let (owner, repo, tag) = match parts.as_slice() {
                 [owner, repo] => (owner, repo, None),
@@ -194,7 +222,7 @@ fn target(input: &str) -> Result<Target, String> {
             Ok(Target::Commons { title, category })
         }
         _ => Err(
-            "This URL is not a GitHub release, Internet Archive item or Wikimedia Commons page."
+            "Use a supported GitHub, Archive, Commons, arXiv, Zenodo or LibriVox source."
                 .into(),
         ),
     }
@@ -202,6 +230,32 @@ fn target(input: &str) -> Result<Target, String> {
 
 pub fn supported(input: &str) -> bool {
     target(input).is_ok()
+}
+
+pub fn canonical_followed_search(input: &str) -> Result<String, String> {
+    let target = target(input)?;
+    if !matches!(target, Target::Arxiv(arxiv::ArxivTarget::Search { .. })
+        | Target::Librivox(librivox::LibrivoxTarget::Search { .. }))
+    {
+        return Err("Choose an arXiv or LibriVox catalog search to follow.".into());
+    }
+    Ok(source_url(&target))
+}
+
+pub fn followed_search_page_size(input: &str) -> Result<usize, String> {
+    canonical_followed_search(input).map(|_| 20)
+}
+
+pub fn valid_followed_search_entry(search: &str, entry_url: &str, entry_id: &str) -> bool {
+    let Ok(entry) = target(entry_url) else { return false; };
+    if source_url(&entry) != entry_url { return false; }
+    match (target(search), entry) {
+        (Ok(Target::Arxiv(arxiv::ArxivTarget::Search { .. })), Target::Arxiv(arxiv::ArxivTarget::Article(id))) =>
+            id.matches_search_entry(entry_id),
+        (Ok(Target::Librivox(librivox::LibrivoxTarget::Search { .. })), Target::Librivox(librivox::LibrivoxTarget::Edition(id))) =>
+            entry_id == format!("librivox:{id}"),
+        _ => false,
+    }
 }
 
 pub fn github_repository_url(input: &str) -> Result<String, String> {
@@ -233,6 +287,9 @@ fn url_path(base: &str, parts: &[&str]) -> String {
 
 fn source_url(target: &Target) -> String {
     match target {
+        Target::Arxiv(target) => arxiv::canonical(target),
+        Target::Zenodo(target) => zenodo::canonical(target),
+        Target::Librivox(target) => librivox::canonical(target),
         Target::Github {
             owner,
             repo,
@@ -409,7 +466,15 @@ async fn cancelled(mut cancel: watch::Receiver<bool>) {
     }
 }
 
+const PUBLIC_NOT_FOUND: &str = "The public source item was not found or is not publicly accessible.";
+
 async fn api_json(input: &str) -> Result<Value, String> {
+    let bytes = api_bytes(input, "application/json").await?;
+    serde_json::from_slice(&bytes)
+        .map_err(|_| "The source did not return valid public metadata JSON.".into())
+}
+
+async fn api_bytes(input: &str, accept: &str) -> Result<Vec<u8>, String> {
     let parsed = url::Url::parse(input).map_err(|_| "Invalid public API URL.")?;
     let host = parsed.host_str().ok_or("The public API URL has no host.")?;
     if parsed.scheme() != "https"
@@ -418,7 +483,7 @@ async fn api_json(input: &str) -> Result<Value, String> {
         || parsed.password().is_some()
         || !matches!(
             host,
-            "api.github.com" | "archive.org" | "commons.wikimedia.org"
+            "api.github.com" | "archive.org" | "commons.wikimedia.org" | "export.arxiv.org" | "arxiv.org" | "zenodo.org" | "librivox.org"
         )
     {
         return Err("Only official public source APIs are allowed.".into());
@@ -452,7 +517,7 @@ async fn api_json(input: &str) -> Result<Value, String> {
         .map_err(|_| "Could not prepare the public source request.")?;
     let mut response = client
         .get(parsed.clone())
-        .header(reqwest::header::ACCEPT, "application/json")
+        .header(reqwest::header::ACCEPT, accept)
         .header(reqwest::header::ACCEPT_ENCODING, "identity")
         .send()
         .await
@@ -461,7 +526,7 @@ async fn api_json(input: &str) -> Result<Value, String> {
     match status {
         200 => {}
         401 | 403 => return Err("This source denied access or exhausted its public API allowance. No authentication or access bypass was attempted.".into()),
-        404 => return Err("The public source item was not found or is not publicly accessible.".into()),
+        404 => return Err(PUBLIC_NOT_FOUND.into()),
         429 => return Err("The public source requested a pause. Retry later.".into()),
         _ => return Err(format!("The official public source API returned HTTP {status}.")),
     }
@@ -482,8 +547,7 @@ async fn api_json(input: &str) -> Result<Value, String> {
         }
         bytes.extend_from_slice(&chunk);
     }
-    serde_json::from_slice(&bytes)
-        .map_err(|_| "The source did not return valid public metadata JSON.".into())
+    Ok(bytes)
 }
 
 fn safe_download_url(input: &str, provider: Provider) -> Result<String, String> {
@@ -494,6 +558,9 @@ fn safe_download_url(input: &str, provider: Provider) -> Result<String, String> 
         Provider::Github => host == "github.com",
         Provider::Archive => host == "archive.org",
         Provider::Commons => host == "upload.wikimedia.org",
+        Provider::Arxiv => host == "arxiv.org",
+        Provider::Zenodo => host == "zenodo.org",
+        Provider::Librivox => host == "archive.org" || host == "librivox.org",
     };
     // Imageinfo analytics parameters are unnecessary for file access and must not be persisted.
     if provider == Provider::Commons
@@ -628,6 +695,9 @@ fn github_asset(value: &Value, target: &Target, version: &str) -> Result<Asset, 
             .and_then(|digest| hex_digest(digest, 64)),
         platform,
         architecture,
+        published_at: None,
+        checksum: None,
+        audiobook: None,
     })
 }
 
@@ -850,6 +920,9 @@ fn archive_asset(file: &Value, metadata: &Value, target: &Target) -> Result<Opti
             .and_then(|digest| hex_digest(digest, 64)),
         platform: None,
         architecture: None,
+        published_at: None,
+        checksum: None,
+        audiobook: None,
     }))
 }
 
@@ -1041,6 +1114,9 @@ fn commons_assets(raw: &Value) -> Result<Vec<Asset>, String> {
             sha256: None,
             platform: None,
             architecture: None,
+            published_at: None,
+            checksum: None,
+            audiobook: None,
         };
         if let Some(thumb) = info["thumburl"].as_str() {
             let thumb = safe_download_url(thumb, Provider::Commons)?;
@@ -1169,6 +1245,9 @@ pub async fn inspect(
     let target = target(input)?;
     let operation = async {
         match &target {
+            Target::Arxiv(value) => arxiv::inspect(value, cursor).await,
+            Target::Zenodo(value) => zenodo::inspect(value, cursor).await,
+            Target::Librivox(value) => librivox::inspect(value, cursor).await,
             Target::Github { .. } => github(&target, cursor).await,
             Target::Archive { .. } => archive(&target, cursor).await,
             Target::Commons { .. } => commons(&target, cursor).await,
@@ -1188,6 +1267,9 @@ pub async fn resolve(
     let target = target(input)?;
     let operation = async {
         match &target {
+            Target::Arxiv(value) => arxiv::resolve(value, asset_id).await,
+            Target::Zenodo(value) => zenodo::resolve(value, asset_id).await,
+            Target::Librivox(value) => librivox::resolve(value, asset_id).await,
             Target::Github {
                 owner,
                 repo,

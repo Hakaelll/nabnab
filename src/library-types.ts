@@ -7,11 +7,14 @@ export interface Bookmark { id: string; name: string; time: number }
 export interface ClipReference { requestedStart: number; requestedEnd: number; actualStart: number | null; actualEnd: number | null }
 export interface NarrationReference { planRef: string | null; textHash: string; sourceVersion: string; voiceName: string; language: string; engineFingerprint: string }
 export interface RecordingReference { captureRef: string | null; sourceLabel: string; kind: string; durationMs: number; interrupted: boolean; reason: string | null }
+export interface AudiobookChapter { bookId: string; bookTitle: string; chapter: number; reader: string | null; language: string | null }
 export interface LibraryDetails {
   contentId: string | null; creator: string | null; platform: string | null; sourceIds: string[];sourceUrl?:string|null;license?:string|null;attribution?:string|null;webArchiveRef?:string|null;articleAnnotations?:import("./articles-ui").ArticleAnnotation[];ocrRef?:string|null;
   chapters: Chapter[]; tracks: LocalTrack[]; playbackPosition: number; favorite: boolean;
   bookmarks: Bookmark[]; clip: ClipReference | null;
   narration?: NarrationReference | null; recording?: RecordingReference | null;
+  sourceVersion?: string | null; sourcePublishedAt?: string | null; sourceChecksum?: string | null;
+  audiobook?: AudiobookChapter | null;
 }
 export type SmartCondition =
   | { kind: "kind" | "source" | "platform" | "tag" | "subtitleLanguage"; value: string }

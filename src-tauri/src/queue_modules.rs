@@ -163,6 +163,19 @@ pub(super) async fn run(app:&AppHandle,state:&Arc<AppState>,job:&Job,staging:&Pa
                     return Err("The downloaded file does not match its published SHA-256. It was not added to the library.".into());
                 }
             }
+            if let Some(expected) = asset.checksum.as_deref().and_then(|value| value.strip_prefix("md5:")) {
+                if !md5_digest(file.clone(), cancel.clone()).await?.eq_ignore_ascii_case(expected) {
+                    return Err("The downloaded file does not match its published MD5 checksum. It was not added to the library.".into());
+                }
+            }
+            if asset.id.starts_with("arxiv:") {
+                let mut signature = [0u8; 5];
+                if fs::File::open(&file).and_then(|mut file| file.read_exact(&mut signature)).is_err()
+                    || &signature != b"%PDF-"
+                {
+                    return Err("arXiv did not return a PDF. No document was added to the library.".into());
+                }
+            }
             Some((file,Some(selection.source_url.clone()),None))
         },
         Source::CloudFile {selection,..} => {
@@ -270,6 +283,15 @@ pub(super) async fn run(app:&AppHandle,state:&Arc<AppState>,job:&Job,staging:&Pa
             item.details.creator=selection.author.clone();
             item.details.license=selection.license.clone();
             item.details.attribution=selection.attribution.clone();
+            item.details.source_version = selection.version.clone();
+            item.details.source_published_at = selection.published_at.clone();
+            item.details.source_checksum = selection.checksum.clone();
+            item.details.audiobook = selection.audiobook.clone();
+            if let Some(chapter) = &selection.audiobook {
+                item.kind = "audio".into();
+                item.details.platform = Some("LibriVox".into());
+                item.collections.push(format!("{} · LibriVox {}", chapter.book_title, chapter.book_id));
+            }
             if !selection.collection.is_empty(){item.collections.push(selection.collection.clone());}
         },
         Source::CloudFile {selection,collection} => {

@@ -14,6 +14,8 @@ use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_dialog::DialogExt;
 #[path = "course_members.rs"]
 pub mod members;
+#[path = "course_browser.rs"]
+pub mod browser;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -94,6 +96,7 @@ impl Course {
             || !matches!(
                 self.provider.as_str(),
                 "local" | "udemy" | "hotmart" | "kiwify"
+                    | "rocketseat" | "coursera" | "domestika" | "skillshare"
             )
             || self.sections.len() > 1000
         {

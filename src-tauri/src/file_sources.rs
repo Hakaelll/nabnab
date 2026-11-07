@@ -23,6 +23,9 @@ pub struct PublicSelection {
     pub license: Option<String>,
     pub attribution: Option<String>,
     pub collection: String,
+    pub published_at: Option<String>,
+    pub checksum: Option<String>,
+    pub audiobook: Option<public_sources::AudiobookChapter>,
 }
 
 impl PublicSelection {
@@ -32,6 +35,7 @@ impl PublicSelection {
             || self.asset_id.is_empty() || self.asset_id.len()>2048
             || self.asset_id.chars().any(char::is_control)
             || self.sha256.as_ref().is_some_and(|hash| hash.len()!=64 || !hash.bytes().all(|v|v.is_ascii_hexdigit()))
+            || self.checksum.as_ref().is_some_and(|value| !valid_checksum(value))
         {return Err("The selected public file identity or checksum is invalid.".into());}
         crate::direct::validate_filename(&self.filename)?;
         collection(&self.collection)?;
@@ -42,9 +46,17 @@ impl PublicSelection {
         if self.asset_id!=asset.id || self.source_url!=asset.source_url || self.filename!=asset.filename
             || self.version!=asset.version || self.size!=asset.size
             || self.sha256.as_ref().is_some_and(|hash|asset.sha256.as_ref()!=Some(hash))
+            || self.checksum.as_ref().is_some_and(|checksum|asset.checksum.as_ref()!=Some(checksum))
+            || self.audiobook != asset.audiobook
         { return Err("The selected source file changed. Inspect it again to create a new local version.".into()); }
         Ok(())
     }
+}
+
+fn valid_checksum(value: &str) -> bool {
+    let Some((algorithm, digest)) = value.split_once(':') else { return false; };
+    let length = match algorithm { "md5" => 32, "sha256" => 64, _ => return false };
+    digest.len() == length && digest.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 pub(crate) fn begin(state: &AppState, request: u64) -> Result<watch::Receiver<bool>, String> {
@@ -91,7 +103,7 @@ fn collection(value: &str) -> Result<String, String> {
 pub fn queue_public_files(state: State<Arc<AppState>>, source_url: String, asset_ids: Vec<String>, collection: String, client_request: String) -> Result<Vec<queue::Job>, String> {
     let collection = self::collection(&collection)?;
     if asset_ids.is_empty() || asset_ids.len() > 199 { return Err("Select 1–199 files from the inspected source.".into()); }
-    let tasks = {
+    let mut tasks = {
         let pages = state.file_sources.pages.lock().unwrap();
         let page = pages.get(&source_url).ok_or("Inspect the source again before downloading its files.")?;
         let mut tasks = Vec::new();
@@ -101,15 +113,46 @@ pub fn queue_public_files(state: State<Arc<AppState>>, source_url: String, asset
             if !selected.insert(id.clone()) { continue; }
             let asset = page.assets.iter().find(|a| a.id == id).ok_or("Select only files listed in the inspected source.")?;
             crate::direct::validate_filename(&asset.filename)?;
-            let selection = PublicSelection { source_url: asset.source_url.clone(), asset_id: asset.id.clone(), filename: asset.filename.clone(), sha256: asset.sha256.clone(), version: asset.version.clone(), size: asset.size, author: asset.author.clone(), license: asset.license.clone(), attribution: asset.attribution.clone(), collection: collection.clone() };
+            let selection = PublicSelection {
+                source_url: asset.source_url.clone(), asset_id: asset.id.clone(), filename: asset.filename.clone(),
+                sha256: asset.sha256.clone(), version: asset.version.clone(), size: asset.size,
+                author: asset.author.clone(), license: asset.license.clone(), attribution: asset.attribution.clone(),
+                collection: collection.clone(), published_at: asset.published_at.clone(),
+                checksum: asset.checksum.clone(), audiobook: asset.audiobook.clone(),
+            };
             if matches!(page.provider, public_sources::Provider::Commons) { attribution.push(selection.clone()); }
             tasks.push((queue::Source::PublicFile { selection }, asset.title.clone()));
+        }
+        if page.provider == public_sources::Provider::Librivox {
+            tasks.sort_by_key(|(source, _)| match source {
+                queue::Source::PublicFile { selection } => selection.audiobook.as_ref().map(|chapter| chapter.chapter),
+                _ => None,
+            });
         }
         if !attribution.is_empty() { tasks.push((queue::Source::Attribution { entries: attribution }, "Wikimedia Commons · attribution".into())); }
         tasks
     };
     let mut guard = state.repository.lock().unwrap();
     let repo = guard.as_mut().ok_or("Open nabnab first.")?;
+    tasks.retain(|(source, _)| {
+        let queue::Source::PublicFile { selection } = source else { return true; };
+        if !["arxiv:", "zenodo:", "librivox:"].iter().any(|prefix| selection.asset_id.starts_with(prefix)) {
+            return true;
+        }
+        !repo.data.jobs.iter().any(|job| {
+            if job.client_request == client_request || job.folder != repo.data.settings.folder
+                || matches!(job.state, queue::JobState::Cancelled | queue::JobState::Error)
+                || job.state == queue::JobState::Completed && !job.outputs.iter().any(|path| path.is_file())
+            {
+                return false;
+            }
+            matches!(&job.source, queue::Source::PublicFile { selection: queued }
+                if queued.source_url == selection.source_url && queued.asset_id == selection.asset_id
+                    && queued.version == selection.version && queued.checksum == selection.checksum
+                    && queued.size == selection.size)
+        })
+    });
+    if tasks.is_empty() { return Err("The selected files are already queued or saved in this destination.".into()); }
     let jobs = queue::enqueue_tasks(repo, tasks, &client_request)?;
     state.runtime.notify.notify_one();
     Ok(jobs)
@@ -175,11 +218,11 @@ pub fn queue_cloud_files(state: State<Arc<AppState>>, selections: Vec<cloud_stor
 mod tests {
     use super::*;
     fn selected() -> PublicSelection {
-        PublicSelection { source_url:"https://github.com/example/tool/releases/tag/v1".into(), asset_id:"github:123".into(), filename:"tool.zip".into(), sha256:None, version:Some("2026-11-06".into()), size:Some(7), author:None, license:None, attribution:None, collection:"Releases".into() }
+        PublicSelection { source_url:"https://github.com/example/tool/releases/tag/v1".into(), asset_id:"github:123".into(), filename:"tool.zip".into(), sha256:None, version:Some("2026-11-06".into()), size:Some(7), author:None, license:None, attribution:None, collection:"Releases".into(), published_at:None, checksum:None, audiobook:None }
     }
     fn asset() -> public_sources::Asset {
         let selection=selected();
-        public_sources::Asset {id:selection.asset_id,source_url:selection.source_url,download_url:"https://github.com/example/tool/releases/download/v1/tool.zip".into(),filename:selection.filename,mime:"application/zip".into(),size:selection.size,title:"tool.zip".into(),version:selection.version,original:true,author:None,license:None,attribution:None,sha256:None,platform:None,architecture:None}
+        public_sources::Asset {id:selection.asset_id,source_url:selection.source_url,download_url:"https://github.com/example/tool/releases/download/v1/tool.zip".into(),filename:selection.filename,mime:"application/zip".into(),size:selection.size,title:"tool.zip".into(),version:selection.version,original:true,author:None,license:None,attribution:None,sha256:None,platform:None,architecture:None,published_at:None,checksum:None,audiobook:None}
     }
     #[test]
     fn selected_identity_rejects_source_parameters_and_control_paths() {

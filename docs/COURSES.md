@@ -12,6 +12,25 @@ Seleccionar una sección añade sus materiales disponibles a la selección. Aña
 
 Los adjuntos PDF/EPUB dependen de la lectura y clasificación documental de la biblioteca. El módulo de cursos no ejecuta adjuntos ni contenido HTML de lecciones. No muestra compras ni catálogos externos, y conectar una sesión no descarga todo el curso.
 
+## Materiales de Rocketseat, Coursera, Domestika y Skillshare
+
+Abre **Plataformas → Cursos**, elige el proveedor y pega el enlace del curso. También puedes pegar el enlace en Inicio. Abre el curso en el navegador y elige allí el perfil o la sesión autorizada. Guarda el material desde los controles que la plataforma haya habilitado. En nabnab, indica el nombre del curso y pulsa **Elegir archivos guardados**. El selector admite hasta 200 archivos por operación.
+
+La biblioteca indexa los archivos elegidos en su ubicación actual. Para conservar el orden del curso, guarda cada unidad en una carpeta numerada y numera los nombres de las lecciones. Los archivos con el mismo nombre base en la misma carpeta aparecen juntos, por ejemplo, un vídeo y su subtítulo. Los ZIP, RAR, 7z y archivos de diseño admitidos quedan como adjuntos para consultar en su carpeta. Al añadir archivos al mismo curso se conservan las notas, el estado aprendido y la posición asociada a los archivos ya indexados.
+
+| Plataforma | Vía disponible |
+| --- | --- |
+| Rocketseat | Abre la [formación](https://app.rocketseat.com.br/journey/discover/contents). Importa únicamente archivos que se te haya autorizado a guardar. Sus [condiciones de uso](https://www.rocketseat.com.br/termos-de-uso) prohíben descargar las videoclases. |
+| Coursera | Usa los controles habilitados en cada lección. La [API documentada](https://dev.coursera.com/get-started) requiere credenciales de una organización Business, Campus o Government. Las [condiciones de uso](https://www.coursera.org/about/terms) requieren autorización previa para extraer contenido automáticamente. |
+| Domestika | Guarda los [recursos adicionales](https://support.domestika.org/hc/en-us/articles/360003129937-I-can-t-download-the-additional-resources) desde la web. Los [vídeos offline](https://support.domestika.org/hc/en-us/articles/360003651177-Can-I-download-the-courses) se reproducen en la app de Domestika. |
+| Skillshare | Usa [Proyectos y recursos → Descargar recursos](https://help.skillshare.com/hc/en-us/articles/217440617-How-do-I-access-class-materials-or-additional-resources). Los [vídeos offline](https://help.skillshare.com/hc/en-us/articles/205221147-How-do-I-download-videos-for-offline-viewing) se reproducen en la app de Skillshare. |
+
+En estos cuatro proveedores la sesión y la descarga se gestionan en el navegador oficial. nabnab recibe los archivos locales elegidos, con su procedencia y curso asociados. El índice local no enumera el currículo remoto ni crea trabajos de descarga. Las comprobaciones utilizan archivos sintéticos y un navegador con IPC simulado, sin acceso a cuentas.
+
+![Apertura del curso e importación de adjuntos, a 1180 × 780 con IPC simulado](course-materials-form.png)
+
+![Estudio de materiales importados, a 900 × 620 con IPC simulado](course-materials-study.png)
+
 ## Referencias y límites
 
 Se consultaron las interfaces de [cursos de Omniget](https://github.com/OpenSelena/omniget/tree/main/src-tauri/plugins/courses/src/platforms), bajo [GPL-3.0](https://github.com/OpenSelena/omniget/blob/main/LICENSE), y el [extractor oficial de Udemy de yt-dlp](https://github.com/yt-dlp/yt-dlp/blob/master/yt_dlp/extractor/udemy.py). No se copiaron código, recursos ni credenciales. Las rutas de alumno observadas en Hotmart y Kiwify requieren comprobación con cuentas autorizadas y pueden cambiar. La [API pública documentada de Kiwify](https://docs.kiwify.com.br/api-reference/general) es una API de negocio y no sustituye la sesión de alumno.

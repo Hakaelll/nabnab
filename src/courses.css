@@ -15,4 +15,16 @@
 .course-study audio { width: 100%; }
 .course-note { border-top: 1px solid var(--border, #2b2e34); padding: 12px 0; }
 .course-note p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.course-browser-steps { width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+.course-browser-steps > section { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 14px; }
+.course-browser-steps > section + section { border-inline-start: 1px solid var(--border); padding-inline-start: 24px; }
+.course-browser-steps h3 { font-size: 14px; }
+.course-browser-steps .field-note { margin-top: 0; }
 @media (max-width: 1000px) { .course-layout { grid-template-columns: minmax(0, 1fr); } }
+@media (min-width: 860px) and (max-width: 1000px) {
+  .course-layout--browser { grid-template-columns: minmax(180px, 1fr) minmax(0, 2fr); }
+}
+@media (max-width: 760px) {
+  .course-browser-steps { grid-template-columns: minmax(0, 1fr); }
+  .course-browser-steps > section + section { border-inline-start: 0; padding-inline-start: 0; border-top: 1px solid var(--border); padding-top: 20px; }
+}

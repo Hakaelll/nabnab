@@ -43,7 +43,7 @@ pub struct ProviderInfo {
     pub capabilities: Capabilities,
 }
 
-pub fn course_page(input:&str)->bool{url::Url::parse(input).ok().is_some_and(|u|{let h=u.host_str().unwrap_or_default();(h=="udemy.com"||h.ends_with(".udemy.com"))&&u.path().starts_with("/course/")||(h=="hotmart.com"||h.ends_with(".hotmart.com")||h=="kiwify.com"||h.ends_with(".kiwify.com"))&&!u.path().contains("download")})}
+pub fn course_page(input:&str)->bool{crate::courses::browser::is_course_page(input)||url::Url::parse(input).ok().is_some_and(|u|{let h=u.host_str().unwrap_or_default();(h=="udemy.com"||h.ends_with(".udemy.com"))&&u.path().starts_with("/course/")||(h=="hotmart.com"||h.ends_with(".hotmart.com")||h=="kiwify.com"||h.ends_with(".kiwify.com"))&&!u.path().contains("download")})}
 
 pub fn identify(input: &str) -> Result<ProviderInfo, String> {
     let normalized = crate::model::validate_url(input)?;

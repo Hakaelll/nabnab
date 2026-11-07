@@ -1,4 +1,5 @@
 export type SourceStatus = "ready" | "checking" | "paused" | "requiresSession" | "error";
+export type SourceKind = "channel" | "playlist" | "podcast" | "gallery" | "github" | "publicSearch";
 export type SourceItemState = "observed" | "review" | "queued" | "downloaded" | "ignored" | "unavailable";
 export interface SourceSettings {
   presetId: string | null;
@@ -17,7 +18,7 @@ export interface SourceItem {
   reason: string | null; jobIds: string[];
 }
 export interface FollowedSource {
-  id: string; name: string; url: string; kind: "channel" | "playlist" | "podcast" | "gallery" | "github"; urlRef?: string | null; publicFeedUrl?: string | null; status: SourceStatus;
+  id: string; name: string; url: string; kind: SourceKind; urlRef?: string | null; publicFeedUrl?: string | null; status: SourceStatus;
   createdAt: number; lastCheck: number | null; nextCheck: number | null; error: string | null; failures: number;
   settings: SourceSettings;
   baseline: { complete: boolean; inspected: number; total: number | null; cursor: number; hasMore: boolean };

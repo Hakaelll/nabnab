@@ -37,6 +37,10 @@ const setup = `
     if(cmd==="cloud_preview_folder")return {entries:[binary("scan","Scan.pdf"),native("nested-doc","Nested document")],nextCursor:null,partial:true,warnings:["Fixture folder limit reached. Only reviewed files are included."]};
     if(cmd==="queue_public_files"||cmd==="queue_cloud_files")return [];
     if(cmd==="public_source_inspect"){
+      if(args.url.startsWith("https://arxiv.org/search/"))return sourcePage(args.url,{provider:"arxiv",title:"arXiv · fixture search",entries:[{id:"arxiv:2401.00001v2",title:"A versioned paper",url:"https://arxiv.org/abs/2401.00001",prerelease:false,publishedAt:"2024-01-02"}]});
+      if(args.url.startsWith("https://arxiv.org/abs/"))return sourcePage(args.url,{provider:"arxiv",title:"A versioned paper",assets:[1,2].map(version=>asset("arxiv:2401.00001v"+version,"arxiv-2401.00001v"+version+".pdf",{mime:"application/pdf",version:"v"+version,publishedAt:"2024-01-02",author:"Fixture Author"}))});
+      if(args.url==="10.5281/zenodo.1234")return sourcePage("https://doi.org/10.5281/zenodo.1234",{provider:"zenodo",title:"Fixture dataset",assets:[asset("zenodo:1235:samples.csv","samples.csv",{mime:"text/csv",size:2**31,version:"Version 2",checksum:"md5:"+"a".repeat(32)})],warnings:["Record version 1235 · Record family 1234"]});
+      if(args.url.includes("librivox.org/api/feed/audiobooks/id/"))return sourcePage(args.url,{provider:"librivox",title:"Fixture audiobook",assets:[1,2].map(chapter=>asset("librivox:52:"+chapter,"chapter-"+chapter+".mp3",{mime:"audio/mpeg",title:"Chapter title",audiobook:{bookId:"librivox:52",bookTitle:"Fixture audiobook",chapter,reader:"Fixture Reader",language:"English"}}))});
       if(args.url.includes("/error"))throw "Fixture source permission denied. Choose another source or retry.";
       if(args.url.includes("/slow"))return await new Promise(resolve=>{fixture.pending=()=>resolve(sourcePage(args.url,{title:"Stale result must not appear"}));});
       if(args.url.includes("/empty"))return sourcePage(args.url,{title:"Empty release"});
@@ -124,6 +128,41 @@ try {
     assert.equal(await page.locator(".file-source-list img").count(), 0);
     assert.match(await page.locator(".file-source-list").innerText(), /<img src=x onerror=alert\(1\)>/);
     report.push("Archive originals and derivatives filters passed; Commons author metadata renders as text.");
+
+    await page.locator("[data-action='file-source-search-mode'][data-id='arxiv']").click();
+    await page.locator("#file-source-arxiv-field").selectOption("author");
+    await page.locator("#file-source-catalog-query").fill("Fixture Author");
+    await page.locator("#file-source-catalog-form button[type=submit]").click();
+    await page.getByRole("button", { name: "Seguir búsqueda" }).waitFor();
+    await page.getByRole("button", { name: /A versioned paper/ }).click();
+    await page.locator("[data-file-source-select='arxiv:2401.00001v2']").waitFor();
+    assert.equal(await page.locator("[data-file-source-select]").count(), 2);
+    assert.equal(await page.locator("[data-file-source-select]:checked").count(), 0);
+    await page.setViewportSize({ width: 1180, height: 780 });
+    await page.locator(".file-source-list").scrollIntoViewIfNeeded();
+    await checkNoHorizontalOverflow("arXiv version list");
+    await page.screenshot({ path: `${directory}/arxiv-versions-fixture.png` });
+
+    await inspect("10.5281/zenodo.1234");
+    await page.locator("[data-file-source-select='zenodo:1235:samples.csv']").check();
+    assert.match(await page.locator(".file-source-selection").innerText(), /2\.00 GiB/);
+    assert.match(await page.locator(".file-source-list").innerText(), /md5:[a-f0-9]{32}/);
+    for (const [width, height] of [[1180, 780], [900, 620]]) {
+      await page.setViewportSize({ width, height });
+      await checkNoHorizontalOverflow(`Zenodo ${width}`);
+      await page.screenshot({ path: `${directory}/zenodo-${width}x${height}-fixture.png` });
+    }
+
+    await inspect("https://librivox.org/api/feed/audiobooks/id/52");
+    await page.locator("[data-file-source-select='librivox:52:2']").waitFor();
+    assert.deepEqual(await page.locator(".file-source-row-main strong").allTextContents(), ["Capítulo 1 · Chapter title", "Capítulo 2 · Chapter title"]);
+    assert.match(await page.locator(".file-source-list").innerText(), /Fixture Reader · English/);
+    await page.locator("[data-action='file-source-select-chapters']").click();
+    assert.equal(await page.locator("[data-file-source-select]:checked").count(), 2);
+    await page.setViewportSize({ width: 1180, height: 780 });
+    await checkNoHorizontalOverflow("LibriVox chapters");
+    await page.screenshot({ path: `${directory}/librivox-chapters-fixture.png` });
+    report.push("arXiv author search and version selection, Zenodo DOI with reviewed volume, and ordered LibriVox chapters passed.");
 
     await inspect("https://github.com/example/empty");
     await page.getByRole("heading", { name: "Empty release", exact: true }).waitFor();

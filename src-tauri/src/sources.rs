@@ -20,7 +20,10 @@ pub enum SourceKind {
     Podcast,
     Gallery,
     Github,
+    PublicSearch,
 }
+
+const PUBLIC_SEARCH_LIMIT: usize = 200;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -201,6 +204,34 @@ impl FollowedSource {
             }
             return Ok(());
         }
+        if self.kind == SourceKind::PublicSearch {
+            let canonical = crate::public_sources::canonical_followed_search(&self.url)?;
+            if canonical != self.url
+                || public_search_id(&canonical) != self.id
+                || self.url_ref.is_some()
+                || self.public_feed_url.is_some()
+                || self.next_check.is_some()
+            {
+                return Err("The saved public search identity or schedule is invalid.".into());
+            }
+            validate_public_search_settings(&self.settings, &canonical)?;
+            let mut identities = HashSet::new();
+            for item in &self.items {
+                if !crate::public_sources::valid_followed_search_entry(
+                    &canonical,
+                    &item.url,
+                    &item.content_id,
+                ) || !identities.insert(&item.content_id)
+                    || item.url_ref.is_some()
+                    || !item.job_ids.is_empty()
+                {
+                    return Err(
+                        "The saved public search contains invalid or repeated results.".into(),
+                    );
+                }
+            }
+            return Ok(());
+        }
         if matches!(self.kind, SourceKind::Podcast | SourceKind::Gallery) {
             crate::model::validate_url(&self.url)?;
             let valid_source = if self.kind == SourceKind::Gallery {
@@ -335,6 +366,10 @@ fn github_source_id(url: &str) -> String {
     format!("github-{:x}", Sha256::digest(url.as_bytes()))
 }
 
+fn public_search_id(url: &str) -> String {
+    format!("public-search-{:x}", Sha256::digest(url.as_bytes()))
+}
+
 fn validate_github_settings(settings: &SourceSettings) -> Result<(), String> {
     if settings.automatic {
         return Err("GitHub release following requires manual file selection. Open a release to choose its files.".into());
@@ -345,6 +380,27 @@ fn validate_github_settings(settings: &SourceSettings) -> Result<(), String> {
             "GitHub release following supports up to 50 releases per page and 5000 positions."
                 .into(),
         );
+    }
+    Ok(())
+}
+
+fn validate_public_search_settings(settings: &SourceSettings, url: &str) -> Result<(), String> {
+    settings.validate()?;
+    if settings.automatic
+        || settings.interval_hours.is_some()
+        || settings.preset_id.is_some()
+        || !settings.relative_folder.is_empty()
+    {
+        return Err("Public catalog searches use manual checks and file selection.".into());
+    }
+    let page_size = crate::public_sources::followed_search_page_size(url)?;
+    if settings.page_size != page_size
+        || settings.exploration_limit > PUBLIC_SEARCH_LIMIT
+        || settings.exploration_limit % page_size != 0
+    {
+        return Err(format!(
+            "Use {page_size} results per page and up to {PUBLIC_SEARCH_LIMIT} search positions."
+        ));
     }
     Ok(())
 }
@@ -540,9 +596,19 @@ fn apply_page(
                 } else {
                     SourceItemState::Review
                 };
-                item.reason=Some(if source.kind == SourceKind::Github {
-                    "Release history is observed only. Open a release to choose its files."
-                } else { "Initial history is never downloaded automatically. Select an item to queue it." }.into());
+                item.reason = Some(match source.kind {
+                    SourceKind::Github => "Release history is observed only. Open a release to choose its files.",
+                    SourceKind::PublicSearch => "Open a catalog result to review the available files.",
+                    _ => "Initial history is never downloaded automatically. Select an item to queue it.",
+                }.into());
+            } else if source.kind == SourceKind::PublicSearch {
+                if item
+                    .published_at
+                    .is_some_and(|time| time >= source.created_at)
+                {
+                    item.discovery = Discovery::Published;
+                }
+                item.reason = Some("Open a catalog result to review the available files.".into());
             } else if !baseline_complete || item.published_at.is_none() {
                 item.discovery = Discovery::Ambiguous;
                 item.reason=Some("Incomplete baseline or missing publication date. Review this item before downloading.".into());
@@ -654,11 +720,16 @@ fn queue_items(
     ids: &[String],
     manual: bool,
 ) -> Result<Vec<queue::Job>, String> {
-    if source.kind == SourceKind::Github {
+    if matches!(source.kind, SourceKind::Github | SourceKind::PublicSearch) {
         return if ids.is_empty() {
             Ok(Vec::new())
         } else {
-            Err("Open the release and select its files before adding them to the queue.".into())
+            Err(if source.kind == SourceKind::Github {
+                "Open the release and select its files before adding them to the queue."
+            } else {
+                "Open the catalog result and select its files before adding them to the queue."
+            }
+            .into())
         };
     }
     let selected: HashSet<_> = ids.iter().collect();
@@ -774,6 +845,66 @@ impl Drop for CheckGuard {
     }
 }
 
+fn public_search_page(
+    url: &str,
+    result: crate::public_sources::Page,
+    page_size: usize,
+) -> Result<Page, String> {
+    let provider = match result.provider {
+        crate::public_sources::Provider::Arxiv => "arXiv",
+        crate::public_sources::Provider::Librivox => "LibriVox",
+        _ => return Err("The result is not from a supported public catalog.".into()),
+    };
+    if result.source_url != url || result.entries.len() > page_size {
+        return Err("The public search page does not match its saved search.".into());
+    }
+    let has_more = result.next_cursor.is_some();
+    let inspected = if has_more {
+        page_size
+    } else {
+        result.entries.len()
+    };
+    let stamp = queue::now();
+    let items = result
+        .entries
+        .into_iter()
+        .filter(|entry| {
+            crate::public_sources::valid_followed_search_entry(url, &entry.url, &entry.id)
+        })
+        .map(|entry| SourceItem {
+            url: entry
+                .id
+                .strip_prefix("arxiv:")
+                .map(|id| format!("https://arxiv.org/abs/{id}"))
+                .unwrap_or(entry.url),
+            content_id: entry.id,
+            title: entry.title,
+            creator: provider.into(),
+            url_ref: None,
+            size: None,
+            media_type: provider.into(),
+            thumbnail: None,
+            duration: None,
+            published_at: entry
+                .published_at
+                .as_deref()
+                .and_then(crate::gallery_sources::published_at),
+            discovered_at: stamp,
+            state: SourceItemState::Review,
+            discovery: Discovery::Ambiguous,
+            reason: None,
+            job_ids: Vec::new(),
+        })
+        .collect();
+    Ok(Page {
+        name: Some(result.title),
+        items,
+        inspected,
+        has_more,
+        total: None,
+    })
+}
+
 async fn inspect_page(
     app: &AppHandle,
     state: &AppState,
@@ -782,6 +913,23 @@ async fn inspect_page(
     mut cancel: watch::Receiver<bool>,
 ) -> Result<Page, String> {
     source.validate()?;
+    if source.kind == SourceKind::PublicSearch {
+        let offset = if continuation {
+            source.baseline.cursor
+        } else {
+            0
+        };
+        let page_size = source.settings.page_size;
+        if offset % page_size != 0 || offset >= source.settings.exploration_limit {
+            return Err(
+                "The public search reached its exploration limit. Refine it or change its scope."
+                    .into(),
+            );
+        }
+        let cursor = (offset / page_size + 1).to_string();
+        let result = crate::public_sources::inspect(&source.url, Some(&cursor), cancel).await?;
+        return public_search_page(&source.url, result, page_size);
+    }
     if source.kind == SourceKind::Github {
         let offset = if continuation {
             source.baseline.cursor
@@ -1241,12 +1389,13 @@ async fn check(
             let repo = guard.as_mut().ok_or("Open the app first.")?;
             if let Some(source) = repo.data.sources.iter_mut().find(|source| source.id == id) {
                 if source.status != SourceStatus::Paused {
-                    source.status =
-                        if failure.code == "authentication" || failure.code == "forbidden" {
-                            SourceStatus::RequiresSession
-                        } else {
-                            SourceStatus::Error
-                        };
+                    source.status = if source.kind != SourceKind::PublicSearch
+                        && (failure.code == "authentication" || failure.code == "forbidden")
+                    {
+                        SourceStatus::RequiresSession
+                    } else {
+                        SourceStatus::Error
+                    };
                     source.failures = source.failures.saturating_add(1);
                     source.error = Some(crate::failure::sanitize(&error));
                     let wait = (60_000u64.saturating_mul(1u64 << source.failures.min(10)))
@@ -1289,6 +1438,11 @@ pub async fn add_source(
         let canonical = crate::public_sources::github_repository_url(&url)?;
         let id = github_source_id(&canonical);
         (canonical, SourceKind::Github, None, None, id)
+    } else if kind == Some(SourceKind::PublicSearch) {
+        let canonical = crate::public_sources::canonical_followed_search(&url)?;
+        validate_public_search_settings(&settings, &canonical)?;
+        let id = public_search_id(&canonical);
+        (canonical, SourceKind::PublicSearch, None, None, id)
     } else if kind == Some(SourceKind::Podcast) {
         let url = crate::model::validate_url(&url)?;
         let id = crate::podcasts::feed_id(&url);
@@ -1408,6 +1562,9 @@ pub fn save_source(
         .ok_or("Source not found.")?;
     if repo.data.sources[index].kind == SourceKind::Github {
         validate_github_settings(&settings)?;
+    }
+    if repo.data.sources[index].kind == SourceKind::PublicSearch {
+        validate_public_search_settings(&settings, &repo.data.sources[index].url)?;
     }
     let old = repo.data.sources[index].clone();
     let source = &mut repo.data.sources[index];
@@ -1888,6 +2045,90 @@ mod tests {
         assert_eq!(followed.items[1].state, SourceItemState::Review);
         assert_eq!(followed.items[1].discovery, Discovery::Published);
         assert_eq!(followed.items.len(), 2);
+    }
+
+    #[test]
+    fn public_search_keeps_versions_separate_and_rejects_automatic_checks() {
+        let mut followed = source();
+        followed.kind = SourceKind::PublicSearch;
+        followed.url = "https://arxiv.org/search/?field=title&query=Example".into();
+        followed.id = public_search_id(&followed.url);
+        followed.settings = SourceSettings {
+            page_size: 20,
+            ..Default::default()
+        };
+        let make_page = |version: u32| {
+            public_search_page(
+                &followed.url,
+                crate::public_sources::Page {
+                    provider: crate::public_sources::Provider::Arxiv,
+                    source_url: followed.url.clone(),
+                    title: "arXiv · Example".into(),
+                    description: None,
+                    rights: None,
+                    entries: vec![crate::public_sources::Entry {
+                        id: format!("arxiv:1710.02185v{version}"),
+                        title: format!("Example v{version}"),
+                        url: "https://arxiv.org/abs/1710.02185".into(),
+                        prerelease: false,
+                        published_at: None,
+                    }],
+                    assets: vec![],
+                    next_cursor: None,
+                    warnings: vec![],
+                },
+                20,
+            )
+            .unwrap()
+        };
+        let first = make_page(1);
+        let second = make_page(2);
+        assert!(apply_page(&mut followed, first, false, 20_000).is_empty());
+        assert!(apply_page(&mut followed, second, false, 30_000).is_empty());
+        assert_eq!(followed.items[0].state, SourceItemState::Observed);
+        assert_eq!(followed.items[1].state, SourceItemState::Review);
+        assert_eq!(followed.items[0].url, "https://arxiv.org/abs/1710.02185v1");
+        assert_eq!(followed.items[1].url, "https://arxiv.org/abs/1710.02185v2");
+        assert!(followed.validate().is_ok());
+        assert!(followed.next_check.is_none());
+        followed.settings.interval_hours = Some(1);
+        assert!(followed.validate().is_err());
+        followed.settings.interval_hours = None;
+        followed.items[1].url = "https://arxiv.org/abs/1710.02185v1".into();
+        assert!(followed.validate().is_err());
+        followed.items[1].url = "https://arxiv.org/abs/1706.03762".into();
+        assert!(followed.validate().is_err());
+    }
+
+    #[test]
+    fn filtered_public_search_page_advances_even_without_visible_hits() {
+        let mut followed = source();
+        followed.url = "https://librivox.org/search/?title=Example".into();
+        followed.kind = SourceKind::PublicSearch;
+        followed.settings = SourceSettings {
+            page_size: 20,
+            ..Default::default()
+        };
+        let page = public_search_page(
+            &followed.url,
+            crate::public_sources::Page {
+                provider: crate::public_sources::Provider::Librivox,
+                source_url: followed.url.clone(),
+                title: "LibriVox · Example".into(),
+                description: None,
+                rights: None,
+                entries: vec![],
+                assets: vec![],
+                next_cursor: Some("2".into()),
+                warnings: vec![],
+            },
+            20,
+        )
+        .unwrap();
+        assert!(apply_page(&mut followed, page, false, 20_000).is_empty());
+        assert!(followed.items.is_empty());
+        assert!(followed.baseline.has_more);
+        assert_eq!(followed.baseline.cursor, 20);
     }
     fn source() -> FollowedSource {
         FollowedSource {

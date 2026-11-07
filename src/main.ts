@@ -20,7 +20,7 @@ import {createLiveController} from "./live-ui";
 import {createTelegramController} from "./telegram-ui";
 import {createDocuments,documentToolsPanel} from "./documents-ui";
 import {createGalleryExports} from "./gallery-exports-ui";
-import {createCoursesController} from "./courses-ui";
+import {browserCourseProvider, createCoursesController} from "./courses-ui";
 import {createTranscriptionManager} from "./transcription-ui";
 import {createTorrentsController} from "./torrents-ui";
 import {createPlatformsController} from "./platforms-ui";
@@ -85,7 +85,7 @@ const torrents=createTorrentsController({command,refresh,notify,showError,t,rend
 let platformModule:'catalog'|'torrent'|'courses'|'telegram'|'live'|'exports'|'files'|'fileSources'='catalog';
 const mediaEdits=createMediaEdits({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t});
 const palettes=createPalettes({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t});
-const fileSources=createFileSources({command,refresh,render:renderCurrent,notify,showError,t,followSource:url=>{librarySection="sources";sources.openAdd(url,"github");navigate("library");},folder:()=>snapshot.settings.folder,chooseFolder:()=>{void chooseFolder().then(renderCurrent).catch(showError);}});
+const fileSources=createFileSources({command,refresh,render:renderCurrent,notify,showError,t,followSource:(url,kind)=>{librarySection="sources";sources.openAdd(url,kind);navigate("library");},folder:()=>snapshot.settings.folder,chooseFolder:()=>{void chooseFolder().then(renderCurrent).catch(showError);}});
 const advancedFiles=createAdvancedFilesController({command,refresh,render:renderCurrent,notify,showError,t,settings:()=>{preferences.section='engines';navigate('settings');void loadSettingsSection().catch(showError);},folder:()=>snapshot.settings.folder});
 const captionEditor=createCaptionEditor({command,snapshot:()=>snapshot,refresh,render:renderLibraryModules,notify,t});
 const sourceExports=createSourceExportsController({command,refresh,render:renderCurrent,notify,showError,t});
@@ -132,7 +132,7 @@ function enterSurface(element: HTMLElement, axis: "x" | "y" = "y"): void {
   void animation.finished.catch(() => {}).then(() => { if (surfaceAnimations.get(element) === animation) surfaceAnimations.delete(element); });
 }
 function checked(id: string): boolean { const element = document.getElementById(id); return element instanceof HTMLInputElement && element.checked; }
-function isLibraryFilter(value:string|undefined):value is LibraryView['filter']{return ['all','video','audio','image','subtitle','document','file','article','ocr','recording','narration'].includes(value??'');}
+function isLibraryFilter(value:string|undefined):value is LibraryView['filter']{return ['all','video','audio','image','subtitle','document','file','article','ocr','recording','narration','audiobook'].includes(value??'');}
 function isPage(value: string | undefined): value is Page { return value === "platforms" || value === "home" || value === "downloads" || value === "library" || value === "tools" || value === "settings"; }
 function isTool(value: string | undefined): value is ToolKind { return ["transcribe","animate","frame","contactSheet","rotate","crop","mute","audioProcess","imageConvert"].includes(value??"") || value === "convert" || value === "extractAudio" || value === "trim" || value === "compress"; }
 function isSettingsSection(value: string | undefined): value is SettingsSection { return value === "automation" || value === "connections" || value === "general" || value === "downloads" || value === "formats" || value === 'organization' || value === "engines" || value === "sessions" || value === "appearance" || value === "browser" || value === "about"; }
@@ -415,10 +415,15 @@ function updateSourceInput(value: string, render=true): void {
 async function inspect(skipGallery=false): Promise<void> {
   clearTimeout(debounce);const parsed=sourceUrls(home.input);
   const inputUrl=parsed.urls[0]?new URL(parsed.urls[0]):null;
+  const sourceIdentifier = home.input.trim();
+  if (/^(?:arxiv:\s*)?(?:\d{4}\.\d{4,5}|[a-z][a-z.-]*\/\d{7})(?:v[1-9]\d*)?$/i.test(sourceIdentifier)
+      || /^(?:doi:\s*)?10\.5281\/zenodo\.\d+$|^zenodo:\s*\d+$/i.test(sourceIdentifier)) {
+    platformModule='fileSources'; navigate('platforms'); await fileSources.open(sourceIdentifier); return;
+  }
   if(inputUrl&&parsed.urls.length===1){const host=inputUrl.hostname;
-    if(['github.com','archive.org','commons.wikimedia.org','drive.google.com','docs.google.com','1drv.ms','onedrive.live.com','dropbox.com','www.dropbox.com'].includes(host)||host.endsWith('.sharepoint.com')){platformModule='fileSources';navigate('platforms');await fileSources.open(inputUrl.href);return;}
+    if(['github.com','archive.org','commons.wikimedia.org','arxiv.org','www.arxiv.org','export.arxiv.org','zenodo.org','www.zenodo.org','librivox.org','www.librivox.org','doi.org','dx.doi.org','drive.google.com','docs.google.com','1drv.ms','onedrive.live.com','dropbox.com','www.dropbox.com'].includes(host)||host.endsWith('.sharepoint.com')){platformModule='fileSources';navigate('platforms');await fileSources.open(inputUrl.href);return;}
     if(['t.me','telegram.me'].includes(host)){platformModule='telegram';navigate('platforms');telegram.openLink(inputUrl.href);return;}
-    if(['udemy.com','hotmart.com','kiwify.com'].some(domain=>host===domain||host.endsWith('.'+domain))){platformModule='courses';navigate('platforms');await courses.open(inputUrl.href);return;}
+    if(browserCourseProvider(inputUrl)||['udemy.com','hotmart.com','kiwify.com'].some(domain=>host===domain||host.endsWith('.'+domain))){platformModule='courses';navigate('platforms');await courses.open(inputUrl.href);return;}
     if(/\.(?:zip|7z|rar|iso|pdf|epub|torrent|exe|msi)$/i.test(inputUrl.pathname)){platformModule='files';navigate('platforms');advancedFiles.openUrl(inputUrl.href);return;}
   }
   if(batches.active||parsed.urls.length>1||parsed.invalid||inputUrl&&(/youtube\.com$/.test(inputUrl.hostname))&&(inputUrl.pathname.startsWith('/playlist')||inputUrl.pathname.startsWith('/@')||inputUrl.pathname.startsWith('/channel/'))){await batches.prepare(home.input);return;}
@@ -516,7 +521,7 @@ async function handleAction(action: string, button: HTMLButtonElement): Promise<
   const id=button.dataset.id??"";
   if(action==='batch-open'||action==='batch-new')navigate('home');
   if(action==='emblem-activate'){const color=handleEmblemClick();if(color.toggled)renderHome();return;}
-  if(action==='open-fileSources'){platformModule='fileSources';navigate('platforms');await fileSources.open();if(id==='drive'||id==='onedrive'||id==='dropbox'){const tabButton=document.createElement('button');tabButton.dataset.tab=id;await fileSources.handleClick('file-source-tab',tabButton);}return;}
+  if(action==='open-fileSources'){platformModule='fileSources';navigate('platforms');if(id==='arxiv'||id==='zenodo'||id==='librivox'){fileSources.openCatalog(id);return;}await fileSources.open();if(id==='drive'||id==='onedrive'||id==='dropbox'){const tabButton=document.createElement('button');tabButton.dataset.tab=id;await fileSources.handleClick('file-source-tab',tabButton);}return;}
   if(action==='open-files'){platformModule='files';navigate('platforms');await advancedFiles.load();return;}
   if(action==='tool-module'){const module=button.dataset.id;if(module==='documents'||module==='pdfEdits'||module==='ocr'||module==='composition'||module==='palettes'||module==='imageAssets'||module==='fileOrganization'||module==='portable'||module==='screenCapture'||module==='voice'){if(module!=='voice')voice.deactivate();localToolModule=module;renderCurrent();if(module==='screenCapture')await screenCapture.open();if(module==='voice')await voice.open();}return;}
   if(action==='organize-selected'){localToolModule='fileOrganization';navigate('tools');fileOrganization.open([...library.selected]);return;}

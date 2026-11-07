@@ -55,7 +55,10 @@ label.file-source-row { cursor: pointer; }
 .file-source-empty { color: var(--muted); text-align: center; padding: 24px 12px; }
 .file-source-pagination { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-block: 16px; }
 .file-source-pagination p { color: var(--muted); font-size: 12px; max-width: 540px; margin: 0; }
-.file-source-selection { position: sticky; bottom: 0; z-index: 2; display: grid; grid-template-columns: minmax(120px, 1fr) minmax(140px, 1fr) auto; gap: 12px 20px; align-items: end; padding: 20px; margin-top: 24px; border: 1px solid var(--border); border-radius: 12px; background: var(--secondary); box-shadow: var(--contact); }
+.file-source-selection { display: grid; grid-template-columns: minmax(120px, 1fr) minmax(140px, 1fr) auto; gap: 12px 20px; align-items: end; padding: 20px; margin-top: 24px; border: 1px solid var(--border); border-radius: 12px; background: var(--secondary); box-shadow: var(--contact); }
+@media (min-width: 1021px) and (min-height: 760px) {
+  .file-source-selection:has([data-action="file-source-clear"]) { position: sticky; bottom: 0; z-index: 2; }
+}
 .file-source-selection-title { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; grid-column: 1 / -1; }
 .file-source-selection-title > strong { font-size: 14px; font-weight: 600; }
 .file-source-selection-title > span { color: var(--muted); font-size: 12px; flex: 1; }
@@ -111,4 +114,25 @@ label.file-source-row { cursor: pointer; }
 @media (forced-colors: active) {
   .file-source-row.is-selected { outline: 1px solid Highlight; outline-offset: -1px; }
   .file-source-tabs button[aria-current="page"]::after { background: Highlight; }
+}
+.file-source-catalog {
+  display: grid;
+  gap: 12px;
+}
+.file-source-catalog-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+}
+.file-source-catalog-form label {
+  display: grid;
+  gap: 6px;
+}
+.file-source-catalog-form label:has(#file-source-catalog-query) {
+  flex: 1 1 14rem;
+  min-width: 0;
+}
+.file-source-checksum {
+  overflow-wrap: anywhere;
 }
