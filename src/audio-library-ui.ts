@@ -11,7 +11,7 @@ type TagField = Exclude<keyof AudioTags, "embeddedCover">;
 type Column = "locator" | "id" | "title" | "artist" | "duration" | "version";
 interface Candidate { id: string; title: string; artist: string | null; album: string | null; duration: number | null; versionMatches: boolean }
 interface ImportedRow { entry: AudioPlaylistEntry; artist: string | null; duration: number | null; version: string | null; candidates: Candidate[] }
-type ImportPreview =
+export type ImportPreview =
   | { kind: "csv"; id: string; name: string; columns: string[]; sample: string[][]; count: number }
   | { kind: "list"; name: string; rows: ImportedRow[] };
 const categories: Category[] = ["music", "podcasts", "books", "playlists"];
@@ -522,5 +522,14 @@ export function createAudioLibrary(hooks: Hooks) {
     return true;
   }
 
-  return { render, click, input, submit };
+  function openArchivePlaylist(preview: ImportPreview) {
+    category = "playlists";
+    imported = preview;
+    editing = null;
+    resolutions.clear();
+    importPage = 0;
+    hooks.render();
+  }
+
+  return { render, click, input, submit, openArchivePlaylist };
 }

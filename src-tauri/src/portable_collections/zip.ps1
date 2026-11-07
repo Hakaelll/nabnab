@@ -1,7 +1,8 @@
-param([ValidateSet('Inspect','Extract')][string]$Action,[string]$Archive,[string]$Destination,[string]$Report,[string]$Names,[string]$PartRoot)
+param([ValidateSet('Inspect','Extract','PersonalCatalog','PersonalExtract')][string]$Action,[string]$Archive,[string]$Destination,[string]$Report,[string]$Names,[string]$PartRoot)
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $utf8 = New-Object System.Text.UTF8Encoding($false,$true)
+$personal = $Action.StartsWith('Personal',[StringComparison]::Ordinal)
 $zip=[IO.Compression.ZipFile]::OpenRead($Archive)
 try {
     if($zip.Entries.Count -gt 10000){throw 'The ZIP exceeds 10000 entries.'}
@@ -10,16 +11,28 @@ try {
     $total=[UInt64]0
     foreach($entry in $zip.Entries){
         $name=$entry.FullName
-        if($name.EndsWith('/')){continue}
+        if($name.EndsWith('/')){
+            if($personal -and ($name -match '[\\:\x00-\x1f<>"|?*]' -or $name.StartsWith('/') -or $name.Split('/').Count -gt 25 -or $name.Split('/') -contains '..')){throw 'The personal ZIP contains an unsafe directory path.'}
+            continue
+        }
         if($name.Length -eq 0 -or $name.Length -gt 1024 -or $name -match '[\\:\x00-\x1f<>"|?*]' -or $name.StartsWith('/') -or !$known.Add($name)){throw 'The ZIP contains unsafe or colliding paths.'}
         foreach($part in $name.Split('/')){if($part -eq '' -or $part -eq '.' -or $part -eq '..' -or $part.EndsWith('.') -or $part.EndsWith(' ') -or $part -match '^(?i:CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9])(?:\.|$)'){throw 'The ZIP contains a reserved or traversal path.'}}
         if((($entry.ExternalAttributes -shr 16) -band 61440) -eq 40960){throw 'ZIP symbolic links are not allowed.'}
+        if($personal){
+            $type=($entry.ExternalAttributes -shr 16) -band 61440
+            if(($type -ne 0 -and $type -ne 32768) -or ($entry.ExternalAttributes -band 1024) -ne 0 -or $name.Split('/').Count -gt 24){throw 'The personal ZIP contains an unsupported entry or exceeds its depth limit.'}
+            if($entry.Length -gt 268435456 -or $entry.Length -gt ($entry.CompressedLength*200L+1048576L)){throw 'The personal ZIP exceeds the per-file or compression-ratio limit.'}
+        }
         if($entry.Length -lt 0 -or $entry.Length -gt 137438953472 -or $entry.Length -gt ($entry.CompressedLength*1000L+1048576L)){throw 'The ZIP exceeds its size or expansion-ratio budget.'}
         $total+=[UInt64]$entry.Length
         if($total -gt 137438953472){throw 'The ZIP expands beyond 128 GiB.'}
+        if($personal -and $total -gt 2147483648){throw 'The personal ZIP expands beyond 2 GiB.'}
         $entries.Add($entry)
     }
-    if($Action -eq 'Inspect'){
+    if($Action -eq 'PersonalCatalog'){
+        $result=@($entries | ForEach-Object {@{name=$_.FullName;size=[UInt64]$_.Length}})
+        [IO.File]::WriteAllText($Report,(ConvertTo-Json -InputObject $result -Depth 3 -Compress),$utf8)
+    } elseif($Action -eq 'Inspect'){
         $manifestEntry=$zip.GetEntry('manifest.json')
         if($null -eq $manifestEntry -or $manifestEntry.Length -gt 16777216){throw 'A portable ZIP needs a bounded manifest.json.'}
         $stream=$manifestEntry.Open();$memory=New-Object IO.MemoryStream;$buffer=New-Object byte[] 65536;$actual=[UInt64]0
@@ -51,9 +64,11 @@ try {
         $privateRoot=[IO.Path]::GetFullPath($PartRoot).TrimEnd('\')+'\'
         if($privateRoot.StartsWith($root,[StringComparison]::OrdinalIgnoreCase) -or ([IO.File]::GetAttributes($privateRoot.TrimEnd('\')) -band [IO.FileAttributes]::ReparsePoint) -ne 0){throw 'ZIP partials need a private directory outside the extraction namespace.'}
         $partIndex=0
+        $copied=[UInt64]0
         foreach($name in $selected){
             if(!$known.Contains([string]$name)){throw 'A selected ZIP entry is unavailable.'}
             $entry=$zip.GetEntry([string]$name)
+            if($personal){$copied+=[UInt64]$entry.Length;if($copied -gt 268435456){throw 'The selected personal files exceed 256 MiB.'}}
             $target=[IO.Path]::GetFullPath([IO.Path]::Combine($root,([string]$name).Replace('/','\')))
             if(!$target.StartsWith($root,[StringComparison]::OrdinalIgnoreCase)){throw 'A ZIP path escaped the owned extraction folder.'}
             [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($target))|Out-Null

@@ -552,6 +552,27 @@ pub fn audio_playlist_map(
     resolve(&state, table.name.clone(), &table.directory, rows)
 }
 
+pub(crate) fn from_archive(
+    state: &AppState,
+    name: String,
+    tracks: Vec<crate::personal_archive::parse::Track>,
+) -> Result<Preview, String> {
+    if tracks.len() > MAX_ENTRIES {
+        return Err(format!("Match up to {MAX_ENTRIES} tracks at a time."));
+    }
+    let rows = tracks
+        .into_iter()
+        .map(|track| Row {
+            id: track.id,
+            title: Some(track.title),
+            artist: track.artist,
+            version: track.album,
+            ..Row::default()
+        })
+        .collect();
+    resolve(state, name.chars().take(100).collect(), Path::new(""), rows)
+}
+
 fn resolve(
     state: &AppState,
     name: String,

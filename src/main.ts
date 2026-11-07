@@ -14,6 +14,7 @@ import {createFileSources} from "./file-sources-ui";
 import {createPersonalServers} from "./personal-servers-ui";
 import {createAudioPlayer} from "./audio-player";
 import {createAudioLibrary} from "./audio-library-ui";
+import {createPersonalArchives} from "./personal-archives-ui";
 import {createAdvancedFilesController} from "./advanced-files-ui";
 import {createPalettes,palettesPanel} from "./palettes-ui";
 import {createMediaEdits,mediaEditsPanel} from "./media-edits-ui";
@@ -72,7 +73,7 @@ let localToolModule:"media"|"documents"|"pdfEdits"|"ocr"|"composition"|"palettes
 const tools: ToolsView = { kind: "convert", ids: new Set(), options: defaultToolOptions("convert"), picking: false };
 const preferences: SettingsView = { section: "general", engines: null, sessions: null, bridge: null, pairing: null, cache: null, working: false };
 const t: Copy = (spanish, english) => snapshot.settings.language === "es" ? spanish : english;
-let librarySection:'files'|'collections'|'sources'|'later'|'references'|'audio'='files';
+let librarySection:'files'|'collections'|'sources'|'later'|'references'|'audio'|'archives'='files';
 let quickPreset='';
 let toolSearch='';
 let quickRequest=0;
@@ -129,6 +130,12 @@ const audioLibrary=createAudioLibrary({
   invalidateCover: id => { thumbnailUrls.delete(id); },
   inspect: id => { librarySection = "files"; library.detailId = id; navigate("library"); },
   importMedia: () => { void importMedia(false).catch(showError); },
+});
+const personalArchives=createPersonalArchives({
+  command, render: renderCurrent, notify, t,
+  prepareLinks: async links => { navigate("home"); await batches.prepare(links.join("\n")); },
+  openPlaylist: preview => { librarySection = "audio"; navigate("library"); audioLibrary.openArchivePlaylist(preview); },
+  returnToHeading: () => { required("#main").scrollTop = 0; document.getElementById("archive-title")?.focus({ preventScroll: true }); },
 });
 const organization=createOrganizationController({command,snapshot:()=>snapshot,refresh,render:renderCurrent,t});
 
@@ -319,8 +326,8 @@ function renderCurrent(): void {
     if(page==='platforms'&&platformModule!=='catalog')required('#page-content').insertAdjacentHTML('afterbegin',`<button type="button" class="button quiet" data-action="platform-back">${t('← Plataformas','← Platforms')}</button>`);
     if(page==='library'){
       const container=required('#page-content');
-      const navigation=`<nav class="library-navigation filter-tabs" aria-label="${t('Vistas de Biblioteca','Library views')}">${[['files',t('Archivos','Files')],['audio',t('Audio','Audio')],['collections',t('Colecciones','Collections')],['sources',t('Fuentes','Sources')],['later',t('Para después','For later')],['references',t('Referencias','References')]].map(([section,label])=>`<button data-action="library-section" data-section="${section}" aria-current="${librarySection===section?'page':'false'}">${label}</button>`).join('')}</nav>`;
-      if(librarySection!=='files')container.innerHTML=librarySection==='sources'?sources.render():librarySection==='later'?batches.renderLater():librarySection==='references'?personalServers.renderReferences():librarySection==='audio'?audioLibrary.render():libraryFeatures.collectionsView();
+      const navigation=`<nav class="library-navigation filter-tabs" aria-label="${t('Vistas de Biblioteca','Library views')}">${[['files',t('Archivos','Files')],['audio',t('Audio','Audio')],['collections',t('Colecciones','Collections')],['sources',t('Fuentes','Sources')],['later',t('Para después','For later')],['references',t('Referencias','References')],['archives',t('Archivos personales','Personal archives')]].map(([section,label])=>`<button data-action="library-section" data-section="${section}" aria-current="${librarySection===section?'page':'false'}">${label}</button>`).join('')}</nav>`;
+      if(librarySection!=='files')container.innerHTML=librarySection==='sources'?sources.render():librarySection==='later'?batches.renderLater():librarySection==='references'?personalServers.renderReferences():librarySection==='audio'?audioLibrary.render():librarySection==='archives'?personalArchives.render():libraryFeatures.collectionsView();
       container.insertAdjacentHTML('afterbegin',navigation);
     }
     if(page==='settings'&&(preferences.section==='formats'||preferences.section==='organization'))required('.settings-content').innerHTML=`<h2 id="settings-title">${preferences.section==='formats'?t('Ajustes reutilizables','Reusable presets'):t('Organización','Organization')}</h2>${preferences.section==='formats'?batches.renderPresets():organization.render()}`;
@@ -401,6 +408,7 @@ async function refresh(): Promise<void> { applySnapshot(await command<Snapshot>(
 function navigate(next: Page): void {
   if(page==='platforms'&&platformModule==='courses')courses.savePlayback();
   if(next!=='tools')voice.deactivate();
+  if(next!=='library'||librarySection!=='archives')personalArchives.leave();
   const changed=page!==next;cancelSurfaceMotion();
   if(page==='tools'){try{tools.options=readToolOptions();}catch{/* Keep the last valid options while a draft is incomplete. */}}
   scrollPositions.set(page,required("#main").scrollTop);page=next;inspectorKey="";
@@ -408,6 +416,7 @@ function navigate(next: Page): void {
   if(changed&&next==='tools')void mediaEdits.load();
   if(changed)enterSurface(required(next==='home'?'#home-content':'#page-content'));
   if(next==='settings')void loadSettingsSection().catch(showError);
+  if(next==='library'&&librarySection==='archives')void personalArchives.load();
 }
 function showPlatformsCatalog():void{
   if(page==='platforms'&&platformModule==='courses')courses.savePlayback();
@@ -561,13 +570,13 @@ async function handleAction(action: string, button: HTMLButtonElement): Promise<
   if(await automation.click(action,button)||await screenCapture.click(action,button)||await voice.click(action,button))return;
   if(await imageAssets.click(action,button)||await fileOrganization.click(action,button)||await portable.click(action,button))return;
   if(await articles.click(action,button)||await ocr.click(action,button)||await documentEdits.click(action))return;
-  if(audioPlayer.click(action)||await audioLibrary.click(action,button))return;
+  if(audioPlayer.click(action)||await audioLibrary.click(action,button)||await personalArchives.click(action,button))return;
   if(await personalServers.handleClick(action,button)||await fileSources.handleClick(action,button))return;
   if(await palettes.click(action)||await advancedFiles.handleClick(action)||await mediaEdits.click(action,button)||await sourceExports.handleClick(action)||await galleryExports.click(action)||await documents.click(action,button)||await telegram.handleClick(action)||await courses.handleClick(action,button)||await transcriptionManager.click(action,button)||await torrents.handleClick(action)||await platforms.handleClick(action,button)||await batches.handleClick(action,button)||await sources.handleClick(action,button)||await organization.handleClick(action,button)||await libraryFeatures.handleClick(button))return;
   switch(action){
     case 'open-library-collection':librarySection='files';library.collection=button.dataset.collection??'';library.offset=0;renderCurrent();break;
     case 'job-next':case 'job-up':case 'job-down':{const job=snapshot.jobs.find(j=>j.id===id);if(job)applySnapshot(await command<Snapshot>('configure_jobs',{ids:[id],priority:job.priority??'normal',schedule:job.schedule??{kind:'immediate'},orderAction:action.slice(4)}));break;}
-    case 'library-section':{const section=button.dataset.section;if(section==='files'||section==='collections'||section==='sources'||section==='later'||section==='references'||section==='audio'){librarySection=section;renderCurrent();if(section==='references')await personalServers.load();}break;}
+    case 'library-section':{const section=button.dataset.section;if(section==='files'||section==='collections'||section==='sources'||section==='later'||section==='references'||section==='audio'||section==='archives'){if(section!=='archives')personalArchives.leave();librarySection=section;renderCurrent();if(section==='references')await personalServers.load();if(section==='archives')await personalArchives.load();}break;}
     case 'prepare-single':await batches.prepare(home.input,quickPreset||null);break;
     case 'save-single-later':await batches.prepare(home.input,quickPreset||null,true);break;
     case 'toggle-sidebar':{const settings={...snapshot.settings,sidebarExpanded:!snapshot.settings.sidebarExpanded};if(desktop)await saveSettings(settings);else{snapshot.settings=settings;renderCurrent();}break;}
@@ -623,6 +632,7 @@ async function handleAction(action: string, button: HTMLButtonElement): Promise<
   }
 }
 document.addEventListener('input',event=>{
+  if(event.target instanceof HTMLElement&&personalArchives.input(event.target))return;
   if(event.target instanceof HTMLElement&&(automation.change(event.target)||screenCapture.change(event.target)||voice.change(event.target)||imageAssets.input(event.target)||fileOrganization.input(event.target)||(event.target.id==='portable-query'&&portable.change(event.target))||audioPlayer.input(event.target)||audioLibrary.input(event.target)||personalServers.handleInput(event.target)||fileSources.handleInput(event.target)||advancedFiles.handleInput(event.target)||sourceExports.handleInput(event.target)||live.input(event.target)||telegram.handleInput(event.target)||courses.handleInput(event.target)||torrents.handleInput(event.target)||platforms.handleInput(event.target)||batches.handleInput(event.target)||sources.handleInput(event.target)||libraryFeatures.handleInput(event.target)))return;
   const target=event.target;if(!(target instanceof HTMLInputElement||target instanceof HTMLTextAreaElement))return;
   if(target.id==='url')updateSourceInput(target.value,false);
@@ -633,6 +643,7 @@ document.addEventListener('input',event=>{
 });
 document.addEventListener('change',event=>{
   const target=event.target;
+  if(target instanceof HTMLElement&&target.closest('.personal-archives')){void personalArchives.change(target).catch(showError);return;}
   if((target instanceof HTMLInputElement||target instanceof HTMLSelectElement||target instanceof HTMLTextAreaElement)&&(articles.change(target)||ocr.change(target)))return;
   if(target instanceof HTMLSelectElement&&target.id==='library-content-filter'){const value=target.value||'all';if(isLibraryFilter(value)){library.filter=value;library.offset=0;renderCurrent();}return;}
   if(target instanceof HTMLElement&&(automation.change(target)||screenCapture.change(target)||voice.change(target)||imageAssets.change(target)||portable.change(target)||documentEdits.change(target)))return;
@@ -664,7 +675,7 @@ async function submitForm(form: HTMLFormElement): Promise<void> {
   if(await automation.submit(form)||await screenCapture.submit(form)||await voice.submit(form))return;
   if(await imageAssets.submit(form)||await fileOrganization.submit(form)||await portable.submit(form))return;
   if(await articles.submit(form)||await ocr.submit(form)||await documentEdits.submit(form))return;
-  if(await audioLibrary.submit(form))return;
+  if(await audioLibrary.submit(form)||await personalArchives.submit(form))return;
   if(await personalServers.handleSubmit(form)||await fileSources.handleSubmit(form))return;
   if(await sources.handleSubmit(form)||await organization.handleSubmit(form)||await libraryFeatures.handleSubmit(form))return;
   if(await palettes.submit(form)||await advancedFiles.handleSubmit(form)||await mediaEdits.submit(form)||await captionEditor.submit(form)||await sourceExports.handleSubmit(form)||await documents.submit(form)||await live.submit(form)||await telegram.handleSubmit(form)||await courses.handleSubmit(form)||await torrents.handleSubmit(form)||await platforms.handleSubmit(form))return;

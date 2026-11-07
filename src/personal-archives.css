@@ -1,0 +1,55 @@
+.personal-archives { display: grid; gap: 16px; min-width: 0; }
+.archive-heading, .archive-actions, .archive-choose, .archive-search {
+  display: flex; flex-wrap: wrap; align-items: end; gap: 10px;
+}
+.archive-heading { justify-content: space-between; align-items: start; }
+.archive-heading > div { min-width: 0; }
+.personal-archives h1, .personal-archives h2 { margin: 0; overflow-wrap: anywhere; }
+.personal-archives p { margin: 0; overflow-wrap: anywhere; }
+.archive-heading p, .archive-panel > p { color: var(--muted); }
+.archive-panel {
+  display: grid; gap: 14px; min-width: 0; padding: 18px;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--surface);
+}
+.archive-panel > button { justify-self: start; }
+.archive-panel label:not(.archive-option, .archive-record-name), .archive-account { display: grid; gap: 5px; min-width: 0; }
+.archive-account { width: min(100%, 38rem); }
+.archive-account select, .archive-fields input, .archive-search input { width: 100%; min-width: 0; }
+.archive-search > label { flex: 1 1 15rem; }
+#archive-import-form { display: grid; gap: 13px; justify-items: start; }
+#archive-import-form > :is(fieldset, .archive-fields) { width: 100%; }
+.archive-categories, .archive-fields {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px;
+}
+.archive-categories { min-width: 0; margin: 0; padding: 10px; border: 1px solid var(--border); border-radius: 8px; }
+.archive-categories legend { padding: 0 5px; color: var(--text); }
+.archive-private { background: var(--hover); }
+.archive-option, .archive-record-name {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 8px;
+}
+.archive-option strong, .archive-option small, .archive-record-name strong, .archive-record-name small { display: block; overflow-wrap: anywhere; }
+.archive-option small, .archive-record-name small, .archive-file span { color: var(--muted); }
+.archive-option input, .archive-record-name input { min-height: auto; margin-top: 3px; }
+.archive-tabs { flex-wrap: wrap; min-width: 0; }
+.archive-tabs button[aria-pressed="true"] { background: var(--hover); color: var(--text); border-color: var(--border); }
+.archive-metrics {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px;
+  margin: 0; padding: 10px 0; border-block: 1px solid var(--border);
+}
+.archive-metrics dt { color: var(--muted); font-size: 12px; }
+.archive-metrics dd { margin: 2px 0 0; color: var(--text); font-size: 19px; font-variant-numeric: tabular-nums; }
+.archive-records { list-style: none; margin: 0; padding: 0; }
+.archive-record { display: flex; align-items: start; flex-wrap: wrap; gap: 8px; padding: 10px 0; border-top: 1px solid var(--border); }
+.archive-record-name { flex: 1 1 16rem; }
+.archive-record > details { flex: 1 0 100%; padding-left: 24px; }
+.archive-details { overflow-wrap: anywhere; }
+.archive-details[open] > :not(summary) { margin-top: 6px; }
+.archive-details summary { width: fit-content; cursor: pointer; color: var(--muted); }
+.archive-text { white-space: pre-wrap; }
+.archive-confirm { border-left: 2px solid var(--border); padding-left: 12px; }
+.archive-confirm p { margin-bottom: 8px; }
+.archive-error { color: var(--error); }
+@media (max-width: 720px) {
+  .archive-panel { padding: 12px; }
+  .archive-categories, .archive-fields { grid-template-columns: minmax(0, 1fr); }
+}

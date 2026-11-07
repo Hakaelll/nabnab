@@ -67,6 +67,7 @@ Las sesiones se importan por sitio desde un archivo Netscape elegido por el usua
 - [Matriz de plataformas](docs/PLATFORMS.md). Que yt-dlp tenga un extractor no certifica cada sitio o contenido.
 - [Arquitectura](docs/IMPLEMENTATION.md), [migración](docs/MIGRATION.md) y [herramientas](docs/TOOLS.md).
 - [HTTP directo](docs/DIRECT.md) y [subtítulos](docs/SUBTITLES.md).
+- [Archivos personales](docs/PERSONAL-ARCHIVES.md) para importar y consultar exportaciones locales por cuenta y categoría.
 - [Red, motores y privacidad](docs/NETWORK.md), [diseño](docs/design-reference.md) y [plan de trabajo](docs/PLAN.md).
 - [Licencias y avisos](THIRD_PARTY_NOTICES.md).
 

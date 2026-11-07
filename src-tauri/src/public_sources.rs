@@ -307,7 +307,7 @@ fn source_url(target: &Target) -> String {
     }
 }
 
-fn clean_text(input: &str, max: usize) -> String {
+pub(crate) fn clean_text(input: &str, max: usize) -> String {
     // These fields are plain text, never trusted HTML. Drop script/style bodies too.
     let lower = input.to_ascii_lowercase();
     let mut output = String::new();

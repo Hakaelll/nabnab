@@ -4,7 +4,7 @@ use sha2::{Digest, Sha256};
 use std::{collections::{HashMap, HashSet}, fs::{self, File, OpenOptions}, io::{Read, Write}, path::{Path, PathBuf}, sync::atomic::{AtomicU64, Ordering}};
 use tokio::sync::watch;
 
-mod package;
+pub(crate) mod package;
 const MAX_FILES: usize = 10_000;
 const MAX_ITEMS: usize = 2_000;
 const MAX_BYTES: u64 = 128 * 1024 * 1024 * 1024;

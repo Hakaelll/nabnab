@@ -54,6 +54,7 @@ mod federated_auth;
 mod library;
 mod library_features;
 mod audio_library;
+mod personal_archive;
 mod delimited;
 mod local_media;
 mod media;
@@ -102,6 +103,7 @@ pub(crate) struct AppState {
     file_sources: file_sources::BrowserState,
     personal_servers: personal_servers::BrowserState,
     audio_playlist_browser: audio_library::playlist_import::Browser,
+    personal_archive: personal_archive::ArchiveState,
     repository: Mutex<Option<store::Repository>>,
     runtime: queue::Runtime,
     metadata: Mutex<Option<(u64, watch::Sender<bool>)>>,
@@ -1270,6 +1272,11 @@ fn main() {
             audio_library::playlist_import::audio_playlist_choose, audio_library::playlist_import::audio_playlist_map,
             audio_library::audio_lyrics, audio_library::audio_lyrics_choose,
             audio_library::audio_cover_choose,
+            personal_archive::personal_archive_choose, personal_archive::personal_archive_import,
+            personal_archive::personal_archive_list, personal_archive::personal_archive_records,
+            personal_archive::personal_archive_links, personal_archive::personal_archive_export,
+            personal_archive::personal_archive_copy_media, personal_archive::personal_archive_remove,
+            personal_archive::personal_archive_match,
             library_features::library_favorite,
             library_features::library_bookmark,
             library_features::smart_collection_save,

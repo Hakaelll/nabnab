@@ -14,6 +14,8 @@ const URL_HEADER: &[u8] = b"nabnab-operational-url-v1\n";
 const BACKUP_HEADER: &[u8] = b"nabnab-repository-backup-v1\n";
 const MAX_URL_BYTES: usize = 8192;
 const MAX_BACKUP_BYTES: usize = 64 * 1024 * 1024;
+const ARCHIVE_HEADER: &[u8] = b"nabnab-personal-archive-v1\n";
+const MAX_ARCHIVE_RECORD_BYTES: usize = 32 * 1024 * 1024;
 
 fn module_name(name: &str) -> Result<(), String> {
     if name.is_empty()
@@ -52,6 +54,25 @@ pub fn load_module_secret(root: &Path, name: &str) -> Result<Vec<u8>, String> {
         65536,
     )?;
     Ok(secret.0.clone())
+}
+
+pub(crate) fn personal_archive_record_path(root: &Path, name: &str) -> Result<PathBuf, String> {
+    module_name(name)?;
+    Ok(private_directory(root, "personal-archive-data")?.join(format!("{name}.bin")))
+}
+
+pub(crate) fn save_personal_archive_record(root: &Path, name: &str, bytes: &[u8]) -> Result<(), String> {
+    if bytes.is_empty() || bytes.len() > MAX_ARCHIVE_RECORD_BYTES {
+        return Err("The selected personal archive index exceeds 32 MiB. Import fewer categories or a smaller date range.".into());
+    }
+    let path = personal_archive_record_path(root, name)?;
+    write_protected(&path, ARCHIVE_HEADER, &format!("nabnab-personal-archive:{name}"), bytes)
+}
+
+pub(crate) fn load_personal_archive_record(root: &Path, name: &str) -> Result<Vec<u8>, String> {
+    let path = personal_archive_record_path(root, name)?;
+    read_protected(&path, ARCHIVE_HEADER, &format!("nabnab-personal-archive:{name}"), MAX_ARCHIVE_RECORD_BYTES)
+        .map(|secret| secret.0.clone())
 }
 pub const SITES: [&str; 24] = [
     "youtube",
