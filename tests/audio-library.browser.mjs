@@ -19,11 +19,11 @@ pcm.writeUInt32LE(8000, 24); pcm.writeUInt32LE(16000, 28); pcm.writeUInt16LE(2, 
 pcm.writeUInt16LE(16, 34); pcm.write("data", 36); pcm.writeUInt32LE(pcm.length - 44, 40);
 await page.route("http://nabmedia.localhost/**", async route => {
   const bytes = /^bytes=(\d+)-(\d*)$/.exec(route.request().headers().range ?? "");
-  if (!bytes) return route.fulfill({ contentType: "audio/wav", body: pcm });
+  if (!bytes) return route.fulfill({ contentType: "audio/wav", body: pcm, headers: { "Access-Control-Allow-Origin": "*" } });
   const start = Number(bytes[1]);
   const end = bytes[2] ? Math.min(Number(bytes[2]), pcm.length - 1) : pcm.length - 1;
   await route.fulfill({ status: 206, contentType: "audio/wav", body: pcm.subarray(start, end + 1),
-    headers: { "Accept-Ranges": "bytes", "Content-Range": `bytes ${start}-${end}/${pcm.length}` } });
+    headers: { "Access-Control-Allow-Origin": "*", "Accept-Ranges": "bytes", "Content-Range": `bytes ${start}-${end}/${pcm.length}` } });
 });
 
 const setup = `

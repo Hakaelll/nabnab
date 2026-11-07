@@ -1,5 +1,8 @@
 import { escapeHtml as h, localMediaUrl, type Copy, type LibraryItem } from "./contracts";
 import { detailsFor } from "./library-features";
+import type { LocalTrack } from "./library-types";
+import { isPlayable, playbackRates, readPlayback, resumePosition, savePlayback } from "./playback-preferences";
+import { createPlaybackStage, type StageState } from "./playback-stage";
 import { durationLabel } from "./presentation";
 import { icon } from "./views-common";
 
@@ -16,23 +19,33 @@ interface Hooks {
   command<T>(name: string, args: Record<string, unknown>): Promise<T>;
   render(): void;
   open(): void;
+  refresh(): Promise<void>;
+  fullscreen(enabled: boolean): Promise<void>;
+  convert(id: string): void;
+  timeChanged(id: string, time: number): void;
   showError(error: unknown): void;
   t: Copy;
 }
 
-type Repeat = "off" | "all" | "one";
-
 export function createAudioPlayer(hooks: Hooks) {
   const { t } = hooks;
-  let media: HTMLAudioElement | null = null;
+  const stored = readPlayback();
+  const preferences = stored.preferences;
+  let media: HTMLVideoElement | null = null;
   let host: HTMLElement | null = null;
   let transport: HTMLElement | null = null;
+  let stage: ReturnType<typeof createPlaybackStage> | null = null;
+  let expanded = false;
+  let fullscreen = false;
+  let changingFullscreen = false;
+  let queueOpen = false;
   let tracks: string[] = [];
   let order: number[] = [];
   let cursor = -1;
-  let repeat: Repeat = "off";
-  let shuffled = false;
-  let rate = 1;
+  let expectedSource = "";
+  let pendingSeek: number | null = null;
+  let resumeChoice = 0;
+  let mediaState: StageState = "loading";
   let sleep = "off";
   let sleepUntil = 0;
   let stoppedBySleep = false;
@@ -41,28 +54,100 @@ export function createAudioPlayer(hooks: Hooks) {
   let lastSaved = 0;
   let sourceRevision = 0;
   let issue = "";
+  let lastVolume = preferences.volume || 0.5;
 
   const currentId = () => tracks[order[cursor] ?? -1] ?? "";
   const current = () => hooks.item(currentId());
   const nextEntries = () => order.slice(cursor + 1).map(position => ({ position, id: tracks[position] }));
+  const matchesSource = () => Boolean(media && expectedSource && media.currentSrc === expectedSource);
+
+  function saveSession() {
+    savePlayback(preferences, cursor >= 0 ? { tracks, order, cursor } : null);
+  }
+
+  function showStage() {
+    const item = current();
+    if (item?.kind !== "video" || !stage) return;
+    expanded = true;
+    queueOpen = false;
+    stage.show(item, preferences, resumeChoice, issue);
+    render();
+  }
+
+  function hideStage() {
+    expanded = false;
+    stage?.hide();
+    if (fullscreen) void setFullscreen(false);
+  }
+
+  function backFromStage() {
+    media?.pause();
+    persist();
+    hideStage();
+    render();
+    hooks.render();
+    document.getElementById("audio-open")?.focus({ preventScroll: true });
+  }
+
+  async function setFullscreen(enabled: boolean) {
+    if (changingFullscreen || fullscreen === enabled) return;
+    changingFullscreen = true;
+    try {
+      await hooks.fullscreen(enabled);
+      if (enabled && !expanded) await hooks.fullscreen(false);
+      fullscreen = enabled && expanded;
+      stage?.setFullscreen(fullscreen);
+    } catch (error) { hooks.showError(error); }
+    finally { changingFullscreen = false; }
+  }
+
+  function volume(value: number) {
+    if (!media || !Number.isFinite(value)) return;
+    preferences.volume = Math.max(0, Math.min(1, value));
+    if (preferences.volume > 0) {
+      lastVolume = preferences.volume;
+      preferences.muted = false;
+    }
+    media.volume = preferences.volume;
+    media.muted = preferences.muted;
+    saveSession();
+    updatePlaying();
+  }
+
+  function mute() {
+    if (!media) return;
+    if (preferences.volume === 0) { volume(lastVolume); return; }
+    preferences.muted = !preferences.muted;
+    media.muted = preferences.muted;
+    saveSession();
+    updatePlaying();
+  }
 
   function persist() {
     const item = current();
-    if (!media || !item || media.readyState === 0 || !Number.isFinite(media.currentTime) || media.currentTime <= 0) return;
-    const position = media.currentTime;
-    item.details = { ...detailsFor(item), playbackPosition: position, lastPlayedAt: Date.now() };
+    if (!media || !item || !matchesSource() || media.readyState === 0 || resumeChoice || pendingSeek !== null || !Number.isFinite(media.currentTime)) return;
+    const position = media.ended ? 0 : media.currentTime;
+    const details = detailsFor(item);
+    const playedAudio = item.kind === "audio" && media.currentTime > 0;
+    if (details.playbackPosition === position && (!playedAudio || details.lastPlayedAt)) return;
+    item.details = { ...details, playbackPosition: position, lastPlayedAt: playedAudio ? Date.now() : details.lastPlayedAt };
     lastSaved = Date.now();
     void hooks.command("library_playback", { id: item.id, position }).catch(hooks.showError);
   }
 
   function seek(time: number) {
-    if (!media || !Number.isFinite(media.duration) || !Number.isFinite(time)) return;
+    if (!media || !expectedSource || !Number.isFinite(time)) return;
+    if (!matchesSource() || media.readyState === 0 || !Number.isFinite(media.duration)) {
+      pendingSeek = Math.max(0, time);
+      return;
+    }
     media.currentTime = Math.max(0, Math.min(time, media.duration));
     updateTime();
   }
 
   function updateTime() {
     if (!media || !transport) return;
+    stage?.update(mediaState, issue);
     const elapsed = transport.querySelector<HTMLElement>("[data-audio-elapsed]");
     const end = transport.querySelector<HTMLElement>("[data-audio-duration]");
     const input = transport.querySelector<HTMLInputElement>("#audio-seek");
@@ -75,7 +160,7 @@ export function createAudioPlayer(hooks: Hooks) {
       input.disabled = duration <= 0;
       input.setAttribute("aria-valuetext", durationLabel(media.currentTime));
     }
-    if (duration > 0 && "mediaSession" in navigator) {
+    if (matchesSource() && duration > 0 && "mediaSession" in navigator) {
       try {
         navigator.mediaSession.setPositionState({
           duration, position: Math.min(media.currentTime, duration), playbackRate: media.playbackRate,
@@ -93,6 +178,17 @@ export function createAudioPlayer(hooks: Hooks) {
       button.title = label;
       button.innerHTML = icon(media.paused ? "play" : "pause");
     }
+    const muteButton = transport.querySelector<HTMLElement>("#audio-mute");
+    if (muteButton) {
+      const muted = media.muted || media.volume === 0;
+      const label = muted ? t("Activar sonido", "Unmute") : t("Silenciar", "Mute");
+      muteButton.setAttribute("aria-label", label);
+      muteButton.title = label;
+      muteButton.innerHTML = icon(muted ? "muted" : "volume");
+    }
+    const volumeInput = transport.querySelector<HTMLInputElement>("#audio-volume");
+    if (volumeInput && document.activeElement !== volumeInput) volumeInput.value = String(media.volume);
+    stage?.update(mediaState, issue);
     if ("mediaSession" in navigator) navigator.mediaSession.playbackState = media.paused ? "paused" : "playing";
   }
 
@@ -133,31 +229,49 @@ export function createAudioPlayer(hooks: Hooks) {
   function render() {
     if (!host || !transport || !media) return;
     const item = current();
-    host.hidden = !item;
-    document.documentElement.classList.toggle("has-audio-player", Boolean(item));
+    host.hidden = !item || expanded;
+    document.documentElement.classList.toggle("has-audio-player", Boolean(item) && !expanded);
     if (!item) { transport.replaceChildren(); return; }
     const book = isAudiobook(item);
     const active = transport.contains(document.activeElement) && document.activeElement instanceof HTMLElement
       ? document.activeElement.id : "";
     const title = audioTitle(item);
     const subtitle = [item.details?.audio?.artist ?? item.details?.creator, item.details?.audiobook?.bookTitle ?? item.details?.audio?.album].filter(Boolean).join(" · ");
-    const button = (id: string, text: string, symbol?: Parameters<typeof icon>[0], pressed?: boolean) =>
-      `<button id="audio-${id}" class="${symbol ? "icon-button" : "button quiet"}" type="button" data-action="audio-player-${id}" aria-label="${h(text)}" title="${h(text)}"${pressed === undefined ? "" : ` aria-pressed="${pressed}"`}>${symbol ? icon(symbol) : h(text)}</button>`;
+    const button = (id: string, text: string, symbol?: Parameters<typeof icon>[0], attributes = "") =>
+      `<button id="audio-${id}" class="${symbol ? "icon-button" : "button quiet"}" type="button" data-action="audio-player-${id}" aria-label="${h(text)}" title="${h(text)}" ${attributes}>${symbol ? icon(symbol) : h(text)}</button>`;
     transport.innerHTML = `
-      <div class="audio-playing"><span class="audio-cover" aria-hidden="true"${item.details?.audioCover || item.details?.audio?.embeddedCover ? ` data-thumbnail-id="${h(item.id)}"` : ""}>${icon("audio")}</span>
-        <button id="audio-open" class="audio-open" type="button" data-action="audio-player-open" title="${h(title)}"><strong>${h(title)}</strong><small>${h(subtitle || t("Biblioteca de audio", "Audio library"))}</small></button></div>
+      <div class="audio-playing"><span class="audio-cover" aria-hidden="true"${item.details?.audioCover || item.details?.audio?.embeddedCover ? ` data-thumbnail-id="${h(item.id)}"` : ""}>${icon(item.kind === "video" ? "video" : "audio")}</span>
+        <button id="audio-open" class="audio-open" type="button" data-action="audio-player-open" title="${h(title)}"><strong>${h(title)}</strong><small>${h(subtitle || (item.kind === "video" ? t("Vídeo local", "Local video") : t("Biblioteca de audio", "Audio library")))}</small></button></div>
       <div class="audio-timeline"><div class="audio-transport-controls">
-        ${book ? button("back", t("Retroceder 15 segundos", "Back 15 seconds")) : button("previous", t("Anterior", "Previous"))}
+        ${book ? button("back", t("Retroceder 15 segundos", "Back 15 seconds"), "seekBack") : button("previous", t("Anterior", "Previous"), "previous")}
         ${button("toggle", t("Reproducir", "Play"), "play")}
-        ${button("next", t("Siguiente", "Next"))}
+        ${button("next", t("Siguiente", "Next"), "next")}
       </div><div class="audio-progress"><span data-audio-elapsed>0:00</span><input type="range" id="audio-seek" min="0" max="0" step="0.1" value="0" aria-label="${t("Posición de reproducción", "Playback position")}" disabled><span data-audio-duration>0:00</span></div></div>
       <div class="audio-playback-options">${book ? `
-        <select id="audio-rate" aria-label="${t("Velocidad", "Playback speed")}">${[0.75, 1, 1.25, 1.5, 1.75, 2].map(speed => `<option value="${speed}" ${speed === rate ? "selected" : ""}>${speed}×</option>`).join("")}</select>
+        <select id="audio-rate" aria-label="${t("Velocidad", "Playback speed")}">${playbackRates.map(speed => `<option value="${speed}" ${speed === preferences.rate ? "selected" : ""}>${speed}×</option>`).join("")}</select>
         <select id="audio-sleep" aria-label="${t("Temporizador de descanso", "Sleep timer")}">${[["off", t("Descanso", "Sleep timer")], ["10", "10 min"], ["20", "20 min"], ["30", "30 min"], ["45", "45 min"], ["60", "60 min"], ["chapter", t("Fin del capítulo", "End of chapter")]].map(([value, name]) => `<option value="${value}" ${value === sleep ? "selected" : ""}>${name}</option>`).join("")}</select>
-      ` : `${button("shuffle", t("Aleatorio", "Shuffle"), undefined, shuffled)}${button("repeat", repeat === "all" ? t("Repetir todo", "Repeat all") : repeat === "one" ? t("Repetir pista", "Repeat track") : t("Repetición", "Repeat"), undefined, repeat !== "off")}`}
-      ${button("close", t("Cerrar reproductor", "Close player"), "close")}</div>
-      ${issue ? `<p class="audio-player-issue" role="alert">${h(issue)}</p>` : ""}`;
-    host.setAttribute("aria-label", t("Reproductor de audio", "Audio player"));
+      ` : ""}
+      <div class="audio-volume">${button("mute", t("Silenciar", "Mute"), "volume")}<input id="audio-volume" type="range" min="0" max="1" step="0.02" value="${preferences.volume}" aria-label="${t("Volumen", "Volume")}"></div>
+      ${button("queue", t("Cola de reproducción", "Playback queue"), "list", `aria-expanded="${queueOpen}" aria-controls="audio-queue-panel"`)}
+      ${button("close", t("Detener y cerrar", "Stop and close"), "close")}</div>
+      ${issue && !expanded ? `<div class="audio-player-issue" role="alert"><span>${h(issue)}</span><div class="button-group">
+        ${button("convert", t("Convertir una copia", "Convert a copy"))}${button("external", t("Abrir con el sistema", "Open with system"))}
+      </div></div>` : ""}
+      <section id="audio-queue-panel" class="audio-queue-panel" aria-label="${t("Cola de reproducción", "Playback queue")}" ${queueOpen ? "" : "hidden"}>
+        <header><strong>${t("Cola de reproducción", "Playback queue")}</strong>
+          <div class="button-group">${button("shuffle", t("Aleatorio", "Shuffle"), undefined, `aria-pressed="${preferences.shuffled}"`)}
+          ${button("repeat", preferences.repeat === "all" ? t("Repetir todo", "Repeat all") : preferences.repeat === "one" ? t("Repetir pista", "Repeat track") : t("Repetición", "Repeat"), undefined, `aria-pressed="${preferences.repeat !== "off"}"`)}</div></header>
+        <ol>${order.slice(cursor, cursor + 30).map((index, offset) => {
+          const queued = hooks.item(tracks[index]);
+          if (!queued) return "";
+          return `<li><span ${offset === 0 ? 'aria-current="true"' : ""}>${h(audioTitle(queued))}</span>${offset > 0
+            ? `<button class="icon-button" data-action="audio-player-queue-up" data-position="${index}" aria-label="${t("Subir en la cola", "Move up in queue")}" ${offset < 2 ? "disabled" : ""}>↑</button>
+               <button class="icon-button" data-action="audio-player-queue-down" data-position="${index}" aria-label="${t("Bajar en la cola", "Move down in queue")}" ${cursor + offset + 1 >= order.length ? "disabled" : ""}>↓</button>` : ""}</li>`;
+        }).join("")}</ol>
+        ${order.length - cursor > 30 ? `<p class="field-note">${t("Se muestran los primeros 30 archivos.", "Showing the first 30 files.")}</p>` : ""}
+        <label class="toggle"><input id="audio-resume-music" type="checkbox" ${preferences.resumeMusic ? "checked" : ""}>${t("Reanudar pistas de música", "Resume music tracks")}</label>
+      </section>`;
+    host.setAttribute("aria-label", t("Reproductor compacto", "Compact player"));
     updatePlaying();
     updateTime();
     if (active) document.getElementById(active)?.focus({ preventScroll: true });
@@ -187,18 +301,37 @@ export function createAudioPlayer(hooks: Hooks) {
   async function playMedia() {
     if (!media) return;
     const revision = sourceRevision;
-    try { await media.play(); }
-    catch {
-      if (revision !== sourceRevision) return;
-      issue = t("No se pudo reproducir este archivo. Revisa el formato o su ubicación.", "Could not play this file. Check its format or location.");
+    try {
+      if (media.ended) seek(0);
+      await media.play();
+    } catch (error) {
+      if (revision !== sourceRevision || error instanceof DOMException && error.name === "AbortError") return;
+      if (!issue) issue = playbackIssue(media.error);
+      mediaState = "error";
       render();
+      updateTime();
     }
   }
 
-  function activate(position: number, autoplay: boolean, resume: boolean) {
+  function playbackIssue(error: MediaError | null): string {
+    if (current()?.missing || error?.code === 2) return t("El archivo no está disponible. Revisa su ubicación en Biblioteca.", "The file is unavailable. Check its location in Library.");
+    if (error?.code === 3) return t("El motor no pudo decodificar el archivo. Puede estar dañado o incompleto.", "The engine could not decode the file. It may be damaged or incomplete.");
+    return t("El formato o los códecs de este archivo no se pueden reproducir en este equipo.", "This device cannot play the file's format or codecs.");
+  }
+
+  function resumeVideo(fromStart: boolean) {
+    const position = fromStart ? 0 : resumeChoice;
+    resumeChoice = 0;
+    seek(position);
+    const item = current();
+    if (item && expanded) stage?.render(item, preferences, 0, issue);
+    void playMedia();
+  }
+
+  function activate(position: number, autoplay: boolean, resume: boolean, openVideo = true) {
     const id = tracks[order[position] ?? -1];
     const item = id ? hooks.item(id) : undefined;
-    if (!media || !item || item.missing) return;
+    if (!media || !isPlayable(item)) return;
     persist();
     media.pause();
     if (sleep === "chapter" || !isAudiobook(item) && sleep !== "off") {
@@ -208,23 +341,30 @@ export function createAudioPlayer(hooks: Hooks) {
     cursor = position;
     stoppedBySleep = false;
     issue = "";
-    const revision = ++sourceRevision;
-    const progress = resume ? detailsFor(item).playbackPosition : 0;
-    media.src = localMediaUrl(item.id);
-    media.playbackRate = isAudiobook(item) ? rate : 1;
-    if (progress > 0) media.addEventListener("loadedmetadata", () => {
-      if (revision === sourceRevision && progress < (media?.duration ?? 0) - 2) seek(progress);
-    }, { once: true });
+    ++sourceRevision;
+    const longAudio = isAudiobook(item) || item.details?.platform === "Podcast RSS" || (item.duration ?? 0) >= 30 * 60;
+    const progress = resume && (item.kind === "video" || longAudio || preferences.resumeMusic)
+      ? resumePosition(detailsFor(item).playbackPosition, item.duration) : 0;
+    resumeChoice = item.kind === "video" && openVideo && autoplay ? progress : 0;
+    pendingSeek = progress && !resumeChoice ? progress : null;
+    mediaState = "loading";
+    expectedSource = localMediaUrl(item.id);
+    media.dataset.localPlayer = item.id;
+    media.src = expectedSource;
+    media.playbackRate = preferences.rate;
     lastSaved = Date.now();
     mediaSession(item);
+    saveSession();
+    if (item.kind === "video" && openVideo) showStage();
+    else hideStage();
     render();
     hooks.render();
-    if (autoplay) void playMedia();
+    if (autoplay && !resumeChoice) void playMedia();
   }
 
   function reorder(keep: number) {
     order = tracks.map((_, index) => index);
-    if (!shuffled) return order.indexOf(keep);
+    if (!preferences.shuffled) return order.indexOf(keep);
     order = order.filter(index => index !== keep);
     for (let index = order.length - 1; index > 0; index--) {
       const other = Math.floor(Math.random() * (index + 1));
@@ -237,21 +377,31 @@ export function createAudioPlayer(hooks: Hooks) {
   function play(ids: string[], start: number) {
     const id = ids[start];
     const item = id ? hooks.item(id) : undefined;
-    if (!item || item.missing) return;
-    const index = ids.slice(0, start).filter(value => hooks.item(value) && !hooks.item(value)?.missing).length;
+    if (!isPlayable(item)) return;
+    const index = ids.slice(0, start).filter(value => isPlayable(hooks.item(value))).length;
+    if (index >= 2000) return;
+    const same = currentId() === item.id && Boolean(expectedSource) && !issue;
     persist();
-    tracks = ids.filter(value => hooks.item(value) && !hooks.item(value)?.missing);
+    tracks = ids.filter(value => isPlayable(hooks.item(value))).slice(0, 2000);
     cursor = -1;
-    if (isAudiobook(item)) shuffled = false;
-    activate(reorder(index), true, true);
+    if (isAudiobook(item)) preferences.shuffled = false;
+    const position = reorder(index);
+    if (same) {
+      cursor = position;
+      if (item.kind === "video") showStage();
+      if (!resumeChoice && media?.paused) void playMedia();
+      saveSession();
+      render();
+      hooks.render();
+    } else activate(position, true, true);
   }
 
   function add(id: string) {
-    if (!hooks.item(id) || hooks.item(id)?.missing) return;
+    if (!isPlayable(hooks.item(id)) || tracks.length >= 2000) return;
     tracks.push(id);
     order.push(tracks.length - 1);
-    if (cursor < 0) activate(0, false, true);
-    else hooks.render();
+    if (cursor < 0) activate(0, false, true, false);
+    else { saveSession(); render(); hooks.render(); }
   }
 
   function remove(position: number) {
@@ -260,6 +410,8 @@ export function createAudioPlayer(hooks: Hooks) {
     tracks.splice(position, 1);
     order = order.filter(index => index !== position).map(index => index > position ? index - 1 : index);
     cursor = order.indexOf(playing > position ? playing - 1 : playing);
+    saveSession();
+    render();
     hooks.render();
   }
 
@@ -268,12 +420,14 @@ export function createAudioPlayer(hooks: Hooks) {
     if (direction === -1 && media.currentTime > 3) { seek(0); return; }
     const item = current();
     const book = item ? isAudiobook(item) : false;
-    if (!manual && !book && repeat === "one") { seek(0); void playMedia(); return; }
+    if (!manual && !preferences.autoplay) return;
+    if (!manual && !book && preferences.repeat === "one") { seek(0); void playMedia(); return; }
     let position = cursor + direction;
-    if (!book && repeat === "all" && order.length) position = (position + order.length) % order.length;
-    for (; position >= 0 && position < order.length; position += direction) {
+    for (let tried = 0; tried < order.length; tried++, position += direction) {
+      if (!book && preferences.repeat === "all") position = (position + order.length) % order.length;
+      if (position < 0 || position >= order.length) break;
       const item = hooks.item(tracks[order[position]]);
-      if (item && !item.missing) { activate(position, true, false); return; }
+      if (isPlayable(item)) { activate(position, true, false); return; }
     }
     updatePlaying();
   }
@@ -282,13 +436,20 @@ export function createAudioPlayer(hooks: Hooks) {
     persist();
     media?.pause();
     ++sourceRevision;
+    expectedSource = "";
+    pendingSeek = null;
+    resumeChoice = 0;
+    queueOpen = false;
+    hideStage();
     tracks = [];
     order = [];
     cursor = -1;
     clearTimer();
     sleep = "off";
     media?.removeAttribute("src");
+    media?.removeAttribute("data-local-player");
     media?.load();
+    saveSession();
     if ("mediaSession" in navigator) {
       navigator.mediaSession.metadata = null;
       navigator.mediaSession.playbackState = "none";
@@ -303,32 +464,105 @@ export function createAudioPlayer(hooks: Hooks) {
   function mount() {
     host = document.getElementById("audio-player");
     const element = document.getElementById("audio-engine");
-    if (!host || !(element instanceof HTMLAudioElement)) return;
+    const stageHost = document.getElementById("playback-stage");
+    if (!host || !stageHost || !(element instanceof HTMLVideoElement)) return;
     media = element;
+    element.volume = preferences.volume;
+    element.muted = preferences.muted;
     transport = document.getElementById("audio-transport");
+    stage = createPlaybackStage(stageHost, element, {
+      t, seek, mute, volume, back: backFromStage, resume: resumeVideo,
+      toggle: () => { if (element.paused) void playMedia(); else element.pause(); },
+      rate: value => { preferences.rate = value; element.playbackRate = value; saveSession(); },
+      preference: (key, value) => { preferences[key] = value; saveSession(); },
+      captionSize: value => { preferences.captionSize = value; saveSession(); },
+      fullscreen: () => { void setFullscreen(!fullscreen); },
+      move: direction => move(direction, true),
+      convert: id => { backFromStage(); hooks.convert(id); },
+      external: openExternal,
+      importCaption: async language => {
+        const id = currentId();
+        try {
+          const track = await hooks.command<LocalTrack>("subtitle_import", { id, language, path: null });
+          await hooks.refresh();
+          const item = current();
+          if (expanded && item?.id === id) {
+            stage?.render(item, preferences, resumeChoice, issue);
+            stage?.selectCaption(track.id);
+          }
+        } catch (error) {
+          if (!String(error).includes("Cancelled")) hooks.showError(error);
+        }
+      },
+    });
     const playerHost = host;
     new ResizeObserver(() => {
       document.documentElement.style.setProperty("--audio-player-height", `${playerHost.offsetHeight}px`);
     }).observe(playerHost);
     element.addEventListener("timeupdate", () => {
+      if (!matchesSource()) return;
       updateTime();
+      hooks.timeChanged(currentId(), element.currentTime);
       if (sleep === "chapter" && stopAt > 0 && element.currentTime >= stopAt || sleepUntil && Date.now() >= sleepUntil) sleepNow();
       if (!element.paused && Date.now() - lastSaved > 15_000) persist();
     });
-    element.addEventListener("loadedmetadata", updateTime);
-    element.addEventListener("play", () => {
-      stoppedBySleep = false;
-      updatePlaying();
-      for (const other of document.querySelectorAll<HTMLMediaElement>("[data-local-player]")) other.pause();
+    element.addEventListener("loadedmetadata", () => {
+      if (!matchesSource() || element.readyState < 1) return;
+      if (pendingSeek !== null) {
+        const position = pendingSeek;
+        pendingSeek = null;
+        seek(position);
+      }
+      if (resumeChoice && !resumePosition(resumeChoice, element.duration)) resumeChoice = 0;
+      const item = current();
+      if (item && expanded) stage?.render(item, preferences, resumeChoice, issue);
+      if (element.paused && mediaState === "loading") mediaState = "paused";
+      updateTime();
     });
-    element.addEventListener("pause", () => { persist(); updatePlaying(); });
+    element.textTracks.addEventListener("addtrack", () => {
+      const item = current();
+      if (item && expanded && matchesSource()) stage?.render(item, preferences, resumeChoice, issue);
+    });
+    for (const event of ["waiting", "stalled", "seeking", "seeked", "playing", "canplay", "progress"] as const) {
+      element.addEventListener(event, () => {
+        if (!matchesSource()) return;
+        if (event === "seeking") mediaState = "seeking";
+        else if (event === "waiting" || event === "stalled") {
+          if (!element.paused || element.readyState === 0) mediaState = "loading";
+        } else if (event !== "progress" && !element.ended && !element.seeking) mediaState = element.paused ? "paused" : "playing";
+        updateTime();
+      });
+    }
+    element.addEventListener("play", () => {
+      if (!matchesSource()) return;
+      stoppedBySleep = false;
+      if (element.readyState >= 3) mediaState = "playing";
+      updatePlaying();
+    });
+    element.addEventListener("pause", () => {
+      if (!matchesSource() || !element.paused) return;
+      if (!element.ended && !issue) mediaState = element.readyState ? "paused" : "loading";
+      persist(); updatePlaying();
+    });
     element.addEventListener("ended", () => {
+      if (!matchesSource() || !element.ended) return;
+      mediaState = "ended";
       persist();
+      updateTime();
       if (sleep === "chapter") sleepNow();
       else if (!stoppedBySleep) move(1, false);
     });
+    element.addEventListener("error", () => {
+      if (!expectedSource || element.src !== expectedSource || !element.error) return;
+      issue = playbackIssue(element.error);
+      mediaState = "error";
+      render(); updateTime();
+    });
     document.addEventListener("play", event => {
-      if (event.target instanceof HTMLMediaElement && event.target !== element && event.target.hasAttribute("data-local-player")) element.pause();
+      if (!(event.target instanceof HTMLMediaElement)) return;
+      if (event.target === element) {
+        for (const other of document.querySelectorAll<HTMLMediaElement>("audio,video")) if (other !== element && !other.paused) other.pause();
+      } else element.pause();
     }, true);
   }
 
@@ -336,9 +570,16 @@ export function createAudioPlayer(hooks: Hooks) {
     if (element instanceof HTMLInputElement && element.id === "audio-seek") {
       seek(Number(element.value)); return true;
     }
+    if (element instanceof HTMLInputElement && element.id === "audio-volume") {
+      volume(Number(element.value)); return true;
+    }
+    if (element instanceof HTMLInputElement && element.id === "audio-resume-music") {
+      preferences.resumeMusic = element.checked; saveSession(); return true;
+    }
     if (element instanceof HTMLSelectElement && element.id === "audio-rate") {
-      rate = Number(element.value);
-      if (media) media.playbackRate = rate;
+      preferences.rate = Number(element.value);
+      if (media) media.playbackRate = preferences.rate;
+      saveSession();
       return true;
     }
     if (element instanceof HTMLSelectElement && element.id === "audio-sleep") {
@@ -348,21 +589,105 @@ export function createAudioPlayer(hooks: Hooks) {
     return false;
   }
 
-  function click(action: string): boolean {
+  function restore() {
+    if (!stored.queue || current()) return;
+    const saved = stored.queue;
+    const remap = new Map<number, number>();
+    tracks = saved.tracks.filter((id, index) => {
+      if (!isPlayable(hooks.item(id))) return false;
+      remap.set(index, remap.size);
+      return true;
+    });
+    if (!tracks.length) { saveSession(); return; }
+    order = saved.order.flatMap(index => remap.has(index) ? [remap.get(index)!] : []);
+    const previous = order.indexOf(remap.get(saved.order[saved.cursor]) ?? -1);
+    activate(Math.max(0, previous), false, true, false);
+  }
+
+  function playAt(id: string, time: number): boolean {
+    const item = hooks.item(id);
+    if (!isPlayable(item)) return false;
+    if (id !== currentId() || issue) {
+      persist();
+      tracks = [id]; order = [0]; cursor = -1;
+      activate(0, false, false);
+    } else if (item.kind === "video") showStage();
+    if (resumeChoice) {
+      resumeChoice = 0;
+      stage?.render(item, preferences, 0, issue);
+    }
+    seek(time);
+    return true;
+  }
+
+  function shuffleUpcoming() {
+    preferences.shuffled = !preferences.shuffled;
+    const history = order.slice(0, cursor + 1);
+    const upcoming = order.slice(cursor + 1);
+    if (preferences.shuffled) {
+      for (let index = upcoming.length - 1; index > 0; index--) {
+        const other = Math.floor(Math.random() * (index + 1));
+        [upcoming[index], upcoming[other]] = [upcoming[other], upcoming[index]];
+      }
+    } else upcoming.sort((a, b) => a - b);
+    order = [...history, ...upcoming];
+    saveSession(); render(); hooks.render();
+  }
+
+  function key(event: KeyboardEvent): boolean {
+    if (expanded) return stage?.key(event) ?? false;
+    if (queueOpen && event.key === "Escape") {
+      queueOpen = false; render(); document.getElementById("audio-queue")?.focus(); return true;
+    }
+    return false;
+  }
+
+  function openExternal(id: string) {
+    media?.pause();
+    void hooks.command("open_media", { id, folder: false }).catch(hooks.showError);
+  }
+
+  function click(action: string, control?: HTMLElement): boolean {
     switch (action) {
-      case "audio-player-toggle": if (media?.paused) void playMedia(); else media?.pause(); break;
+      case "audio-player-toggle":
+        if (resumeChoice) resumeVideo(false);
+        else if (media?.paused) void playMedia();
+        else media?.pause();
+        break;
       case "audio-player-next": move(1, true); break;
       case "audio-player-previous": move(-1, true); break;
       case "audio-player-back": seek((media?.currentTime ?? 0) - 15); break;
-      case "audio-player-shuffle": shuffled = !shuffled; cursor = reorder(order[cursor]); render(); hooks.render(); break;
-      case "audio-player-repeat": repeat = repeat === "off" ? "all" : repeat === "all" ? "one" : "off"; render(); break;
-      case "audio-player-open": hooks.open(); break;
+      case "audio-player-mute": mute(); break;
+      case "audio-player-shuffle": shuffleUpcoming(); break;
+      case "audio-player-repeat":
+        preferences.repeat = preferences.repeat === "off" ? "all" : preferences.repeat === "all" ? "one" : "off";
+        saveSession(); render(); break;
+      case "audio-player-queue":
+        queueOpen = !queueOpen;
+        render();
+        break;
+      case "audio-player-queue-up": case "audio-player-queue-down": {
+        const position = order.indexOf(Number(control?.dataset.position));
+        const target = position + (action.endsWith("-up") ? -1 : 1);
+        if (position > cursor && target > cursor && target < order.length) {
+          [order[position], order[target]] = [order[target], order[position]];
+          saveSession(); render(); hooks.render();
+        }
+        break;
+      }
+      case "audio-player-convert": if (currentId()) hooks.convert(currentId()); break;
+      case "audio-player-external": if (currentId()) openExternal(currentId()); break;
+      case "audio-player-open":
+        if (current()?.kind === "video") { showStage(); hooks.render(); }
+        else hooks.open();
+        break;
       case "audio-player-close": close(); break;
       default: return false;
     }
     return true;
   }
 
-  return { mount, render, play, add, remove, input, click, current, nextEntries, seek, persist,
+  return { mount, render, restore, play, playAt, add, remove, input, click, key, current, nextEntries, seek, persist, isExpanded: () => expanded,
+    timeFor: (id: string) => id === currentId() && matchesSource() && media?.readyState ? media.currentTime : undefined,
     time: () => media?.currentTime ?? 0 };
 }

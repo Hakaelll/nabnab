@@ -68,7 +68,7 @@ try {
     await page.route("http://nabmedia.localhost/**",async route=>{
       const request=route.request();const range=request.headers().range?.match(/^bytes=(\d+)-(\d*)$/);
       const start=range?Number(range[1]):0;const end=range&&range[2]?Math.min(Number(range[2]),wav.length-1):wav.length-1;
-      await route.fulfill({status:range?206:200,headers:{"content-type":"audio/wav","accept-ranges":"bytes",...(range?{"content-range":'bytes '+start+'-'+end+'/'+wav.length}:{}),"content-length":String(end-start+1)},body:wav.subarray(start,end+1)});
+      await route.fulfill({status:range?206:200,headers:{"content-type":"audio/wav","accept-ranges":"bytes","access-control-allow-origin":"*",...(range?{"content-range":'bytes '+start+'-'+end+'/'+wav.length}:{}),"content-length":String(end-start+1)},body:wav.subarray(start,end+1)});
     });
     await page.goto(base);
     await page.waitForFunction(()=>window.libraryFixture?.calls.some(call=>call.cmd==="startup"));
@@ -169,6 +169,7 @@ try {
       await page.locator('#library-search').fill(query);
       await page.locator('[data-action="library-seek-result"]').first().click();
       await page.waitForFunction(({id,time})=>{const player=document.querySelector('[data-local-player="'+id+'"]');return player instanceof HTMLMediaElement&&player.readyState>=1&&Math.abs(player.currentTime-time)<.01;},{id,time});
+      if(await page.locator("#playback-stage").isVisible())await page.locator("#stage-back").click();
     };
     await refreshFixtures(()=>{
       const state=window.libraryFixture.state;const base=state.library.find(item=>item.id==='lecture');

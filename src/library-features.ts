@@ -132,6 +132,8 @@ interface LibraryHooks {
   snapshot(): Snapshot; refresh(): Promise<void>; render(): void; t: Copy;
   notify(message: string): void; showError(error: unknown): void;
   inspect(id: string, time?: number): void;
+  timeFor(id: string): number | undefined;
+  playAt(id: string, time: number): boolean;
 }
 const conditionLabels = (t: Copy): [SmartCondition["kind"], string][] => [["kind", t("Tipo", "Type")], ["source", t("Fuente", "Source")], ["platform", t("Plataforma", "Platform")], ["tag", t("Etiqueta", "Tag")], ["downloadedAfter", t("Descargado desde", "Downloaded after")], ["downloadedBefore", t("Descargado antes de", "Downloaded before")], ["minDuration", t("Duración mínima en segundos", "Minimum duration in seconds")], ["maxDuration", t("Duración máxima en segundos", "Maximum duration in seconds")], ["minHeight", t("Resolución mínima", "Minimum height")], ["maxHeight", t("Resolución máxima", "Maximum height")], ["subtitleLanguage", t("Idioma de subtítulos", "Subtitle language")], ["hasSubtitles", t("Tiene subtítulos", "Has subtitles")], ["favorite", t("Favorito", "Favorite")]];
 export function createLibraryFeatures(hooks: LibraryHooks) {
@@ -141,14 +143,11 @@ export function createLibraryFeatures(hooks: LibraryHooks) {
   let cuePage = 0;
   let followPlayback = true;
   let lastReaderCheckAt = 0;
-  let lastSavedAt = 0;
   let editSmart: SmartCollection | null = null;
-  let seekTarget: { id: string; time: number } | null = null;
   let exporting = false;
   const t = hooks.t;
   function value(id: string): string { const input = document.getElementById(id); return input instanceof HTMLInputElement || input instanceof HTMLSelectElement ? input.value : ""; }
   function itemFor(id: string): LibraryItem | undefined { return hooks.snapshot().library.find(item => item.id === id); }
-  function playerFor(id: string): HTMLMediaElement | null { return [...document.querySelectorAll<HTMLMediaElement>("video[data-local-player],audio[data-local-player]")].find(player => player.dataset.localPlayer === id) ?? null; }
   function seekFallback(time: number, original = false, approximate = false): void {
     hooks.notify(t("Tiempo para el reproductor externo: ", "Time for external player: ") + durationLabel(time));
     const fallback = document.querySelector<HTMLElement>("[data-seek-fallback]");
@@ -161,42 +160,30 @@ export function createLibraryFeatures(hooks: LibraryHooks) {
     }
   }
   function seek(id: string, time: number): void {
-    const player = playerFor(id);
-    if (!player) {
-      const item = itemFor(id);
-      if (item && (item.kind === "subtitle" || item.kind === "image")) {
-        const snapshot = hooks.snapshot();
-        const target = subtitlePlaybackTarget(item, time, snapshot);
-        if (target) {
-          seek(target.item.id, target.time);
-          hooks.notify(target.approximate ? t("Salto aproximado: no se conoce el inicio real del corte. Los cortes rápidos pueden empezar en un fotograma cercano.", "Approximate seek: the actual cut start is unknown. Fast cuts may start on a nearby frame.") : "");
-        } else {
-          const timing = contentTiming(item, snapshot);
-          const reference = timing ? timing.start + time : time;
-          seekTarget = null;
-          if (item.kind === "subtitle") inspectorTab = "subtitles";
-          hooks.inspect(id);
-          seekFallback(reference, timing !== null, timing?.approximate ?? false);
-          hooks.notify(t("Ningún vídeo local cubre este momento. Copia el tiempo de referencia para usarlo en un reproductor externo.", "No local video covers this moment. Copy the reference time for an external player.") + " " + durationLabel(reference));
-        }
-        return;
-      }
-      seekTarget = { id, time }; hooks.inspect(id, time); return;
-    }
-    const apply = () => {
-      if (player.error || !Number.isFinite(player.duration)) {
-        seekFallback(time);
-        return;
-      }
-      player.currentTime = Math.min(time, player.duration);
-      seekTarget = null;
+    if (hooks.playAt(id, time)) {
       cuePage = 0;
       followPlayback = true;
       renderReader(true);
-    };
-    if (player.error) seekFallback(time);
-    else if (player.readyState >= 1) apply();
-    else { player.addEventListener("loadedmetadata", apply, { once: true }); player.addEventListener("error", () => seekFallback(time), { once: true }); }
+      return;
+    }
+    const item = itemFor(id);
+    if (item && (item.kind === "subtitle" || item.kind === "image")) {
+      const snapshot = hooks.snapshot();
+      const target = subtitlePlaybackTarget(item, time, snapshot);
+      if (target) {
+        seek(target.item.id, target.time);
+        if (target.approximate) hooks.notify(t("Salto aproximado: no se conoce el inicio real del corte. Los cortes rápidos pueden empezar en un fotograma cercano.", "Approximate seek: the actual cut start is unknown. Fast cuts may start on a nearby frame."));
+        return;
+      }
+      const timing = contentTiming(item, snapshot);
+      if (item.kind === "subtitle") inspectorTab = "subtitles";
+      hooks.inspect(id);
+      seekFallback((timing?.start ?? 0) + time, timing !== null, timing?.approximate ?? false);
+      hooks.notify(t("Ningún vídeo local cubre este momento. Copia el tiempo de referencia para usarlo en un reproductor externo.", "No local video covers this moment. Copy the reference time for an external player.") + " " + durationLabel((timing?.start ?? 0) + time));
+      return;
+    }
+    hooks.inspect(id);
+    seekFallback(time);
   }
   function renderReader(followCurrent = false): void {
     const reader = document.querySelector<HTMLElement>("[data-subtitle-reader]"); if (!reader) return;
@@ -204,7 +191,7 @@ export function createLibraryFeatures(hooks: LibraryHooks) {
     const tracks = detailsFor(item).tracks;
     const track = tracks.find(track => track.id === selectedTrack) ?? tracks[0]; if (!track) return;
     selectedTrack = track.id;
-    const current = playerFor(item.id)?.currentTime ?? detailsFor(item).playbackPosition;
+    const current = hooks.timeFor(item.id) ?? detailsFor(item).playbackPosition;
     const visible = track.segments.map((segment, index) => ({ segment, index })).filter(({ segment }) => !cueQuery || segment.text.toLowerCase().includes(cueQuery.toLowerCase()));
     if (followCurrent && !cueQuery) { const index = visible.findIndex(({ segment }) => current >= segment.start && current < segment.end); if (index >= 0) cuePage = Math.floor(index / 200); }
     cuePage = Math.min(cuePage, Math.max(0, Math.ceil(visible.length / 200) - 1));
@@ -222,42 +209,21 @@ export function createLibraryFeatures(hooks: LibraryHooks) {
     if (select instanceof HTMLSelectElement && [...select.options].some(option => option.value === selectedTrack)) select.value = selectedTrack;
     const search = document.getElementById("subtitle-track-search"); if (search instanceof HTMLInputElement) search.value = cueQuery;
     renderReader(true);
-    for (const player of document.querySelectorAll<HTMLMediaElement>("video[data-local-player],audio[data-local-player]")) {
-      if (player.dataset.libraryBound) continue;
-      player.dataset.libraryBound = "true";
-      const id = player.dataset.localPlayer ?? "";
-      const item = itemFor(id);
-      const position = seekTarget?.id === id ? seekTarget.time : item ? detailsFor(item).playbackPosition : 0;
-      if (position > 0) {
-        player.addEventListener("loadedmetadata", () => { if (Number.isFinite(player.duration)) { player.currentTime = Math.min(position, player.duration); seekTarget = null; renderReader(true); } }, { once: true });
-        player.addEventListener("error", () => seekFallback(position), { once: true });
-      }
-      const save = () => {
-        if (!Number.isFinite(player.currentTime)) return;
-        const item = itemFor(id); if (!item) return;
-        const details = { ...detailsFor(item), playbackPosition: player.currentTime }; item.details = details;
-        void hooks.command("library_playback", { id, position: player.currentTime }).catch(hooks.showError);
-        lastSavedAt = Date.now();
-      };
-      player.addEventListener("timeupdate", () => {
-        for (const cue of document.querySelectorAll<HTMLElement>("[data-cue-start]")) cue.classList.toggle("is-current", player.currentTime >= Number(cue.dataset.cueStart) && player.currentTime < Number(cue.dataset.cueEnd));
-        if (followPlayback && !cueQuery && inspectorTab === "subtitles" && Date.now() - lastReaderCheckAt > 1000) {
-          lastReaderCheckAt = Date.now();
-          const currentItem = itemFor(id);
-          const track = currentItem ? detailsFor(currentItem).tracks.find(track => track.id === selectedTrack) : undefined;
-          const index = track?.segments.findIndex(segment => player.currentTime >= segment.start && player.currentTime < segment.end) ?? -1;
-          if (index >= 0 && Math.floor(index / 200) !== cuePage) renderReader(true);
-        }
-        if (!player.paused && Date.now() - lastSavedAt > 15_000) save();
-      });
-      player.addEventListener("pause", save); player.addEventListener("ended", save);
+  }
+  function playbackChanged(id: string, time: number): void {
+    const reader = document.querySelector<HTMLElement>("[data-subtitle-reader]");
+    if (reader?.dataset.subtitleReader !== id || inspectorTab !== "subtitles") return;
+    for (const cue of reader.querySelectorAll<HTMLElement>("[data-cue-start]")) {
+      cue.classList.toggle("is-current", time >= Number(cue.dataset.cueStart) && time < Number(cue.dataset.cueEnd));
     }
+    if (!followPlayback || cueQuery || Date.now() - lastReaderCheckAt <= 1000) return;
+    lastReaderCheckAt = Date.now();
+    const current = itemFor(id);
+    const track = current && detailsFor(current).tracks.find(track => track.id === selectedTrack);
+    const index = track ? track.segments.findIndex(segment => time >= segment.start && time < segment.end) : -1;
+    if (index >= 0 && Math.floor(index / 200) !== cuePage) renderReader(true);
   }
   async function changed(): Promise<void> {
-    for (const player of document.querySelectorAll<HTMLMediaElement>("video[data-local-player],audio[data-local-player]")) {
-      const id = player.dataset.localPlayer;
-      if (id && itemFor(id) && Number.isFinite(player.currentTime)) await hooks.command("library_playback", { id, position: player.currentTime });
-    }
     await hooks.refresh(); hooks.render();
   }
   async function handleClick(target: HTMLElement): Promise<boolean> {
@@ -336,7 +302,7 @@ export function createLibraryFeatures(hooks: LibraryHooks) {
     try {
       if (form.id === "bookmark-form") {
         const id = form.dataset.id ?? ""; const item = itemFor(id);
-        const position = playerFor(id)?.currentTime;
+        const position = hooks.timeFor(id);
         if (!item || position === undefined || !Number.isFinite(position)) { hooks.notify(t("Abre el archivo en el reproductor interno para marcar el momento.", "Open the file in the internal player to mark the moment.")); return true; }
         const bookmark: Bookmark = { id: `bookmark-${Date.now()}`, name: value("bookmark-name"), time: position };
         await hooks.command("library_bookmark", { id, bookmark, remove: false }); await changed();
@@ -362,5 +328,5 @@ export function createLibraryFeatures(hooks: LibraryHooks) {
       return `<div data-smart-condition="${index}" class="button-group"><select data-condition-kind aria-label="${t("Condición", "Condition")}">${conditionLabels(t).map(([kind, label]) => option(kind, label, condition.kind)).join("")}</select>${boolean ? `<select data-condition-value aria-label="${t("Valor", "Value")}">${option("true", t("Sí", "Yes"), String(condition.value))}${option("false", t("No", "No"), String(condition.value))}</select>` : condition.kind === "source" ? `<select data-condition-value required aria-label="${t("Fuente", "Source")}">${option("", t("Elige una fuente", "Choose a source"), String(condition.value))}${[...sourceOptions].map(([id, name]) => option(id, name, String(condition.value))).join("")}${typeof condition.value === "string" && condition.value && !sourceOptions.has(condition.value) ? option(condition.value, t("Fuente anterior", "Previous source"), condition.value) : ""}</select>` : condition.kind === "kind" ? `<select data-condition-value aria-label="${t("Tipo de archivo", "File type")}">${[["video", t("Vídeo", "Video")], ["audio", t("Audio", "Audio")], ["image", t("Imagen", "Image")], ["subtitle", t("Subtítulos", "Subtitles")]].map(([kind, label]) => option(kind, label, String(condition.value))).join("")}</select>` : `<input data-condition-value type="${date ? "date" : numeric ? "number" : "text"}" value="${h(date ? dateValue : String(condition.value))}" ${numeric ? 'min="0" step="any"' : ""} required aria-label="${t("Valor", "Value")}">`}${action("smart-remove-condition", t("Quitar condición", "Remove condition"), "close", "icon-button", `data-index="${index}"`)}</div>`;
     }).join("")}<div class="button-group">${action("smart-add-condition", t("Añadir condición", "Add condition"), "add", "quiet")}<button type="submit" class="button primary">${t("Guardar colección", "Save collection")}</button>${action("smart-cancel", t("Cancelar", "Cancel"), undefined, "quiet")}</div></form>`;
   }
-  return { bind, handleClick, handleInput, handleChange, handleSubmit, collectionsView, seek };
+  return { bind, handleClick, handleInput, handleChange, handleSubmit, collectionsView, seek, playbackChanged };
 }

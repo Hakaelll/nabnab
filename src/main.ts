@@ -18,6 +18,7 @@ import {createDocumentEdits} from "./document-edits-ui";
 import {createFileSources} from "./file-sources-ui";
 import {createPersonalServers} from "./personal-servers-ui";
 import {createAudioPlayer} from "./audio-player";
+import {isPlayable} from "./playback-preferences";
 import {createAudioLibrary} from "./audio-library-ui";
 import {createPersonalArchives} from "./personal-archives-ui";
 import {createAdvancedFilesController} from "./advanced-files-ui";
@@ -41,6 +42,7 @@ import { startGraphics,handleEmblemClick } from "./graphics";
 import { errorLabel, errorDetails, isCancelled } from "./presentation";
 import { activeStates, cancellableStates, defaultToolOptions, initialSettings, sourceUrls, type BridgeStatus, type Copy, type DownloadView, type EngineStatus, type HomeState, type Job, type LibraryView, type Page, type SessionStatus, type Settings, type SettingsSection, type SettingsView, type Snapshot, type Startup, type ToolKind, type ToolOptions, type ToolsView, type Media } from "./contracts";
 import { downloadsView, homeView, icon, jobInspector, libraryView, mediaInspector, settingsView, stateLabel, toolsView } from "./views";
+import { filteredLibrary } from "./views-library";
 import {createBatchController} from './batch-ui';
 import {createSourcesController} from './sources-ui';
 import {createLibraryFeatures} from './library-features';
@@ -129,10 +131,27 @@ const courses=createCoursesController({command,getSnapshot:()=>snapshot,refresh,
 const platforms=createPlatformsController({command,snapshot:()=>snapshot,refresh,notify,showError,render:renderCurrent,t,openLink:url=>{navigate('home');updateSourceInput(url);clearTimeout(debounce);void inspect(true).catch(showError);}});
 const sources=createSourcesController({command,openPublicSource:url=>{platformModule="fileSources";navigate("platforms");void fileSources.open(url).catch(showError);},getSnapshot:()=>snapshot,refresh,notify,showError,t,render:renderCurrent});
 const batches=createBatchController({command,snapshot:()=>snapshot,refresh,notify,showError,t,render:renderCurrent,onFollowSource:url=>{librarySection='sources';sources.openAdd(url);navigate('library');}});
-const libraryFeatures=createLibraryFeatures({command,snapshot:()=>snapshot,refresh,notify,showError,t,render:()=>{renderCurrent();renderInspector(true);libraryFeatures.bind();},inspect:(id)=>{librarySection='files';library.detailId=id;navigate('library');}});
+const libraryFeatures=createLibraryFeatures({
+  command, snapshot:()=>snapshot, refresh, notify, showError, t,
+  render:()=>{renderCurrent();renderInspector(true);libraryFeatures.bind();},
+  inspect:id=>{librarySection='files';library.detailId=id;navigate('library');},
+  timeFor:id=>audioPlayer.timeFor(id),
+  playAt:(id,time)=>{
+    const item=snapshot.library.find(item=>item.id===id);
+    if(!isPlayable(item))return false;
+    if(item.kind==='video')closeInspector();
+    else if(page==='library'&&library.detailId!==id){
+      librarySection='files';library.detailId=id;renderCurrent();
+    }
+    return audioPlayer.playAt(id,time);
+  },
+});
 const audioPlayer=createAudioPlayer({
-  item: id => snapshot.library.find(item => item.id === id && item.kind === "audio"),
-  command, render: renderCurrent, showError, t,
+  item: id => snapshot.library.find(item => item.id === id),
+  command, render: renderCurrent, refresh, showError, t,
+  fullscreen: enabled => getCurrentWindow().setFullscreen(enabled),
+  convert: id => setToolInput([id]),
+  timeChanged: (id,time)=>libraryFeatures.playbackChanged(id,time),
   open: () => { librarySection = "audio"; navigate("library"); },
 });
 const audioLibrary=createAudioLibrary({
@@ -184,7 +203,7 @@ required("#app").innerHTML = `<canvas id="field" aria-hidden="true"></canvas><he
   <button id="maximize" aria-label="Maximizar" title="Maximizar"><svg class="maximize-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="3.5" width="9" height="9" rx=".5"/></svg><svg class="restore-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 5.5v-2h7v7h-2"/><rect x="3.5" y="5.5" width="7" height="7" rx=".5"/></svg></button>
   <button id="close" aria-label="Cerrar" title="Cerrar"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg></button>
   </div></header><div class="app-shell"><nav class="sidebar" aria-label="Navegación principal"><button id="toggle-sidebar" class="sidebar-toggle icon-button" data-action="toggle-sidebar" title="Contraer navegación" aria-label="Contraer navegación">${icon("menu")}</button><div class="nav-primary"></div><div class="nav-secondary"></div></nav>
-  <main id="main"><div id="notification" class="notification" hidden><span id="notification-icon"></span><div><span id="notification-text"></span><details id="notification-details" hidden><summary>Detalles técnicos</summary><pre></pre></details></div><button class="icon-button" data-action="dismiss-message" aria-label="Cerrar aviso">${icon("close")}</button></div><section id="home-page" class="home-page"><div id="home-content"></div></section><div class="content-layout"><section id="page-content" class="page-content" hidden></section><aside id="inspector" class="inspector" aria-label="Detalles" hidden></aside></div><button id="activity" class="activity" data-action="show-activity" hidden><span class="activity-dot"></span><span id="activity-text"></span>${icon("arrow")}</button></main><section class="audio-player" id="audio-player" hidden><audio id="audio-engine" preload="metadata"></audio><div id="audio-transport"></div></section></div><aside id="capture-indicator" class="capture-indicator" hidden aria-label="Controles de captura"><span class="capture-status-dot" aria-hidden="true"></span><div class="capture-status-copy"><strong id="capture-status-label" aria-live="polite"></strong><small id="capture-status-source"></small></div><time id="capture-status-time"></time><span id="capture-shortcut-label"></span><button class="button quiet" data-action="screen-capture-open">Captura</button><button class="button secondary" data-action="screen-capture-save-replay" hidden>Guardar</button><button class="button primary" data-action="screen-capture-stop">Detener</button></aside><dialog id="detail-dialog" class="detail-dialog" aria-label="Detalles"></dialog><div id="drop-indicator" class="drop-indicator" hidden>${icon("add")}<span></span></div>`;
+  <main id="main"><div id="notification" class="notification" hidden><span id="notification-icon"></span><div><span id="notification-text"></span><details id="notification-details" hidden><summary>Detalles técnicos</summary><pre></pre></details></div><button class="icon-button" data-action="dismiss-message" aria-label="Cerrar aviso">${icon("close")}</button></div><section id="home-page" class="home-page"><div id="home-content"></div></section><div class="content-layout"><section id="page-content" class="page-content" hidden></section><aside id="inspector" class="inspector" aria-label="Detalles" hidden></aside></div><button id="activity" class="activity" data-action="show-activity" hidden><span class="activity-dot"></span><span id="activity-text"></span>${icon("arrow")}</button></main><section class="audio-player" id="audio-player" hidden><div id="audio-transport"></div></section></div><section class="playback-stage" id="playback-stage" aria-label="Reproductor de vídeo" tabindex="-1" hidden><video id="audio-engine" crossorigin="anonymous" preload="metadata" playsinline></video><div class="stage-captions" hidden></div><div class="stage-feedback" aria-hidden="true" hidden></div><div class="stage-hud"></div></section><aside id="capture-indicator" class="capture-indicator" hidden aria-label="Controles de captura"><span class="capture-status-dot" aria-hidden="true"></span><div class="capture-status-copy"><strong id="capture-status-label" aria-live="polite"></strong><small id="capture-status-source"></small></div><time id="capture-status-time"></time><span id="capture-shortcut-label"></span><button class="button quiet" data-action="screen-capture-open">Captura</button><button class="button secondary" data-action="screen-capture-save-replay" hidden>Guardar</button><button class="button primary" data-action="screen-capture-stop">Detener</button></aside><dialog id="detail-dialog" class="detail-dialog" aria-label="Detalles"></dialog><div id="drop-indicator" class="drop-indicator" hidden>${icon("add")}<span></span></div>`;
 const inspectorBody = document.createElement("div");
 inspectorBody.className = "inspector-body";
 const palette=createPalette({snapshot:()=>snapshot,t,showError,search:desktop?async query=>(await command<import("./library-types").SearchHit[]>("library_search",{query,collection:null,smartId:null})).filter(hit=>hit.kind==="article"||hit.kind==="ocr").map((hit,index)=>({id:`content:${hit.fileId}:${index}`,kind:hit.kind==="article"?t("Artículo","Article"):"OCR",label:hit.title,context:hit.excerpt,run:()=>openContentHit(hit,query)})):undefined,
@@ -274,9 +293,10 @@ function updateNavigation(): void {
   required("#drop-indicator span").textContent=t("Suelta para importar", "Drop to import");
 }
 function graphics(): void {
-  if(page==='home'&&disposeGraphics&&!snapshot.settings.reducedMotion)return;
+  const visible=page==='home'&&!document.documentElement.classList.contains('has-playback-stage');
+  if(visible&&disposeGraphics&&!snapshot.settings.reducedMotion)return;
   disposeGraphics?.(); disposeGraphics=null;
-  if (page!=="home") return;
+  if (!visible) return;
   disposeGraphics=startGraphics(required<HTMLCanvasElement>("#field"),required<HTMLCanvasElement>("#emblem"));
   if(snapshot.settings.reducedMotion){disposeGraphics();disposeGraphics=null;}
 }
@@ -592,7 +612,7 @@ async function handleAction(action: string, button: HTMLButtonElement): Promise<
   if(await automation.click(action,button)||await screenCapture.click(action,button)||await voice.click(action,button))return;
   if(await imageAssets.click(action,button)||await stickerTool.click(action)||await upscaleTool.click(action)||await backgroundTool.click(action)||await stemsTool.click(action,button)||await translationTool.click(action)||await fileOrganization.click(action,button)||await portable.click(action,button))return;
   if(await articles.click(action,button)||await ocr.click(action,button)||await documentEdits.click(action))return;
-  if(audioPlayer.click(action)||await audioLibrary.click(action,button)||await personalArchives.click(action,button))return;
+  if(audioPlayer.click(action,button)||await audioLibrary.click(action,button)||await personalArchives.click(action,button))return;
   if(await personalServers.handleClick(action,button)||await fileSources.handleClick(action,button))return;
   if(await palettes.click(action)||await advancedFiles.handleClick(action)||await mediaEdits.click(action,button)||await sourceExports.handleClick(action)||await galleryExports.click(action)||await documents.click(action,button)||await telegram.handleClick(action)||await courses.handleClick(action,button)||await transcriptionManager.click(action,button)||await torrents.handleClick(action)||await platforms.handleClick(action,button)||await batches.handleClick(action,button)||await sources.handleClick(action,button)||await organization.handleClick(action,button)||await libraryFeatures.handleClick(button))return;
   switch(action){
@@ -627,6 +647,24 @@ async function handleAction(action: string, button: HTMLButtonElement): Promise<
     case 'inspect-media':library.detailId=id;if(page!=='library')navigate('library');else renderCurrent();if(snapshot.library.some(item=>item.id===id&&item.kind==='document'))await documents.open(id);const contentHit=libraryContentHits.find(hit=>hit.fileId===id&&(hit.kind==='article'||hit.kind==='ocr'));if(library.query&&contentHit)await openContentHit(contentHit,library.query);else{if(snapshot.library.some(item=>item.id===id&&item.kind==='article'))await articles.open(id);if(snapshot.library.some(item=>item.id===id&&item.details?.ocrRef))await ocr.open(id);}break;
     case 'close-inspector':closeInspector();break;
     case 'open-media':await command('open_media',{id,folder:false});break;
+    case 'play-media':case 'play-selection':case 'play-job':{
+      let items = snapshot.library.filter(item=>item.id===id);
+      if(action==='play-job'){
+        const job=snapshot.jobs.find(candidate=>candidate.id===id);
+        items=(job?.outputs??[]).flatMap(path=>snapshot.library.find(item=>item.path===path)??[]);
+      } else {
+        const fromSelection=action==='play-selection'||library.selected.has(id);
+        if(page==='library'&&(fromSelection||library.collection)){
+          items=filteredLibrary(snapshot,library).filter(item=>!fromSelection||library.selected.has(item.id));
+        }
+      }
+      const ids=items.filter(isPlayable).map(item=>item.id);
+      if(!ids.length)break;
+      closeInspector();
+      const position=ids.indexOf(id);
+      audioPlayer.play(ids,position<0?0:position);
+      break;
+    }
     case 'reveal-media':await command('open_media',{id,folder:true});break;
     case 'copy-path':{const item=snapshot.library.find(item=>item.id===id);if(item)await copyText(item.path);break;}
     case 'locate-media':thumbnailUrls.delete(id);applySnapshot(await command<Snapshot>('locate_media',{id}));renderInspector(true);break;
@@ -724,6 +762,8 @@ async function submitForm(form: HTMLFormElement): Promise<void> {
   }
 }
 document.addEventListener('keydown',event=>{
+  if(audioPlayer.key(event)){event.preventDefault();return;}
+  if(audioPlayer.isExpanded())return;
   if(event.ctrlKey&&!event.altKey&&!event.shiftKey&&event.key.toLowerCase()==='k'){event.preventDefault();palette.open();return;}
   if(palette.isOpen)return;
   if(event.key==='Escape'&&document.querySelector('dialog[open]:not(#detail-dialog)'))return;
@@ -736,14 +776,25 @@ document.addEventListener('keydown',event=>{
 });
 required<HTMLDialogElement>('#detail-dialog').addEventListener('cancel',event=>{event.preventDefault();closeInspector();});
 required<HTMLDialogElement>('#detail-dialog').addEventListener('click',event=>{if(event.target===event.currentTarget)closeInspector();});
-document.addEventListener('error',event=>{const target=event.target;if(target instanceof HTMLElement&&target.dataset.localPlayer){const fallback=target.closest('.media-player')?.querySelector<HTMLElement>('#playback-error');if(fallback)fallback.hidden=false;}else if(target instanceof HTMLImageElement&&target.classList.contains('preview-image'))target.hidden=true;},true);
+document.addEventListener('error',event=>{const target=event.target;if(target instanceof HTMLImageElement&&target.classList.contains('preview-image'))target.hidden=true;},true);
 window.addEventListener('resize',()=>preserveFocus(()=>renderInspector()));
 
 async function receivePaths(paths: string[]): Promise<void> {
   required('#drop-indicator').hidden=true;
   const textFiles=page==='home'?paths.filter(path=>path.toLowerCase().endsWith('.txt')):[];const mediaFiles=paths.filter(path=>!textFiles.includes(path));
   for(const path of textFiles)await importUrlFile(path);
-  if(mediaFiles.length){const previous=new Set(snapshot.library.map(item=>item.id));const next=await command<Snapshot>('import_paths',{paths:mediaFiles});for(const item of next.library)if(!previous.has(item.id)&&item.kind!=='image')tools.ids.add(item.id);snapshot=next;navigate(tools.ids.size?'tools':'library');notify(t("Archivo importado. El original no se ha modificado.", "File imported. The original was not modified."),'success');}
+  if(mediaFiles.length){
+    const previous=new Set(snapshot.library.map(item=>item.id));
+    snapshot=await command<Snapshot>('import_paths',{paths:mediaFiles});
+    const imported=snapshot.library.filter(item=>!previous.has(item.id));
+    if(page==='tools'){
+      for(const item of imported)if(item.kind!=='image')tools.ids.add(item.id);
+      navigate('tools');
+    }else{
+      librarySection='files';library.detailId=imported[0]?.id??null;navigate('library');
+    }
+    notify(t("Archivo importado. El original no se ha modificado.", "File imported. The original was not modified."),'success');
+  }
 }
 document.addEventListener('dragover',event=>{event.preventDefault();required('#drop-indicator').hidden=false;});
 document.addEventListener('dragleave',event=>{if(event.relatedTarget===null)required('#drop-indicator').hidden=true;});
@@ -771,7 +822,7 @@ if(desktop){
     await listen('drafts-changed',()=>void refresh().catch(showError));
     await listen<string>('browser-draft',({payload})=>void(async()=>{await refresh();const draft=snapshot.drafts?.find(d=>d.id===payload);if(!draft)return;if(draft.savedForLater){notify(t('Enlaces guardados en Biblioteca > Para después.','Links saved in Library > For later.'),'success');}else{navigate('home');await batches.open(draft);}})().catch(showError));
     await listen<string>('app-warning',({payload})=>notify(payload));
-    const state=await command<Startup>('startup');snapshot=state;enginesReady=state.enginesReady;void command<CaptureStatus>('screen_capture_status').then(value=>{if(value)screenCapture.acceptStatus(value);}).catch(()=>{});localTimezone=await command<string>('local_timezone').catch(()=> 'UTC');renderCurrent();if(state.engineError)notify(t("Algunos motores requieren preparación. Revisa Motores en Ajustes.", "Some engines require preparation. Review Engines in Settings."),'info',state.engineError);
+    const state=await command<Startup>('startup');snapshot=state;enginesReady=state.enginesReady;void command<CaptureStatus>('screen_capture_status').then(value=>{if(value)screenCapture.acceptStatus(value);}).catch(()=>{});localTimezone=await command<string>('local_timezone').catch(()=> 'UTC');audioPlayer.restore();renderCurrent();if(state.engineError)notify(t("Algunos motores requieren preparación. Revisa Motores en Ajustes.", "Some engines require preparation. Review Engines in Settings."),'info',state.engineError);
   }catch(error){showError(error);}
 }else{for(const button of document.querySelectorAll<HTMLButtonElement>('.window-actions button'))button.disabled=true;}
 required<HTMLTextAreaElement>('#url').focus({preventScroll:true});
