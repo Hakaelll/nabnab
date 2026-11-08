@@ -64,6 +64,7 @@ export function createCoursesController(hooks: CourseHooks) {
   let input = "";
   let provider: CourseProvider = "udemy";
   let browserTitle = "";
+  let courseraIds = { organization: "", program: "", courseId: "" };
   let resourceLinks = "";
   let resourceLessonId = "";
   let productId = "";
@@ -94,6 +95,7 @@ export function createCoursesController(hooks: CourseHooks) {
     if (active(asset)) return t("En cola", "Queued");
     if (asset.status === "drm") return "DRM";
     if (asset.status === "downloadable") return failed(asset) ? t("Descarga fallida", "Download failed") : t("Descarga autorizada disponible", "Authorized download available");
+    if (asset.id.startsWith("coursera-item-")) return t("Consultar en Coursera", "View in Coursera");
     return asset.status === "local" ? t("Archivo ausente", "Missing file") : t("Sin descarga autorizada", "No authorized download");
   }
   function materialKind(kind: string, localStudy: boolean): string {
@@ -101,6 +103,10 @@ export function createCoursesController(hooks: CourseHooks) {
     if (kind === "video") return t("Lección de vídeo", "Video lesson");
     if (kind === "audio") return t("Lección de audio", "Audio lesson");
     if (kind === "subtitle") return t("Subtítulos", "Subtitles");
+    if (kind === "reading") return t("Lectura", "Reading");
+    if (kind === "quiz") return t("Cuestionario", "Quiz");
+    if (kind === "assignment") return t("Actividad", "Assignment");
+    if (kind === "course-item") return t("Material del curso", "Course material");
     return t("Adjunto", "Attachment");
   }
 
@@ -136,6 +142,7 @@ export function createCoursesController(hooks: CourseHooks) {
       courseId = null;
       lessonId = null;
       browserTitle = "";
+      courseraIds = { organization: "", program: "", courseId: "" };
       resourceLinks = "";
       resourceLessonId = "";
       selected.clear();
@@ -264,7 +271,26 @@ export function createCoursesController(hooks: CourseHooks) {
           ${source === "skillshare" ? skillshareEntry() : ""}
         </section>
       </div>
-    </form>`;
+    </form>${source === "coursera" ? courseraForm() : ""}`;
+  }
+
+  function courseraForm(course?: Course): string {
+    const idField = (name: string, caption: string, value = "") =>
+      `<label>${caption}<input name="${name}" required maxlength="128" value="${h(value)}" autocomplete="off" spellcheck="false"></label>`;
+    return `<details id="course-coursera-business" class="course-resource-entry">
+      <summary>${t("Temario de Coursera Business", "Coursera Business outline")}</summary>
+      <form id="course-coursera-form" class="settings-form" aria-busy="${busy}">
+        <p class="field-note">${t("Usa un token autorizado de Business, Campus o Government. La consulta guarda el temario y usa el token solo durante la solicitud.", "Use an authorized Business, Campus or Government token. This request saves the outline and uses the token only for the request.")}</p>
+        <fieldset ${busy ? "disabled" : ""}>
+          <div class="form-grid">
+            ${idField("organization", t("ID de organización", "Organization ID"), courseraIds.organization)}
+            ${idField("program", t("ID de programa", "Program ID"), courseraIds.program)}
+            ${idField("courseId", t("ID de curso en Business", "Business course ID"), course?.slug ?? courseraIds.courseId)}
+            <label>${t("Token de acceso", "Access token")}<input name="token" type="password" required maxlength="16384" autocomplete="off"></label>
+          </div>
+          <div class="button-group"><button class="button secondary" type="submit">${busy ? t("Consultando…", "Fetching…") : course?.slug ? t("Actualizar temario", "Refresh outline") : t("Consultar temario", "Fetch outline")}</button></div>
+        </fieldset>
+      </form></details>`;
   }
 
   function skillshareEntry(course?: Course) {
@@ -346,7 +372,7 @@ export function createCoursesController(hooks: CourseHooks) {
     const item = lessonMedia(lesson);
     const queueable = course.sections.flatMap(section => section.lessons).flatMap(lesson => lesson.assets).filter(asset => selected.has(asset.id) && available(asset));
     return `<div class="page-heading"><div>${action("course-back", t("Todos los cursos", "All courses"), undefined, "quiet")}<h1 id="course-heading" tabindex="-1">${h(course.title)}</h1><p>${h(course.provider === "local" ? t("Archivos locales", "Local files") : courseProviderName(course.provider))} · ${courseCounts}</p></div>${browserAssisted ? `<div class="button-group">${action("course-browser-open", t("Abrir curso en el navegador", "Open course in browser"), "arrow", "quiet", busy ? "disabled" : "")}${action("course-add-folder", t("Añadir carpeta", "Add folder"), "folder", "secondary", `id="course-add-folder" ${busy ? "disabled" : ""}`)}${action("course-add-materials", t("Añadir archivos guardados", "Add saved files"), "add", "primary", `id="course-add-materials" ${busy ? "disabled" : ""}`)}</div>` : course.url ? action("course-refresh", t("Actualizar materiales", "Refresh materials"), "retry", "quiet", busy ? "disabled" : "") : ""}</div>
-      ${course.provider === "skillshare" ? skillshareEntry(course) : ""}
+      ${course.provider === "skillshare" ? skillshareEntry(course) : course.provider === "coursera" ? courseraForm(course) : ""}
       ${!showQueue ? "" : `<div class="selection-toolbar"><span>${queueable.length === 1 ? t("1 material seleccionado", "1 material selected") : `${queueable.length} ${t("materiales seleccionados", "materials selected")}`}</span>${action("course-queue", t("Añadir a la cola", "Add to queue"), "add", "primary", busy || !queueable.length ? "disabled" : "")}${action("course-clear", t("Quitar selección", "Clear selection"), undefined, "quiet")}</div>`}
       <div class="course-layout${browserAssisted ? " course-layout--browser" : ""}"><nav aria-label="${resourceCount ? t("Lecciones y recursos", "Lessons and resources") : t("Lecciones del curso", "Course lessons")}" class="course-tree"><label class="search-control">${icon("search")}<input id="course-search" type="search" value="${h(query)}" placeholder="${t("Buscar lección", "Find lesson")}" aria-label="${t("Buscar lección", "Find lesson")}"></label>${course.sections.map(section => `<details ${section.lessons.some(lesson => lesson.id === lessonId) || !lessonId ? "open" : ""}><summary>${h(section.id === "skillshare-resources" ? t("Recursos de Skillshare", "Skillshare resources") : section.title)}</summary>${localStudy && !section.lessons.some(lesson => lesson.assets.some(available)) ? "" : action("course-select-section", t("Seleccionar materiales disponibles", "Select available materials"), undefined, "quiet", `data-id="${h(section.id)}"`)}<ul>${section.lessons.filter(lesson => lesson.title.toLocaleLowerCase().includes(query.toLocaleLowerCase())).map(lesson => `<li><button type="button" class="course-lesson" data-action="course-lesson" data-id="${h(lesson.id)}" ${lesson.id === lessonId ? 'aria-current="true"' : ""}><span>${h(lesson.title)}</span>${lesson.learned ? `<small>${t("Aprendida", "Learned")}</small>` : ""}</button></li>`).join("")}</ul></details>`).join("")}</nav><section class="course-study">${lesson ? `<div class="page-heading"><h2>${h(lesson.title)}</h2>${action("course-learned", resourceLesson ? (lesson.learned ? t("Marcar pendiente", "Mark as pending") : t("Marcar revisado", "Mark as reviewed")) : (lesson.learned ? t("Marcar pendiente de aprender", "Mark as not learned") : t("Marcar aprendida", "Mark as learned")), "check", "quiet", `aria-pressed="${lesson.learned}" ${busy ? "disabled" : ""}`)}</div>
       ${item ? lessonPlayback(item) : ""}
@@ -396,6 +422,36 @@ export function createCoursesController(hooks: CourseHooks) {
   async function handleSubmit(form: HTMLFormElement): Promise<boolean> {
     if (form.id === "course-browser-form") {
       if (isBrowserProvider(provider) && form.reportValidity()) await reviewMaterials(provider, input, browserTitle);
+      return true;
+    }
+    if (form.id === "course-coursera-form") {
+      const course = current();
+      if (busy || (course?.provider ?? provider) !== "coursera") return true;
+      if (!course && !document.querySelector<HTMLFormElement>("#course-browser-form")?.reportValidity()) return true;
+      const data = new FormData(form);
+      const token = form.querySelector<HTMLInputElement>('input[name="token"]');
+      if (!token) return true;
+      const accessToken = token.value;
+      token.value = "";
+      courseraIds = {
+        organization: String(data.get("organization") ?? ""),
+        program: String(data.get("program") ?? ""),
+        courseId: String(data.get("courseId") ?? ""),
+      };
+      let saved = false;
+      await perform(async () => {
+        const result = await hooks.command<{ course: Course; partial: boolean }>("inspect_coursera_course", {
+          url: course?.url ?? input, title: course?.title ?? browserTitle, ...courseraIds, token: accessToken,
+        });
+        courseId = result.course.id;
+        lessonId = course?.id === courseId ? lessonId : result.course.sections[0]?.lessons[0]?.id ?? null;
+        saved = true;
+        if (result.partial) hooks.notify(t("El origen indica que el temario guardado es parcial.", "The source reports that the saved outline is partial."), "info");
+      });
+      const entry = document.querySelector<HTMLDetailsElement>("#course-coursera-business");
+      if (entry) entry.open = !saved;
+      if (saved) focusCourseHeading();
+      else entry?.querySelector<HTMLElement>('input[name="token"]')?.focus();
       return true;
     }
     if (form.id === "course-open-online") { await perform(async () => { const course = provider === "udemy" ? await hooks.command<Course>("inspect_course", { url: input, limit }) : await hooks.command<Course>("inspect_member_course", { provider, url: input, productId, slug, limit }); courseId = course.id; lessonId = course.sections[0]?.lessons[0]?.id ?? null; }); return true; }

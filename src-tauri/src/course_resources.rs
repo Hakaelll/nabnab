@@ -167,7 +167,7 @@ fn register(
     links: &[String],
     lesson_id: Option<&str>,
 ) -> Result<Course, String> {
-    let (id, url) = browser::skillshare_course(url)?;
+    let (id, url) = browser::authorized_course("skillshare", url)?;
     let title = label(title, 240);
     if title.is_empty() || links.is_empty() || links.len() > 30 {
         return Err("Enter a course name and 1–30 resource links.".into());

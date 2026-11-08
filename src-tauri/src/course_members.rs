@@ -12,12 +12,19 @@ fn provider_name(provider: &str) -> Result<&str, String> {
         Err("Choose Hotmart or Kiwify for a student token connection.".into())
     }
 }
-fn identifier(value: &str) -> bool {
+pub(super) fn identifier(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 128
         && value
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b"-_".contains(&b))
+}
+pub(super) fn valid_access_token(token: &str) -> bool {
+    !token.is_empty()
+        && token.len() <= 16384
+        && token
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"-._~+/=".contains(&b))
 }
 fn field_id(value: &Value) -> Option<String> {
     value
@@ -46,18 +53,13 @@ pub fn save_course_token(
         return Ok(());
     }
     let token = token.trim();
-    if token.is_empty()
-        || token.len() > 16384
-        || !token
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b"-._~+/=".contains(&b))
-    {
+    if !valid_access_token(token) {
         return Err("Enter a valid student access token without spaces.".into());
     }
     sessions::save_module_secret(&root, &name, token.as_bytes())
 }
 
-async fn get_json(
+pub(super) async fn get_json(
     provider: &str,
     token: &str,
     url: &str,
@@ -74,6 +76,7 @@ async fn get_json(
         ]
         .contains(&host),
         "kiwify" => ["admin-api.kiwify.com", "admin-api.kiwify.com.br"].contains(&host),
+        "coursera" => host == "api.coursera.com",
         _ => false,
     };
     if !approved || url.scheme() != "https" || url.port_or_known_default() != Some(443) {
@@ -108,7 +111,7 @@ async fn get_json(
             .header("slug", slug)
             .header("x-product-id", product_id)
             .header("Origin", "https://hotmart.com");
-    } else {
+    } else if provider == "kiwify" {
         request = request.header("Origin", "https://admin.kiwify.com.br");
     }
     let mut response = request
@@ -116,6 +119,9 @@ async fn get_json(
         .await
         .map_err(|_| "The authorized course API request failed.")?;
     if !response.status().is_success() {
+        if provider == "coursera" {
+            return Err(format!("Coursera Business returned HTTP {}. Check the token expiry and organization, program and course access.", response.status().as_u16()));
+        }
         return Err(format!("{} returned HTTP {}. Check the student session, course access and download permissions.",provider,response.status().as_u16()));
     }
     let mut bytes = Vec::new();

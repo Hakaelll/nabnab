@@ -33,7 +33,7 @@ Si un documento, subtítulo, imagen o archivo comprimido pertenece a una lecció
 | Domestika | Guarda los [recursos adicionales](https://support.domestika.org/hc/en-us/articles/360003129937-I-can-t-download-the-additional-resources) desde la web. Los [vídeos offline](https://support.domestika.org/hc/en-us/articles/360003651177-Can-I-download-the-courses) se reproducen en la app de Domestika. |
 | Skillshare | Copia los enlaces a archivos de [Proyectos y recursos → Descargar recursos](https://help.skillshare.com/hc/en-us/articles/217440617-How-do-I-access-class-materials-or-additional-resources), o importa los archivos guardados. Los [vídeos offline](https://help.skillshare.com/hc/en-us/articles/205221147-How-do-I-download-videos-for-offline-viewing) se reproducen en la app de Skillshare. |
 
-En Rocketseat, Coursera y Domestika, la sesión y la descarga se gestionan en el sitio oficial. El índice local asocia los archivos elegidos con su curso. En Skillshare, el flujo de enlaces directos que se describe abajo permite enviar adjuntos públicos a Descargas después de revisarlos.
+En Rocketseat, Coursera y Domestika, la sesión de alumno y la descarga se gestionan en el sitio oficial. El índice local asocia los archivos elegidos con su curso. En Skillshare, el flujo de enlaces directos que se describe abajo permite enviar adjuntos públicos a Descargas después de revisarlos. Los usuarios autorizados de Coursera Business pueden consultar el temario con su token de organización.
 
 ![Apertura del curso e importación de adjuntos, a 1180 × 780 con IPC simulado](course-materials-form.png)
 
@@ -46,6 +46,17 @@ En Rocketseat, Coursera y Domestika, la sesión y la descarga se gestionan en el
 ![Revisión de adjuntos para una lección existente, a 900 × 620 con IPC simulado](course-lesson-attachments.png)
 
 `tests/native-course-materials.browser.mjs` abre un perfil aislado de Windows y comprueba que el comando de revisión rechaza un archivo local cuando no hay un arrastre nativo que lo autorice. La biblioteca y los cursos quedan vacíos y el perfil temporal se elimina al terminar. Ejecuta `node tests/native-course-materials.browser.mjs` con Vite en el puerto 1420 y el ejecutable de depuración actualizado. El recorrido de arrastre entre ventanas sigue pendiente de comprobar con el Explorador.
+
+### Temario de Coursera Business
+
+1. En **Plataformas → Cursos**, selecciona **Coursera**, pega el enlace del curso e indica su nombre.
+2. Abre **Temario de Coursera Business**. Introduce los identificadores de organización, programa y curso. Usa un token de acceso emitido para una aplicación autorizada de Business, Campus o Government. [Cómo obtener un token en Coursera](https://dev.coursera.com/get-started)
+3. Pulsa **Consultar temario**. nabnab guarda los módulos y sus lecciones en el orden que devuelve la API. El token se envía a `api.coursera.com` durante la solicitud y se borra del formulario. La consulta guarda la página devuelta y avisa si la respuesta indica que hay más páginas. [API de materiales del curso](https://dev.coursera.com/docs/coursera-for-business-api-product/1/routes/api%2Fbusinesses.v1%2F%7BorgId%7D%2Fprograms%2F%7BprogramId%7D%2FcourseMaterials%2F%7BcourseId%7D/get)
+4. Usa **Abrir curso en el navegador** para consultar las lecturas, vídeos y actividades con tu sesión de alumno. Guarda los archivos que el sitio permita descargar y vincúlalos a su lección con **Añadir adjuntos**. Actualizar el temario conserva las notas, el estado aprendido y los adjuntos locales de las lecciones que ya están guardadas.
+
+La respuesta documentada contiene enlaces de acceso que pueden inscribir al alumno. nabnab guarda el tipo y el nombre de cada material y usa el enlace general del curso para abrir Coursera. Las pruebas de Rust usan respuestas sintéticas basadas en el esquema oficial. La prueba de Edge comprueba los controles a 900 y 1180 px y el reintento tras un token caducado simulado. La consulta con un token real de organización queda pendiente.
+
+![Lección con los tipos de material del temario de Coursera Business, con datos de prueba](course-coursera-business.png)
 
 ### Adjuntos de Skillshare
 

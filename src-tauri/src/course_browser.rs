@@ -113,8 +113,8 @@ pub(crate) fn is_course_page(input: &str) -> bool {
     CourseLink::parse(input).is_some()
 }
 
-pub(super) fn skillshare_course(input: &str) -> Result<(String, String), String> {
-    let link = CourseLink::selected("skillshare", input)?;
+pub(super) fn authorized_course(provider: &str, input: &str) -> Result<(String, String), String> {
+    let link = CourseLink::selected(provider, input)?;
     Ok((link.id, link.page.to_string()))
 }
 
@@ -520,7 +520,9 @@ fn import_selected(
         })
         .collect();
     if let Some(target) = lesson_id {
-        let lesson = course.sections.iter_mut().filter(|section| section.id.starts_with("section-"))
+        let lesson = course.sections.iter_mut().filter(|section| {
+            section.id.starts_with("section-") || link.provider == "coursera" && section.id.starts_with("coursera-module-")
+        })
             .flat_map(|section| &mut section.lessons).find(|lesson| lesson.id == target)
             .ok_or("This lesson is no longer available. Open the course and choose the attachments again.")?;
         lesson.assets.extend(additions.into_iter().map(local_asset));
@@ -721,6 +723,39 @@ mod tests {
             assert!(!is_course_page(invalid));
         }
         assert!(CourseLink::selected("rocketseat", "https://www.coursera.org/learn/apis").is_err());
+    }
+
+    #[test]
+    fn attaches_saved_file_to_a_coursera_outline_lesson() {
+        let root = std::env::temp_dir()
+            .join(format!("nabnab-coursera-attachment-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("Saved handout.txt");
+        fs::write(&path, b"Authorized course handout").unwrap();
+        let link = CourseLink::selected("coursera", "https://www.coursera.org/learn/fixture").unwrap();
+        let mut repo = crate::store::Repository::open(&root, &root).unwrap();
+        save_course(&mut repo, Course {
+            id: link.id.clone(), title: "Fixture".into(), provider: "coursera".into(),
+            url: Some(link.page.to_string()), slug: Some("remote-id".into()), created_at: 1,
+            sections: vec![CourseSection {
+                id: "coursera-module-fixture".into(), title: "First module".into(),
+                lessons: vec![CourseLesson {
+                    id: "coursera-lesson-fixture".into(), title: "First lesson".into(),
+                    learned: true, notes: Vec::new(), assets: Vec::new(),
+                }],
+            }],
+        }).unwrap();
+        let target = Some("coursera-lesson-fixture");
+        let (_, plan) = prepare_review(1, link, "Fixture".into(), &[path], false, target.map(str::to_owned)).unwrap();
+        let selected = selected_files(&plan, &[0]).unwrap();
+        let saved = import_selected(&mut repo, plan.link, plan.title, selected, target).unwrap();
+        let lesson = &saved.sections[0].lessons[0];
+        assert!(lesson.learned);
+        assert_eq!(lesson.assets[0].title, "Saved handout.txt");
+        assert_eq!(lesson.assets[0].library_id.as_deref(), Some(repo.data.library[0].id.as_str()));
+        assert!(repo.data.jobs.is_empty());
+        drop(repo);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

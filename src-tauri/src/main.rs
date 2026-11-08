@@ -1259,6 +1259,7 @@ fn main() {
             courses::members::save_course_token, courses::members::inspect_member_course, courses::inspect_course, courses::queue_course_assets, courses::list_courses, courses::import_local_course, courses::course_learned, courses::save_course_note,
             courses::browser::open_course_site, courses::browser::preview_course_materials,
             courses::browser::discard_course_materials, courses::browser::import_course_materials,
+            courses::coursera::inspect_coursera_course,
             courses::resources::review_skillshare_resources,
             courses::resources::add_skillshare_resources,
             queue_torrent, torrents::torrent_status, torrents::set_torrent_enabled, torrents::open_torrent, torrents::inspect_torrent_magnet, torrents::cancel_torrent_inspection,

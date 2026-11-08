@@ -16,6 +16,8 @@ use tauri_plugin_dialog::DialogExt;
 pub mod members;
 #[path = "course_browser.rs"]
 pub mod browser;
+#[path = "course_coursera.rs"]
+pub mod coursera;
 #[path = "course_resources.rs"]
 pub mod resources;
 

@@ -27,6 +27,21 @@ const setup = `
     if (cmd === "get_snapshot") return structuredClone(state);
     if (cmd === "list_courses") return structuredClone(fixture.courses);
     if (cmd === "open_course_site") return;
+    if (cmd === "inspect_coursera_course") {
+      if (args.token === "expired-fixture") throw Error("Coursera Business returned HTTP 401.");
+      const course = {
+        id:"business-course",provider:"coursera",title:args.title,url:args.url,slug:args.courseId,createdAt:1,
+        sections:[{id:"coursera-module-z",title:"02 Datos en práctica",lessons:[{
+          id:"coursera-lesson-1",title:"Revisar los datos",learned:true,
+          notes:[{id:"business-note",text:"Comprobar el origen",time:null,bookmarkId:null}],
+          assets:[["clip","Vídeo de preparación","video"],["text","Lectura inicial","reading"]].map(([id,title,kind])=>({
+            id:"coursera-item-"+id,title,kind,status:"unavailable",libraryId:null,urlRef:null,jobIds:[],
+          })),
+        }]},{id:"coursera-module-a",title:"01 Repaso",lessons:[{id:"coursera-lesson-2",title:"Comprobar el resultado",learned:false,notes:[],assets:[]}]}],
+      };
+      fixture.courses = [course];
+      return {course,partial:true};
+    }
     if (cmd === "review_skillshare_resources") {
       const names = {"Guide.pdf":"Guía del proyecto.pdf","Templates.zip":"Plantillas.zip","Unused.pdf":"Sin marcar.pdf","Referencias.pdf":"Referencias.pdf"};
       const seen = new Set();
@@ -373,8 +388,54 @@ try {
   await page.getByText("Adjunto · En cola", {exact:true}).waitFor();
   const queuedLesson = await page.evaluate(() => window.courseFixture.calls.filter(call => call.cmd === "queue_course_assets").at(-1).args);
   assert.deepEqual(queuedLesson.assetIds, ["skillshare-lesson-resource"]);
+
+  await page.locator("button[data-page='platforms']").click();
+  await page.locator("[data-action='open-courses'][data-id='coursera']").click();
+  await page.getByLabel("Enlace del curso").fill("https://www.coursera.org/learn/analisis");
+  await page.getByLabel("Nombre del curso").fill("Análisis de datos");
+  const business = page.locator("#course-coursera-business");
+  await business.locator("summary").press("Enter");
+  await business.getByLabel("ID de organización").fill("org-fixture");
+  await business.getByLabel("ID de programa").fill("program-fixture");
+  await business.getByLabel("ID de curso en Business").fill("course-fixture");
+  const token = business.getByLabel("Token de acceso");
+  const fetchOutline = business.getByRole("button", { name: "Consultar temario" });
+  for (const [width,height] of [[1180,780],[900,620]]) {
+    await page.setViewportSize({width,height});
+    await business.scrollIntoViewIfNeeded();
+    assert.ok(await business.evaluate(node => node.scrollWidth <= node.clientWidth + 1));
+    await page.screenshot({path:`${directory}/coursera-business-form-${width}.png`,animations:"disabled"});
+  }
+  assert.equal(await token.getAttribute("type"), "password");
+  await token.fill("expired-fixture");
+  await fetchOutline.press("Enter");
+  await token.waitFor();
+  assert.equal(await token.inputValue(), "");
+  assert.equal(await token.evaluate(field => field === document.activeElement), true);
+  assert.equal(await business.getByLabel("ID de programa").inputValue(), "program-fixture");
+  await token.fill("authorized-fixture");
+  await fetchOutline.press("Enter");
+  const businessHeading = page.getByRole("heading", { name: "Análisis de datos", exact: true });
+  await businessHeading.waitFor();
+  assert.equal(await businessHeading.evaluate(node => node === document.activeElement), true);
+  assert.equal(await business.evaluate(details => details.open), false);
+  assert.deepEqual(await page.locator(".course-tree summary").allTextContents(), ["02 Datos en práctica", "01 Repaso"]);
+  await page.getByText("Lectura · Consultar en Coursera", {exact:true}).waitFor();
+  await page.getByText("Comprobar el origen", {exact:true}).waitFor();
+  assert.equal(await page.locator("[data-action='course-queue']").count(), 0);
+  assert.equal(await page.locator("[data-course-asset]").count(), 0);
+  await page.getByText("El origen indica que el temario guardado es parcial.", {exact:true}).waitFor();
+  const courseCall = await page.evaluate(() => window.courseFixture.calls.filter(call => call.cmd === "inspect_coursera_course").at(-1).args);
+  assert.deepEqual(courseCall, {url:"https://www.coursera.org/learn/analisis",title:"Análisis de datos",organization:"org-fixture",program:"program-fixture",courseId:"course-fixture",token:"authorized-fixture"});
+  for (const [width,height] of [[1180,780],[900,620]]) {
+    await page.setViewportSize({width,height});
+    const study = page.locator(".course-layout");
+    await page.getByRole("heading", { name: "Revisar los datos" }).scrollIntoViewIfNeeded();
+    assert.ok(await study.evaluate(node => node.scrollWidth <= node.clientWidth + 1));
+    await page.screenshot({path:`${directory}/coursera-business-study-${width}.png`,animations:"disabled"});
+  }
   assert.deepEqual(errors, []);
-  console.log("Browser-assisted import and selective Skillshare queueing for course and lesson attachments passed at two widths.");
+  console.log("Browser-assisted import, Skillshare attachment queueing and Coursera Business outline review passed at two widths.");
 } finally {
   await browser.close();
 }
