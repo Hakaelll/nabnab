@@ -6,7 +6,7 @@ import { createRequire } from "node:module";
 const { chromium } = createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODULE || "playwright");
 const browser = await chromium.launch({ headless: true, channel: "msedge" });
 const base = process.env.NABNAB_UI_URL || "http://127.0.0.1:1420/";
-const directory = "artifacts/audio-library";
+const directory = process.env.NABNAB_AUDIO_ARTIFACTS || "artifacts/audio-library";
 await mkdir(directory, { recursive: true });
 const page = await browser.newPage({ viewport: { width: 1180, height: 780 } });
 const errors = [];
@@ -264,6 +264,22 @@ try {
   await page.waitForFunction(() => document.getElementById("audio-engine").src.endsWith("/chapter2") && !document.getElementById("audio-engine").paused);
   assert.deepEqual(await trackTitles(), ["Capítulo 1", "Capítulo 2", "Capítulo 3"]);
   assert.deepEqual(await page.locator(".audio-next li strong").allTextContents(), ["Capítulo 3"]);
+  await page.evaluate(async () => {
+    const { state } = window.audioFixture;
+    const book = structuredClone(state.library.find(item => item.id === "chapter1"));
+    Object.assign(book, {id:"many-chapters", name:"Voces del valle.m4b", path:"C:/fixture/Voces del valle.m4b", duration:33});
+    Object.assign(book.details, {audiobook:null, playbackPosition:0, chapters:Array.from({length:33}, (_, i) => ({title:`Parte ${i + 1}`,start:i,end:i + 1}))});
+    state.library.push(book);
+    const { emit } = await import("/node_modules/@tauri-apps/api/event.js");
+    await emit("library-update");
+  });
+  await page.locator('#audio-book option[value="many-chapters"]').waitFor({state:"attached"});
+  await page.locator("#audio-book").selectOption("many-chapters");
+  const chapterIndex = page.getByRole("region", {name:"Capítulos del archivo"});
+  assert.equal(await chapterIndex.locator("li").count(), 30);
+  await chapterIndex.getByRole("button", {name:"Siguientes",exact:true}).press("Enter");
+  assert.deepEqual(await chapterIndex.locator("strong").allTextContents(), ["Parte 31", "Parte 32", "Parte 33"]);
+  assert.equal(await chapterIndex.getByRole("heading").evaluate(node => node === document.activeElement), true);
   assert.deepEqual(errors, []);
   console.log("Audio shelves, keyboard filtering, persistent playback, playlist review, and audiobook sleep and chapter resumption passed.");
 } finally { await browser.close(); }

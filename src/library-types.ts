@@ -1,4 +1,5 @@
 export interface Chapter { title: string; start: number; end: number }
+export interface ChapterPosition { start: number; end: number; position: number }
 export type TrackOrigin = "creator" | "automatic" | "machineTranslation" | "imported";
 export interface Segment { start: number; end: number; text: string }
 export interface RemoteSubtitleTrack { language: string; origin: TrackOrigin; formats: string[] }
@@ -20,7 +21,7 @@ export interface AudioPlaylist { id: string; name: string; entries: AudioPlaylis
 export interface Lyric { time: number; text: string }
 export interface LibraryDetails {
   contentId: string | null; creator: string | null; platform: string | null; sourceIds: string[];sourceUrl?:string|null;license?:string|null;attribution?:string|null;webArchiveRef?:string|null;articleAnnotations?:import("./articles-ui").ArticleAnnotation[];ocrRef?:string|null;
-  chapters: Chapter[]; tracks: LocalTrack[]; playbackPosition: number; favorite: boolean;
+  chapters: Chapter[]; chapterPositions?: ChapterPosition[]; tracks: LocalTrack[]; playbackPosition: number; favorite: boolean;
   bookmarks: Bookmark[]; clip: ClipReference | null;
   narration?: NarrationReference | null; recording?: RecordingReference | null;
   sourceVersion?: string | null; sourcePublishedAt?: string | null; sourceChecksum?: string | null;

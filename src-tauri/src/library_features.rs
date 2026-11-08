@@ -37,11 +37,20 @@ pub struct LibraryDetails {
     pub narration: Option<NarrationReference>,
     pub recording: Option<RecordingReference>,
     pub chapters: Vec<Chapter>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub chapter_positions: Vec<ChapterPosition>,
     pub tracks: Vec<LocalTrack>,
     pub playback_position: f64,
     pub favorite: bool,
     pub bookmarks: Vec<Bookmark>,
     pub clip: Option<ClipReference>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ChapterPosition {
+    pub start: f64,
+    pub end: f64,
+    pub position: f64,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -400,12 +409,36 @@ pub fn library_playback(
         return Err("Use a valid playback position.".into());
     }
     edit_item(&state, &id, |item| {
-        item.details.playback_position = position.min(item.duration.unwrap_or(position));
+        save_playback_position(item, position);
         if item.kind == "audio" && position > 0.0 {
             item.details.last_played_at = Some(crate::queue::now());
         }
         Ok(())
     })
+}
+
+fn save_playback_position(item: &mut LibraryItem, position: f64) {
+    let position = position.min(item.duration.unwrap_or(position));
+    let details = &mut item.details;
+    if item.kind == "audio"
+        && (details.audiobook.is_some() || item.path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("m4b")))
+        && !details.chapters.is_empty()
+    {
+        // Seed the saved point for books indexed before chapter-specific progress was added.
+        let previous = details.chapter_positions.is_empty().then_some(details.playback_position);
+        for point in previous.into_iter().chain([position]) {
+            let Some(chapter) = details.chapters.iter().find(|chapter| chapter.start < point && point < chapter.end) else {
+                continue;
+            };
+            if let Some(saved) = details.chapter_positions.iter_mut().find(|saved| saved.start == chapter.start) {
+                saved.end = chapter.end;
+                saved.position = point;
+            } else if details.chapter_positions.len() < 1000 {
+                details.chapter_positions.push(ChapterPosition { start: chapter.start, end: chapter.end, position: point });
+            }
+        }
+    }
+    details.playback_position = position;
 }
 #[tauri::command]
 pub fn library_favorite(
@@ -744,6 +777,29 @@ mod tests {
         }
         .validate()
         .is_ok());
+    }
+
+    #[test]
+    fn embedded_audiobook_chapters_keep_separate_resume_points() {
+        let mut book = item();
+        book.kind = "audio".into();
+        book.path = book.path.with_extension("M4B");
+        book.duration = Some(100.0);
+        book.details.chapters = vec![
+            Chapter { title: "First".into(), start: 0.0, end: 40.0 },
+            Chapter { title: "Second".into(), start: 40.0, end: 100.0 },
+        ];
+        book.details.playback_position = 18.0;
+        save_playback_position(&mut book, 60.0);
+        save_playback_position(&mut book, 22.0);
+        assert_eq!(book.details.playback_position, 22.0);
+        assert_eq!(book.details.chapter_positions, vec![
+            ChapterPosition { start: 0.0, end: 40.0, position: 22.0 },
+            ChapterPosition { start: 40.0, end: 100.0, position: 60.0 },
+        ]);
+        let saved = serde_json::to_vec(&book.details).unwrap();
+        let reloaded: LibraryDetails = serde_json::from_slice(&saved).unwrap();
+        assert_eq!(reloaded.chapter_positions, book.details.chapter_positions);
     }
 
     #[test]

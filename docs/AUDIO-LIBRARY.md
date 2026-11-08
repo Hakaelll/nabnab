@@ -10,6 +10,8 @@ En **Ajustes → Sesiones y privacidad → Caché de miniaturas** puedes ver cu�
 
 La **Estantería** de audiolibros agrupa capítulos de LibriVox y reconoce archivos M4B. **Continuar** recupera el punto guardado del capítulo o abre el siguiente si el anterior llegó al final. La cola de capítulos se limita al libro que estás escuchando. El minirreproductor ofrece velocidad, retroceso de 15 segundos y temporizador por minutos o al final del capítulo. Los marcadores se guardan en Biblioteca. Si hay capítulos incrustados, se puede saltar a ellos.
 
+Abre un M4B desde la **Estantería** para ver sus capítulos antes de reproducirlo. **Reproducir** abre el capítulo desde el inicio y **Retomar** vuelve al punto guardado de ese capítulo. **Continuar audiolibro** indica el nombre del último capítulo y el tiempo transcurrido dentro de él. Los puntos se conservan al cerrar nabnab y al pasar a otro capítulo desde el índice.
+
 Selecciona pistas para crear una lista, añadirlas a una existente o editar sus etiquetas. Puedes cambiar el orden y quitar entradas desde **Listas → Editar lista**. La previsualización de etiquetas muestra los campos que cambiarán. **Guardar etiquetas** actualiza la base de nabnab. **Crear copias con etiquetas** usa la cola para generar archivos nuevos y compara la huella de los flujos de audio antes de incorporarlos a Biblioteca. Se probaron MP3, M4A, M4B, FLAC, OGG y Opus con los motores de producción. Los originales se conservan.
 
 Desde la pista actual, **Elegir portada** permite asociar un JPEG, PNG o WebP local. Quitar la asociación vuelve a mostrar la portada incrustada cuando está disponible.
@@ -19,6 +21,8 @@ Desde la pista actual, **Elegir portada** permite asociar un JPEG, PNG o WebP lo
 En **Listas → Importar lista** puedes abrir M3U, M3U8, PLS o CSV en UTF-8. En CSV, confirma las columnas y la unidad de duración. nabnab reconoce identificadores y rutas de archivos que ya están en Biblioteca. Las coincidencias por título, artista, duración o versión son sugerencias. Puedes escoger la grabación o conservar la referencia remota o ausente. La lista conserva el orden y las URLs importadas permanecen como referencias.
 
 La prueba de interfaz reproduce un WAV silencioso en Edge con almacenamiento de escritorio simulado. Comprueba el orden por disco y pista, la estantería con teclado, la continuidad del reproductor, el descanso de audiolibros, las letras y la edición de listas y etiquetas. La prueba nativa usa audio sintético y verifica que, después de reiniciar nabnab, **Continuar** abre el capítulo siguiente de un libro cuyo capítulo anterior terminó. La integración con Windows se comprueba mediante solicitudes del sistema a la sesión multimedia de prueba.
+
+Con `NABNAB_PLAYBACK_EMBEDDED_BOOK=1`, `tests/native-playback.browser.mjs` importa un M4B local de tres capítulos, guarda dos puntos de escucha y comprueba ambos tras reiniciar nabnab. También verifica que el resumen cambia al retomar y pausar otro capítulo. La revisión visual se hizo a 900 y 1180 px. [Índice de capítulos en Windows](audio-embedded-chapters.png)
 
 ![Biblioteca de audio y minirreproductor persistente con datos de prueba](audio-library-preview.png)
 

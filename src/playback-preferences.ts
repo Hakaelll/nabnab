@@ -1,4 +1,5 @@
 import type { LibraryItem } from "./contracts";
+import type { Chapter } from "./library-types";
 
 export const playbackRates = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
 export type Repeat = "off" | "all" | "one";
@@ -39,6 +40,10 @@ export function audiobookChapterComplete(position: number, duration?: number | n
 
 export function audiobookResumePosition(position: number, duration?: number | null): number {
   return Number.isFinite(position) && position > 0 && !audiobookChapterComplete(position, duration) ? position : 0;
+}
+
+export function chapterAt(chapters: readonly Chapter[], time: number) {
+  return chapters.find(chapter => chapter.start <= time && time < chapter.end);
 }
 
 export function resumePosition(position: number, duration?: number | null): number {

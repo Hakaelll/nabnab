@@ -35,6 +35,14 @@
 .audio-continue-copy > span { color: var(--muted); font-size: 11px; font-weight: 600; }
 .audio-continue-copy h2 { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -.02em; overflow-wrap: anywhere; }
 .audio-continue .button { margin-inline-start: auto; }
+.audio-book-chapters { margin-bottom: 20px; }
+.audio-book-chapters > header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.audio-book-chapters h2 { margin: 0; font-size: 15px; }
+.audio-book-chapters > header span, .audio-book-chapter-number, .audio-book-chapter-copy small { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.audio-book-chapters > ol { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--edge-quiet); }
+.audio-book-chapters li { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 7px 4px; border-bottom: 1px solid var(--edge-quiet); }
+.audio-book-chapter-copy { display: grid; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
+.audio-book-chapter-copy strong { font-weight: 550; }
 .audio-filters, .audio-tag-fields, .audio-add-list { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; }
 .audio-filters { margin-bottom: 20px; }
 .audio-filters label, .audio-add-list label, .audio-editor > label, .audio-tag-fields > div { display: grid; gap: 6px; min-width: 0; }

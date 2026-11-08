@@ -3,7 +3,7 @@ import { detailsFor } from "./library-features";
 import type { AudioPlaylist, LocalTrack } from "./library-types";
 import { createMiniPlayer, hasPlayerArtwork, playerArtist } from "./mini-player";
 import type { createSceneControls } from "./music-scene-controls";
-import { audiobookResumePosition, isPlayable, playbackRates, readPlayback, resumePosition, savePlayback } from "./playback-preferences";
+import { audiobookResumePosition, chapterAt, isPlayable, playbackRates, readPlayback, resumePosition, savePlayback } from "./playback-preferences";
 import { connectPlaybackSignal } from "./playback-signal";
 import { createPlaybackStage, type StageState } from "./playback-stage";
 import { durationLabel } from "./presentation";
@@ -296,7 +296,17 @@ export function createAudioPlayer(hooks: Hooks) {
     const details = detailsFor(item);
     const playedAudio = item.kind === "audio" && media.currentTime > 0;
     if (details.playbackPosition === position && (!playedAudio || details.lastPlayedAt)) return;
-    item.details = { ...details, playbackPosition: position, lastPlayedAt: playedAudio ? Date.now() : details.lastPlayedAt };
+    let chapterPositions = details.chapterPositions;
+    if (isAudiobook(item) && details.chapters.length) {
+      const points = chapterPositions?.length ? [position] : [details.playbackPosition, position];
+      for (const point of points) {
+        const chapter = chapterAt(details.chapters, point);
+        if (!chapter || point === chapter.start) continue;
+        const previous = (chapterPositions ?? []).filter(saved => saved.start !== chapter.start);
+        chapterPositions = [...previous, { start: chapter.start, end: chapter.end, position: point }];
+      }
+    }
+    item.details = { ...details, chapterPositions, playbackPosition: position, lastPlayedAt: playedAudio ? Date.now() : details.lastPlayedAt };
     lastSaved = Date.now();
     return hooks.command<void>("library_playback", { id: item.id, position }).catch(hooks.showError);
   }
@@ -384,7 +394,7 @@ export function createAudioPlayer(hooks: Hooks) {
     const item = current();
     if (!item || !media) return 0;
     const position = media.currentTime;
-    return detailsFor(item).chapters.find(chapter => chapter.start <= position && chapter.end > position)?.end
+    return chapterAt(detailsFor(item).chapters, position)?.end
       ?? (Number.isFinite(media.duration) ? media.duration : 0);
   }
 
@@ -881,7 +891,10 @@ export function createAudioPlayer(hooks: Hooks) {
     element.addEventListener("pause", () => {
       if (!matchesSource() || !element.paused) return;
       if (!element.ended && !issue) mediaState = element.readyState ? "paused" : "loading";
-      persist(); updatePlaying();
+      const saved = persist();
+      updatePlaying();
+      const item = current();
+      if (saved && item?.details?.chapters.length && isAudiobook(item)) hooks.render();
     });
     element.addEventListener("ended", () => {
       if (!matchesSource() || !element.ended) return;
@@ -964,6 +977,13 @@ export function createAudioPlayer(hooks: Hooks) {
     }
     seek(time);
     return true;
+  }
+
+  function playChapter(id: string, position: number) {
+    if (id === currentId()) persist();
+    if (!playAt(id, position)) return;
+    if (media?.paused) void playMedia();
+    hooks.render();
   }
 
   function compareTrack(id: string, group: readonly string[]) {
@@ -1081,7 +1101,7 @@ export function createAudioPlayer(hooks: Hooks) {
     return true;
   }
 
-  return { mount, render, restore, play, playAt, compareTrack, pause: () => media?.pause(), add, playNext, remove, input, click, key, current, nextEntries, seek, persist, detachMini, openFloatingMini,
+  return { mount, render, restore, play, playAt, playChapter, compareTrack, pause: () => media?.pause(), add, playNext, remove, input, click, key, current, nextEntries, seek, persist, detachMini, openFloatingMini,
     nativeMiniRestored: (dock: boolean) => { setDetached(false); if (dock) dockMini(); },
     syncDesktopWheel, wheelAction, isExpanded: () => expanded, isDetached: () => detached,
     timeFor: (id: string) => id === currentId() && matchesSource() && media?.readyState ? media.currentTime : undefined,

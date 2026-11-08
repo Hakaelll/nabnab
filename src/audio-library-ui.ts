@@ -2,8 +2,8 @@ import "./audio-library.css";
 import { audioTitle, isAudiobook, type createAudioPlayer } from "./audio-player";
 import { escapeHtml as h, type Copy, type LibraryItem, type Snapshot } from "./contracts";
 import { detailsFor } from "./library-features";
-import type { AudioPlaylist, AudioPlaylistEntry, AudioTags, Lyric } from "./library-types";
-import { audiobookChapterComplete, audiobookResumePosition, isPlayable } from "./playback-preferences";
+import type { AudioPlaylist, AudioPlaylistEntry, AudioTags, Chapter, LibraryDetails, Lyric } from "./library-types";
+import { audiobookChapterComplete, audiobookResumePosition, chapterAt, isPlayable } from "./playback-preferences";
 import { durationLabel } from "./presentation";
 import { action, icon, option, type Icon } from "./views-common";
 
@@ -29,6 +29,7 @@ const columnAliases: Record<Column, string[]> = {
 const speeds = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 const PAGE_SIZE = 60;
 const SHELF_SIZE = 3;
+const CHAPTER_PAGE_SIZE = 30;
 
 interface Hooks {
   snapshot(): Snapshot;
@@ -51,6 +52,12 @@ function albumKey(item: LibraryItem) {
 
 function bookKey(item: LibraryItem) {
   return item.details?.audiobook?.bookId ?? item.id;
+}
+
+function chapterResume(details: LibraryDetails, chapter: Chapter) {
+  const saved = details.chapterPositions?.find(point => point.start === chapter.start && point.end === chapter.end);
+  const position = saved?.position ?? details.playbackPosition;
+  return position > chapter.start && position < chapter.end ? position : chapter.start;
 }
 
 function numberOrder(value: number | null | undefined) { return value ?? Number.MAX_SAFE_INTEGER; }
@@ -77,6 +84,7 @@ export function createAudioLibrary(hooks: Hooks) {
   let artist = "", album = "", genre = "", book = "", query = "";
   let offset = 0;
   let shelfOffset = 0;
+  let chapterOffset = 0;
   let selected = new Set<string>();
   let tagDraft: Partial<Record<TagField, string>> | null = null;
   let tagPreview = false;
@@ -229,13 +237,39 @@ export function createAudioLibrary(hooks: Hooks) {
       const chapter = next.details?.audiobook;
       const title = chapter?.bookTitle ?? audioTitle(next);
       const position = audiobookResumePosition(next.details?.playbackPosition ?? 0, next.duration);
-      const detail = [chapter ? `${t("Capítulo", "Chapter")} ${chapter.chapter}` : "",
-        position ? durationLabel(position) : t("Desde el principio", "From the start")].filter(Boolean).join(" · ");
+      const embedded = chapter ? undefined : chapterAt(detailsFor(next).chapters, position);
+      const label = chapter ? `${t("Capítulo", "Chapter")} ${chapter.chapter}` : embedded?.title;
+      const elapsed = position - (embedded?.start ?? 0);
+      const detail = [label, elapsed ? durationLabel(elapsed) : t("Desde el principio", "From the start")].filter(Boolean).join(" · ");
       return `<section class="audio-continue" aria-label="${t("Continuar audiolibro", "Continue audiobook")}">
         ${cover(next, "book")}<div class="audio-continue-copy"><span>${t("Continuar audiolibro", "Continue audiobook")}</span><h2>${h(title)}</h2><small>${h(detail)}</small></div>
         ${action("audio-continue-book", t("Continuar", "Continue"), "play", "primary", `data-id="${h(next.id)}" aria-label="${h(t("Continuar · ", "Continue · ") + title + " · " + detail)}"`)}</section>`;
     }
     return "";
+  }
+
+  function embeddedChapters(item: LibraryItem | undefined) {
+    if (!item || item.missing) return "";
+    const details = detailsFor(item);
+    const chapters = details.chapters;
+    if (!chapters.length) return "";
+    chapterOffset = Math.min(chapterOffset, Math.floor((chapters.length - 1) / CHAPTER_PAGE_SIZE) * CHAPTER_PAGE_SIZE);
+    const end = Math.min(chapterOffset + CHAPTER_PAGE_SIZE, chapters.length);
+    return `<section class="audio-book-chapters" aria-labelledby="audio-book-chapters-title">
+      <header><h2 id="audio-book-chapters-title" tabindex="-1">${t("Capítulos del archivo", "File chapters")}</h2><span>${chapters.length}</span></header>
+      <ol start="${chapterOffset + 1}">${chapters.slice(chapterOffset, end).map((chapter, index) => {
+        const number = chapterOffset + index;
+        const elapsed = chapterResume(details, chapter) - chapter.start;
+        const caption = elapsed ? t("Retomar", "Resume") : t("Reproducir", "Play");
+        const label = elapsed ? `${t("Desde", "From")} ${durationLabel(elapsed)}` : durationLabel(chapter.end - chapter.start);
+        return `<li><span class="audio-book-chapter-number" aria-hidden="true">${number + 1}</span>
+          <div class="audio-book-chapter-copy"><strong>${h(chapter.title)}</strong><small>${label}</small></div>
+          ${action("audio-play-chapter", caption, "play", "quiet", `id="audio-chapter-${number}" data-id="${h(item.id)}" data-index="${number}" aria-label="${h(`${caption} · ${chapter.title}`)}"`)}</li>`;
+      }).join("")}</ol>
+      ${chapters.length > CHAPTER_PAGE_SIZE ? `<div class="library-pagination"><span>${chapterOffset + 1}–${end} / ${chapters.length}</span>
+        ${action("audio-chapters-back", t("Anteriores", "Previous"), undefined, "quiet", chapterOffset ? "" : "disabled")}
+        ${action("audio-chapters-next", t("Siguientes", "Next"), undefined, "quiet", end < chapters.length ? "" : "disabled")}</div>` : ""}
+    </section>`;
   }
 
   function row(item: LibraryItem) {
@@ -368,7 +402,7 @@ export function createAudioLibrary(hooks: Hooks) {
         ${remaining ? `<small>+${remaining}</small>` : ""}` : `<p class="field-note">${t("Las pistas siguientes aparecerán aquí.", "Upcoming tracks appear here.")}</p>`}
       ${item ? `<div class="audio-current"><h2>${h(audioTitle(item))}</h2>
         ${isAudiobook(item) ? `<div class="button-group">${action("audio-add-bookmark", t("Marcar posición", "Bookmark position"), "add", "secondary", disabled())}</div>
-        ${detailsFor(item).chapters.map(chapter => action("audio-seek-chapter", `${durationLabel(chapter.start)} · ${chapter.title}`, "play", "quiet", `data-time="${chapter.start}"`)).join("")}
+        ${category === "books" && book === bookKey(item) ? "" : detailsFor(item).chapters.map(chapter => action("audio-seek-chapter", `${durationLabel(chapter.start)} · ${chapter.title}`, "play", "quiet", `data-time="${chapter.start}"`)).join("")}
         ${detailsFor(item).bookmarks.map(bookmark => action("audio-seek-chapter", `${durationLabel(bookmark.time)} · ${bookmark.name}`, "play", "quiet", `data-time="${bookmark.time}"`)).join("")}` : ""}
         <div class="button-group">${action("audio-open-lyrics", lyricOpen ? t("Cerrar letras", "Close lyrics") : t("Letras locales", "Local lyrics"), "list", "quiet", disabled())}</div>
         <div class="button-group">${action("audio-cover-choose", t("Elegir portada", "Choose cover"), "image", "quiet", disabled())}
@@ -383,12 +417,14 @@ export function createAudioLibrary(hooks: Hooks) {
     const library = hooks.snapshot().library;
     const upcoming = queue.slice(0, 16).map(({ position, id }) => ({ position, item: library.find(item => item.id === id) }));
     const next = upcoming.find(entry => isPlayable(entry.item));
+    const chapterFile = category === "books" && book ? byCategory.find(item => bookKey(item) === book && !item.details?.audiobook) : undefined;
     offset = Math.min(offset, Math.max(0, Math.floor((results.length - 1) / PAGE_SIZE) * PAGE_SIZE));
     return `<section class="audio-library"><div class="page-heading"><div><h1>${t("Audio", "Audio")}</h1>
       <p>${t("Música, podcasts y audiolibros de tu biblioteca.", "Music, podcasts and audiobooks from your library.")}</p></div>
       ${action("audio-import-media", t("Importar audio", "Import audio"), "add", "secondary", disabled())}</div>
       <nav class="audio-category-nav" aria-label="${t("Tipo de audio", "Audio type")}">${categories.map(value => `<button type="button" data-action="audio-category" data-id="${value}" ${value === category ? 'aria-current="page"' : ""}>${icon(categoryIcons[value])}${categoryName(value)}</button>`).join("")}</nav>
       <div class="audio-layout"><div class="audio-content">${category === "playlists" ? imported ? importView(imported) : playlistView() : `${continueBook(byCategory)}${shelf(results)}${filters(byCategory)}
+        ${embeddedChapters(chapterFile)}
         ${selection(next?.item)}${editTags()}${request ? `<p role="status" class="field-note">${t("Leyendo etiquetas locales…", "Reading local tags…")} ${action("audio-cancel-read", t("Cancelar", "Cancel"), undefined, "quiet")}</p>` : ""}
         ${results.length ? `<ol class="audio-rows">${results.slice(offset, offset + PAGE_SIZE).map(row).join("")}</ol>`
           : `<div class="empty-state">${icon("audio")}<h2>${t("Sin audio en esta vista", "No audio in this view")}</h2><p>${t("Importa archivos o cambia los filtros.", "Import files or change the filters.")}</p></div>`}
@@ -432,16 +468,31 @@ export function createAudioLibrary(hooks: Hooks) {
           category = id; offset = 0; shelfOffset = 0; hooks.render();
         } break;
       case "audio-play": playTrack(id); break;
+      case "audio-play-chapter": {
+        const item = itemFor(id);
+        if (!isPlayable(item) || !isAudiobook(item) || book !== bookKey(item)) break;
+        const details = detailsFor(item);
+        const chapter = details.chapters[index];
+        if (!chapter) break;
+        player.playChapter(id, chapterResume(details, chapter));
+        document.getElementById(`audio-chapter-${index}`)?.focus({ preventScroll: true });
+      } break;
+      case "audio-chapters-back":
+      case "audio-chapters-next": {
+        chapterOffset = Math.max(0, chapterOffset + (name === "audio-chapters-next" ? CHAPTER_PAGE_SIZE : -CHAPTER_PAGE_SIZE));
+        hooks.render();
+        (document.querySelector<HTMLElement>(`[data-action="${name}"]:not(:disabled)`) ?? document.getElementById("audio-book-chapters-title"))?.focus();
+      } break;
       case "audio-continue-book": {
         const item = itemFor(id);
         if (category !== "books" || !item || !isAudiobook(item)) break;
-        book = bookKey(item); query = ""; offset = 0;
+        book = bookKey(item); query = ""; offset = 0; chapterOffset = 0;
         playTrack(id);
         document.querySelector<HTMLElement>(".audio-continue [data-action='audio-continue-book']")?.focus({ preventScroll: true });
       } break;
       case "audio-shelf-open":
         if (category === "music") album = id;
-        else if (category === "books") book = id;
+        else if (category === "books") { book = id; chapterOffset = 0; }
         offset = 0; hooks.render();
         document.querySelector<HTMLElement>(".audio-shelf-trail button")?.focus({ preventScroll: true });
         break;
@@ -617,7 +668,7 @@ export function createAudioLibrary(hooks: Hooks) {
       case "audio-artist": artist = element.value; break;
       case "audio-album": album = element.value; break;
       case "audio-genre": genre = element.value; break;
-      case "audio-book": book = element.value; break;
+      case "audio-book": book = element.value; chapterOffset = 0; break;
       case "audio-active-list": activeList = element.value; editing = null; break;
       case "audio-add-list": addTo = element.value; break;
       default: return false;

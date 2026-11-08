@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 
 const root = path.resolve(import.meta.dirname, "..");
-const base = path.join(root, "artifacts/playback");
+const base = process.env.NABNAB_PLAYBACK_ARTIFACTS || path.join(root, "artifacts/playback");
 await mkdir(base, { recursive: true });
 const data = await mkdtemp(path.join(base, "native-run-"));
 const output = path.join(data, "output");
@@ -15,6 +15,7 @@ const desktopTray = process.env.NABNAB_PLAYBACK_DESKTOP_TRAY === "1";
 const desktopMiniKey = process.env.NABNAB_PLAYBACK_DESKTOP_MINI_KEY === "1";
 const desktopRestore = process.env.NABNAB_PLAYBACK_DESKTOP_RESTORE === "1";
 const windowsMedia = process.env.NABNAB_PLAYBACK_WINDOWS_MEDIA === "1";
+const embeddedBookOnly = process.env.NABNAB_PLAYBACK_EMBEDDED_BOOK === "1";
 const fixtureArtist = windowsMedia ? `Laboratorio nabnab · ${path.basename(data)}` : "Laboratorio nabnab";
 const fixtureTitle = desktopRestore
   ? "Señal para la cola · Grabación completa de prueba para un título largo que debe dejar visibles todos los controles del minirreproductor"
@@ -331,12 +332,71 @@ async function seedPlaybackFixtures(videoId, audioId, handoutId, bookIds) {
   await writeFile(stateFile, JSON.stringify(state));
 }
 
-async function verifyBookContinuation(ids) {
-  const openBooks = async () => {
-    await page.locator('button[data-page="library"]').click();
-    await page.locator('[data-action="library-section"][data-section="audio"]').click();
-    await page.getByRole("button", { name: "Audiolibros", exact: true }).click();
+async function openBooks() {
+  await page.locator('button[data-page="library"]').click();
+  await page.locator('[data-action="library-section"][data-section="audio"]').click();
+  await page.getByRole("button", { name: "Audiolibros", exact: true }).click();
+}
+
+async function verifyEmbeddedBook() {
+  const file = path.join(data, "Viaje de prueba.m4b");
+  const metadata = path.join(data, "chapters.ffmetadata");
+  const titles = ["Salida", "Paso de montaña", "Llegada"];
+  await writeFile(metadata, `;FFMETADATA1\ntitle=Viaje de prueba\n${titles.map((title, i) =>
+    `[CHAPTER]\nTIMEBASE=1/1000\nSTART=${i * 4000}\nEND=${(i + 1) * 4000}\ntitle=${title}\n`).join("")}`);
+  encode("-f", "lavfi", "-i", "sine=frequency=440:duration=12", "-f", "ffmetadata", "-i", metadata,
+    "-map_metadata", "1", "-map_chapters", "1", "-c:a", "aac", file);
+  const imported = await rpc("import_paths", { paths: [file] });
+  const item = imported.library.find(entry => path.basename(entry.path) === path.basename(file));
+  assert.ok(item);
+  assert.deepEqual(item.details.chapters.map(chapter => chapter.title), titles);
+  const openBook = async () => {
+    await openBooks();
+    await page.getByRole("button", { name: "Viaje de prueba 3 capítulos" }).press("Enter");
+    await page.getByRole("heading", { name: "Capítulos del archivo" }).waitFor();
+    assert.deepEqual(await page.locator(".audio-book-chapters strong").allTextContents(), titles);
   };
+  const save = async position => {
+    await page.locator("#audio-engine").evaluate((media, time) => { media.currentTime = time; }, position);
+    await wait(async () => Math.abs((await playing()).time - position) < .3);
+    await page.locator("#audio-toggle").click();
+    return wait(async () => {
+      const {library} = await rpc("get_snapshot");
+      const book = library.find(entry => entry.id === item.id);
+      return Math.abs(book.details.playbackPosition - position) < .3 && book;
+    });
+  };
+  await openBook();
+  assert.equal((await playing()).id, undefined);
+  const first = page.getByRole("button", { name: "Reproducir · Salida", exact: true });
+  await first.press("Enter");
+  await wait(async () => (await playing()).id === item.id && !(await playing()).paused && (await playing()).duration > 11);
+  assert.equal(await first.evaluate(button => document.activeElement === button), true);
+  const earlier = (await save(2)).details.chapterPositions[0].position;
+  await page.getByRole("button", { name: "Reproducir · Paso de montaña", exact: true }).click();
+  await wait(async () => !(await playing()).paused && (await playing()).time >= 4);
+  const paused = await save(6.1);
+  assert.deepEqual(paused.details.chapterPositions.map(point => point.start), [0,4]);
+  assert.equal(paused.details.chapterPositions[0].position, earlier);
+  await shutdown();
+  await launch();
+  await openBook();
+  await page.getByRole("button", { name: /Continuar · Viaje de prueba · Paso de montaña · 0:02/ }).waitFor();
+  await page.getByRole("button", { name: "Retomar · Salida", exact: true }).press("Enter");
+  await wait(async () => !(await playing()).paused && Math.abs((await playing()).time - earlier) < .4);
+  await save(2.4);
+  await page.getByRole("button", { name: /Continuar · Viaje de prueba · Salida · 0:02/ }).waitFor();
+  for (const [width,height] of [[1180,780],[900,620]]) {
+    await page.setViewportSize({width,height});
+    const index = page.locator(".audio-book-chapters");
+    assert.ok(await index.evaluate(node => node.scrollWidth <= node.clientWidth + 1));
+    await index.scrollIntoViewIfNeeded();
+    await page.screenshot({path:path.join(output, `embedded-book-${width}.png`),animations:"disabled"});
+  }
+  console.log("Native M4B import, chapter selection and independent resume points survived a desktop restart.");
+}
+
+async function verifyBookContinuation(ids) {
   await openBooks();
   await page.locator(`[data-action="audio-play"][data-id="${ids[0]}"]`).click();
   const chapter = await wait(async () => {
@@ -929,8 +989,7 @@ async function renderPreviews() {
   console.log(`Rendered ${names.length * 2} native WebGL previews to ${output}`);
 }
 
-try {
-  const initial = await launch();
+async function verifyPlayback(initial) {
   if (process.env.NABNAB_RENDER_SCENES === "1") {
     await renderPreviews();
     await shutdown();
@@ -1537,6 +1596,12 @@ try {
     replacedLoadingSource: true, compactRoundTrips: 3, externalWebViewRequests: unexpectedNetwork.length }));
   await verifyCoursePlayback(videoId, musicId, audioLessonId, handoutId);
   await verifyBookContinuation(bookIds);
+}
+
+try {
+  const initial = await launch();
+  if (embeddedBookOnly) await verifyEmbeddedBook();
+  else await verifyPlayback(initial);
 } catch (error) {
   console.error(log);
   console.error(await page?.locator("#playback-stage").innerText().catch(() => ""));
