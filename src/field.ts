@@ -25,10 +25,14 @@ export function createFieldRenderer(canvas: HTMLCanvasElement) {
       float u = uv.x, v = uv.y, drift = time * .16;
       float first = u*.62 + sin(u*2.3+drift*.35)*.16 + cos(time*.027)*.13 - .5;
       float second = -u*.28 + sin(u*2.4-drift*.3)*.12 + .49;
-      float ribbon = max(exp(-pow(abs((v-first)*4.8),2.)),exp(-pow(abs((v-second)*5.4),2.)));
-      float filament = max(exp(-pow(abs(v-first),2.)*500.),exp(-pow(abs(v-second),2.)*600.));
+      float third = .14 + sin(u*2.8+drift*.46)*.21 - .39*u;
+      float ribbon = max(exp(-pow(abs((v-first)*4.1),2.)),exp(-pow(abs((v-second)*4.7),2.)));
+      ribbon = max(ribbon, .44*exp(-pow(abs((v-third)*5.8),2.)));
+      float filament = max(exp(-pow(abs(v-first),2.)*370.),exp(-pow(abs(v-second),2.)*470.));
+      filament = max(filament, .63*exp(-pow(abs(v-third),2.)*630.));
       float depth = .45+detail.y*.35;
-      vec2 p = origin + vec2(sin(v*2.4+drift)*18.,cos(u*2.8-drift*.7)*14.)*depth;
+      vec2 p = origin + vec2(sin(v*2.4+drift)*22.+sin(u*4.1-v*3.1+drift*.8)*6.,
+        cos(u*2.8-drift*.7)*17.+sin(v*4.8+u*2.1-drift)*5.)*depth;
       float light = 0.;
       float chroma = 0.;
       for (int i=0;i<3;i++) {
@@ -42,9 +46,14 @@ export function createFieldRenderer(canvas: HTMLCanvasElement) {
         p += delta/max(1.,distance)*displacement*vec2(17.,12.);
         light += envelope*waves[i].w*(.6+cos(offset*.05)*.4);
       }
-      float breathe = .72+sin(time*.22+u*4.8-v*2.7)*.28;
-      float quiet = 1.-.86*exp(-pow(abs((p.x-size.x*.5)/(readingWidth*.7)),4.)-pow(abs((p.y-size.y*.48)/(size.y*.38)),4.));
-      opacity = min(.38,((.012+ribbon*.26+filament*.08)*depth*breathe+light*.12)*quiet);
+      float breathe = .81+sin(time*.22+u*4.8-v*2.7)*.19;
+      float twinkle = .5+.5*sin(detail.x+time*.63+u*.9);
+      float crest = pow(.5+.5*cos(v*7.-u*4.+time*.41),4.);
+      vec2 eddies = vec2(length(vec2(u+.92, (v-.48)*1.22)),length(vec2(u-.88, (v+.44)*1.16)));
+      float etch = pow(.5+.5*cos(eddies.x*25.-time*.74+.83*sin(eddies.y*11.+drift)),12.) * exp(-eddies.x*1.65);
+      etch += pow(.5+.5*cos(eddies.y*30.+time*.67+.71*sin(eddies.x*9.-drift)),16.) * exp(-eddies.y*1.55);
+      float quiet = 1.-.79*exp(-pow(abs((p.x-size.x*.56)/(readingWidth*.68)),4.)-pow(abs((p.y-size.y*.50)/(size.y*.31)),4.));
+      opacity = min(.57,((.025+ribbon*(.32+.08*crest)+filament*.15)*depth*breathe*(.86+.24*twinkle)+light*.14+etch*.33)*quiet);
       float hue = time/mix(${COLOR_CYCLE_SECONDS.toFixed(1)},${CONTINUOUS_COLOR_CYCLE_SECONDS.toFixed(1)},fullColor) + dot(p/size,vec2(.025,.02));
       float saturation = mix(min(.62,chroma*.72),max(.12,min(.8,chroma*.9)),fullColor);
       vec3 spectrum = clamp(abs(fract(hue+vec3(0.,2./3.,1./3.))*6.-3.)-1.,0.,1.);

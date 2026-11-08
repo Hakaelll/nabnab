@@ -1,35 +1,34 @@
 /* The work areas share the home palette, with quieter boundaries and task-sized surfaces. */
 .tool-workspace > .tool-section { margin: 0; padding: 0; border: 0; }
-body:not([data-page="home"]) .app-shell {
+.app-shell {
   --work-top: 40px;
   --work-gutter: 12px;
   --work-radius: 22px;
-  background: var(--secondary);
 }
-body:not([data-page="home"]) #main {
+#main {
   height: auto;
   margin: var(--work-top) var(--work-gutter) var(--work-gutter) 0;
   border: 1px solid var(--edge-quiet);
   border-radius: var(--work-radius);
-  background: var(--background);
+  background: color-mix(in srgb, var(--background) 52%, transparent);
 }
-.has-audio-player body:not([data-page="home"]) #main {
+.has-audio-player #main {
   margin-bottom: 0;
   border-bottom: 0;
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
 }
-.has-audio-player body:not([data-page="home"]) .audio-player {
+.has-audio-player .audio-player {
   margin: 0 var(--work-gutter) var(--work-gutter) 0;
   border: 1px solid var(--edge-quiet);
   border-radius: 0 0 var(--work-radius) var(--work-radius);
   background: var(--surface);
 }
-body:not([data-page="home"]) .sidebar {
+.sidebar {
   border-right: 0;
   padding: var(--work-top) 12px 22px;
 }
-body:not([data-page="home"]) .sidebar-header {
+.sidebar-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -45,7 +44,6 @@ body:not([data-page="home"]) .sidebar-header {
   background: var(--action);
   mask: url('/emblem.png') center / contain no-repeat;
 }
-.is-home .sidebar-mark { display: none; }
 .titlebar-search {
   display: flex;
   align-items: center;
@@ -59,24 +57,22 @@ body:not([data-page="home"]) .sidebar-header {
   font-size: 12px;
   cursor: pointer;
 }
-.is-home .titlebar-search { display: none; }
 .titlebar-search:hover { color: var(--text); background: var(--surface); }
 .titlebar-search svg { width: 14px; height: 14px; }
 .titlebar-search kbd { padding: 1px 4px; border-radius: 4px; font: inherit; font-size: 10px; background: var(--hover); }
-body:not([data-page="home"]) .sidebar-toggle { margin: 0; border-radius: 11px; }
-body:not([data-page="home"]) .nav-item {
+.app-shell .sidebar-toggle { margin: 0; border-radius: 11px; }
+.nav-item {
   min-height: 42px;
   border-radius: 12px;
   transition: background-color var(--feedback) var(--ease-out), color var(--feedback) var(--ease-out);
 }
-body:not([data-page="home"]) .nav-item[aria-current="page"] {
+.nav-item[aria-current="page"] {
   background: var(--surface);
   border-color: var(--edge-quiet);
 }
-body:not([data-page="home"]) .nav-item[aria-current="page"]::before { display: none; }
-.sidebar-collapsed body:not([data-page="home"]) .sidebar { padding-inline: 8px; }
-.sidebar-collapsed body:not([data-page="home"]) .sidebar-header { flex-direction: column; justify-content: center; padding: 0; gap: 10px; }
-.sidebar-collapsed body:not([data-page="home"]) .sidebar-mark { width: 21px; height: 21px; }
+.sidebar-collapsed .sidebar { padding-inline: 8px; }
+.sidebar-collapsed .sidebar-header { flex-direction: column; justify-content: center; padding: 0; gap: 10px; }
+.sidebar-collapsed .sidebar-mark { width: 21px; height: 21px; }
 body:not([data-page="home"]) #page-content {
   --section-radius: 18px;
   --section-edge: #ffffff0b;
@@ -95,6 +91,7 @@ body:not([data-page="home"]) #page-content .filter-tabs :is([aria-pressed="true"
 body:not([data-page="home"]) #page-content .selection-toolbar { border-radius: 12px; padding: 10px 14px; gap: 10px; }
 body:not([data-page="home"]) #page-content .search-control { border-radius: 11px; background: #0e0f12; border-color: #ffffff14; min-height: 40px; }
 body:not([data-page="home"]) #page-content .search-control input { background: transparent; }
+body:not([data-page="home"]) #page-content .search-control input:focus-visible { outline: none; }
 body:not([data-page="home"]) #page-content .empty-state { padding-block: 68px; }
 body:not([data-page="home"]) #page-content .empty-state > svg { padding: 12px; box-sizing: content-box; border-radius: 50%; background: var(--secondary); color: var(--muted); }
 body:not([data-page="home"]) #page-content .empty-state h2 { font-size: 19px; letter-spacing: -.3px; }
@@ -123,8 +120,10 @@ body[data-page="downloads"] .job-metrics { color: var(--muted); }
 body[data-page="downloads"] .job-group-summary { padding: 20px 14px 5px; color: var(--muted); font-size: 12px; }
 
 /* The source directory separates choosing a family from choosing a source. */
+body[data-page="platforms"] #main { overflow-x: hidden; }
 body[data-page="platforms"] .platform-view-toolbar { margin-bottom: 16px; }
-body[data-page="platforms"] .platform-view-toolbar .search-control { width: min(100%, 480px); max-width: none; }
+body[data-page="platforms"] .platform-view-toolbar .search-control { min-width: 0; max-width: 100%; flex: 1 1 100%; }
+body[data-page="platforms"] .platform-view-toolbar .search-control input { flex: 1; min-width: 0; width: auto; }
 body[data-page="platforms"] .platform-shortcuts { gap: 6px; margin: 0 0 28px; padding-bottom: 20px; border-bottom: 1px solid var(--section-edge); }
 body[data-page="platforms"] .platform-shortcuts .button { background: transparent; border-color: transparent; box-shadow: none; font-size: 12px; color: var(--muted); padding-inline: 10px; }
 body[data-page="platforms"] .platform-directory { display: grid; grid-template-columns: 154px minmax(0,1fr); gap: 28px; align-items: start; }
@@ -132,9 +131,16 @@ body[data-page="platforms"] #page-content .platform-filters { display: flex; fle
 body[data-page="platforms"] #page-content .platform-filters button { justify-content: flex-start; text-align: left; white-space: normal; padding: 10px 12px; min-height: 39px; color: var(--muted); }
 body[data-page="platforms"] #page-content .platform-filters [aria-current="page"] { color: var(--text); background: var(--surface); }
 body[data-page="platforms"] .platform-list { border: 0; min-width: 0; }
-body[data-page="platforms"] .platform-row { display: grid; grid-template-columns: 44px minmax(0,1fr) minmax(100px,160px) 16px; gap: 15px; min-height: 99px; padding: 16px 12px; margin-bottom: 5px; border: 0; border-radius: 15px; }
+body[data-page="platforms"] .platform-row { display: grid; grid-template-columns: 44px minmax(0,1fr) minmax(0,160px) 16px; gap: 15px; min-height: 99px; padding: 16px 12px; margin-bottom: 5px; border: 0; border-radius: 15px; }
 body[data-page="platforms"] .platform-symbol { width: 44px; height: 44px; border-radius: 50%; background: var(--surface); color: var(--text); font-size: 14px; font-weight: 600; letter-spacing: -.4px; display: grid; place-items: center; }
+.platform-symbol img { display: block; object-fit: contain; filter: invert(.91); }
+.platform-heading-identity { display: flex; align-items: center; gap: 13px; }
+.platform-heading-identity .platform-symbol { flex-shrink: 0; }
+@media (forced-colors: active) {
+  .platform-symbol img { filter: none; background: white; border-radius: 3px; forced-color-adjust: none; }
+}
 body[data-page="platforms"] .platform-main { gap: 5px; }
+body[data-page="platforms"] :is(.platform-main,.platform-requirements) { min-width: 0; overflow-wrap: anywhere; }
 body[data-page="platforms"] .platform-main strong { font-size: 15px; font-weight: 500; }
 body[data-page="platforms"] .platform-main > span { line-height: 1.5; font-size: 12px; }
 body[data-page="platforms"] .platform-main small { color: var(--auxiliary); }
@@ -367,7 +373,7 @@ body[data-page="platforms"] #page-content .platform-filters { position: sticky; 
   body[data-page="platforms"] #page-content .platform-filters { position: static; }
 }
 @media (forced-colors: active) {
-  body:not([data-page="home"]) :is(#main, .nav-item[aria-current="page"]) { border-color: CanvasText; }
+  :is(#main, .nav-item[aria-current="page"]) { border-color: CanvasText; }
   .sidebar-mark { background: CanvasText; forced-color-adjust: none; }
   body[data-page="library"] :is(.media-item,.media-poster,.media-format) { border-color: CanvasText; }
   body[data-page="library"] .media-format { background: Canvas; color: CanvasText; }

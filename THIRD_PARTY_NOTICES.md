@@ -1,5 +1,7 @@
 # Third-party notices
 
+The local platform marks under `public/platform-logos` are unchanged SVG files from [Simple Icons 16.0.0](https://github.com/simple-icons/simple-icons/tree/16.0.0/icons). The set is distributed under [CC0 1.0](https://github.com/simple-icons/simple-icons/blob/16.0.0/LICENSE.md). The PeerTube artwork by Framasoft is listed under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/). See the [upstream trademark notice](https://github.com/simple-icons/simple-icons/blob/16.0.0/DISCLAIMER.md) for the separate rights associated with brand marks.
+
 nabnab launches the following separate engine executables. They are not linked into its Rust binary.
 
 Optional OCR uses Tesseract 5.5.4 and Leptonica 1.87.0 from pinned Cygwin packages, plus their separate runtime dependencies. Package versions, SHA-512 checksums, license labels and source-package links are recorded in `src-tauri/src/ocr/packages.json`. The installer retains package license files and excludes unrelated system utilities. English and Spanish use the pinned Apache-2.0 `tessdata_fast` models documented in `docs/OCR.md`; they are downloaded only after consent. These binaries and models are not included in the default application bundle.

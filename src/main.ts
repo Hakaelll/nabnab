@@ -366,7 +366,7 @@ function renderCurrent(): void {
   if(!showingTranslation)translationTool.leave();
   const directoryScroll=document.querySelector<HTMLElement>('.tool-directory')?.scrollTop??0;
   preserveFocus(()=>{
-    updateNavigation();required('#field').hidden=page!=='home';required("#home-page").hidden=page!=="home";required("#page-content").hidden=page==='home';
+    updateNavigation();required("#home-page").hidden=page!=="home";required("#page-content").hidden=page==='home';
     if(page==='home')renderHome();
     else {disposeGraphics?.();disposeGraphics=null;required("#page-content").innerHTML=page==='downloads'?downloadsView(snapshot,downloads,t):page==='library'?libraryView(snapshot,library,t):page==='tools'?toolsView(snapshot,tools,t,showToolCatalog):page==='platforms'?(platformModule==='torrent'?torrents.render():platformModule==='courses'?courses.render():platformModule==='telegram'?telegram.render():platformModule==='live'?live.render():platformModule==='exports'?sourceExports.render():platformModule==='files'?advancedFiles.render():platformModule==='fileSources'?fileSources.render():platforms.render()):settingsView(snapshot,preferences,t,desktop);}
     if(page==='platforms'&&platformModule!=='catalog')required('#page-content').insertAdjacentHTML('afterbegin',`<button type="button" class="button quiet" data-action="platform-back">${t('← Plataformas','← Platforms')}</button>`);
@@ -626,6 +626,12 @@ function setToolInput(ids: string[]): void {
 
 document.addEventListener("pointerdown",()=>{pointerInput=true;document.documentElement.dataset.input="pointer";},{passive:true});
 document.addEventListener("keydown",()=>{pointerInput=false;document.documentElement.dataset.input="keyboard";cancelSurfaceMotion();},true);
+document.addEventListener("contextmenu", event => {
+  const target = event.target;
+  const textInput = target instanceof HTMLInputElement && ["text", "search", "url", "email", "tel", "password", "number"].includes(target.type);
+  if (textInput || target instanceof HTMLTextAreaElement || target instanceof HTMLElement && target.isContentEditable) return;
+  event.preventDefault();
+});
 matchMedia("(prefers-reduced-motion: reduce)").addEventListener("change",()=>cancelSurfaceMotion());
 document.addEventListener("click",event=>{
   const target=event.target instanceof Element?event.target.closest<HTMLButtonElement>('button'):null;

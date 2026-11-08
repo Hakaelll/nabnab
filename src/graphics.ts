@@ -92,11 +92,14 @@ export function startGraphics(background: HTMLCanvasElement, emblem: HTMLCanvasE
       const u = (g.x - width * 0.5) / span, v = (g.y - height * 0.48) / span;
       const first = u * 0.62 + Math.sin(u * 2.3 + drift * 0.35) * 0.16 + Math.cos(time * 0.027) * 0.13 - 0.5;
       const second = -u * 0.28 + Math.sin(u * 2.4 - drift * 0.3) * 0.12 + 0.49;
-      const ribbon = Math.max(Math.exp(-Math.pow((v - first) * 4.8, 2)), Math.exp(-Math.pow((v - second) * 5.4, 2)));
-      const filament = Math.max(Math.exp(-Math.pow(v - first, 2) * 500), Math.exp(-Math.pow(v - second, 2) * 600));
+      const third = .14 + Math.sin(u * 2.8 + drift * .46) * .21 - .39 * u;
+      const ribbon = Math.max(Math.exp(-Math.pow((v - first) * 4.1, 2)), Math.exp(-Math.pow((v - second) * 4.7, 2)),
+        .44 * Math.exp(-Math.pow((v - third) * 5.8, 2)));
+      const filament = Math.max(Math.exp(-Math.pow(v - first, 2) * 370), Math.exp(-Math.pow(v - second, 2) * 470),
+        .63 * Math.exp(-Math.pow(v - third, 2) * 630));
       const depth = 0.45 + g.depth * 0.35;
-      let x = g.x + Math.sin(v * 2.4 + drift) * 18 * depth;
-      let y = g.y + Math.cos(u * 2.8 - drift * 0.7) * 14 * depth;
+      let x = g.x + (Math.sin(v * 2.4 + drift) * 22 + Math.sin(u * 4.1 - v * 3.1 + drift * .8) * 6) * depth;
+      let y = g.y + (Math.cos(u * 2.8 - drift * .7) * 17 + Math.sin(v * 4.8 + u * 2.1 - drift) * 5) * depth;
       let light = 0;
       for (const wave of waves) {
         const dx = x - wave.x, dy = (y - wave.y) / wave.ellipse;
@@ -109,9 +112,14 @@ export function startGraphics(background: HTMLCanvasElement, emblem: HTMLCanvasE
         y += dy / Math.max(1, distance) * displacement * 12;
         light += envelope * wave.strength * (0.6 + Math.cos(offset * 0.05) * 0.4);
       }
-      const breathe = 0.72 + Math.sin(time * 0.22 + u * 4.8 - v * 2.7) * 0.28;
-      const quiet = 1 - 0.86 * Math.exp(-Math.pow((x - width * 0.5) / (readingWidth * 0.7), 4) - Math.pow((y - height * 0.48) / (height * 0.38), 4));
-      const opacity = Math.min(0.38, ((0.012 + ribbon * 0.26 + filament * 0.08) * depth * breathe + light * 0.12) * quiet);
+      const breathe = .81 + Math.sin(time * .22 + u * 4.8 - v * 2.7) * .19;
+      const twinkle = .5 + .5 * Math.sin(g.phase + time * .63 + u * .9);
+      const crest = Math.pow(.5 + .5 * Math.cos(v * 7 - u * 4 + time * .41), 4);
+      const eddyA = Math.hypot(u + .92, (v - .48) * 1.22), eddyB = Math.hypot(u - .88, (v + .44) * 1.16);
+      const etch = Math.pow(.5 + .5 * Math.cos(eddyA * 25 - time * .74 + .83 * Math.sin(eddyB * 11 + drift)), 12) * Math.exp(-eddyA * 1.65)
+        + Math.pow(.5 + .5 * Math.cos(eddyB * 30 + time * .67 + .71 * Math.sin(eddyA * 9 - drift)), 16) * Math.exp(-eddyB * 1.55);
+      const quiet = 1 - .79 * Math.exp(-Math.pow((x - width * .56) / (readingWidth * .68), 4) - Math.pow((y - height * .50) / (height * .31), 4));
+      const opacity = Math.min(.57, ((.025 + ribbon * (.32 + .08 * crest) + filament * .15) * depth * breathe * (.86 + .24 * twinkle) + light * .14 + etch * .33) * quiet);
       if (opacity < 0.025) continue;
       const level = Math.min(63, Math.round(opacity * 128));
       const palette = level * 16;

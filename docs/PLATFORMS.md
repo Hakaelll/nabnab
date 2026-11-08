@@ -1,5 +1,7 @@
 # Matriz de plataformas
 
+El catálogo incorpora 35 logotipos vectoriales locales con un tratamiento monocromático. Las fuentes restantes usan el icono de su categoría. El campo de búsqueda muestra un solo contorno al recibir el foco y el catálogo se desplaza en vertical. [Vista de Plataformas](platform-logos.png)
+
 La presencia de un extractor de yt-dlp y las pruebas con JSON simulado no certifican una plataforma. Esta matriz distingue implementación de pruebas reales. No se usan servicios de extracción intermediarios.
 
 | Plataforma | Contrato y motor | Vídeo/audio | Lotes | Imagen/galería | Sesión opcional | Prueba real en 0.2 |
