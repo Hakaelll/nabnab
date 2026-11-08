@@ -246,6 +246,27 @@ export function createPersonalArchives(hooks: Hooks) {
     </label>`;
   }
 
+  function selectionSummary() {
+    const items = preview?.categories.filter(item => included.has(item.category)) ?? [];
+    if (!items.length) return t("Elige al menos una categoría.", "Choose at least one category.");
+    const privateCount = items.filter(item => item.sensitive).length;
+    const files = items.reduce((total, item) => total + item.files, 0);
+    const bytes = items.reduce((total, item) => total + item.bytes, 0);
+    return [
+      `${number(items.length)} ${items.length === 1 ? t("categoría", "category") : t("categorías", "categories")}`,
+      privateCount ? `${number(privateCount)} ${t("con datos privados", "with private data")}` : "",
+      `${number(files)} ${files === 1 ? t("archivo", "file") : t("archivos", "files")}`,
+      bytesLabel(bytes),
+    ].filter(Boolean).join(" · ");
+  }
+
+  function syncImportSelection() {
+    const output = document.getElementById("archive-selection-summary");
+    if (output) output.textContent = selectionSummary();
+    const submit = document.getElementById("archive-import-submit");
+    if (submit instanceof HTMLButtonElement) submit.disabled = busy || !included.size;
+  }
+
   function importForm() {
     return `<section class="archive-panel" aria-labelledby="archive-import-title">
       <div class="archive-heading"><h2 id="archive-import-title">${t("Importar exportación", "Import an export")}</h2>
@@ -277,10 +298,15 @@ export function createPersonalArchives(hooks: Hooks) {
             : t("Si aplicas un intervalo, se omite el contenido multimedia sin fecha.", "Applying a date range skips undated media.")}</p>
         ${preview.datedPostMedia ? `<div id="archive-media-review-result" role="status" tabindex="-1">${mediaReview ? `<strong>${number(mediaReview.files)} ${mediaReview.files === 1 ? t("adjunto en el intervalo", "attachment in range") : t("adjuntos en el intervalo", "attachments in range")} · ${bytesLabel(mediaReview.bytes)}</strong>
           ${mediaReview.skippedPostFiles ? `<small>${t("Archivos de publicaciones que no se pudieron leer", "Unreadable post files")} · ${number(mediaReview.skippedPostFiles)}</small>` : ""}` : ""}</div>` : ""}
-        <div class="archive-actions">
-          <button type="submit" class="button primary" ${disabled()}>${t("Importar selección", "Import selection")}</button>
-          ${preview.datedPostMedia ? action("archive-review-media", t("Calcular adjuntos", "Calculate attachments"), "list", "secondary", `id="archive-review-media" ${busy || !canReviewMedia() ? "disabled" : ""}`) : ""}
-        </div>
+        <footer class="archive-import-footer">
+          <div class="archive-import-summary"><strong>${t("Selección de importación", "Import selection")}</strong>
+            <output id="archive-selection-summary" aria-atomic="true">${h(selectionSummary())}</output>
+            <small>${t("Tamaño de origen sin comprimir, antes de aplicar fechas.", "Uncompressed source size before applying dates.")}</small></div>
+          <div class="archive-actions">
+            ${preview.datedPostMedia ? action("archive-review-media", t("Calcular adjuntos", "Calculate attachments"), "list", "secondary", `id="archive-review-media" ${busy || !canReviewMedia() ? "disabled" : ""}`) : ""}
+            <button type="submit" id="archive-import-submit" class="button primary" ${busy || !included.size ? "disabled" : ""}>${t("Importar selección", "Import selection")}</button>
+          </div>
+        </footer>
       </form>` : ""}
     </section>`;
   }
@@ -804,9 +830,11 @@ export function createPersonalArchives(hooks: Hooks) {
       error = "";
       hooks.render();
     } else if (target instanceof HTMLInputElement && target.name === "archive-category") {
-      const key = target.value as Category;
+      const key = preview?.categories.find(item => item.category === target.value && selectable(item))?.category;
+      if (!key) return false;
       if (target.checked) included.add(key); else included.delete(key);
       if (key === "posts" || key === "media") resetMediaReview();
+      syncImportSelection();
     } else if (target instanceof HTMLInputElement && target.name === "archive-record") {
       const row = result?.rows.find(item => item.id === target.value);
       if (row && target.checked && selected.size < 200) selected.set(row.id, row);

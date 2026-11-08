@@ -4,6 +4,10 @@ Open **Library → Personal archives → Add export**, choose the provider, and 
 
 ![Category selection before importing a fixture export](personal-archive-selection.png)
 
+The import footer totals the selected categories and flags any private categories you selected. Its file count and uncompressed size come from the source before date filtering. The separate attachment calculation reports the media linked to posts in the chosen interval.
+
+![Selected categories and source volume with private messages explicitly included](personal-archive-selection-total.png)
+
 | Provider | Recognized content |
 | --- | --- |
 | Instagram and Facebook | Posts, saved items, media from recognized folders, and separately selected contacts and messages. JSON has the most detail. HTML is indexed as plain text, one record per document. |

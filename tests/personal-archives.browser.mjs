@@ -147,6 +147,16 @@ try {
   await page.getByText("Formato no compatible", { exact: false }).waitFor();
   await page.getByText("No incluido", { exact: false }).waitFor();
   await page.getByText("Vacío", { exact: false }).waitFor();
+  const summary = page.locator("#archive-selection-summary");
+  const importSelection = page.getByRole("button", { name: "Importar selección", exact: true });
+  const postChoice = page.locator("input[name='archive-category'][value='posts']");
+  assert.equal(await summary.innerText(), "1 categoría · 1 archivo · 314 B");
+  await postChoice.press("Space");
+  assert.equal(await summary.innerText(), "Elige al menos una categoría.");
+  assert.equal(await importSelection.isDisabled(), true);
+  assert.equal(await postChoice.evaluate(input => input === document.activeElement), true);
+  await postChoice.press("Space");
+  assert.equal(await importSelection.isEnabled(), true);
   assert.equal(await page.locator("input[value='messages']").isChecked(), false);
   assert.equal(await page.locator("input[value='bookmarks']").isDisabled(), true);
   assert.equal((await calls()).filter(call => call.cmd === "personal_archive_records").length, 0);
@@ -161,14 +171,17 @@ try {
       return [panel.scrollWidth, panel.clientWidth];
     });
     assert(layout[0] <= layout[1] + 1, `Archive form overflows at ${width}px`);
-    const submit = page.getByRole("button", {name:"Importar selección",exact:true});
-    await submit.scrollIntoViewIfNeeded();
+    await importSelection.scrollIntoViewIfNeeded();
     const note = await page.getByText(/Marca Publicaciones y Multimedia para incluir los adjuntos vinculados/).boundingBox();
     assert.ok(note && note.y >= 0 && note.y + note.height < height);
     await page.screenshot({ path: `${directory}/selection-${width}.png` });
   }
   await page.locator("input[value='messages']").check();
-  await page.getByRole("button", { name: "Importar selección" }).click();
+  assert.equal(await summary.innerText(), "2 categorías · 1 con datos privados · 2 archivos · 628 B");
+  assert.equal((await calls()).filter(call => call.cmd === "personal_archive_import" || call.cmd === "personal_archive_records").length, 0);
+  await importSelection.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: `${directory}/selection-private-900.png` });
+  await importSelection.click();
   await page.getByText("Una publicación", { exact: true }).waitFor();
   assert.equal(await page.locator("#main").evaluate(element => element.scrollTop), 0);
   const [{ args: { selection } }] = (await calls()).filter(call => call.cmd === "personal_archive_import");
@@ -278,6 +291,7 @@ try {
       await page.locator("#archive-from").fill("2025-01-08");
       await calculate.press("Enter");
       await page.getByText("2 adjuntos en el intervalo · 4 KB", {exact:true}).waitFor();
+      assert.equal(await page.locator("#archive-selection-summary").innerText(), "2 categorías · 4 archivos · 6 KB");
       assert.equal(await summary.evaluate(node => node === document.activeElement), true);
       const request = (await calls()).find(call => call.cmd === "personal_archive_review_media").args;
       assert.equal(request.from, "2025-01-08");
