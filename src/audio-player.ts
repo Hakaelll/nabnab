@@ -313,8 +313,10 @@ export function createAudioPlayer(hooks: Hooks) {
     const button = (id: string, text: string, symbol?: Parameters<typeof icon>[0], attributes = "") =>
       `<button id="audio-${id}" class="${symbol ? "icon-button" : "button quiet"}" type="button" data-action="audio-player-${id}" aria-label="${h(text)}" title="${h(text)}" ${attributes}>${symbol ? icon(symbol) : h(text)}</button>`;
     transport.innerHTML = `
-      <div class="audio-playing"><span class="audio-cover" aria-hidden="true"${item.details?.audioCover || item.details?.audio?.embeddedCover || item.kind === "video" ? ` data-thumbnail-id="${h(item.id)}"` : ""}>${icon(item.kind === "video" ? "video" : "audio")}</span>
-        <button id="audio-open" class="audio-open" type="button" data-action="audio-player-open" title="${h(item.kind === "video" ? t("Abrir vídeo", "Open video") : t("Abrir visualización", "Open visualization"))}"><strong>${h(title)}</strong><small>${h(subtitle || (item.kind === "video" ? t("Vídeo local", "Local video") : t("Biblioteca de audio", "Audio library")))}</small></button></div>
+      <button id="audio-open" class="audio-open" type="button" data-action="audio-player-open" title="${h(item.kind === "video" ? t("Abrir vídeo", "Open video") : t("Abrir visualización", "Open visualization"))}">
+        <span class="audio-cover" aria-hidden="true"${item.details?.audioCover || item.details?.audio?.embeddedCover || item.kind === "video" ? ` data-thumbnail-id="${h(item.id)}"` : ""}>${icon(item.kind === "video" ? "video" : "audio")}</span>
+        <span class="audio-playing-label"><strong>${h(title)}</strong>${subtitle ? `<small>${h(subtitle)}</small>` : ""}</span>
+      </button>
       <div class="audio-timeline"><div class="audio-transport-controls">
         ${book ? button("back", t("Retroceder 15 segundos", "Back 15 seconds"), "seekBack") : button("previous", t("Anterior", "Previous"), "previous")}
         ${button("toggle", t("Reproducir", "Play"), "play")}

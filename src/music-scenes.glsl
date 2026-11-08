@@ -27,22 +27,23 @@ float scope(float x) {
 vec3 palette(vec3 a, vec3 b, float weight) { return mix(mix(shadow, silver, weight), mix(a, b, weight), colorMode); }
 
 vec3 ink(vec2 p, float time) {
-  p = rotate(-.37 + .13 * sin(time * .39)) * p;
+  p = rotate(-.34 + .13 * sin(time * .39)) * p;
   p /= 1. + signal.x * .34;
   p.x *= .73;
   p.x += dynamics.y * .12;
   float x = p.x, y = p.y;
-  float sweep = .22 * sin(2.8*x + time*.51) + .08 * sin(6.*x - time*.85) + .038 * scope(x*.52 + .5);
-  float fold = .115 + .13*signal.y;
+  float sweep = .29 * sin(2.8*x + time*.51) + .096 * sin(6.*x - time*.85) + .045 * scope(x*.52 + .5);
+  float fold = .18 + .17*signal.y;
   float lines = 0.;
   for (int i = 0; i < 6; i++) {
     float k = float(i) - 2.5;
-    float filament = sweep + k*fold*.21*sin(3.8*x + .7*k + time*.56) + .029*k*sin(7.4*x - time*.63);
-    lines += thread(y - filament, .0045 + .0025 * signal.z);
+    float filament = sweep + k*fold*.24*sin(3.8*x + .7*k + time*.56) + .033*k*sin(7.4*x - time*.63);
+    lines += thread(y - filament, .0045 + .003 * signal.z) * (.65 + .35*cos(x*4. - k + time*.38));
   }
-  float smoke = thread(y - sweep, .082 + .055*signal.x) * (.17 + .09 * sin(x*11. + time));
-  float mask = exp(-2.05 * x*x - 2.2 * y*y) * (.64 + .25 * sin(x*2. - time*.33));
-  return mask * palette(vec3(.13,.24,.71), vec3(.82,.72,.99), .63) * (lines*.24 + smoke);
+  float smoke = thread(y - sweep, .105 + .069*signal.x) * (.24 + .10 * sin(x*11. + time));
+  float wisps = thread(y - sweep*.78 + .15*sin(x*4. + time*.43), .033) * .12;
+  float mask = exp(-1.48 * x*x - 2.1 * y*y) * (.78 + .20 * sin(x*2. - time*.33));
+  return mask * palette(vec3(.13,.24,.71), vec3(.82,.72,.99), .70) * (lines*.34 + smoke + wisps);
 }
 
 vec3 vortex(vec2 p, float time) {
@@ -93,7 +94,7 @@ vec3 orbit(vec2 p, float time) {
   for (int i = 0; i < 4; i++) {
     float k = float(i);
     vec2 q = rotate(.72*k + .11*time + .30*dynamics.y)*p;
-    float radius = .24 + k*.115 + .073*signal.x;
+    float radius = .30 + k*.145 + .086*signal.x;
     q.y /= .33+.08*k;
     float theta = atan(q.y,q.x);
     float radial = length(q)-radius;
@@ -114,7 +115,7 @@ vec3 prism(vec2 p, float time) {
   float tile = abs(fract(q.x*5.-.38)-.5) + abs(fract(q.y*8.+q.x*.84)-.5);
   float bevel = thread(tile-(.54 + .057*sin(time*.71)), .036);
   float facet = smoothstep(.28,.31,tile)*(1.-smoothstep(.60,.63,tile));
-  float fade = exp(-2.7*radius*radius)*smoothstep(.034,.20,radius);
+  float fade = exp(-1.85*radius*radius)*smoothstep(.034,.20,radius);
   float weight = .48+.36*cos(q.x*19. - q.y*7. - time*.53);
   return (bevel*(.41+.26*signal.z)+facet*.13)*fade * palette(vec3(.26,.12,.69), vec3(.15,.89,.78),weight);
 }
@@ -177,7 +178,7 @@ void main() {
   vec3 form = shape(scene,p,clock);
   if (previous != scene) form = mix(shape(previous,p,clock),form,blend);
   float dt = delta * 30.;
-  float presence = .31 + .56*signal.w;
+  float presence = .32 + .64*signal.w;
   vec3 light = pow(clamp(form * 1.65, 0., .92), vec3(.61)) * presence;
   vec3 feedback = old * exp(-delta*(4.0 - 1.15*signal.x));
   vec3 combined = max(light, min(vec3(.82),feedback + light*dt*.14));

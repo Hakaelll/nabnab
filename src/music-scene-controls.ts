@@ -84,16 +84,17 @@ export function createSceneControls(host: HTMLElement, t: Copy, signal: (dt: num
     const root = panel();
     if (!root) return;
     const focused = root.contains(document.activeElement) ? document.activeElement as HTMLElement : null;
-    const position = root.scrollTop;
+    const drawer = root.parentElement;
+    const position = drawer?.scrollTop ?? 0;
     const indices = showFavorites ? settings.favorites : scenes.map((_, index) => index);
     const checkbox = (id: string, text: string, checked: boolean) => `<label class="toggle"><input id="${id}" type="checkbox" ${checked ? "checked" : ""}>${text}</label>`;
-    root.innerHTML = `<header class="music-panel-head"><div><h2>${t("Escenas", "Scenes")}</h2><span>${label(settings.scene)}</span></div>
+    root.innerHTML = `<header class="music-panel-head"><div><h2>${t("Escenas", "Scenes")}</h2><span>${t("En escena", "On stage")} · ${label(settings.scene)}</span></div>
       <div class="button-group"><button type="button" class="button quiet" id="scene-filter" aria-pressed="${showFavorites}">${t("Favoritas", "Favorites")}</button>
       <button type="button" id="scene-previous" class="stage-button" aria-label="${t("Escena anterior", "Previous scene")}">${icon("previous")}</button>
       <button type="button" id="scene-next" class="stage-button" aria-label="${t("Escena siguiente", "Next scene")}">${icon("next")}</button></div></header>
       ${graphUnavailable || graphicsUnavailable ? `<p class="field-note" role="status">${graphicsUnavailable ? t("Vista fija. Los gráficos no están disponibles.", "Still preview. Graphics are unavailable.") : t("La señal de audio no está disponible para la escena.", "The scene cannot access the audio signal.")}</p>` : ""}
       <div class="music-scene-grid">${indices.map(index => `<div class="music-scene-tile" data-selected="${index === settings.scene}">
-        <button id="scene-pick-${index}" class="music-scene-pick" data-scene="${index}" aria-pressed="${index === settings.scene}" type="button"><img src="${preview(index, settings.color)}" alt="" decoding="async"><span>${label(index)}</span></button>
+        <button id="scene-pick-${index}" class="music-scene-pick" data-scene="${index}" aria-pressed="${index === settings.scene}" type="button"><img src="${preview(index, settings.color)}" alt="" decoding="async"><span>${label(index)}${index === settings.scene ? icon("check") : ""}</span></button>
         <button id="scene-favorite-${index}" class="stage-button music-scene-favorite" data-scene-favorite="${index}" type="button" aria-pressed="${settings.favorites.includes(index)}" aria-label="${t("Favorita", "Favorite")} · ${label(index)}">${icon("heart")}</button></div>`).join("") || `<p class="field-note">${t("Aún no hay escenas favoritas.", "No favorite scenes yet.")}</p>`}</div>
       <div class="music-scene-options">
         <label for="scene-color">${t("Tratamiento", "Palette")}<select id="scene-color">${option("sober", t("Sobrio", "Muted"), settings.color ? "color" : "sober")}${option("color", "Color", settings.color ? "color" : "sober")}</select></label>
@@ -105,7 +106,7 @@ export function createSceneControls(host: HTMLElement, t: Copy, signal: (dt: num
         ${checkbox("scene-shuffle", t("Orden aleatorio", "Shuffle scenes"), settings.shuffled)}
         ${checkbox("scene-lock", t("Fijar escena actual", "Lock current scene"), settings.locked)}
       </div>`;
-    root.scrollTop = position;
+    if (drawer) drawer.scrollTop = position;
     if (focused?.id) (root.querySelector<HTMLElement>(`#${CSS.escape(focused.id)}`) ?? root.querySelector<HTMLElement>("#scene-filter"))?.focus({ preventScroll: true });
   }
 

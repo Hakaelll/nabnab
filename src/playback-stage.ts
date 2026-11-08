@@ -199,6 +199,12 @@ export function createPlaybackStage(host: HTMLElement, media: HTMLVideoElement, 
       `${track.language} · ${track.origin === "machineTranslation" ? t("Traducción automática", "Machine translation") : t("Local", "Local")}`, caption));
     const audio = audioTracks();
     const chosen = document.activeElement instanceof HTMLElement ? document.activeElement.id : "";
+    const elapsed = '<span data-stage-elapsed>0:00</span>';
+    const duration = button("remaining", t("Alternar duración y tiempo restante", "Toggle duration and remaining time"));
+    const volume = `<div class="stage-volume">${button("mute", t("Silenciar", "Mute"), "volume", 'id="stage-mute"')}
+      <input id="stage-volume" type="range" min="0" max="1" step="0.02" aria-label="${t("Volumen", "Volume")}" value="${preferences.volume}"></div>`;
+    const toggle = button("toggle", t("Reproducir", "Play"), "play", 'id="stage-toggle"');
+    const fullscreenButton = button("fullscreen", t("Pantalla completa", "Full screen"), "fullscreen", 'id="stage-fullscreen"');
     controls.innerHTML = `
       <header class="stage-top">
         ${button("back", t("Atrás", "Back"), "back", 'id="stage-back"')}
@@ -226,20 +232,24 @@ export function createPlaybackStage(host: HTMLElement, media: HTMLVideoElement, 
         ${button("external", t("Abrir con el sistema", "Open with system"))}</div></section>
       <footer class="stage-bottom">
         <div class="stage-status" role="status"></div>
-        <div class="stage-scrub"><output id="stage-hover" aria-hidden="true" hidden><img alt="" hidden><span></span></output><input id="stage-seek" type="range" min="0" max="0" step="0.01" value="0" aria-label="${t("Posición de reproducción", "Playback position")}" disabled></div>
+        <div class="stage-timeline">${music ? elapsed : ""}
+          <div class="stage-scrub"><output id="stage-hover" aria-hidden="true" hidden><img alt="" hidden><span></span></output><input id="stage-seek" type="range" min="0" max="0" step="0.01" value="0" aria-label="${t("Posición de reproducción", "Playback position")}" disabled></div>
+          ${music ? duration : ""}
+        </div>
         <div class="stage-toolbar">
-          ${music ? button("previous", t("Pista anterior", "Previous track"), "previous") : ""}
-          ${button("toggle", t("Reproducir", "Play"), "play", 'id="stage-toggle"')}
-          ${music ? button("next", t("Pista siguiente", "Next track"), "next") : button("back-ten", t("Retroceder 10 segundos", "Back 10 seconds"), "seekBack") + button("forward-ten", t("Avanzar 10 segundos", "Forward 10 seconds"), "seekForward")}
-          <div class="stage-volume">${button("mute", t("Silenciar", "Mute"), "volume", 'id="stage-mute"')}
-            <input id="stage-volume" type="range" min="0" max="1" step="0.02" aria-label="${t("Volumen", "Volume")}" value="${preferences.volume}"></div>
-          <div class="stage-clock"><span data-stage-elapsed>0:00</span><span aria-hidden="true"> / </span>${button("remaining", t("Alternar duración y tiempo restante", "Toggle duration and remaining time"))}</div>
-          <span class="stage-spacer"></span>
-          ${music ? `<button type="button" class="stage-button music-scenes-trigger" data-stage-action="scenes" id="music-scenes" aria-expanded="false" aria-controls="stage-panel-scenes" aria-label="${t("Escenas", "Scenes")}" title="${t("Escenas", "Scenes")}">${icon("wave")}<span>${t("Escenas", "Scenes")}</span></button>` +
-            button("queue", t("Cola de reproducción", "Playback queue"), "list", 'id="music-queue" aria-expanded="false" aria-controls="stage-panel-queue"') +
-            button("immerse", t("Ocultar controles", "Hide controls"), "image")
-            : button("captions", t("Subtítulos", "Subtitles"), "captions", 'id="stage-caption-button" aria-expanded="false" aria-controls="stage-panel-captions"')}
-          ${button("fullscreen", t("Pantalla completa", "Full screen"), "fullscreen", 'id="stage-fullscreen"')}
+          ${music ? `${volume}<div class="music-transport">
+            ${button("previous", t("Pista anterior", "Previous track"), "previous")}${toggle}${button("next", t("Pista siguiente", "Next track"), "next")}
+          </div><div class="music-tools">
+            <button type="button" class="stage-button music-scenes-trigger" data-stage-action="scenes" id="music-scenes" aria-expanded="false" aria-controls="stage-panel-scenes" aria-label="${t("Escenas", "Scenes")}" title="${t("Escenas", "Scenes")}">${icon("wave")}<span>${t("Escenas", "Scenes")}</span></button>
+            ${button("queue", t("Cola de reproducción", "Playback queue"), "list", 'id="music-queue" aria-expanded="false" aria-controls="stage-panel-queue"')}
+            ${button("immerse", t("Ocultar controles", "Hide controls"), "image")}${fullscreenButton}
+          </div>` : `${toggle}
+            ${button("back-ten", t("Retroceder 10 segundos", "Back 10 seconds"), "seekBack")}
+            ${button("forward-ten", t("Avanzar 10 segundos", "Forward 10 seconds"), "seekForward")}
+            ${volume}<div class="stage-clock">${elapsed}<span aria-hidden="true">/</span>${duration}</div>
+            <span class="stage-spacer"></span>
+            ${button("captions", t("Subtítulos", "Subtitles"), "captions", 'id="stage-caption-button" aria-expanded="false" aria-controls="stage-panel-captions"')}
+            ${fullscreenButton}`}
         </div>
         ${music ? "" : `<div class="stage-panel stage-caption-panel" id="stage-panel-captions" data-stage-panel="captions" hidden>
           <label for="stage-caption-track">${t("Pista", "Track")}<select id="stage-caption-track">${option("", t("Desactivados", "Off"), caption)}
