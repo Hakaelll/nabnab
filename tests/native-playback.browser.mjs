@@ -10,6 +10,7 @@ await mkdir(base, { recursive: true });
 const data = await mkdtemp(path.join(base, "native-run-"));
 const output = path.join(data, "output");
 await mkdir(output);
+const desktopGesture = process.env.NABNAB_PLAYBACK_DESKTOP_GESTURE === "1";
 const { chromium } = createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODULE || "playwright");
 const port = process.env.NABNAB_PLAYBACK_DEBUG_PORT || 9254;
 const endpoint = `http://127.0.0.1:${port}`;
@@ -89,7 +90,7 @@ function rpc(command, args = {}) {
 }
 
 async function launch() {
-  child = spawn(path.join(root, "src-tauri/target/debug/nabnab.exe"), [], {
+  child = spawn(process.env.NABNAB_PLAYBACK_TEST_EXE ?? path.join(root, "src-tauri/target/debug/nabnab.exe"), [], {
     cwd: root, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
     env: { ...process.env, NABNAB_TEST_DATA_DIR: data, WEBVIEW2_USER_DATA_FOLDER: path.join(data, "webview"),
       WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port} --mute-audio` },
@@ -103,7 +104,7 @@ async function launch() {
     } catch { /* WebView2 can recycle its debugging endpoint during restart. */ }
     return null;
   });
-  page = await wait(() => browser.contexts()[0]?.pages().find(tab => /:1420/.test(tab.url())));
+  page = await wait(() => browser.contexts()[0]?.pages().find(tab => /:1420\/$/.test(tab.url())));
   return wait(async () => { try { return await rpc("get_snapshot"); } catch { return null; } });
 }
 
@@ -461,6 +462,104 @@ function windowCommand(operation, width = 0, height = 0) {
     $window.ToInt64()
   `], { windowsHide: true, encoding: "utf8" }).trim());
   assert.ok(Number.isSafeInteger(nativeHandle) && nativeHandle > 0);
+}
+
+async function verifyDesktopWheel(original, selectedTracks) {
+  const overlay = await wait(() => browser.contexts()[0]?.pages().find(tab => tab.url().includes("/quick-skip.html")));
+  overlay.on("pageerror", error => { log += `\nQuick Skip: ${error.message}`; });
+  const other = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-STA", "-Command", `
+    Add-Type -AssemblyName System.Windows.Forms
+    $work = [Windows.Forms.Screen]::PrimaryScreen.WorkingArea
+    $form = [Windows.Forms.Form]::new()
+    $form.Text = 'Nabnab playback test window'
+    $form.StartPosition = 'Manual'
+    $form.SetBounds($work.Right - 450, $work.Top + 180, 420, 280)
+    $form.Add_Shown({ $form.Activate(); [Console]::WriteLine('ready') })
+    [Windows.Forms.Application]::Run($form)
+  `], { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+  let ready = false;
+  other.stdout.on("data", bytes => { if (String(bytes).includes("ready")) ready = true; });
+  other.stderr.on("data", bytes => { log += String(bytes); });
+  function desktop(operation, delta = 0) {
+    return execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `
+      Add-Type -Name DesktopWheelInput -Namespace Nabnab -MemberDefinition @'
+      [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern System.IntPtr GetForegroundWindow();
+      [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(System.IntPtr h, out uint process);
+      [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+      [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern void keybd_event(byte key, byte scan, uint flags, System.UIntPtr extra);
+      [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern void mouse_event(uint flags, int x, int y, int data, System.UIntPtr extra);
+      [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern System.IntPtr SetThreadDpiAwarenessContext(System.IntPtr awareness);
+'@
+      $api = [Nabnab.DesktopWheelInput]
+      [uint32]$owner = 0
+      [void]$api::GetWindowThreadProcessId($api::GetForegroundWindow(), [ref]$owner)
+      $owner
+      if ('${operation}' -eq 'release') { $api::keybd_event(0xA4, 0, 2, [UIntPtr]::Zero); exit }
+      if ($owner -ne ${other.pid}) { exit }
+      if ('${operation}' -eq 'open') {
+        [void]$api::SetThreadDpiAwarenessContext([IntPtr](-4))
+        Add-Type -AssemblyName System.Windows.Forms
+        $work = [Windows.Forms.Screen]::PrimaryScreen.WorkingArea
+        [void]$api::SetCursorPos($work.Right - 90, $work.Top + 300)
+        $api::keybd_event(0xA4, 0, 0, [UIntPtr]::Zero)
+        Start-Sleep -Milliseconds 35
+      }
+      if (${delta} -ne 0) { $api::mouse_event(0x800, 0, 0, ${delta}, [UIntPtr]::Zero) }
+      if ('${operation}' -eq 'cancel') {
+        $api::keybd_event(0x1B, 0, 0, [UIntPtr]::Zero)
+        $api::keybd_event(0x1B, 0, 2, [UIntPtr]::Zero)
+      }
+    `], { windowsHide: true, encoding: "utf8" }).trim();
+  }
+
+  const wheel = overlay.locator("#track-wheel");
+  const central = wheel.locator('[data-offset="0"]');
+  const visible = () => page.evaluate(async () => {
+    const { Window } = await import("/node_modules/@tauri-apps/api/window.js");
+    return new Window("quick-skip", { skip: true }).isVisible();
+  });
+  try {
+    await wait(() => ready);
+    await wait(() => desktop("status") === String(other.pid), 7000);
+    const before = (await playing()).id;
+    const expected = selectedTracks.find(item => item.name === path.basename(music)).id;
+    const queue = await page.evaluate(() => JSON.parse(localStorage.getItem("nabnab.playback.v1")).queue);
+    const coverPosition = queue.order.findIndex(index => queue.tracks[index] === expected);
+    const distance = coverPosition - queue.cursor;
+    assert.ok(coverPosition >= 0 && distance !== 0);
+    assert.equal(desktop("open", -120 * Math.sign(distance)), String(other.pid));
+    await central.waitFor();
+    assert.equal(await wheel.getAttribute("data-side"), "left");
+    if (Math.abs(distance) > 1) assert.equal(desktop("step", -120 * (distance - Math.sign(distance))), String(other.pid));
+    await wait(async () => (await central.getAttribute("data-position")) === String(coverPosition));
+    assert.equal((await playing()).id, before);
+    assert.equal(await mainMinimized(), true);
+    assert.equal(await visible(), true);
+    await central.locator(".audio-cover img").waitFor();
+    await overlay.screenshot({ path: path.join(output, "quick-skip-desktop.png"), omitBackground: true });
+    assert.equal(desktop("release"), String(other.pid));
+    await wheel.waitFor({ state: "hidden" });
+    await wait(async () => !await visible());
+    await wait(async () => (await playing()).id === expected);
+    assert.equal(await mainMinimized(), true);
+    assert.equal(await original.evaluate(element => element === document.getElementById("audio-engine")), true);
+    assert.equal(desktop("open", 120 * Math.sign(distance)), String(other.pid));
+    await central.waitFor();
+    assert.equal(desktop("cancel"), String(other.pid));
+    await wheel.waitFor({ state: "hidden" });
+    desktop("release");
+    assert.equal((await playing()).id, expected);
+    await page.locator("#audio-close").evaluate(button => button.click());
+    await wait(() => page.evaluate(() => JSON.parse(localStorage.getItem("nabnab.playback.v1")).queue === null));
+    assert.equal(desktop("open", -120), String(other.pid));
+    assert.equal(desktop("release"), String(other.pid));
+    assert.equal(await visible(), false);
+    assert.equal(await mainMinimized(), true);
+    console.log("Desktop Alt + wheel committed and canceled while minimized and stayed closed after stopping playback.");
+  } finally {
+    desktop("release");
+    other.kill();
+  }
 }
 
 async function av1Fixture() {
@@ -969,8 +1068,10 @@ try {
   assert.ok(chosen);
   const bounds = await wheel.boundingBox();
   assert.ok(bounds.x > 400 && bounds.y >= 0 && bounds.height > 420);
-  const centeredArt = await selection.locator(".audio-cover").boundingBox();
-  assert.ok(centeredArt.width > 128 && centeredArt.height > 128);
+  await wait(async () => {
+    const artwork = await selection.locator(".audio-cover").boundingBox();
+    return artwork && artwork.width > 128 && artwork.height > 128;
+  });
   assert.equal(await wheel.evaluate(node => getComputedStyle(node).backgroundColor), "rgba(0, 0, 0, 0)");
   await wheel.screenshot({ path: path.join(output, "quick-skip.png"), animations: "disabled" });
   await page.keyboard.up("Alt");
@@ -982,7 +1083,8 @@ try {
     return data.some((value, index) => index % 4 === 3 && value > 0);
   }));
   await stage().screenshot({ path: path.join(output, "mini-audio.png"), animations: "disabled" });
-  await page.locator("#minimize").click();
+  if (desktopGesture) windowCommand("minimize");
+  else await page.locator("#minimize").click();
   await wait(async () => await mainMinimized() && await page.evaluate(() => innerWidth <= 400));
   await page.locator("#mini-wheel").click();
   await selection.waitFor();
@@ -997,6 +1099,9 @@ try {
   assert.equal(await selection.locator("strong").textContent(), title);
   await page.keyboard.up("Alt");
   await wait(async () => (await playing()).id === chosen.id && !(await playing()).paused);
+  const miniVolume = page.locator("#mini-volume");
+  await miniVolume.fill("0.65");
+  await wait(() => page.evaluate(() => JSON.parse(localStorage.getItem("nabnab.playback.v1")).preferences.volume === .65));
   await stage().screenshot({ path: path.join(output, "mini-audio-detached.png"), animations: "disabled" });
   await page.locator("#mini-dock").click();
   await wait(async () => !await mainMinimized());
@@ -1004,6 +1109,14 @@ try {
   assert.equal(await page.locator("#audio-mini").evaluate(button => button === document.activeElement), true);
   await page.locator('[data-action="clear-library-selection"]').click();
   console.log("Both floating mini players preserved the media element with the main window minimized. Alt + wheel worked in the main and detached windows.");
+
+  if (desktopGesture) {
+    if (!(await playing()).paused) await page.locator("#audio-toggle").click();
+    windowCommand("minimize");
+    await wait(mainMinimized);
+    try { await verifyDesktopWheel(original, selectedTracks); }
+    finally { windowCommand("restore"); }
+  }
 
   await play(musicId);
   await wait(async () => { const current = await playing(); return current.id === musicId && !current.paused && current.time > 0.15; });
@@ -1078,7 +1191,7 @@ try {
   await wait(async () => (await playing()).time >= 10);
   assert.equal((await playing()).paused, true);
   assert.equal((await playing()).id, videoId);
-  assert.equal((await playing()).volume, 0.36);
+  assert.equal((await playing()).volume, 0.65);
   console.log(JSON.stringify({ sharedElement: true, compact: true, video: true, hidControlsAfterMouseClick: true, captions: true,
     fullscreen: true, restoredOnRestart: true, playlistAudioCover: true, viewports: [1180, 900], rapidSeek: true,
     replacedLoadingSource: true, compactRoundTrips: 3, externalWebViewRequests: unexpectedNetwork.length }));

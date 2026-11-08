@@ -4,11 +4,11 @@ Biblioteca, descargas y marcadores usan una sesión con un elemento multimedia e
 
 El vídeo abre una vista de borde a borde con ajuste de proporción, subtítulos locales, velocidad, volumen y pantalla completa. Los controles se ocultan durante la reproducción y vuelven con el puntero o el teclado. La barra distingue la preparación indeterminada del progreso temporal. Volver de esta vista pausa el vídeo y conserva su posición en la barra compacta. La cola y las preferencias se restauran en pausa al reiniciar. Las posiciones inferiores a tres segundos o dentro del tramo final del archivo no se ofrecen para reanudar.
 
-Abre el **minirreproductor** desde la barra o la vista grande. Se queda en una esquina mientras navegas por nabnab. El vídeo conserva la imagen y los controles básicos. El audio muestra la portada, el título, el tiempo y una onda dibujada con la señal real de reproducción. [Referencia del mini de audio](https://spotifast.rocks/winamp/)
+Abre el **minirreproductor** desde la barra o la vista grande. Se queda en una esquina mientras navegas por nabnab. El vídeo conserva la imagen y los controles básicos. El audio reúne portada, título, volumen y tiempo con una onda dibujada con la señal real de reproducción. [Referencia del mini de audio](https://spotifast.rocks/winamp/)
 
-Pulsa **Sacar a una ventana** o usa **Minimizar** en la barra de título de nabnab con el mini abierto. La ventana flotante se queda sobre el escritorio y puedes arrastrarla desde el título de la pista. Al volver a nabnab, el mismo WebView2 conserva el archivo, la posición y la cola.
+Pulsa **Sacar a una ventana** o minimiza nabnab con el mini abierto. La ventana flotante se queda sobre el escritorio y puedes arrastrarla desde el título de la pista. Al volver a nabnab, el mismo WebView2 conserva el archivo, la posición y la cola.
 
-Con una pista de audio en la sesión, mantén **Alt** y gira la rueda con el foco en nabnab o en el mini flotante. Las portadas aparecen junto al puntero y giran en profundidad. Suelta **Alt** para reproducir la tarjeta central o pulsa **Esc** para cancelar. También puedes abrir **Salto rápido** desde el mini de audio y elegir con **↑**, **↓** e **Intro**, pulsar una tarjeta o volver al tema anterior al último salto. [Referencia de la rueda](https://github.com/ffoouuaadd/skip-dat)
+Con una pista de audio en la sesión, mantén **Alt** y gira la rueda. En Windows funciona también con nabnab minimizado y otra aplicación en primer plano. Las portadas aparecen junto al puntero y giran en profundidad. Suelta **Alt** para reproducir la tarjeta central o pulsa **Esc** para cancelar. Puedes pulsar una tarjeta, usar **↑**, **↓** e **Intro**, o abrir **Salto rápido** desde el mini de audio. **Volver a la pista** deshace el último salto dentro de la misma cola. [Referencia de la rueda](https://github.com/ffoouuaadd/skip-dat)
 
 Usa **↑** y **↓** para subir o bajar el volumen cinco puntos en vídeo o música. En la barra y el mini, el atajo funciona cuando el foco está en el reproductor. Los controles de formulario mantienen su manejo habitual con las flechas.
 
@@ -51,6 +51,8 @@ La prueba `tests/native-playback.browser.mjs` genera las muestras con FFmpeg y, 
 
 Con `NABNAB_PLAYBACK_LIVE_DOWNLOAD=1`, la misma prueba descarga una muestra pública a través de la cola nativa mientras suena un archivo local. Con la pila normal de Windows se guardaron 1.128.375 bytes y la pista avanzó 1,74 segundos entre el inicio de la transferencia y su final, sin cambiar de archivo ni pasar a pausa. [Muestra de vídeo de MDN](https://developer.mozilla.org/shared-assets/videos/flower.mp4)
 
+Con `NABNAB_PLAYBACK_DESKTOP_GESTURE=1`, la prueba usa la rueda y el teclado de Windows en una ventana de prueba independiente. Comprueba el foco, la selección al soltar Alt, la cancelación con Esc y que el gesto deja de abrir la rueda al detener la sesión.
+
 En Windows, compilación 26200, con Intel Iris Xe y ANGLE/D3D11, se observaron 60 FPS en Automática y 30 FPS en Ahorro, en la escena Órbita a 900 × 620 px CSS. Se midieron los fotogramas dibujados durante 2,3 segundos en cada modo, con la música activa y el selector de escenas abierto. Ahorro usó un lienzo interno de 610 × 420 px. Las cifras corresponden a ese equipo y esas condiciones.
 
 El frontend de producción ocupa 2.221.082 bytes, 7.602 menos que `e191ff3` con el mismo compilador. Las 16 vistas previas bajaron de 65.850 a 55.240 bytes. El código de escenas se carga al abrir la vista musical. Se mantuvieron WebView2 y FFmpeg como motores existentes. La medida corresponde al frontend compilado. El instalador requiere su propia medición.
@@ -58,3 +60,5 @@ El frontend de producción ocupa 2.221.082 bytes, 7.602 menos que `e191ff3` con 
 Las pruebas de navegador de audio y biblioteca cubren las listas, los capítulos, los marcadores y la búsqueda de subtítulos.
 
 [Vídeo con controles](playback/video-controls.png) · [Pistas de audio](playback/video-audio-tracks.png) · [Vídeo con los controles ocultos](playback/video-clean.png) · [Subtítulos ASS externos](playback/video-ass.png) · [Subtítulos integrados en MKV](playback/video-embedded.png) · [Previsualización al buscar](playback/video-seek.png) · [Música a 900 px](playback/music.png) · [Fósforo](playback/phosphor-full.png) · [Selector de escenas](playback/scenes.png) · [Barra compacta a 900 px](playback/compact.png)
+
+[Salto rápido sobre el escritorio](playback/quick-skip-desktop.png) · [Mini flotante de audio](playback/mini-audio.png) · [Mini flotante de vídeo](playback/mini-video.png)

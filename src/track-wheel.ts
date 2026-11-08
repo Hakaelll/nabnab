@@ -1,22 +1,35 @@
-import { escapeHtml as h, type Copy, type LibraryItem } from "./contracts";
-import { playerArtist, playerArtwork, playerButton } from "./mini-player";
+import { escapeHtml as h, type Copy } from "./contracts";
+import { playerButton } from "./mini-player";
 import { icon } from "./views-common";
 
-interface Entry {
+export interface WheelEntry {
   position: number;
-  item: LibraryItem;
+  id: string;
+  title: string;
+  artist: string;
+  artwork: boolean;
 }
+
+export interface WheelSession {
+  entries: WheelEntry[];
+  cursor: number;
+  playing: boolean;
+}
+
+export type WheelAction =
+  | { type: "toggle"; source: WheelEntry }
+  | { type: "play"; source: WheelEntry; target: WheelEntry };
 
 interface Hooks {
   t: Copy;
   enabled(): boolean;
-  entries(): Entry[];
+  entries(): WheelEntry[];
   cursor(): number;
-  title(item: LibraryItem): string;
-  play(entry: Entry): void;
+  play(entry: WheelEntry): void;
   toggle(): void;
   playing(): boolean;
   thumbnails(): void;
+  closed?(): void;
 }
 
 export function createTrackWheel(hooks: Hooks) {
@@ -50,7 +63,7 @@ export function createTrackWheel(hooks: Hooks) {
   const playPause = wheel.querySelector<HTMLButtonElement>("#track-wheel-toggle")!;
   const back = wheel.querySelector<HTMLButtonElement>(".track-wheel-back")!;
   const cards = new Map<number, HTMLButtonElement>();
-  let entries: Entry[] = [];
+  let entries: WheelEntry[] = [];
   let selected = 0;
   let source = -1;
   let opener: HTMLButtonElement | undefined;
@@ -61,7 +74,7 @@ export function createTrackWheel(hooks: Hooks) {
   let motion: Animation | undefined;
   let offsetX = 0;
   let offsetY = 0;
-  let returnTo: { from: Entry; to: Entry } | undefined;
+  let returnTo: { from: WheelEntry; to: WheelEntry } | undefined;
 
   function animate(opening: boolean) {
     const reduced = document.documentElement.classList.contains("reduced-motion") || matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -105,11 +118,10 @@ export function createTrackWheel(hooks: Hooks) {
         card.type = "button";
         card.className = "track-wheel-card";
         card.dataset.position = String(entry.position);
-        const title = hooks.title(entry.item);
-        const artist = playerArtist(entry.item);
+        const { title, artist } = entry;
         card.setAttribute("aria-label", [title, artist].filter(Boolean).join(" · "));
         card.title = title;
-        card.innerHTML = `${playerArtwork(entry.item)}<span class="track-wheel-copy"><strong>${h(title)}</strong>${artist ? `<small>${h(artist)}</small>` : ""}</span>`;
+        card.innerHTML = `<span class="audio-cover" aria-hidden="true"${entry.artwork ? ` data-thumbnail-id="${h(entry.id)}"` : ""}>${icon("record")}</span><span class="track-wheel-copy"><strong>${h(title)}</strong>${artist ? `<small>${h(artist)}</small>` : ""}</span>`;
         card.addEventListener("click", () => commit(index));
         const following = [...cards.keys()].filter(key => key > index).sort((a, b) => a - b)[0];
         drum.insertBefore(card, cards.get(following) ?? null);
@@ -125,7 +137,7 @@ export function createTrackWheel(hooks: Hooks) {
       if (entry.position === source) card.setAttribute("aria-current", "true");
     }
     position.textContent = `${selected + 1} / ${entries.length}`;
-    status.textContent = `${hooks.title(entries[selected].item)} · ${t(`${selected + 1} de ${entries.length}`, `${selected + 1} of ${entries.length}`)}`;
+    status.textContent = `${entries[selected].title} · ${t(`${selected + 1} de ${entries.length}`, `${selected + 1} of ${entries.length}`)}`;
     previous.disabled = selected === 0;
     next.disabled = selected === entries.length - 1;
     update();
@@ -151,19 +163,21 @@ export function createTrackWheel(hooks: Hooks) {
       drum.replaceChildren();
       cards.clear();
       entries = [];
+      hooks.closed?.();
     };
     if (exit) void exit.finished.then(finish, () => {});
     else finish();
   }
 
   function commit(index: number) {
+    if (!opened) return;
     const entry = entries[index];
     const from = entries.find(candidate => candidate.position === source);
-    dismiss(true);
     if (entry && from && entry.position !== source) {
       returnTo = { from, to: entry };
       hooks.play(entry);
     }
+    dismiss(true);
   }
 
   function move(direction: number) {
@@ -193,7 +207,7 @@ export function createTrackWheel(hooks: Hooks) {
     offsetY = Math.max(-26, Math.min(26, y - top - height / 2));
   }
 
-  function show(x: number, y: number, button?: HTMLButtonElement) {
+  function show(x: number, y: number, button?: HTMLButtonElement, steps = 0) {
     entries = hooks.entries();
     source = hooks.cursor();
     selected = entries.findIndex(entry => entry.position === source);
@@ -204,20 +218,29 @@ export function createTrackWheel(hooks: Hooks) {
     drum.replaceChildren();
     cards.clear();
     opener?.setAttribute("aria-expanded", "true");
+    wheel.querySelector("#track-wheel-heading")!.innerHTML = `${icon("audio")}${t("Salto rápido", "Quick skip")}`;
+    for (const [control, label] of [
+      [previous, t("Selección anterior", "Previous selection")],
+      [next, t("Selección siguiente", "Next selection")],
+    ] as const) {
+      control.title = label;
+      control.setAttribute("aria-label", label);
+    }
     shortcut.textContent = usingAlt ? t("Suelta Alt", "Release Alt") : t("↑ ↓ · Intro", "↑ ↓ · Enter");
     const old = returnTo;
-    const canReturn = old && entries[selected].item.id === old.to.item.id
-      && entries.some(entry => entry.position === old.from.position && entry.item.id === old.from.item.id);
+    const canReturn = old && entries[selected].id === old.to.id
+      && entries.some(entry => entry.position === old.from.position && entry.id === old.from.id);
     back.hidden = !canReturn;
     if (canReturn) {
       back.textContent = t("Volver a la pista", "Back to track");
-      back.title = hooks.title(old.from.item);
+      back.title = old.from.title;
       back.setAttribute("aria-label", `${back.textContent} · ${back.title}`);
     }
     motion?.cancel();
     motion = undefined;
     wheel.hidden = false;
     wheel.inert = false;
+    selected = Math.max(0, Math.min(entries.length - 1, selected + steps));
     render();
     place(x, y, button);
     wheel.classList.add("is-open");
@@ -234,7 +257,7 @@ export function createTrackWheel(hooks: Hooks) {
   playPause.addEventListener("click", hooks.toggle);
   back.addEventListener("click", () => {
     const target = returnTo?.from;
-    if (target) commit(entries.findIndex(entry => entry.position === target.position && entry.item.id === target.item.id));
+    if (target) commit(entries.findIndex(entry => entry.position === target.position && entry.id === target.id));
   });
   document.addEventListener("wheel", event => {
     if (!event.altKey || event.ctrlKey || event.metaKey || !event.deltaY || !hooks.enabled()) return;
@@ -269,8 +292,10 @@ export function createTrackWheel(hooks: Hooks) {
   document.addEventListener("pointerdown", event => {
     if (event.target instanceof Node && !wheel.contains(event.target) && !opener?.contains(event.target)) dismiss();
   }, true);
-  window.addEventListener("blur", () => dismiss());
-  window.addEventListener("resize", () => dismiss(true));
+  if (!hooks.closed) {
+    window.addEventListener("blur", () => dismiss());
+    window.addEventListener("resize", () => dismiss(true));
+  }
 
   return {
     toggle(button: HTMLButtonElement) {
@@ -279,6 +304,6 @@ export function createTrackWheel(hooks: Hooks) {
       const rect = button.getBoundingClientRect();
       show(rect.right, rect.top, button);
     },
-    dismiss, update,
+    show, move, commit: () => commit(selected), dismiss, update,
   };
 }

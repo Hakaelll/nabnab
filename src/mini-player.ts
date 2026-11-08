@@ -24,6 +24,7 @@ interface Hooks {
   seek(time: number): void;
   toggle(): void;
   mute(): void;
+  volume(value: number): void;
   move(direction: -1 | 1): void;
   sound(): { muted: boolean; volume: number };
   signal(dt: number): PlaybackSignal | undefined;
@@ -57,6 +58,7 @@ export function createMiniPlayer(host: HTMLElement, media: HTMLVideoElement, hoo
       ${playerButton("mini-toggle", t("Reproducir", "Play"), "play")}
       ${playerButton("mini-next", t("Pista siguiente", "Next track"), "next", 'data-mini-audio')}
       ${playerButton("mini-mute", t("Silenciar", "Mute"), "volume")}
+      <input id="mini-volume" data-mini-audio type="range" min="0" max="1" step=".05" aria-label="${t("Volumen", "Volume")}">
       ${playerButton("mini-wheel", t("Salto rápido · Alt + rueda", "Quick skip · Alt + scroll"), "trackWheel", 'data-mini-audio aria-controls="track-wheel" aria-expanded="false"', t("Salto rápido", "Quick skip"))}
     </div>
     <div class="mini-timeline">
@@ -76,6 +78,7 @@ export function createMiniPlayer(host: HTMLElement, media: HTMLVideoElement, hoo
   const end = view.querySelector<HTMLElement>("#mini-duration")!;
   const play = view.querySelector<HTMLButtonElement>("#mini-toggle")!;
   const mute = view.querySelector<HTMLButtonElement>("#mini-mute")!;
+  const volume = view.querySelector<HTMLInputElement>("#mini-volume")!;
   const wheel = view.querySelector<HTMLButtonElement>("#mini-wheel")!;
   const floating = view.querySelector<HTMLButtonElement>("#mini-float");
   const canvas = view.querySelector<HTMLCanvasElement>("canvas")!;
@@ -146,6 +149,9 @@ export function createMiniPlayer(host: HTMLElement, media: HTMLVideoElement, hoo
     const sound = hooks.sound();
     const silent = sound.muted || sound.volume === 0;
     buttonState(mute, silent ? t("Activar sonido", "Unmute") : t("Silenciar", "Mute"), silent ? "muted" : "volume");
+    const audibleVolume = silent ? 0 : sound.volume;
+    volume.value = String(audibleVolume);
+    volume.style.setProperty("--played", `${audibleVolume * 100}%`);
     syncMonitor();
   }
 
@@ -169,6 +175,7 @@ export function createMiniPlayer(host: HTMLElement, media: HTMLVideoElement, hoo
 
   play.addEventListener("click", hooks.toggle);
   mute.addEventListener("click", hooks.mute);
+  volume.addEventListener("input", () => hooks.volume(volume.valueAsNumber));
   seek.addEventListener("input", () => hooks.seek(seek.valueAsNumber));
   wheel.addEventListener("click", () => hooks.wheel(wheel));
   if (hooks.float) floating?.addEventListener("click", hooks.float);

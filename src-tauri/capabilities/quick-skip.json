@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "quick-skip",
+  "description": "Receive local playback information in the desktop track wheel.",
+  "webviews": ["quick-skip"],
+  "permissions": ["core:event:allow-listen"]
+}

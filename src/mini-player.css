@@ -81,7 +81,7 @@
   font-variant-numeric: tabular-nums;
 }
 #mini-duration { text-align: end; }
-#mini-seek {
+:is(#mini-seek, #mini-volume) {
   appearance: none;
   width: 100%;
   min-width: 0;
@@ -93,12 +93,13 @@
   box-shadow: none;
   cursor: pointer;
 }
-#mini-seek::-webkit-slider-runnable-track {
+.mini-controls #mini-volume { flex: 0 1 54px; width: 54px; min-width: 32px; margin-inline: 2px 4px; }
+:is(#mini-seek, #mini-volume)::-webkit-slider-runnable-track {
   height: 3px;
   border-radius: 4px;
   background: linear-gradient(90deg, var(--action) var(--played, 0%), var(--border) var(--played, 0%));
 }
-#mini-seek::-webkit-slider-thumb {
+:is(#mini-seek, #mini-volume)::-webkit-slider-thumb {
   appearance: none;
   width: 9px;
   height: 9px;
@@ -142,6 +143,8 @@
   outline: none;
 }
 .track-wheel[hidden] { display: none; }
+.quick-skip-window, .quick-skip-window body { background: transparent; }
+.quick-skip-window .track-wheel { --cover: clamp(76px, min(23dvh, 29vw), 124px); }
 .track-wheel::before {
   content: "";
   position: absolute;
@@ -206,6 +209,13 @@
 }
 .track-wheel-copy { min-width: 0; padding: 0 3px 2px; }
 .track-wheel-copy strong { font-size: 14px; }
+.track-wheel-card[data-offset="0"] .track-wheel-copy strong {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .track-wheel-copy small { margin-top: 2px; }
 .track-wheel-card[aria-current="true"]::after {
   content: "";

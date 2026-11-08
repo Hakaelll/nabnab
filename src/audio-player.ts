@@ -1,13 +1,13 @@
 import { escapeHtml as h, localMediaUrl, type Copy, type LibraryItem } from "./contracts";
 import { detailsFor } from "./library-features";
 import type { AudioPlaylist, LocalTrack } from "./library-types";
-import { createMiniPlayer } from "./mini-player";
+import { createMiniPlayer, playerArtist } from "./mini-player";
 import type { createSceneControls } from "./music-scene-controls";
 import { audiobookResumePosition, isPlayable, playbackRates, readPlayback, resumePosition, savePlayback } from "./playback-preferences";
 import { connectPlaybackSignal } from "./playback-signal";
 import { createPlaybackStage, type StageState } from "./playback-stage";
 import { durationLabel } from "./presentation";
-import { createTrackWheel } from "./track-wheel";
+import { createTrackWheel, type WheelAction, type WheelEntry, type WheelSession } from "./track-wheel";
 import { icon, option } from "./views-common";
 
 export function audioTitle(item: LibraryItem): string {
@@ -28,6 +28,7 @@ interface Hooks {
   refresh(): Promise<void>;
   fullscreen(enabled: boolean): Promise<void>;
   miniWindow?(action: "detach-audio" | "detach-video" | "restore" | "drag" | "resize-audio" | "resize-video"): Promise<void>;
+  desktopWheel?(session: WheelSession | null): void;
   convert(id: string): void;
   timeChanged(id: string, time: number): void;
   showError(error: unknown): void;
@@ -79,6 +80,34 @@ export function createAudioPlayer(hooks: Hooks) {
   const current = () => hooks.item(currentId());
   const nextEntries = () => order.slice(cursor + 1).map(position => ({ position, id: tracks[position] }));
   const matchesSource = () => Boolean(media && expectedSource && media.currentSrc === expectedSource);
+  const wheelEnabled = () => current()?.kind === "audio" && !document.querySelector("dialog[open]");
+  const wheelPlaying = () => Boolean(media && !media.paused && !media.ended);
+  function wheelEntries(): WheelEntry[] {
+    return order.flatMap((track, position) => {
+      const item = hooks.item(tracks[track]);
+      if (!isPlayable(item)) return [];
+      return [{
+        position, id: item.id, title: audioTitle(item), artist: playerArtist(item),
+        artwork: Boolean(item.kind === "video" || item.details?.audioCover || item.details?.audio?.embeddedCover),
+      }];
+    });
+  }
+
+  function syncDesktopWheel() {
+    if (hooks.desktopWheel) hooks.desktopWheel(current()?.kind === "audio"
+      ? { entries: wheelEntries(), cursor, playing: wheelPlaying() } : null);
+  }
+
+  function wheelAction(action: WheelAction) {
+    if (!wheelEnabled() || action.source.position !== cursor || action.source.id !== currentId()) return;
+    if (action.type === "toggle") toggleWheelPlayback();
+    else if (tracks[order[action.target.position]] === action.target.id) activate(action.target.position, true, false);
+  }
+
+  function toggleWheelPlayback() {
+    if (media?.paused) void playMedia();
+    else media?.pause();
+  }
 
   function saveSession() {
     savePlayback(preferences, cursor >= 0 ? { tracks, order, cursor, resumeAudioId } : null);
@@ -319,6 +348,7 @@ export function createAudioPlayer(hooks: Hooks) {
     stage?.update(mediaState, issue);
     mini?.update();
     trackWheel?.update();
+    syncDesktopWheel();
     if ("mediaSession" in navigator) navigator.mediaSession.playbackState = media.paused ? "paused" : "playing";
   }
 
@@ -389,7 +419,7 @@ export function createAudioPlayer(hooks: Hooks) {
     const floating = mini?.active();
     host.hidden = !item || expanded || Boolean(floating);
     document.documentElement.classList.toggle("has-audio-player", !host.hidden);
-    if (!item) { transport.replaceChildren(); return; }
+    if (!item) { transport.replaceChildren(); syncDesktopWheel(); return; }
     mini?.sync(item, issue);
     const book = isAudiobook(item);
     const active = transport.contains(document.activeElement) && document.activeElement instanceof HTMLElement
@@ -743,21 +773,15 @@ export function createAudioPlayer(hooks: Hooks) {
       },
     });
     trackWheel = createTrackWheel({
-      t, title: audioTitle, thumbnails: hooks.thumbnails,
-      toggle: () => { if (element.paused) void playMedia(); else element.pause(); },
-      playing: () => !element.paused && !element.ended,
-      enabled: () => current()?.kind === "audio" && !document.querySelector("dialog[open]"),
-      entries: () => order.flatMap((track, position) => {
-        const item = hooks.item(tracks[track]);
-        return isPlayable(item) ? [{ position, item }] : [];
-      }),
+      t, thumbnails: hooks.thumbnails, toggle: toggleWheelPlayback,
+      playing: wheelPlaying, enabled: wheelEnabled, entries: wheelEntries,
       cursor: () => cursor,
-      play: ({ position, item }) => {
-        if (tracks[order[position]] === item.id) activate(position, true, false);
+      play: ({ position, id }) => {
+        if (tracks[order[position]] === id) activate(position, true, false);
       },
     });
     mini = createMiniPlayer(stageHost, element, {
-      t, seek, mute, title: audioTitle, thumbnails: hooks.thumbnails,
+      t, seek, mute, volume, title: audioTitle, thumbnails: hooks.thumbnails,
       sound: () => preferences,
       signal: dt => signal?.read(dt, mediaState === "playing"),
       toggle: () => { if (element.paused) void playMedia(); else element.pause(); },
@@ -997,7 +1021,7 @@ export function createAudioPlayer(hooks: Hooks) {
   }
 
   return { mount, render, restore, play, playAt, add, remove, input, click, key, current, nextEntries, seek, persist, detachMini,
-    nativeMiniRestored: () => setDetached(false), isExpanded: () => expanded, isDetached: () => detached,
+    nativeMiniRestored: () => setDetached(false), syncDesktopWheel, wheelAction, isExpanded: () => expanded, isDetached: () => detached,
     timeFor: (id: string) => id === currentId() && matchesSource() && media?.readyState ? media.currentTime : undefined,
     time: () => media?.currentTime ?? 0 };
 }

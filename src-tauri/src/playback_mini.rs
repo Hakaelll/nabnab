@@ -80,8 +80,12 @@ fn detach(app: &AppHandle, video: bool) -> tauri::Result<()> {
         let _ = mini.destroy();
         return Err(error);
     }
-    if let Err(error) = main
-        .minimize()
+    let minimize = if main.is_minimized().unwrap_or(false) {
+        Ok(())
+    } else {
+        main.minimize()
+    };
+    if let Err(error) = minimize
         .and_then(|()| mini.show())
         .and_then(|()| mini.set_focus())
     {

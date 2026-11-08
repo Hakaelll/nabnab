@@ -67,6 +67,7 @@ mod local_media;
 mod playback_preview;
 mod playback_audio;
 mod playback_mini;
+mod quick_skip;
 mod styled_captions;
 mod media;
 mod model;
@@ -1212,13 +1213,20 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(state)
+        .manage(quick_skip::DesktopWheel::default())
         .manage(courses::browser::Reviews::default())
         .register_uri_scheme_protocol("nabmedia", |context, request| {
             local_media::serve(context.app_handle(), request)
         })
         .on_window_event(|window, event| playback_mini::window_event(window.app_handle(), window.label(), event))
+        .on_window_event(|window, event| {
+            if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed) {
+                quick_skip::shutdown(window.app_handle());
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             playback_mini::playback_mini_window,
+            quick_skip::quick_skip_session, quick_skip::quick_skip_overlay,
             web_archive::archive_document,web_archive::archive_add_annotation,web_archive::archive_remove_annotation,web_archive::queue_article_export,
             capture_operations::screen_capture_status,capture_operations::screen_capture_sources,capture_operations::screen_capture_preview,capture_operations::cancel_screen_capture_preview,capture_operations::screen_capture_start,capture_operations::screen_capture_stop,capture_operations::screen_capture_save_replay,capture_operations::screen_capture_screenshot,capture_operations::screen_capture_recoverable,capture_operations::queue_screen_capture_recovery,
             voice_operations::voice_status,voice_operations::voice_prepare,voice_operations::voice_sample,voice_operations::voice_plan_status,voice_operations::voice_segment_audio,voice_operations::queue_voice,voice_operations::voice_pause_job,voice_operations::cancel_voice_request,

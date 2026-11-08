@@ -19,6 +19,7 @@ import {createDocumentEdits} from "./document-edits-ui";
 import {createFileSources} from "./file-sources-ui";
 import {createPersonalServers} from "./personal-servers-ui";
 import {createAudioPlayer} from "./audio-player";
+import type { WheelAction } from "./track-wheel";
 import {isPlayable} from "./playback-preferences";
 import {createAudioLibrary} from "./audio-library-ui";
 import {createPersonalArchives} from "./personal-archives-ui";
@@ -151,11 +152,21 @@ const libraryFeatures=createLibraryFeatures({
     return audioPlayer.playAt(id,time);
   },
 });
+let desktopWheelConfig = "";
+let desktopWheelRevision = 0;
 const audioPlayer=createAudioPlayer({
   item: id => snapshot.library.find(item => item.id === id),
   command, render: renderCurrent, refresh, showError, t,
   fullscreen: enabled => getCurrentWindow().setFullscreen(enabled),
   miniWindow: desktop ? action => command("playback_mini_window", {action}) : undefined,
+  desktopWheel: desktop ? session => {
+    const configuration = session && { ...session, language: snapshot.settings.language,
+      reducedMotion: snapshot.settings.reducedMotion, reducedTransparency: snapshot.settings.reducedTransparency };
+    const serialized = JSON.stringify(configuration);
+    if (serialized === desktopWheelConfig) return;
+    desktopWheelConfig = serialized;
+    void command("quick_skip_session", { configuration, revision: ++desktopWheelRevision }).catch(showError);
+  } : undefined,
   convert: id => setToolInput([id]),
   timeChanged: (id,time)=>libraryFeatures.playbackChanged(id,time),
   playlists: () => snapshot.audioPlaylists ?? [], thumbnails: observePlaybackCovers,
@@ -482,6 +493,7 @@ function updateActivity(): void {
 }
 function applySnapshot(next: Snapshot): void {
   snapshot=next;
+  audioPlayer.syncDesktopWheel();
   for(const id of downloads.selected)if(!snapshot.jobs.some(job=>job.id===id))downloads.selected.delete(id);
   for(const id of library.selected)if(!snapshot.library.some(item=>item.id===id))library.selected.delete(id);
   for(const id of tools.ids)if(!snapshot.library.some(item=>item.id===id))tools.ids.delete(id);
@@ -907,7 +919,9 @@ if(desktop){
   const updateMaximize=async()=>{const maximized=await nativeWindow.isMaximized();const button=required('#maximize');button.dataset.maximized=String(maximized);const label=maximized?t("Restaurar", "Restore"):t("Maximizar", "Maximize");button.setAttribute('aria-label',label);button.title=label;};
   try{
     await listen('playback-mini-restored',audioPlayer.nativeMiniRestored);
-    await nativeWindow.onResized(updateMaximize);await updateMaximize();
+    await listen<WheelAction>('quick-skip-action',({payload})=>audioPlayer.wheelAction(payload),{target:{kind:"Webview",label:"main"}});
+    await nativeWindow.onResized(async()=>{if(await nativeWindow.isMinimized())audioPlayer.detachMini();await updateMaximize();});
+    await updateMaximize();
     await nativeWindow.onDragDropEvent(event=>{if(event.payload.type==='drop')void receivePaths(event.payload.paths).catch(showError);else required('#drop-indicator').hidden=event.payload.type!=='enter'&&event.payload.type!=='over';});
     await listen<CaptureStatus>('capture-update',({payload})=>{const previous=captureStatus?.phase;screenCapture.acceptStatus(payload);if(page==='tools'&&localToolModule==='screenCapture'&&(captureIsActive(payload)||previous!==payload.phase))renderCurrent();if(previous!==payload.phase&&(payload.phase==='interrupted'||payload.phase==='error')){notify(payload.readyCapture?t('La captura se interrumpió. Revisa el archivo parcial en Captura.','Capture was interrupted. Review the partial file in Capture.'):t('No se pudo continuar la captura. Revisa Captura.','Capture could not continue. Review Capture.'),'error',payload.reason??'');if(page==='tools'&&localToolModule==='screenCapture')void screenCapture.open().catch(showError);}});
     await listen('capture-saved',()=>{notify(t('Repetición enviada a Descargas.','Replay sent to Downloads.'),'success');void refresh().catch(showError);});
