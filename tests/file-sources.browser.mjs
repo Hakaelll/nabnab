@@ -90,8 +90,8 @@ async function inspect(url) {
   await page.locator("#file-source-url").fill(url);
   await page.locator("#file-source-form button[type=submit]").click();
 }
-async function checkNoHorizontalOverflow(label) {
-  const dimensions = await page.locator(".file-sources").evaluate(element => ({ width: element.clientWidth, scroll: element.scrollWidth }));
+async function checkNoHorizontalOverflow(label, selector = ".file-sources") {
+  const dimensions = await page.locator(selector).evaluate(element => ({ width: element.clientWidth, scroll: element.scrollWidth }));
   assert.ok(dimensions.scroll <= dimensions.width + 1, `${label}: horizontal overflow ${JSON.stringify(dimensions)}`);
 }
 try {
@@ -281,7 +281,24 @@ try {
     await page.locator("#personal-root").fill("https://home.example:8443/remote.php/dav/files/reader/");
     await page.locator("#personal-username").fill("reader");
     await page.locator("#personal-password").fill("fixture-app-password");
+    const certificate = page.locator("#personal-certificate");
+    const trustSummary = page.locator("#personal-webdav-trust summary");
+    assert.equal(await certificate.isVisible(), false);
+    for (const [width, height] of [[1180, 780], [900, 620]]) {
+      await page.setViewportSize({ width, height });
+      await page.locator("#personal-configure").scrollIntoViewIfNeeded();
+      await checkNoHorizontalOverflow(`WebDAV setup ${width}`, "#personal-configure");
+      await page.screenshot({ path: `${directory}/webdav-setup-${width}x${height}-fixture.png` });
+    }
+    await trustSummary.press("Enter");
+    await certificate.waitFor();
+    const pem = "-----BEGIN CERTIFICATE-----\nZml4dHVyZQ==\n-----END CERTIFICATE-----";
+    await certificate.fill(pem);
+    await checkNoHorizontalOverflow("WebDAV certificate editor", "#personal-configure");
+    await page.locator("#personal-configure").scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `${directory}/webdav-certificate-900x620-fixture.png` });
     await page.getByRole("button", {name:"Guardar conexión",exact:true}).click();
+    assert.equal(await page.evaluate(() => window.fileSourceFixture.calls.find(call => call.cmd === "personal_server_webdav").args.certificatePem), pem);
     await page.getByRole("button", {name:/Estudio.*Nextcloud/}).click();
     await page.getByRole("button", {name:"Docs",exact:true}).click();
     await page.getByRole("checkbox", {name:/notes.pdf/}).check();

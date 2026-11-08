@@ -284,6 +284,11 @@ fn store_connection(state: &AppState, name: String, config: Config) -> Result<Sn
                 return Err("The SFTP host key changed. Verify the server before removing the old connection and trusting a new key.".into());
             }
         }
+        if let (Config::Webdav(old), Config::Webdav(new)) = (&existing.config, &connection.config) {
+            if old.certificate_pem != new.certificate_pem {
+                return Err("The WebDAV trust settings changed. Verify the certificate and disconnect the old connection before saving a different certificate.".into());
+            }
+        }
         *existing = connection;
     } else {
         if data.connections.len() >= MAX_SERVERS {
@@ -310,11 +315,13 @@ pub fn personal_server_webdav(
     root: String,
     username: String,
     password: String,
+    certificate_pem: Option<String>,
 ) -> Result<Snapshot, String> {
     let config = webdav::normalize(webdav::Config {
         root,
         username,
         password,
+        certificate_pem,
     })?;
     store_connection(&state, name, Config::Webdav(config))
 }

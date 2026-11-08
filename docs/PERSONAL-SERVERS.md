@@ -2,7 +2,7 @@
 
 Abre **Plataformas → Archivos y documentos → Servidores personales**. Las conexiones también se pueden gestionar en **Ajustes → Conexiones**.
 
-- **Nextcloud / WebDAV.** Indica la URL HTTPS de la carpeta autorizada, el usuario y una contraseña de aplicación. En Nextcloud, copia la URL WebDAV desde los ajustes de Archivos. Windows debe confiar en el certificado HTTPS de la instancia. Las credenciales se guardan con DPAPI y se usan solo en esa conexión.
+- **Nextcloud / WebDAV.** Indica la URL HTTPS de la carpeta autorizada, el usuario y una contraseña de aplicación. En Nextcloud, copia la URL WebDAV desde los ajustes de Archivos. Por defecto se usan los certificados de confianza de Windows. Para un servidor con una CA privada, abre **Certificado de confianza** y pega el certificado público PEM proporcionado por el administrador. Se usa solo para esa conexión y se verifica también el nombre del servidor. Si cambia el certificado de confianza, verifica el nuevo, desconecta la conexión anterior y vuelve a guardarla. Las credenciales se guardan con DPAPI.
 - **SFTP.** Indica host, puerto, usuario y raíz absoluta. Elige una clave privada local que funcione sin interacción con el cliente OpenSSH de Windows. Compara la huella SHA-256 mostrada con la que te haya dado el administrador antes de guardarla. Un cambio de clave detiene la conexión. Verificar y sustituir la identidad del servidor exige retirar primero la conexión anterior.
 - **Carpeta de red / NAS.** Elige una carpeta con el selector nativo. Admite carpetas montadas y rutas UNC ya accesibles con la sesión de Windows. Una unidad de red se guarda como su ruta UNC para conservar la identidad de la ubicación aunque cambie la letra asignada.
 
@@ -14,9 +14,13 @@ Las copias verifican los metadatos seleccionados y comprueban el recurso al fina
 
 La exploración consulta una carpeta a la vez y tiene límites de profundidad y tamaño. Las conexiones se limitan a lectura. Desconectar conserva las referencias y copias existentes. El índice de referencias se consulta en la interfaz local.
 
-[WebDAV de Nextcloud](https://docs.nextcloud.com/server/stable/developer_manual/client_apis/WebDAV/basic.html) · [OpenSSH](https://www.openssh.com/manual.html) · [Rutas UNC en Windows](https://learn.microsoft.com/dotnet/standard/io/file-path-formats)
+[WebDAV de Nextcloud](https://docs.nextcloud.com/server/stable/developer_manual/client_apis/WebDAV/basic.html) · [Certificados de confianza en reqwest 0.13.5](https://docs.rs/reqwest/0.13.5/reqwest/struct.ClientBuilder.html#method.tls_certs_only) · [OpenSSH](https://www.openssh.com/manual.html) · [Rutas UNC en Windows](https://learn.microsoft.com/dotnet/standard/io/file-path-formats)
 
-La prueba nativa en Windows abrió una conexión sintética a una carpeta local, guardó una copia, simuló una desconexión y sustituyó el archivo por otro de igual tamaño y fecha. La cola rechazó la referencia antigua y, tras actualizarla desde la interfaz, guardó la segunda versión conservando la primera. Las conexiones y huellas de WebDAV y SFTP se comprobaron con fixtures. Queda por verificar una transferencia completa con una instancia Nextcloud, un servidor SFTP o un NAS en red.
+![Configuración WebDAV y certificado opcional en una ventana compacta con datos de prueba](personal-server-webdav.png)
+
+La prueba nativa en Windows guardó dos versiones de un archivo en una carpeta montada sintética y dos versiones a través de un servidor WebDAV HTTPS local. En ambos casos rechazó la referencia antigua aunque coincidían tamaño y fecha, y conservó las dos copias tras actualizar la referencia. En WebDAV también comprobó el certificado y el nombre antes de enviar credenciales, el rechazo de rutas fuera de la raíz y el bloqueo de redirecciones. Las huellas SFTP se comprobaron con fixtures. Queda por verificar una transferencia con una instancia Nextcloud, un servidor SFTP o un NAS en red.
+
+Para repetir la prueba nativa, inicia Vite en el puerto 1420 y ejecuta `node tests/native-personal-servers.browser.mjs` con Playwright y el ejecutable de depuración de Windows disponibles. Define `NABNAB_TEST_OPENSSL` con la ruta a OpenSSL 3 para incluir el ensayo WebDAV y generar los certificados efímeros.
 
 ![Selección de un archivo remoto y destino de una copia, con datos de prueba](personal-server-selection.png)
 

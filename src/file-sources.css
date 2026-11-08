@@ -174,6 +174,22 @@ label.file-source-row { cursor: pointer; }
 .personal-server-form > .field-note {
   justify-self: start;
 }
+.personal-server-form[data-kind="webdav"] > label:has(#personal-root, #personal-password) {
+  grid-column: 1 / -1;
+}
+.personal-webdav-trust {
+  grid-column: 1 / -1;
+  padding: 0 12px;
+  border: 1px solid var(--edge-quiet);
+  border-radius: 10px;
+  background: var(--secondary);
+}
+.personal-webdav-trust summary { padding: 10px 0; cursor: pointer; font-weight: 500; }
+.personal-webdav-trust summary small { margin-inline-start: 8px; color: var(--muted); font-weight: 400; }
+.personal-webdav-trust summary:focus-visible { outline: 2px solid var(--action); outline-offset: 3px; border-radius: 4px; }
+.personal-webdav-trust .field-note { margin: 0 0 10px; }
+.personal-webdav-trust label { margin-bottom: 12px; }
+.personal-webdav-trust textarea { min-width: 0; width: 100%; font-family: ui-monospace, monospace; resize: vertical; }
 .personal-key, .personal-trust {
   grid-column: 1 / -1;
   display: flex;

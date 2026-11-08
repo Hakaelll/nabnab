@@ -28,7 +28,8 @@ export function createPersonalServers(hooks: Hooks) {
   const { t } = hooks;
   let status: ServerStatus | null = null;
   let editor: Kind | null = null;
-  let draft = { name: "", root: "", username: "", host: "", port: "22", identity: "" };
+  const newDraft = () => ({ name: "", root: "", username: "", host: "", port: "22", identity: "", certificatePem: "" });
+  let draft = newDraft();
   let trust: Challenge | null = null;
   let serverId = "";
   let path: string[] = [];
@@ -53,7 +54,7 @@ export function createPersonalServers(hooks: Hooks) {
     return entries.findIndex(entry => !entry.directory && label(entry.path) === target);
   };
   const cleanDraft = () => {
-    draft = { name: "", root: "", username: "", host: "", port: "22", identity: "" };
+    draft = newDraft();
     editor = null;
     trust = null;
   };
@@ -97,12 +98,17 @@ export function createPersonalServers(hooks: Hooks) {
     return `<div class="button-group" role="group" aria-label="${t("Tipo de conexión", "Connection type")}">
       ${kinds.map(kind => action("personal-add", nameFor(kind), "add", "secondary",
         `data-kind="${kind}" aria-pressed="${editor === kind}" ${disabled()}`)).join("")}
-    </div>${editor ? `<form id="personal-configure" class="personal-server-form">
+    </div>${editor ? `<form id="personal-configure" class="personal-server-form" data-kind="${editor}">
       ${input("name", t("Nombre", "Name"), draft.name, 'required maxlength="100"')}
       ${editor === "webdav" ? `
-        ${input("root", t("URL HTTPS de la raíz WebDAV", "HTTPS URL of the WebDAV root"), draft.root, 'type="url" required placeholder="https://…"')}
         ${input("username", t("Usuario", "Username"), draft.username, 'required autocomplete="off"')}
+        ${input("root", t("URL HTTPS de la raíz WebDAV", "HTTPS URL of the WebDAV root"), draft.root, 'type="url" required placeholder="https://…"')}
         <label>${t("Contraseña de aplicación", "App password")}<input id="personal-password" type="password" required autocomplete="new-password" ${disabled()}></label>
+        <details id="personal-webdav-trust" class="personal-webdav-trust" ${draft.certificatePem ? "open" : ""}>
+          <summary><span>${t("Certificado de confianza", "Trusted certificate")}</span><small>${t("Opcional", "Optional")}</small></summary>
+          <p id="personal-certificate-help" class="field-note">${t("Pega el certificado público PEM que te dio el administrador. Solo se aplica a esta conexión y se sigue comprobando el nombre del servidor.", "Paste the public PEM certificate from your administrator. It applies only to this connection and the server name is still checked.")}</p>
+          <label>${t("Certificado PEM", "PEM certificate")}<textarea id="personal-certificate" maxlength="8192" rows="4" spellcheck="false" autocomplete="off" aria-describedby="personal-certificate-help" placeholder="-----BEGIN CERTIFICATE-----" ${disabled()}>${h(draft.certificatePem)}</textarea></label>
+        </details>
       ` : editor === "sftp" ? `
         ${input("host", t("Servidor", "Host"), draft.host, 'required spellcheck="false"')}
         ${input("port", t("Puerto", "Port"), draft.port, 'type="number" min="1" max="65535" required')}
@@ -222,6 +228,10 @@ export function createPersonalServers(hooks: Hooks) {
   }
 
   function handleInput(element: HTMLElement): boolean {
+    if (element instanceof HTMLTextAreaElement && element.id === "personal-certificate") {
+      draft.certificatePem = element.value;
+      return true;
+    }
     if (!(element instanceof HTMLInputElement) || !element.id.startsWith("personal-")) return false;
     const key = element.id.slice("personal-".length);
     if (key === "name" || key === "root" || key === "username" || key === "host" || key === "port") {
@@ -245,8 +255,9 @@ export function createPersonalServers(hooks: Hooks) {
     if (busy || !editor || !form.reportValidity()) return true;
     if (editor === "webdav") {
       const password = form.querySelector<HTMLInputElement>("#personal-password")?.value ?? "";
+      const certificatePem = draft.certificatePem.trim() || null;
       await run("save", async () => {
-        status = await hooks.command<ServerStatus>("personal_server_webdav", { name: draft.name, root: draft.root, username: draft.username, password });
+        status = await hooks.command<ServerStatus>("personal_server_webdav", { name: draft.name, root: draft.root, username: draft.username, password, certificatePem });
         cleanDraft();
       });
     } else if (editor === "nas") {

@@ -1,6 +1,6 @@
 use super::{cancelled, valid_relative, Entry, Stamp};
 use quick_xml::{events::Event, name::ResolveResult, NsReader};
-use reqwest::{header, redirect::Policy, Client, Method, Response, StatusCode};
+use reqwest::{header, redirect::Policy, Certificate, Client, Method, Response, StatusCode};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashSet, fs::OpenOptions, io::Write, net::IpAddr, path::Path, time::Duration,
@@ -10,6 +10,7 @@ use url::Url;
 
 const DAV_BODY: &str = r#"<?xml version="1.0" encoding="UTF-8"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/><d:getcontentlength/><d:getlastmodified/><d:getetag/><d:getcontenttype/></d:prop></d:propfind>"#;
 const MAX_XML: usize = 4 * 1024 * 1024;
+const MAX_CERT_PEM: usize = 8192;
 const MAX_ENTRIES: usize = 2_000;
 const MAX_DOWNLOAD: u64 = 128 * 1024 * 1024 * 1024;
 const CHANGED: &str = "The WebDAV file changed. Refresh the folder and select it again.";
@@ -19,6 +20,21 @@ pub(super) struct Config {
     pub root: String,
     pub username: String,
     pub password: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub certificate_pem: Option<String>,
+}
+
+fn certificate(pem: &str) -> Result<Certificate, String> {
+    let message = "Paste one valid PEM certificate from the WebDAV server administrator.";
+    let encoded = pem.strip_prefix("-----BEGIN CERTIFICATE-----\n")
+        .and_then(|value| value.strip_suffix("\n-----END CERTIFICATE-----"))
+        .ok_or(message)?;
+    if pem.len() > MAX_CERT_PEM || encoded.is_empty()
+        || !encoded.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"+/=\n".contains(&byte))
+    {
+        return Err(message.into());
+    }
+    Certificate::from_pem(pem.as_bytes()).map_err(|_| message.into())
 }
 
 pub(super) fn normalize(mut config: Config) -> Result<Config, String> {
@@ -38,6 +54,13 @@ pub(super) fn normalize(mut config: Config) -> Result<Config, String> {
     url.set_path("/");
     append_path(&mut url, &root_path, true)?;
     config.root = url.to_string();
+    if let Some(pem) = &mut config.certificate_pem {
+        if pem.len() > MAX_CERT_PEM {
+            return Err("The WebDAV certificate exceeds 8 KiB.".into());
+        }
+        *pem = pem.trim().replace("\r\n", "\n");
+        certificate(pem)?;
+    }
     Ok(config)
 }
 
@@ -162,7 +185,7 @@ fn allowed_address(ip: IpAddr) -> bool {
     }
 }
 
-async fn client(root: &Url) -> Result<Client, String> {
+async fn client(root: &Url, config: &Config) -> Result<Client, String> {
     let mut builder = Client::builder()
         .https_only(true)
         .no_proxy()
@@ -171,6 +194,9 @@ async fn client(root: &Url) -> Result<Client, String> {
         .read_timeout(Duration::from_secs(20))
         .timeout(Duration::from_secs(24 * 60 * 60))
         .user_agent(concat!("nabnab/", env!("CARGO_PKG_VERSION")));
+    if let Some(pem) = config.certificate_pem.as_deref() {
+        builder = builder.tls_certs_only([certificate(pem)?]);
+    }
     match root.host().ok_or("The WebDAV URL has no host.")? {
         url::Host::Domain(host) => {
             let port = root
@@ -575,7 +601,7 @@ pub(super) async fn browse(
     let root = endpoint(&config.root)?;
     tokio::select! { biased;
         _ = cancelled(cancel) => Err(crate::engine::CANCELLED.into()),
-        result = async { properties(&client(&root).await?, config, &root, relative, true).await } => result,
+        result = async { properties(&client(&root, config).await?, config, &root, relative, true).await } => result,
     }
 }
 
@@ -671,7 +697,7 @@ pub(super) async fn download(
     let mut url = root.clone();
     append_path(&mut url, relative, false)?;
     let prepare = async {
-        let client = client(&root).await?;
+        let client = client(&root, config).await?;
         check_version(&client, config, &root, relative, expected).await?;
         let response = send(
             request(&client, config, Method::GET, url).header(condition, validator),
@@ -736,6 +762,7 @@ mod tests {
             root: root.into(),
             username: "user".into(),
             password: "explicit-app-password".into(),
+            certificate_pem: None,
         }
     }
 
