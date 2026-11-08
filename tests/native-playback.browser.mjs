@@ -1,14 +1,15 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 
 const root = path.resolve(import.meta.dirname, "..");
-const base = process.env.NABNAB_PLAYBACK_ARTIFACTS || path.join(root, "artifacts/playback");
+const base = path.resolve(process.env.NABNAB_PLAYBACK_ARTIFACTS || path.join(root, "artifacts/playback"));
 await mkdir(base, { recursive: true });
 const data = await mkdtemp(path.join(base, "native-run-"));
 const output = path.join(data, "output");
+const webviewProfile = path.join(data, "webview");
 await mkdir(output);
 const desktopGesture = process.env.NABNAB_PLAYBACK_DESKTOP_GESTURE === "1";
 const desktopTray = process.env.NABNAB_PLAYBACK_DESKTOP_TRAY === "1";
@@ -104,7 +105,7 @@ function rpc(command, args = {}) {
 async function launch() {
   child = spawn(process.env.NABNAB_PLAYBACK_TEST_EXE ?? path.join(root, "src-tauri/target/debug/nabnab.exe"), [], {
     cwd: root, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, NABNAB_TEST_DATA_DIR: data, WEBVIEW2_USER_DATA_FOLDER: path.join(data, "webview"),
+    env: { ...process.env, NABNAB_TEST_DATA_DIR: data, WEBVIEW2_USER_DATA_FOLDER: webviewProfile,
       WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port} --mute-audio` },
   });
   for (const stream of [child.stdout, child.stderr]) stream.on("data", chunk => { log = (log + chunk).slice(-6000); });
@@ -1697,4 +1698,13 @@ try {
   throw error;
 } finally {
   await shutdown();
+  try {
+    assert.equal(path.relative(webviewProfile, await realpath(webviewProfile)), "", "Refusing to remove a redirected WebView2 profile.");
+    await rm(webviewProfile, { recursive: true, force: true, maxRetries: 8, retryDelay: 150 });
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      console.error(`Could not clean up the WebView2 test profile at ${webviewProfile}:`, error);
+      process.exitCode = 1;
+    }
+  }
 }
