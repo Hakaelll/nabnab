@@ -450,15 +450,35 @@ pub fn save_course_note(
     let previous = lesson.notes.iter().find(|note| note.id == id).cloned();
     let assets = lesson.assets.clone();
     let note_count = lesson.notes.len();
-    let bookmark_id = time.map(|_| format!("course-{}", id));
+    let bookmark_id = time.filter(|_| !remove && !text.is_empty()).map(|_| format!("course-{}", id));
     if !remove && !text.is_empty() && note_count >= 100 && previous.is_none() {
         return Err("Use at most 100 notes per lesson.".into());
     }
-    let local_id = assets.iter().find_map(|asset| asset.library_id.clone().or_else(|| asset.job_ids.iter().filter_map(|id| repo.data.jobs.iter().find(|job| job.id == *id && job.state == queue::JobState::Completed)).flat_map(|job| &job.outputs).find_map(|path| repo.data.library.iter().find(|item| item.path == *path).map(|item| item.id.clone()))));
-    if let Some(item) = local_id
-        .as_ref()
-        .and_then(|id| repo.data.library.iter().find(|item| item.id == *id))
-    {
+    let local_items: Vec<_> = assets
+        .iter()
+        .filter_map(|asset| {
+            if let Some(id) = &asset.library_id {
+                return repo.data.library.iter().position(|item| item.id == *id);
+            }
+            asset.job_ids.iter()
+                .filter_map(|id| repo.data.jobs.iter().find(|job| {
+                    job.id == *id && job.state == queue::JobState::Completed
+                }))
+                .flat_map(|job| &job.outputs)
+                .find_map(|path| repo.data.library.iter().position(|item| {
+                    item.path == *path && item.path.is_file()
+                }))
+        })
+        .collect();
+    let target = local_items
+        .iter()
+        .copied()
+        .find(|&position| {
+            let item = &repo.data.library[position];
+            matches!(item.kind.as_str(), "audio" | "video") && item.path.is_file()
+        })
+        .or_else(|| local_items.first().copied());
+    if let Some(item) = target.map(|position| &repo.data.library[position]) {
         if time.is_some_and(|time| item.duration.is_some_and(|duration| time > duration)) {
             return Err("The note time is outside the lesson duration.".into());
         }
@@ -478,39 +498,31 @@ pub fn save_course_note(
             bookmark_id: bookmark_id.clone(),
         });
     }
-    let mut library_before = None;
-    if let Some(item) =
-        local_id.and_then(|id| repo.data.library.iter_mut().find(|item| item.id == id))
-    {
-        library_before = Some(item.clone());
-        if let Some(prior) = previous.and_then(|note| note.bookmark_id) {
-            item.details
-                .bookmarks
-                .retain(|bookmark| bookmark.id != prior);
-        }
-        if !remove && !text.is_empty() {
-            if let (Some(id), Some(time)) = (bookmark_id, time) {
-                item.details
-                    .bookmarks
-                    .push(crate::library_features::Bookmark {
-                        id,
-                        name: label(text, 80),
-                        time,
-                    });
+    let mut library_before = Vec::new();
+    if let Some(prior) = previous.and_then(|note| note.bookmark_id) {
+        for position in local_items {
+            let item = &mut repo.data.library[position];
+            if item.details.bookmarks.iter().any(|bookmark| bookmark.id == prior) {
+                library_before.push((position, item.clone()));
+                item.details.bookmarks.retain(|bookmark| bookmark.id != prior);
             }
         }
     }
+    if let (Some(position), Some(id), Some(time)) = (target, bookmark_id, time) {
+        let item = &mut repo.data.library[position];
+        if !library_before.iter().any(|(saved, _)| *saved == position) {
+            library_before.push((position, item.clone()));
+        }
+        item.details.bookmarks.push(crate::library_features::Bookmark {
+            id,
+            name: label(text, 80),
+            time,
+        });
+    }
     if let Err(error) = repo.save() {
         repo.data.courses[index] = course_before;
-        if let Some(previous) = library_before {
-            if let Some(item) = repo
-                .data
-                .library
-                .iter_mut()
-                .find(|item| item.id == previous.id)
-            {
-                *item = previous;
-            }
+        for (position, previous) in library_before {
+            repo.data.library[position] = previous;
         }
         return Err(error);
     }

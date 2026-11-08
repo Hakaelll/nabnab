@@ -51,6 +51,7 @@ export function createAudioPlayer(hooks: Hooks) {
   let tracks: string[] = [];
   let order: number[] = [];
   let cursor = -1;
+  let resumeAudioId: string | undefined;
   let expectedSource = "";
   let pendingSeek: number | null = null;
   let resumeChoice = 0;
@@ -71,7 +72,7 @@ export function createAudioPlayer(hooks: Hooks) {
   const matchesSource = () => Boolean(media && expectedSource && media.currentSrc === expectedSource);
 
   function saveSession() {
-    savePlayback(preferences, cursor >= 0 ? { tracks, order, cursor } : null);
+    savePlayback(preferences, cursor >= 0 ? { tracks, order, cursor, resumeAudioId } : null);
   }
 
   function showScenes() {
@@ -421,7 +422,7 @@ export function createAudioPlayer(hooks: Hooks) {
     issue = "";
     ++sourceRevision;
     const longAudio = isAudiobook(item) || item.details?.platform === "Podcast RSS" || (item.duration ?? 0) >= 30 * 60;
-    const progress = resume && (item.kind === "video" || longAudio || preferences.resumeMusic)
+    const progress = resume && (item.kind === "video" || longAudio || item.id === resumeAudioId || preferences.resumeMusic)
       ? resumePosition(detailsFor(item).playbackPosition, item.duration) : 0;
     resumeChoice = item.kind === "video" && openVideo && autoplay ? progress : 0;
     pendingSeek = progress && !resumeChoice ? progress : null;
@@ -453,7 +454,7 @@ export function createAudioPlayer(hooks: Hooks) {
     return 0;
   }
 
-  function play(ids: string[], start: number) {
+  function play(ids: string[], start: number, resumeShortAudio = false) {
     const id = ids[start];
     const item = id ? hooks.item(id) : undefined;
     if (!isPlayable(item)) return;
@@ -462,6 +463,7 @@ export function createAudioPlayer(hooks: Hooks) {
     const same = currentId() === item.id && Boolean(expectedSource) && !issue;
     persist();
     tracks = ids.filter(value => isPlayable(hooks.item(value))).slice(0, 2000);
+    resumeAudioId = resumeShortAudio && item.kind === "audio" ? item.id : undefined;
     cursor = -1;
     if (isAudiobook(item)) preferences.shuffled = false;
     const position = reorder(index);
@@ -479,7 +481,7 @@ export function createAudioPlayer(hooks: Hooks) {
     if (!isPlayable(hooks.item(id)) || tracks.length >= 2000) return;
     tracks.push(id);
     order.push(tracks.length - 1);
-    if (cursor < 0) activate(0, false, true, false);
+    if (cursor < 0) { resumeAudioId = undefined; activate(0, false, true, false); }
     else { saveSession(); render(); hooks.render(); }
   }
 
@@ -683,19 +685,22 @@ export function createAudioPlayer(hooks: Hooks) {
       return true;
     });
     if (!tracks.length) { saveSession(); return; }
+    resumeAudioId = saved.resumeAudioId;
     order = saved.order.flatMap(index => remap.has(index) ? [remap.get(index)!] : []);
     const previous = order.indexOf(remap.get(saved.order[saved.cursor]) ?? -1);
     activate(Math.max(0, previous), false, true, false);
   }
 
-  function playAt(id: string, time: number): boolean {
+  function playAt(id: string, time: number, resumeShortAudio = false): boolean {
     const item = hooks.item(id);
     if (!isPlayable(item)) return false;
+    const resumeId = resumeShortAudio && item.kind === "audio" ? id : undefined;
     if (id !== currentId() || issue) {
       persist();
-      tracks = [id]; order = [0]; cursor = -1;
+      tracks = [id]; order = [0]; cursor = -1; resumeAudioId = resumeId;
       activate(0, false, false);
     } else if (item.kind === "video") showStage();
+    if (resumeId && resumeId !== resumeAudioId) { resumeAudioId = resumeId; saveSession(); }
     if (resumeChoice) {
       resumeChoice = 0;
       stage?.render(item, preferences, 0, issue);

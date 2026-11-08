@@ -20,6 +20,7 @@ export interface PlaybackQueue {
   tracks: string[];
   order: number[];
   cursor: number;
+  resumeAudioId?: string;
 }
 
 const key = "nabnab.playback.v1";
@@ -65,7 +66,8 @@ export function readPlayback(): { preferences: PlaybackPreferences; queue: Playb
       || !queue.order.every((index: number) => Number.isInteger(index) && index >= 0 && index < queue.tracks.length)) {
       return { preferences, queue: null };
     }
-    return { preferences, queue };
+    const resumeAudioId = typeof queue.resumeAudioId === "string" && queue.tracks.includes(queue.resumeAudioId) ? queue.resumeAudioId : undefined;
+    return { preferences, queue: { tracks: queue.tracks, order: queue.order, cursor: queue.cursor, resumeAudioId } };
   } catch { return { preferences, queue: null }; }
 }
 

@@ -133,7 +133,6 @@ const voice=createVoice({command,snapshot:()=>snapshot,refresh,render:renderCurr
 const documentEdits=createDocumentEdits({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t});
 const documents=createDocuments({command,snapshot:()=>snapshot,refresh,render:renderLibraryModules,t});
 const galleryExports=createGalleryExports({command,selected:()=>[...library.selected],refresh,notify,t});
-const courses=createCoursesController({command,getSnapshot:()=>snapshot,refresh,render:renderCurrent,notify,showError,t,openLibrary:id=>{librarySection='files';library.detailId=id;navigate('library');if(snapshot.library.some(i=>i.id===id&&i.kind==='document'))void documents.open(id);}});
 const platforms=createPlatformsController({command,snapshot:()=>snapshot,refresh,notify,showError,render:renderCurrent,t,openLink:url=>{navigate('home');updateSourceInput(url);clearTimeout(debounce);void inspect(true).catch(showError);}});
 const sources=createSourcesController({command,openPublicSource:url=>{platformModule="fileSources";navigate("platforms");void fileSources.open(url).catch(showError);},getSnapshot:()=>snapshot,refresh,notify,showError,t,render:renderCurrent});
 const batches=createBatchController({command,snapshot:()=>snapshot,refresh,notify,showError,t,render:renderCurrent,onFollowSource:url=>{librarySection='sources';sources.openAdd(url);navigate('library');}});
@@ -166,6 +165,7 @@ const audioPlayer=createAudioPlayer({
     return minimized!==true&&visible!==false;
   },
 });
+const courses=createCoursesController({command,getSnapshot:()=>snapshot,refresh,render:renderCurrent,notify,showError,t,player:audioPlayer,openLibrary:id=>{librarySection='files';library.detailId=id;navigate('library');if(snapshot.library.some(i=>i.id===id&&i.kind==='document'))void documents.open(id);}});
 const audioLibrary=createAudioLibrary({
   snapshot: () => snapshot, command, refresh, render: renderCurrent, notify, showError, t, player: audioPlayer,
   invalidateCover: id => { thumbnailUrls.delete(id); },
@@ -418,7 +418,7 @@ function renderCurrent(): void {
     if(page==='settings'&&preferences.section==='engines')required('.settings-content').insertAdjacentHTML('beforeend',platforms.renderComponents());
     if(page==='settings'&&preferences.section==='automation')required('.settings-content').insertAdjacentHTML('beforeend',automation.render());
     if(page==='settings'&&preferences.section==='connections')required('.settings-content').insertAdjacentHTML('beforeend',fileSources.renderConnections()+personalServers.renderConnections());
-    renderInspector();libraryFeatures.bind();if(page==='platforms'&&platformModule==='catalog')platforms.bind();if(page==='platforms'&&platformModule==='courses')courses.bind();updateActivity();observeThumbnails();screenCapture.bind();voice.bind();if(showingTranslation)translationTool.bind();
+    renderInspector();libraryFeatures.bind();if(page==='platforms'&&platformModule==='catalog')platforms.bind();updateActivity();observeThumbnails();screenCapture.bind();voice.bind();if(showingTranslation)translationTool.bind();
   });
 }
 function observeThumbnails(): void {
@@ -488,7 +488,6 @@ function applySnapshot(next: Snapshot): void {
 }
 async function refresh(): Promise<void> { applySnapshot(await command<Snapshot>("get_snapshot")); }
 function navigate(next: Page): void {
-  if(page==='platforms'&&platformModule==='courses')courses.savePlayback();
   if(next!=='tools'){voice.deactivate();stemsTool.leave();}
   else if(localToolModule!=='stems')stemsTool.leave();
   if(next!=='library'||librarySection!=='archives')personalArchives.leave();
@@ -507,7 +506,6 @@ function navigate(next: Page): void {
   if(next==='library'&&librarySection==='archives')void personalArchives.load();
 }
 function showPlatformsCatalog():void{
-  if(page==='platforms'&&platformModule==='courses')courses.savePlayback();
   platformModule='catalog';platforms.showCatalog();navigate('platforms');
   required('#main').scrollTop=0;required<HTMLInputElement>('#platform-search').focus({preventScroll:true});
 }

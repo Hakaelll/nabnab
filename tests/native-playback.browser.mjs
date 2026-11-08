@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { mkdir, mkdtemp, rename, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 
@@ -24,6 +24,7 @@ const picture = path.join(data, "cover.png");
 const captions = path.join(data, "Subtítulos ñ.vtt");
 const subtitles = path.join(data, "Subtítulos de prueba.srt");
 const missing = path.join(data, "06 · Archivo desplazado.mp4");
+const handout = path.join(data, "Apuntes de la lección.txt");
 const audioSamples = [[".wav", "pcm_s16le"], [".m4a", "aac"], [".opus", "libopus"], [".flac", "flac"]]
   .map(([extension, codec], index) => ({ file: path.join(data, `Audio ${index + 1}${extension}`), codec }));
 
@@ -46,6 +47,7 @@ for (const { file, codec } of audioSamples) encode("-f", "lavfi", "-i", "aevalsr
 await writeFile(broken, "Archivo de prueba sin contenedor de vídeo.");
 await writeFile(captions, "WEBVTT\n\n00:00:04.000 --> 00:00:09.000\nTexto local &lt;b&gt;seguro&lt;/b&gt;\n");
 await writeFile(subtitles, "1\n00:00:04,000 --> 00:00:09,000\nSecond local track\n");
+await writeFile(handout, "Material de estudio de prueba.\n");
 
 let child, browser, page, nativeHandle, log = "";
 async function wait(check, timeout = 30_000) {
@@ -113,6 +115,79 @@ const stage = () => page.locator("#playback-stage");
 const play = id => page.locator(`.media-play[data-id="${id}"]`).click();
 const clickStage = action => stage().locator(`[data-stage-action="${action}"]`).click();
 const clip = file => JSON.parse(execFileSync(ffprobe, ["-v", "error", "-show_streams", "-of", "json", file], { windowsHide: true })).streams;
+
+async function seedCourse(videoId, audioId, handoutId) {
+  const stateFile = path.join(data, "state-v1.json");
+  const state = JSON.parse(await readFile(stateFile, "utf8"));
+  const asset = id => {
+    const item = state.library.find(candidate => candidate.id === id);
+    return { id: `asset-${id}`, title: item.name, kind: item.kind, status: "local", libraryId: id, urlRef: null, jobIds: [] };
+  };
+  const prior = { id: "note-fixture", text: "Nota anterior", time: 7, bookmarkId: "course-note-fixture" };
+  state.library.find(item => item.id === handoutId).details.bookmarks.push({ id: prior.bookmarkId, name: prior.text, time: prior.time });
+  state.courses.push({ id: "local-fixture", title: "Taller de composición", provider: "local", url: null, createdAt: 1,
+    sections: [{ id: "section-fixture", title: "01 · Fundamentos", lessons: [
+      { id: "lesson-video", title: "Encuadre y proporción", learned: false, assets: [asset(handoutId), asset(videoId)], notes: [prior] },
+      { id: "lesson-audio", title: "Ejercicio de escucha", learned: false, assets: [asset(audioId)], notes: [] },
+    ] }],
+  });
+  await writeFile(stateFile, JSON.stringify(state));
+}
+
+async function verifyCoursePlayback(videoId, musicId, audioId, handoutId) {
+  await page.locator('[data-page="library"]').click();
+  await play(musicId);
+  await wait(async () => (await playing()).id === musicId && !(await playing()).paused);
+  const engine = await page.locator("#audio-engine").elementHandle();
+  const button = name => page.getByRole("button", { name, exact: true });
+  await page.locator('[data-page="platforms"]').click();
+  await page.locator('.platform-shortcuts [data-action="open-courses"]').click();
+  await page.getByRole("button", { name: /Taller de composición/ }).click();
+  assert.equal(await page.locator("audio, video").count(), 1);
+  assert.equal(await button("Añadir a la cola").count(), 0);
+  assert.equal((await playing()).id, musicId);
+  assert.equal(await button("Usar tiempo actual").isEnabled(), false);
+  await page.screenshot({ path: path.join(base, "course-video-1180x780.png"), animations: "disabled" });
+  await button("Reproducir lección").press("Enter");
+  await stage().locator("#stage-resume").waitFor();
+  assert.equal(await engine.evaluate(node => node === document.getElementById("audio-engine")), true);
+  assert.equal((await playing()).id, videoId);
+  await clickStage("resume");
+  await wait(async () => (await playing()).time > 10 && !(await playing()).paused);
+  await clickStage("back");
+  await button("Usar tiempo actual").click();
+  const timestamp = Number(await page.locator("#course-note-time").inputValue());
+  assert.ok(timestamp >= 10 && timestamp < 22);
+  await page.locator("#course-note-text").fill("Volver al encuadre vertical");
+  await button("Guardar nota").click();
+  const added = page.locator(".course-note").filter({ hasText: "Volver al encuadre vertical" });
+  await added.waitFor();
+  const snapshot = await rpc("get_snapshot");
+  const videoBookmark = snapshot.library.find(item => item.id === videoId).details.bookmarks.find(bookmark => bookmark.name === "Volver al encuadre vertical");
+  assert.equal(videoBookmark?.time, timestamp);
+  assert.ok(!snapshot.library.find(item => item.id === handoutId).details.bookmarks.some(bookmark => bookmark.id === videoBookmark.id));
+  await page.locator(".course-note").filter({ hasText: "Nota anterior" }).getByRole("button", { name: "Eliminar nota" }).click();
+  await wait(async () => !(await rpc("get_snapshot")).library.find(item => item.id === handoutId).details.bookmarks.some(bookmark => bookmark.id === "course-note-fixture"));
+  await added.getByRole("button", { name: `${timestamp.toFixed(1)} s` }).click();
+  await stage().waitFor();
+  await wait(async () => (await playing()).paused && Math.abs((await playing()).time - timestamp) < 0.05);
+  await clickStage("back");
+  await button("Ejercicio de escucha").click();
+  await button("Reproducir lección").click();
+  await wait(async () => (await playing()).id === audioId && !(await playing()).paused);
+  assert.equal(await stage().isVisible(), false);
+  await page.locator("#audio-seek").evaluate(range => {
+    range.value = "5";
+    range.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await page.locator("#audio-toggle").click();
+  await wait(async () => (await rpc("get_snapshot")).library.find(item => item.id === audioId).details.playbackPosition >= 4.95);
+  await shutdown();
+  await launch();
+  await wait(async () => (await playing()).id === audioId && (await playing()).time >= 4.95);
+  assert.equal((await playing()).paused, true);
+  console.log("Course lessons use the shared engine, timed notes target the video, and short audio resumes after restart.");
+}
 
 async function downloadDuringPlayback(itemId) {
   const { job, observations } = await page.evaluate(async () => {
@@ -296,7 +371,7 @@ try {
     };
   });
   await rpc("save_settings", { settings: { ...initial.settings, folder: output, language: "es", reducedMotion: false, trayEnabled: false, closeToTray: false } });
-  const imported = await rpc("import_paths", { paths: [video, music, webm, mkv, broken, missing, ...audioSamples.map(sample => sample.file), ...(av1 ? [av1] : [])] });
+  const imported = await rpc("import_paths", { paths: [video, music, webm, mkv, broken, missing, handout, ...audioSamples.map(sample => sample.file), ...(av1 ? [av1] : [])] });
   const item = file => imported.library.find(candidate => candidate.name === path.basename(file));
   const videoId = item(video).id, musicId = item(music).id;
   assert.equal(item(music).kind, "audio");
@@ -596,6 +671,9 @@ try {
   assert.deepEqual(errors, []);
   assert.deepEqual(unexpectedNetwork, []);
   await shutdown();
+  const audioLessonId = item(audioSamples[0].file).id;
+  const handoutId = item(handout).id;
+  await seedCourse(videoId, audioLessonId, handoutId);
   await launch();
   await page.locator("#audio-player").waitFor();
   await wait(async () => (await playing()).time >= 10);
@@ -605,6 +683,7 @@ try {
   console.log(JSON.stringify({ sharedElement: true, compact: true, video: true, hidControlsAfterMouseClick: true, captions: true,
     fullscreen: true, restoredOnRestart: true, playlistAudioCover: true, viewports: [1180, 900], rapidSeek: true,
     replacedLoadingSource: true, compactRoundTrips: 3, externalWebViewRequests: unexpectedNetwork.length }));
+  await verifyCoursePlayback(videoId, musicId, audioLessonId, handoutId);
 } catch (error) {
   console.error(log);
   console.error(await page?.locator("#playback-stage").innerText().catch(() => ""));
