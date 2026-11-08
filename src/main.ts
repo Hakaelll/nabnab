@@ -179,7 +179,7 @@ const audioPlayer=createAudioPlayer({
     void command("quick_skip_session", { configuration, revision: ++desktopWheelRevision }).catch(showError);
   } : undefined,
   convert: id => setToolInput([id]),
-  timeChanged: (id,time)=>libraryFeatures.playbackChanged(id,time),
+  timeChanged: (id,time)=>{libraryFeatures.playbackChanged(id,time);audioLibrary.playbackChanged(id,time);},
   playlists: () => snapshot.audioPlaylists ?? [], thumbnails: observePlaybackCovers,
   windowVisible: async () => {
     if(!desktop)return true;
@@ -478,6 +478,7 @@ function renderCurrent(): void {
     if(page==='settings'&&preferences.section==='connections')required('.settings-content').insertAdjacentHTML('beforeend',fileSources.renderConnections()+personalServers.renderConnections());
     renderInspector();libraryFeatures.bind();if(page==='platforms'&&platformModule==='catalog')platforms.bind();updateActivity();observeThumbnails();screenCapture.bind();voice.bind();if(showingDubbing)translationTool.bind();
   });
+  audioLibrary.bindLyrics(page === "library" && librarySection === "audio");
 }
 function observeThumbnails(): void {
   thumbnailObserver?.disconnect();

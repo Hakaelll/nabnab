@@ -4,7 +4,7 @@ import { escapeHtml as h, type Copy, type LibraryItem, type Snapshot } from "./c
 import { detailsFor } from "./library-features";
 import type { AudioPlaylist, AudioPlaylistEntry, AudioTags, Chapter, LibraryDetails, Lyric } from "./library-types";
 import { audiobookChapterComplete, audiobookResumePosition, chapterAt, isPlayable } from "./playback-preferences";
-import { durationLabel } from "./presentation";
+import { durationLabel, errorLabel } from "./presentation";
 import { action, icon, option, type Icon } from "./views-common";
 
 type Category = "music" | "podcasts" | "books" | "playlists";
@@ -13,6 +13,10 @@ type Column = "locator" | "id" | "title" | "artist" | "duration" | "version";
 interface Candidate { id: string; title: string; artist: string | null; album: string | null; duration: number | null; versionMatches: boolean }
 interface ImportedRow { entry: AudioPlaylistEntry; artist: string | null; duration: number | null; version: string | null; candidates: Candidate[] }
 interface QueueEntry { position: number; item: LibraryItem | undefined }
+type Lyrics =
+  | { id: string; kind: "loading" }
+  | { id: string; kind: "error"; message: string }
+  | { id: string; kind: "ready"; cues: Lyric[]; scrollTop: number };
 export type ImportPreview =
   | { kind: "csv"; id: string; name: string; columns: string[]; sample: string[][]; count: number }
   | { kind: "list"; name: string; rows: ImportedRow[] };
@@ -102,7 +106,12 @@ export function createAudioLibrary(hooks: Hooks) {
   let busy = false;
   let request = 0;
   let lyricOpen = false;
-  let lyrics: { id: string; lines: Lyric[] } | null = null;
+  let lyricFollow = true;
+  let choosingLyrics = false;
+  let lyrics: Lyrics | null = null;
+  let lyricPanelElement: HTMLElement | null = null;
+  let lyricList: HTMLOListElement | null = null;
+  let lyricIndex = -1;
   let imported: ImportPreview | null = null;
   let mapping: Partial<Record<Column, number>> = {};
   let milliseconds = false;
@@ -420,11 +429,25 @@ export function createAudioLibrary(hooks: Hooks) {
         ${isAudiobook(item) ? `<div class="button-group">${action("audio-add-bookmark", t("Marcar posición", "Bookmark position"), "add", "secondary", disabled())}</div>
         ${category === "books" && book === bookKey(item) ? "" : detailsFor(item).chapters.map(chapter => action("audio-seek-chapter", `${durationLabel(chapter.start)} · ${chapter.title}`, "play", "quiet", `data-time="${chapter.start}"`)).join("")}
         ${detailsFor(item).bookmarks.map(bookmark => action("audio-seek-chapter", `${durationLabel(bookmark.time)} · ${bookmark.name}`, "play", "quiet", `data-time="${bookmark.time}"`)).join("")}` : ""}
-        <div class="button-group">${action("audio-open-lyrics", lyricOpen ? t("Cerrar letras", "Close lyrics") : t("Letras locales", "Local lyrics"), "list", "quiet", disabled())}</div>
+        ${item.kind === "audio" ? `<div class="button-group">${action("audio-open-lyrics", lyricOpen ? t("Cerrar letras", "Close lyrics") : t("Letras locales", "Local lyrics"), "list", "quiet", `aria-expanded="${lyricOpen}" ${disabled()}`)}</div>
+          ${lyricOpen ? lyricPanel(item.id) : ""}` : ""}
         <div class="button-group">${action("audio-cover-choose", t("Elegir portada", "Choose cover"), "image", "quiet", disabled())}
-        ${item.details?.audioCover ? action("audio-cover-remove", t("Quitar portada local", "Remove local cover"), undefined, "quiet", disabled()) : ""}</div>
-        ${lyricOpen ? `<div class="audio-lyrics">${lyrics?.id === item.id && lyrics.lines.length ? `<ol>${lyrics.lines.map(line => `<li>${action("audio-seek-chapter", line.text, undefined, "quiet", `data-time="${line.time}"`)}</li>`).join("")}</ol>` : `<p class="field-note">${t("No hay letras locales asociadas a esta pista.", "No local lyrics are linked to this track.")}</p>`}
-          ${action("audio-choose-lyrics", t("Asociar archivo LRC", "Link LRC file"), "file", "secondary", disabled())}</div>` : ""}</div>` : ""}</aside>`;
+        ${item.details?.audioCover ? action("audio-cover-remove", t("Quitar portada local", "Remove local cover"), undefined, "quiet", disabled()) : ""}</div></div>` : ""}</aside>`;
+  }
+
+  function lyricPanel(id: string) {
+    const state = lyrics?.id === id ? lyrics : null;
+    const loading = !state || state.kind === "loading";
+    const cues = state?.kind === "ready" ? state.cues : [];
+    const message = loading ? t("Leyendo el LRC de esta pista…", "Reading this track’s LRC…")
+      : state.kind === "error" ? state.message
+      : t("No hay letras locales asociadas a esta pista.", "No local lyrics are linked to this track.");
+    return `<section id="audio-lyrics" class="audio-lyrics" data-track-id="${h(id)}" aria-labelledby="audio-lyrics-title" aria-busy="${loading || choosingLyrics}">
+      <div class="audio-lyrics-heading"><h3 id="audio-lyrics-title">${t("Letra sincronizada", "Timed lyrics")}</h3>
+      ${cues.length ? action("audio-lyrics-follow", t("Seguir letra", "Follow lyrics"), undefined, "quiet", `aria-pressed="${lyricFollow}"`) : ""}</div>
+      ${cues.length ? `<ol id="audio-lyric-lines" aria-labelledby="audio-lyrics-title">${cues.map((cue, index) => `<li><button type="button" class="audio-lyric-line" data-action="audio-seek-chapter" data-id="${h(id)}" data-index="${index}" data-time="${cue.time}"><span class="audio-lyric-time">${durationLabel(cue.time)}</span><span>${h(cue.text)}</span></button></li>`).join("")}</ol>`
+        : `<p class="field-note" role="status">${h(message)}</p>`}
+      ${action("audio-choose-lyrics", t("Asociar archivo LRC", "Link LRC file"), "file", "quiet", `id="audio-lyric-file" ${choosingLyrics ? "disabled" : ""}`)}</section>`;
   }
 
   function render() {
@@ -467,13 +490,83 @@ export function createAudioLibrary(hooks: Hooks) {
     await hooks.refresh();
   }
 
-  async function readLyrics(choose: boolean) {
+  function setLyrics(id: string, lines: Lyric[]) {
+    const cues: Lyric[] = [];
+    for (const line of lines) {
+      const previous = cues.at(-1);
+      if (previous?.time === line.time) previous.text += "\n" + line.text;
+      else cues.push({ ...line });
+    }
+    lyrics = { id, kind: "ready", cues, scrollTop: 0 };
+  }
+
+  async function loadLyrics(id: string) {
+    const pending: Lyrics = { id, kind: "loading" };
+    lyrics = pending;
+    try {
+      const lines = await hooks.command<Lyric[]>("audio_lyrics", { id });
+      if (lyrics !== pending) return;
+      setLyrics(id, lines);
+    } catch (error) {
+      if (lyrics !== pending) return;
+      lyrics = { id, kind: "error", message: errorLabel(error) };
+    }
+    if (lyricPanelElement?.dataset.trackId === id) hooks.render();
+  }
+
+  async function chooseLyrics() {
     const item = player.current();
-    if (!item) return;
-    await run(async () => {
-      const lines = await hooks.command<Lyric[] | null>(choose ? "audio_lyrics_choose" : "audio_lyrics", { id: item.id });
-      if (lines) lyrics = { id: item.id, lines };
-    });
+    if (item?.kind !== "audio" || choosingLyrics) return;
+    choosingLyrics = true;
+    hooks.render();
+    try {
+      const lines = await hooks.command<Lyric[] | null>("audio_lyrics_choose", { id: item.id });
+      if (lines && lyricOpen && player.current()?.id === item.id) setLyrics(item.id, lines);
+    } catch (error) { hooks.showError(error); }
+    finally {
+      choosingLyrics = false;
+      if (lyricPanelElement) {
+        hooks.render();
+        if (lyricPanelElement?.dataset.trackId === item.id) document.getElementById("audio-lyric-file")?.focus({ preventScroll: true });
+      }
+    }
+  }
+
+  function playbackChanged(id: string, time: number) {
+    const list = lyricList;
+    if (!list || lyrics?.kind !== "ready" || lyrics.id !== id) return;
+    const { cues } = lyrics;
+    let low = 0, high = cues.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      if (cues[middle].time <= time) low = middle + 1;
+      else high = middle;
+    }
+    const next = low - 1;
+    if (next === lyricIndex) return;
+    list.children[lyricIndex]?.firstElementChild?.removeAttribute("aria-current");
+    lyricIndex = next;
+    const row = list.children[next];
+    row?.firstElementChild?.setAttribute("aria-current", "true");
+    if (!row || !lyricFollow || list.contains(document.activeElement)) return;
+    const bounds = list.getBoundingClientRect(), line = row.getBoundingClientRect();
+    if (line.top < bounds.top) list.scrollTop += line.top - bounds.top;
+    else if (line.bottom > bounds.bottom) list.scrollTop += Math.min(line.top - bounds.top, line.bottom - bounds.bottom);
+    lyrics.scrollTop = list.scrollTop;
+  }
+
+  function bindLyrics(visible: boolean) {
+    lyricPanelElement = visible ? document.getElementById("audio-lyrics") : null;
+    lyricList = lyricPanelElement?.querySelector("ol") ?? null;
+    lyricIndex = -1;
+    const id = lyricPanelElement?.dataset.trackId;
+    if (!id) return;
+    if (lyrics?.id !== id) { void loadLyrics(id); return; }
+    const list = lyricList, state = lyrics;
+    if (!list || state.kind !== "ready") return;
+    list.scrollTop = state.scrollTop;
+    list.addEventListener("scroll", () => { state.scrollTop = list.scrollTop; });
+    playbackChanged(id, player.timeFor(id) ?? 0);
   }
 
   function playTrack(id: string) {
@@ -481,7 +574,6 @@ export function createAudioLibrary(hooks: Hooks) {
     const item = results.find(item => item.id === id);
     if (!item) return;
     const ids = (category === "books" ? byCategory.filter(candidate => bookKey(candidate) === bookKey(item)).sort(compareChapters) : results).map(item => item.id);
-    lyricOpen = false;
     player.play(ids, ids.indexOf(id));
   }
 
@@ -647,8 +739,10 @@ export function createAudioLibrary(hooks: Hooks) {
         });
       } break;
       case "audio-open-lyrics":
-        lyricOpen = !lyricOpen; if (lyricOpen) await readLyrics(false); else hooks.render(); break;
-      case "audio-choose-lyrics": await readLyrics(true); break;
+        lyricOpen = !lyricOpen; lyrics = null; hooks.render(); break;
+      case "audio-lyrics-follow":
+        lyricFollow = !lyricFollow; hooks.render(); break;
+      case "audio-choose-lyrics": await chooseLyrics(); break;
       case "audio-cover-choose":
       case "audio-cover-remove": {
         const item = player.current();
@@ -755,5 +849,5 @@ export function createAudioLibrary(hooks: Hooks) {
     hooks.render();
   }
 
-  return { render, click, input, submit, openArchivePlaylist };
+  return { render, click, input, submit, openArchivePlaylist, bindLyrics, playbackChanged };
 }

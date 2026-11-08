@@ -82,7 +82,17 @@
 .audio-next-copy { display: grid; gap: 1px; min-width: 0; }
 .audio-next-copy strong { font-size: 12px; font-weight: 500; }
 .audio-next-copy small { color: var(--muted); font-size: 11px; }
-.audio-lyrics ol { list-style: none; padding: 0; max-height: 270px; overflow: auto; }
+.audio-lyrics { display: grid; gap: 8px; margin-block: 8px 12px; }
+.audio-lyrics-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; }
+.audio-lyrics h3 { margin: 0; font-size: 13px; font-weight: 600; }
+.audio-lyrics .button { justify-self: start; }
+.audio-lyrics [aria-pressed="true"] { background: var(--surface); color: var(--text); }
+.audio-lyrics ol { list-style: none; padding: 3px; margin: 0; max-height: 230px; overflow: auto; border-block: 1px solid var(--edge-quiet); }
+.audio-lyric-line { display: grid; grid-template-columns: 4.5ch minmax(0, 1fr); gap: 8px; width: 100%; padding: 8px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font: inherit; text-align: start; cursor: pointer; }
+.audio-lyric-line > span:last-child { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.45; }
+.audio-lyric-line:hover { background: var(--hover); color: var(--text); }
+.audio-lyric-line[aria-current="true"] { background: var(--surface); color: var(--text); box-shadow: inset 2px 0 var(--action); font-weight: 600; }
+.audio-lyric-time { padding-top: 2px; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 .audio-selection, .audio-editor { display: grid; gap: 12px; padding: 14px; margin-bottom: 16px; border: 1px solid var(--edge-quiet); border-radius: 12px; }
 .audio-selection-heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; }
 .audio-selection-scope { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }

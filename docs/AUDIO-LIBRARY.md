@@ -18,11 +18,15 @@ Selecciona pistas para crear una lista, añadirlas a una existente o editar sus 
 
 Desde la pista actual, **Elegir portada** permite asociar un JPEG, PNG o WebP local. Quitar la asociación vuelve a mostrar la portada incrustada cuando está disponible.
 
-**Letras locales** lee el archivo LRC junto a la pista si está disponible. **Asociar archivo LRC** permite elegir otro archivo local. Cada línea permite saltar a su marca de tiempo.
+**Letras locales** lee el LRC que acompaña a la pista. **Asociar archivo LRC** permite elegir otro archivo local. El panel marca la línea actual y se actualiza al cambiar de pista. Pulsa una línea para saltar a su marca de tiempo o desactiva **Seguir letra** para recorrer la lista a tu ritmo. Las líneas con la misma marca aparecen juntas.
+
+![Letras locales sincronizadas en el panel de Audio](audio-lyrics.png)
 
 En **Listas → Importar lista** puedes abrir M3U, M3U8, PLS o CSV en UTF-8. En CSV, confirma las columnas y la unidad de duración. nabnab reconoce identificadores y rutas de archivos que ya están en Biblioteca. Las coincidencias por título, artista, duración o versión son sugerencias. Puedes escoger la grabación o conservar la referencia remota o ausente. La lista conserva el orden y las URLs importadas permanecen como referencias.
 
 La prueba de interfaz reproduce un WAV silencioso en Edge con almacenamiento de escritorio simulado. Comprueba el orden por disco y pista, la estantería con teclado, la continuidad del reproductor, el descanso de audiolibros, las letras y la edición de listas y etiquetas. La prueba nativa usa audio sintético y verifica que, después de reiniciar nabnab, **Continuar** abre el capítulo siguiente de un libro cuyo capítulo anterior terminó. La integración con Windows se comprueba mediante solicitudes del sistema a la sesión multimedia de prueba.
+
+Con `NABNAB_PLAYBACK_LYRICS=1`, `tests/native-playback.browser.mjs` abre dos LRC locales. Comprueba el desplazamiento de tiempo declarado en el archivo, las líneas simultáneas y el cambio de letra al pasar de pista. La revisión visual se hizo a 900 y 1180 px.
 
 Con `NABNAB_PLAYBACK_EMBEDDED_BOOK=1`, `tests/native-playback.browser.mjs` importa un M4B local de tres capítulos, guarda dos puntos de escucha y comprueba ambos tras reiniciar nabnab. También verifica que el resumen cambia al retomar y pausar otro capítulo. La revisión visual se hizo a 900 y 1180 px. [Índice de capítulos en Windows](audio-embedded-chapters.png)
 

@@ -16,6 +16,7 @@ const desktopMiniKey = process.env.NABNAB_PLAYBACK_DESKTOP_MINI_KEY === "1";
 const desktopRestore = process.env.NABNAB_PLAYBACK_DESKTOP_RESTORE === "1";
 const windowsMedia = process.env.NABNAB_PLAYBACK_WINDOWS_MEDIA === "1";
 const embeddedBookOnly = process.env.NABNAB_PLAYBACK_EMBEDDED_BOOK === "1";
+const lyricsOnly = process.env.NABNAB_PLAYBACK_LYRICS === "1";
 const fixtureArtist = windowsMedia ? `Laboratorio nabnab · ${path.basename(data)}` : "Laboratorio nabnab";
 const fixtureTitle = desktopRestore
   ? "Señal para la cola · Grabación completa de prueba para un título largo que debe dejar visibles todos los controles del minirreproductor"
@@ -336,6 +337,40 @@ async function openBooks() {
   await page.locator('button[data-page="library"]').click();
   await page.locator('[data-action="library-section"][data-section="audio"]').click();
   await page.getByRole("button", { name: "Audiolibros", exact: true }).click();
+}
+
+async function verifyLocalLyrics() {
+  const nextAudio = audioSamples[0].file;
+  const sidecar = file => path.join(path.dirname(file), path.parse(file).name + ".lrc");
+  await writeFile(sidecar(music), "[offset:250]\n[00:01.00]Entra la primera voz\n[00:04.25]Cruzan dos voces\n[00:04.25]Responde el eco\n[00:07.00]La señal se aleja\n");
+  await writeFile(sidecar(nextAudio), "[00:00.00]Comienza la segunda pista\n");
+  const imported = await rpc("import_paths", { paths: [music, nextAudio] });
+  const first = imported.library.find(item => path.basename(item.path) === path.basename(music));
+  const next = imported.library.find(item => path.basename(item.path) === path.basename(nextAudio));
+  assert.ok(first && next);
+  await page.locator('button[data-page="library"]').click();
+  await page.locator('[data-action="library-section"][data-section="audio"]').click();
+  const track = id => page.locator(`[data-action="audio-play"][data-id="${id}"]`);
+  await track(first.id).click();
+  await wait(async () => (await playing()).id === first.id && !(await playing()).paused);
+  await page.getByRole("button", { name:"Letras locales", exact:true }).press("Enter");
+  const lines = page.locator("#audio-lyric-lines");
+  await lines.waitFor();
+  assert.equal(await lines.getByRole("button").count(), 3);
+  await page.locator("#audio-toggle").click();
+  await lines.getByRole("button", { name:/Cruzan dos voces/ }).press("Enter");
+  const active = lines.locator('[aria-current="true"]');
+  await active.getByText("Cruzan dos voces Responde el eco").waitFor();
+  await wait(async () => Math.abs((await playing()).time - 4.5) < .05 && (await playing()).paused);
+  for (const [width,height] of [[1180,780],[900,620]]) {
+    await page.setViewportSize({width,height});
+    await page.locator("#audio-lyrics").scrollIntoViewIfNeeded();
+    await page.screenshot({path:path.join(output, `native-lyrics-${width}.png`),animations:"disabled"});
+  }
+  await track(next.id).click();
+  await lines.getByText("Comienza la segunda pista", { exact:true }).waitFor();
+  assert.equal(await lines.getByText("Cruzan dos voces", { exact:false }).count(), 0);
+  console.log("Native LRC offsets, simultaneous lines, keyboard seeking and track changes passed.");
 }
 
 async function verifyEmbeddedBook() {
@@ -1600,7 +1635,8 @@ async function verifyPlayback(initial) {
 
 try {
   const initial = await launch();
-  if (embeddedBookOnly) await verifyEmbeddedBook();
+  if (lyricsOnly) await verifyLocalLyrics();
+  else if (embeddedBookOnly) await verifyEmbeddedBook();
   else await verifyPlayback(initial);
 } catch (error) {
   console.error(log);

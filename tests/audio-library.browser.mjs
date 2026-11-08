@@ -71,8 +71,14 @@ const setup = `
         {id:"last",title:"Tercera pista",artist:"Sonia",album:"Sesiones",duration:10,versionMatches:true}]},
       {entry:{kind:"missing",locator:"missing.mp3",title:"Ausente"},artist:null,duration:null,version:null,candidates:[]},
     ]};
-    if(cmd==="audio_lyrics")return [{time:1,text:"Una letra local"}];
-    if(cmd==="audio_lyrics_choose")return [{time:2,text:"Letra elegida"}];
+    if(cmd==="audio_lyrics")return state.library.find(item=>item.id===args.id)?.details.lyrics ??
+      (args.id==="second"?[{time:0,text:"Letra de la segunda pista"}]:
+      [{time:1,text:"Una letra local"},...Array.from({length:16},(_,i)=>({time:1.5+i*.45,text:"Verso de prueba "+(i+2)}))]);
+    if(cmd==="audio_lyrics_choose"){
+      const lines=[{time:2,text:"Letra elegida"},{time:2,text:"Segunda voz"}];
+      state.library.find(item=>item.id===args.id).details.lyrics=lines;
+      return lines;
+    }
     if(cmd==="audio_cover_choose"){state.library.find(item=>item.id===args.id).details.audioCover=args.remove?null:"C:/fixture/cover.png";return true;}
     if(cmd==="audio_tags_queue_copies")return [];
   }, {shouldMockEvents:true});
@@ -188,8 +194,37 @@ try {
   await page.waitForFunction(() => !document.getElementById("audio-engine").paused);
   await page.locator("[data-action='audio-open-lyrics']").click();
   await page.getByText("Una letra local", {exact:true}).waitFor();
+  await page.locator("#audio-toggle").click();
+  const lyricMedia = page.locator("#audio-engine");
+  const lyricList = page.locator("#audio-lyric-lines");
+  const currentLyric = lyricList.locator('[aria-current="true"]');
+  const follow = page.getByRole("button", {name:"Seguir letra",exact:true});
+  await follow.press("Space");
+  assert.equal(await follow.getAttribute("aria-pressed"), "false");
+  await lyricMedia.evaluate(media => { media.currentTime = 9; });
+  await currentLyric.getByText("Verso de prueba 17", {exact:true}).waitFor();
+  assert.equal(await lyricList.evaluate(list => list.scrollTop), 0);
+  await follow.press("Space");
+  assert.equal(await follow.getAttribute("aria-pressed"), "true");
+  assert.ok(await lyricList.evaluate(list => list.scrollTop > 0));
+  for (const [width,height] of [[900,620],[1180,780]]) {
+    await page.setViewportSize({width,height});
+    await page.locator("#audio-lyrics").scrollIntoViewIfNeeded();
+    assert.ok(await lyricList.evaluate(list => list.scrollWidth <= list.clientWidth + 1));
+    await page.screenshot({path:`${directory}/audio-lyrics-${width}x${height}.png`,animations:"disabled"});
+  }
+  await lyricList.getByRole("button", {name:/Una letra local/}).press("Enter");
+  await currentLyric.getByText("Una letra local", {exact:true}).waitFor();
+  assert.equal(await lyricMedia.evaluate(media => media.currentTime), 1);
   await page.locator("[data-action='audio-choose-lyrics']").click();
-  await page.getByText("Letra elegida", {exact:true}).waitFor();
+  await page.getByText("Letra elegida", {exact:false}).waitFor();
+  assert.equal(await lyricList.getByRole("button").count(), 1);
+  assert.match(await lyricList.innerText(), /Letra elegida\s+Segunda voz/);
+  await page.locator("#audio-next").click();
+  await page.getByText("Letra de la segunda pista", {exact:true}).waitFor();
+  await page.locator("[data-action='audio-play'][data-id='first']").click();
+  await lyricList.getByText("Letra elegida", {exact:false}).waitFor();
+  await page.waitForFunction(() => !document.getElementById("audio-engine").paused);
   await page.locator("[data-action='audio-open-lyrics']").click();
   for (const [width,height] of [[1180,780],[900,620]]) {
     await page.setViewportSize({width,height});
@@ -321,5 +356,5 @@ try {
   assert.deepEqual(await chapterIndex.locator("strong").allTextContents(), ["Parte 31", "Parte 32", "Parte 33"]);
   assert.equal(await chapterIndex.getByRole("heading").evaluate(node => node === document.activeElement), true);
   assert.deepEqual(errors, []);
-  console.log("Audio shelves, independent tab state, keyboard filtering, persistent playback, playlist review, and audiobook controls passed.");
+  console.log("Audio shelves, independent tab state, timed lyrics, persistent playback, playlist review, and audiobook controls passed.");
 } finally { await browser.close(); }
