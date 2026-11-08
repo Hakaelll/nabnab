@@ -17,6 +17,19 @@ const setup = `
   const copy=value=>structuredClone(value);
   const settings={folder:"C:/Downloads/nabnab-fixture",language:"es",networkLimit:3,processingLimit:1,reducedMotion:true,reducedTransparency:true,sidebarExpanded:true,trayEnabled:false,closeToTray:false,startWithWindows:false};
   const state={settings,jobs:[],library:[],collections:[],drafts:[],sources:[],rules:[],smartCollections:[],presets:[]};
+  const savedPaper=(id,version,missing=false)=>({
+    id,name:"Mi copia "+version+".pdf",path:"C:/Papers/"+id+".pdf",kind:"document",size:512,addedAt:1,
+    duration:null,width:null,height:null,source:"https://arxiv.org/abs/2401.00001"+version,parentId:null,collections:[],tags:[],missing,
+    details:{contentId:"arxiv:2401.00001"+version,creator:"Fixture Author",platform:"arXiv",sourceIds:[],sourceVersion:version,
+      chapters:[],tracks:[],playbackPosition:0,favorite:false,bookmarks:[],clip:null}
+  });
+  state.library.push(savedPaper("local-v1","v1"),savedPaper("missing-v2","v2",true));
+  state.sources.push({id:"follow-arxiv",name:"Artículos de prueba",url:"https://arxiv.org/search/?field=author&query=Fixture+Author",
+    kind:"publicSearch",status:"ready",lastCheck:1,settings:{presetId:null,relativeFolder:"",intervalHours:null,automatic:false,pageSize:20},
+    baseline:{inspected:2,total:2,complete:true,cursor:2,hasMore:false},
+    items:[1,2].map(version=>({contentId:"arxiv:2401.00001v"+version,title:"A versioned paper",creator:"arXiv",
+      url:"https://arxiv.org/abs/2401.00001v"+version,publishedAt:null,state:"review",reason:null,jobIds:[]}))
+  });
   const fixture=window.fileSourceFixture={state,calls:[],pending:null};
   const personal={servers:[],references:[]};
   const stamp={size:4096,modified:"2026-11-07",etag:'"version-1"'};
@@ -194,6 +207,11 @@ try {
       await checkNoHorizontalOverflow(`arXiv ${width}`);
       await page.screenshot({ path: `${directory}/arxiv-versions-${width}x${height}-fixture.png` });
     }
+    const localCopy = page.getByRole("button", { name: "Abrir copia de la versión 1" });
+    await localCopy.press("Enter", { timeout: 3000 });
+    assert.equal(await page.getByRole("button", { name: "Abrir copia de la versión 2" }).count(), 0);
+    const localOpen = await page.evaluate(() => window.fileSourceFixture.calls.find(call => call.cmd === "open_media")?.args);
+    assert.deepEqual(localOpen, { id: "local-v1", folder: false });
     await page.getByRole("checkbox", { name: /^Versión 2 · / }).check();
     assert.match(await page.locator(".file-source-selection-title").innerText(), /Tamaño desconocido/);
     const back = page.getByRole("button", { name: "Volver a resultados" });
@@ -207,6 +225,24 @@ try {
     assert.equal(await back.evaluate(node => node === document.activeElement), true);
     await back.press("Enter");
     assert.equal(await secondPaper.evaluate(node => node === document.activeElement), true);
+
+    await page.locator('[data-page="library"]').click();
+    await page.locator('[data-section="sources"]').click();
+    const followed = page.getByRole("button", { name: /Artículos de prueba/ });
+    assert.match(await followed.innerText(), /1 pendiente de revisión/);
+    await followed.click();
+    const versionRow = version => page.locator(".source-item").filter({ hasText: `2401.00001v${version}` });
+    assert.match(await versionRow(1).innerText(), /Descargado/);
+    assert.match(await versionRow(2).innerText(), /Pendiente de revisar/);
+    await page.locator("#source-item-filter").selectOption("downloaded");
+    assert.equal(await page.locator(".source-item").count(), 1);
+    assert.equal(await versionRow(1).count(), 1);
+    await versionRow(1).getByRole("button", { name: "Abrir copia" }).press("Enter");
+    assert.deepEqual(await page.evaluate(() => window.fileSourceFixture.calls.filter(call => call.cmd === "open_media").map(call => call.args.id)), ["local-v1", "local-v1"]);
+    await page.locator("#source-item-filter").selectOption("review");
+    await versionRow(2).getByRole("button", { name: "Elegir archivos" }).press("Enter");
+    await page.locator("[data-file-source-select='arxiv:2401.00001v2']").waitFor();
+    assert.equal(await page.evaluate(() => window.fileSourceFixture.calls.filter(call => call.cmd === "public_source_inspect").at(-1).args.url), "https://arxiv.org/abs/2401.00001v2");
 
     await inspect("10.5281/zenodo.1234");
     await page.getByText("Versión v2 · Registro 1236 · Familia 1234", { exact: true }).waitFor();

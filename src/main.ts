@@ -115,7 +115,7 @@ const personalServers=createPersonalServers({
     (document.querySelector<HTMLElement>(`#detail-dialog[open] ${selector}`) ?? document.querySelector<HTMLElement>(selector))?.focus();
   },
 });
-const fileSources=createFileSources({command,refresh,render:renderCurrent,notify,showError,t,renderPersonal:personalServers.renderBrowser,loadPersonal:personalServers.load,followSource:(url,kind)=>{librarySection="sources";sources.openAdd(url,kind);navigate("library");},folder:()=>snapshot.settings.folder,chooseFolder:()=>{void chooseFolder().then(renderCurrent).catch(showError);}});
+const fileSources=createFileSources({command,refresh,render:renderCurrent,notify,showError,t,library:()=>snapshot.library,renderPersonal:personalServers.renderBrowser,loadPersonal:personalServers.load,followSource:(url,kind)=>{librarySection="sources";sources.openAdd(url,kind);navigate("library");},folder:()=>snapshot.settings.folder,chooseFolder:()=>{void chooseFolder().then(renderCurrent).catch(showError);}});
 const advancedFiles=createAdvancedFilesController({command,refresh,render:renderCurrent,notify,showError,t,settings:()=>{preferences.section='engines';navigate('settings');void loadSettingsSection().catch(showError);},folder:()=>snapshot.settings.folder});
 const captionEditor=createCaptionEditor({command,snapshot:()=>snapshot,refresh,render:renderLibraryModules,notify,t});
 const sourceExports=createSourceExportsController({command,refresh,render:renderCurrent,notify,showError,t});

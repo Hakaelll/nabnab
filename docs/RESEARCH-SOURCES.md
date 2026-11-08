@@ -6,6 +6,7 @@ En **Plataformas → Archivos y documentos**, pega un enlace, un identificador o
 
 - Busca por título, autor o categoría. Puedes abrir un identificador como `arXiv:2401.00001` o un enlace de artículo.
 - Cada PDF tiene su propia fila con número de versión, nombre de archivo y fecha si el origen la indica. Puedes desplegar el resumen en la misma ficha. La referencia guardada identifica la versión exacta y conserva autores, fecha y licencia cuando los informa el origen.
+- Si ya tienes esa versión en Biblioteca, la fila muestra el tamaño de la copia y **Abrir copia**. En **Fuentes** también puedes abrirla directamente. Las demás versiones mantienen su propio estado de revisión.
 - La búsqueda consulta hasta 20 resultados por página y 200 por búsqueda. La API Atom se consulta de una en una, con tres segundos entre peticiones y una caché acotada en memoria.
 
 [Manual de la API](https://info.arxiv.org/help/api/user-manual.html) · [Condiciones de la API](https://info.arxiv.org/help/api/tou.html) · [Disponibilidad por versión](https://info.arxiv.org/help/versions.html)
@@ -49,6 +50,8 @@ Con `NABNAB_RESEARCH_LANGUAGE_ONLY=1` la prueba se limita a consultar el catálo
 Con `NABNAB_RESEARCH_CHAPTER_FILTERS_ONLY=1` la prueba combina idioma y lectura en una edición multilingüe, cambia el filtro y verifica que la selección se conserva. La cola descargó únicamente el capítulo 3, leído en español por Alexandria Adair, con 1.048.675 bytes. Biblioteca conservó los datos de ese capítulo y su edición. [Edición multilingüe en LibriVox](https://librivox.org/mini-multilingual-bedtime-stories-2-by-aesop/)
 
 ![Selección de PDF por versión de arXiv](arxiv-versions.png)
+
+![Una versión de arXiv guardada y otra pendiente con datos de prueba](arxiv-saved-copy.png)
 
 ![Volumen y checksum antes de descargar un archivo de Zenodo](zenodo-selection.png)
 

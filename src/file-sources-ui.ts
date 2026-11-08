@@ -1,5 +1,6 @@
 import "./file-sources.css";
-import { escapeHtml as h, type Copy } from "./contracts";
+import { arxivCopies } from "./arxiv-copies";
+import { escapeHtml as h, type Copy, type LibraryItem } from "./contracts";
 import type { AudiobookChapter } from "./library-types";
 import { action, icon, option } from "./views-common";
 
@@ -36,6 +37,7 @@ interface ConnectionStatus {
 }
 interface FileSourceHooks {
   command<T>(name: string, args?: Record<string, unknown>): Promise<T>;
+  library(): readonly LibraryItem[];
   refresh(): Promise<void>; render(): void; t: Copy;
   renderPersonal(): string; loadPersonal(): Promise<void>;
   notify(message: string, kind?: "info" | "success" | "error"): void;
@@ -256,6 +258,7 @@ export function createFileSources(hooks: FileSourceHooks) {
     if (!publicPage || !publicPage.assets.length && publicPage.entries.length) return "";
     const { provider, rights } = publicPage;
     const research = provider === "arxiv" || provider === "librivox";
+    const copies = provider === "arxiv" ? arxivCopies(hooks.library()) : null;
     const reviewing = provider === "zenodo" && zenodoReview;
     const group = provider === "arxiv" ? t("Versiones del PDF", "PDF versions") : provider === "librivox" ? t("Capítulos", "Chapters")
       : reviewing ? t("Archivos seleccionados", "Selected files") : t("Archivos disponibles", "Available files");
@@ -271,11 +274,18 @@ export function createFileSources(hooks: FileSourceHooks) {
       const metadata = [version ? asset.filename : chapter ? null : asset.mime, chapter || version ? null : asset.version, asset.publishedAt, chapter?.reader, chapter?.language && displayLibrivoxLanguage(chapter.language), asset.platform, asset.architecture].filter(Boolean).join(" · ");
       const attribution = [asset.author, research && rights === asset.license ? null : asset.license].filter(Boolean).join(" · ");
       const checked = publicSelected.has(asset.id);
-      return `<label class="file-source-row ${checked ? "is-selected" : ""}">
+      const saved = copies?.get(asset.id);
+      const row = `<label class="file-source-row ${checked ? "is-selected" : ""}">
         <input type="checkbox" data-file-source-select="${h(asset.id)}" ${name ? `aria-label="${h(name)}"` : ""} ${checked ? "checked" : ""} ${busy || publicSelected.size >= 199 && !checked ? "disabled" : ""}>
         <span class="file-source-file-icon" aria-hidden="true">${chapter ? String(chapter.chapter).padStart(2, "0") : icon(asset.mime.startsWith("image/") ? "image" : asset.mime.startsWith("audio/") ? "audio" : "file")}</span>
         <span class="file-source-row-main"><strong>${h(title)}</strong>${metadata ? `<small>${h(metadata)}</small>` : ""}${provider === "archive" ? `<small>${asset.original ? t("Original", "Original") : t("Derivado", "Derivative")}</small>` : ""}${attribution ? `<small>${h(attribution)}</small>` : ""}${asset.checksum || asset.sha256 ? `<small class="file-source-checksum" title="${h(asset.checksum ?? asset.sha256 ?? "")}">${h(asset.checksum ?? `sha256:${asset.sha256}`)}</small>` : ""}</span>
-        <span class="file-source-size">${h(fileSize(asset.size, t))}</span></label>`;
+        ${saved ? "" : `<span class="file-source-size">${h(fileSize(asset.size, t))}</span>`}</label>`;
+      if (!saved || !version) return row;
+      const label = t(`Abrir copia de la versión ${version}`, `Open copy of version ${version}`);
+      return `<div class="file-source-saved-row">${row}<div class="file-source-saved-copy">
+        <span>${t("En Biblioteca", "In Library")} · ${h(fileSize(saved.size, t))}</span>
+        ${action("open-media", t("Abrir copia", "Open copy"), "arrow", "quiet", `data-id="${h(saved.id)}" aria-label="${h(label)}"`)}
+      </div></div>`;
     }).join("") || `<p class="file-source-empty">${empty}</p>`}</div>`;
   }
   function cloudRows(): string {

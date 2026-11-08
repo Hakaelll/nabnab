@@ -63,6 +63,12 @@ label.file-source-row { cursor: pointer; }
 .file-source-research-list .file-source-file-icon { display: grid; place-items: center; width: 36px; height: 36px; border: 1px solid var(--edge-quiet); border-radius: 9px; background: var(--surface); color: var(--text); font-variant-numeric: tabular-nums; font-weight: 600; }
 .file-source-research-list .file-source-file-icon svg { width: 18px; height: 18px; }
 .file-source-research-list .file-source-row-main strong { font-weight: 600; }
+.file-source-saved-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; min-width: 0; border: 1px solid var(--edge-quiet); border-radius: 10px; background: var(--secondary); }
+.file-source-research-list .file-source-saved-row > .file-source-row { grid-template-columns: 18px 36px minmax(0, 1fr); border: 0; background: transparent; }
+.file-source-saved-row:has(.file-source-row.is-selected) { border-color: var(--action); background: var(--surface); }
+.file-source-saved-copy { display: grid; justify-items: end; gap: 1px; padding-inline: 8px 12px; }
+.file-source-saved-copy > span { font-size: 12px; color: var(--muted); }
+.file-source-saved-copy .button { min-height: 32px; }
 .file-source-folder { display: block; min-width: 0; background: none; border: 0; color: var(--text); font: inherit; text-align: left; padding: 4px 0; cursor: pointer; }
 .file-source-folder strong { display: block; font-weight: 500; overflow-wrap: anywhere; }
 .file-source-folder small { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
@@ -123,6 +129,8 @@ label.file-source-row { cursor: pointer; }
   .file-source-row { gap: 8px; padding-inline: 8px; grid-template-columns: 18px 20px minmax(0, 1fr); }
   .file-source-research-list .file-source-row { grid-template-columns: 18px 36px minmax(0, 1fr); }
   .file-source-size { grid-column: 3; padding-top: 0; }
+  .file-source-saved-row { grid-template-columns: minmax(0, 1fr); }
+  .file-source-saved-copy { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px; padding: 0 8px 8px; }
   .file-source-form > div { flex-wrap: wrap; }
   .file-source-form input { min-width: 180px; }
   .file-source-pagination { flex-wrap: wrap; }
