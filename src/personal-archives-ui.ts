@@ -63,7 +63,21 @@ interface RecordPage {
   completions: number | null;
   completionKnown: number;
   ended: number | null;
-  artists: [string, number][];
+  listeningGroups: { groups: ListeningGroup[]; total: number } | null;
+}
+type ListeningView = "events" | "creators" | "items";
+const listeningViews: ListeningView[] = ["events", "creators", "items"];
+interface ListeningGroup {
+  key: string;
+  title: string;
+  creator: string | null;
+  album: string | null;
+  episode: boolean;
+  identified: boolean;
+  events: number;
+  playedMs: number | null;
+  completions: number | null;
+  completionKnown: number;
 }
 interface ThreadPage {
   posts: { row: Row; replyTo: number | null }[];
@@ -95,6 +109,8 @@ export function createPersonalArchives(hooks: Hooks) {
   let category: Category | null = null;
   let result: RecordPage | null = null;
   let thread: { anchor: string; page: ThreadPage } | null = null;
+  let listeningView: ListeningView = "events";
+  let listeningSelection: { group: ListeningGroup; offset: number; query: string } | null = null;
   let query = "", offset = 0, requestId = 0;
   let privateOpen = false, confirming = false, privateExport = false;
   let loaded = false, busy = false, visible = false, adding = false;
@@ -124,6 +140,8 @@ export function createPersonalArchives(hooks: Hooks) {
     offset = 0;
     result = null;
     thread = null;
+    listeningView = "events";
+    listeningSelection = null;
     privateOpen = false;
     privateExport = false;
     selected.clear();
@@ -158,6 +176,8 @@ export function createPersonalArchives(hooks: Hooks) {
     if (!archiveId || !category || (privateCategory(category) && !privateOpen)) return;
     const page = await hooks.command<RecordPage>("personal_archive_records", {
       id: archiveId, category, consent: privateOpen, query, offset,
+      listening: category === "listening" && listeningView !== "events"
+        ? { by: listeningView, key: listeningSelection?.group.key ?? null } : null,
     });
     if (visible && (!category || !privateCategory(category) || privateOpen)) result = page;
   }
@@ -225,9 +245,59 @@ export function createPersonalArchives(hooks: Hooks) {
       <div><dt>${t("Reproducciones completas", "Complete plays")}</dt><dd>${page.completions === null ? t("Sin datos", "Unavailable") : number(page.completions)}</dd></div>
       ${page.ended === null ? "" : `<div><dt>${t("Llegaron al final", "Reached the end")}</dt><dd>${number(page.ended)}</dd></div>`}
     </dl>
-    ${page.completionKnown > 0 && page.completionKnown < page.total ? `<p class="muted">${t("Eventos con estado completo verificable", "Events with verifiable completion")} · ${number(page.completionKnown)} / ${number(page.total)}</p>` : ""}
-    ${page.artists.length ? `<details class="archive-details"><summary>${t("Artistas por número de eventos", "Artists by event count")}</summary>
-      <ul>${page.artists.map(([artist, count]) => `<li>${h(artist)} · ${number(count)}</li>`).join("")}</ul></details>` : ""}`;
+    ${page.completionKnown > 0 && page.completionKnown < page.total ? `<p class="muted">${t("Eventos con estado completo verificable", "Events with verifiable completion")} · ${number(page.completionKnown)} / ${number(page.total)}</p>` : ""}`;
+  }
+
+  const listeningLabel = (view: ListeningView) => ({
+    events: t("Historial", "History"),
+    creators: t("Artistas y programas", "Artists and shows"),
+    items: t("Pistas y episodios", "Tracks and episodes"),
+  })[view];
+  const listeningMetadata = (group: ListeningGroup) =>
+    [group.creator, group.album === group.creator ? null : group.album];
+
+  function listeningControls() {
+    if (listeningSelection) {
+      const subtitle = listeningMetadata(listeningSelection.group).filter(Boolean).join(" · ");
+      return `<div class="archive-listening-detail">
+        ${action("archive-listening-back", t("Volver al resumen", "Back to summary"), "back", "quiet", disabled())}
+        <h3 id="archive-listening-title" tabindex="-1">${h(listeningSelection.group.title)}</h3>
+        ${subtitle ? `<p>${h(subtitle)}</p>` : ""}
+      </div>`;
+    }
+    return `<nav class="archive-listening-tabs" aria-label="${t("Vistas del historial", "Listening views")}">
+      ${listeningViews.map(view => `<button type="button" class="button quiet" data-action="archive-listening-view"
+        data-id="${view}" aria-pressed="${view === listeningView}" ${disabled()}>${listeningLabel(view)}</button>`).join("")}
+    </nav>`;
+  }
+
+  function pageControls(total: number) {
+    return total > PAGE ? `<div class="archive-actions">
+      ${action("archive-previous", t("Anterior", "Previous"), undefined, "secondary", offset > 0 ? disabled() : "disabled")}
+      <span>${number(offset + 1)}–${number(Math.min(offset + PAGE, total))} / ${number(total)}</span>
+      ${action("archive-next", t("Siguiente", "Next"), undefined, "secondary", offset + PAGE < total ? disabled() : "disabled")}
+    </div>` : "";
+  }
+
+  function listeningGroups(groups: NonNullable<RecordPage["listeningGroups"]>) {
+    return `<section class="archive-listening-groups" aria-label="${listeningLabel(listeningView)}">
+      <p class="muted">${t("Ordenado por tiempo escuchado.", "Sorted by time listened.")} ${listeningView === "items"
+        ? t("Sin identificador, se agrupa por las etiquetas del archivo.", "Items without an identifier are grouped by the export’s labels.") : ""}</p>
+      ${groups.groups.length ? `<ul class="archive-listening-list">${groups.groups.map(group => {
+        const subtitle = [group.episode ? t("Episodio", "Episode") : null, ...listeningMetadata(group),
+          listeningView === "items" && group.identified ? `Ref. ${group.key.slice(0, 6).toUpperCase()}` : null].filter(Boolean).join(" · ");
+        const played = group.playedMs === null ? t("Sin tiempo registrado", "Time unavailable") : `${number(group.playedMs / 60_000, 1)} min`;
+        return `<li><button type="button" data-action="archive-listening-group" data-id="${h(group.key)}" ${disabled()}>
+          <span class="archive-listening-name"><strong>${h(group.title)}</strong>${subtitle ? `<small>${h(subtitle)}</small>` : ""}</span>
+          <span class="archive-listening-counts"><strong>${played}</strong>
+            <small>${number(group.events)} ${group.events === 1 ? t("evento", "event") : t("eventos", "events")}${group.completions === null ? "" : t(
+              ` · ${number(group.completions)} ${group.completions === 1 ? "completa" : "completas"} (${number(group.completionKnown)} con dato)`,
+              ` · ${number(group.completions)} complete (${number(group.completionKnown)} known)`)} </small></span>
+          ${icon("arrow")}
+        </button></li>`;
+      }).join("")}</ul>` : `<p>${t("No hay elementos con nombre para esta búsqueda.", "No named items match this search.")}</p>`}
+      ${pageControls(groups.total)}
+    </section>`;
   }
 
   function recordRow(row: Row) {
@@ -297,14 +367,17 @@ export function createPersonalArchives(hooks: Hooks) {
     const page = result;
     const linkCount = [...selected.values()].filter(row => row.link).length;
     const range = page ? dates(page.start, page.end) : "";
-    return `<form id="archive-search-form" class="archive-search">
+    const context = [range ? `${range} · UTC` : "", page?.listeningGroups
+      ? `${number(page.total)} ${page.total === 1 ? t("evento", "event") : t("eventos", "events")}` : ""].filter(Boolean).join(" · ");
+    return `${category === "listening" ? listeningControls() : ""}<form id="archive-search-form" class="archive-search">
       <label for="archive-query">${t("Buscar en esta categoría", "Search this category")}
         <input id="archive-query" name="query" type="search" maxlength="120" value="${h(query)}" ${disabled()}>
       </label>
       <button type="submit" class="button secondary" ${disabled()}>${icon("search")}${t("Buscar", "Search")}</button>
     </form>
-    ${page ? `${range ? `<p class="muted">${h(range)} · UTC</p>` : ""}
-      ${category === "listening" ? listening(page) : ""}
+    ${page ? `${context ? `<p class="muted">${h(context)}</p>` : ""}
+      ${category === "listening" && !page.listeningGroups ? listening(page) : ""}
+      ${page.listeningGroups ? listeningGroups(page.listeningGroups) : `
       <div class="archive-actions">
         <span>${number(selected.size)} ${t("seleccionados", "selected")}</span>
         ${action("archive-export", t("Exportar CSV", "Export CSV"), undefined, "secondary", selected.size ? disabled() : "disabled")}
@@ -314,11 +387,7 @@ export function createPersonalArchives(hooks: Hooks) {
         ${action("archive-export-confirm", t("Guardar CSV privado", "Save private CSV"), undefined, "primary", disabled())}
         ${action("archive-cancel-confirm", t("Cancelar", "Cancel"), undefined, "secondary", disabled())}</div>` : ""}
       ${page.rows.length ? `<ul class="archive-records">${page.rows.map(recordRow).join("")}</ul>` : `<p>${t("No hay registros para esta búsqueda.", "No records match this search.")}</p>`}
-      ${page.total > PAGE ? `<div class="archive-actions">
-        ${action("archive-previous", t("Anterior", "Previous"), undefined, "secondary", offset > 0 ? disabled() : "disabled")}
-        <span>${number(offset + 1)}–${number(Math.min(offset + PAGE, page.total))} / ${number(page.total)}</span>
-        ${action("archive-next", t("Siguiente", "Next"), undefined, "secondary", offset + PAGE < page.total ? disabled() : "disabled")}
-      </div>` : ""}` : ""}`;
+      ${pageControls(page.total)}`}` : ""}`;
   }
 
   function accountIndex() {
@@ -445,6 +514,30 @@ export function createPersonalArchives(hooks: Hooks) {
         break;
       case "archive-previous": await run(async () => { offset = Math.max(0, offset - PAGE); await read(); }); break;
       case "archive-next": await run(async () => { offset += PAGE; await read(); }); break;
+      case "archive-listening-view": {
+        const view = listeningViews.find(view => view === button.dataset.id);
+        if (category === "listening" && view && view !== listeningView) {
+          await run(async () => { listeningView = view; offset = 0; result = null; await read(); });
+          document.querySelector<HTMLElement>(`[data-action="archive-listening-view"][data-id="${view}"]`)?.focus({ preventScroll: true });
+        }
+        break;
+      }
+      case "archive-listening-group": {
+        const group = result?.listeningGroups?.groups.find(group => group.key === button.dataset.id);
+        if (group) {
+          await run(async () => { listeningSelection = { group, offset, query }; offset = 0; result = null; await read(); });
+          document.getElementById("archive-listening-title")?.focus();
+        }
+        break;
+      }
+      case "archive-listening-back": {
+        const previous = listeningSelection;
+        if (previous) {
+          await run(async () => { listeningSelection = null; offset = previous.offset; query = previous.query; result = null; await read(); });
+          document.querySelector<HTMLElement>(`[data-action="archive-listening-group"][data-id="${CSS.escape(previous.group.key)}"]`)?.focus();
+        }
+        break;
+      }
       case "archive-thread": {
         const anchor = result?.rows.find(row => row.id === button.dataset.id && row.hasThread)?.id;
         if (anchor && category === "posts" && current()?.provider === "x") await openThread(anchor);

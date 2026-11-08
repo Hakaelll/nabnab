@@ -1,3 +1,4 @@
+mod listening;
 pub(crate) mod parse;
 
 use crate::{file_sources, library, portable_collections::package, queue, sessions, AppState};
@@ -480,11 +481,21 @@ fn in_range(time: Option<u64>, from: Option<u64>, to: Option<u64>) -> bool {
 fn merge(records: &mut Records, new: Records) -> Result<(), String> {
     for (category, rows) in new {
         let saved = records.entry(category).or_default();
-        let mut seen = saved
+        let mut positions = saved
             .iter()
-            .map(|row| row.id.clone())
-            .collect::<HashSet<_>>();
-        saved.extend(rows.into_iter().filter(|row| seen.insert(row.id.clone())));
+            .enumerate()
+            .map(|(index, row)| (row.id.clone(), index))
+            .collect::<HashMap<_, _>>();
+        for row in rows {
+            if let Some(&index) = positions.get(&row.id) {
+                if category == Category::Listening && saved[index].listening_item.is_none() {
+                    saved[index].listening_item = row.listening_item;
+                }
+            } else {
+                positions.insert(row.id.clone(), saved.len());
+                saved.push(row);
+            }
+        }
     }
     if records.values().map(Vec::len).sum::<usize>() > MAX_RECORDS {
         return Err(
@@ -832,10 +843,10 @@ pub struct Page {
     completions: Option<usize>,
     completion_known: usize,
     ended: Option<usize>,
-    artists: Vec<(String, usize)>,
+    listening_groups: Option<listening::GroupPage>,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn personal_archive_records(
     state: State<Arc<AppState>>,
     id: String,
@@ -843,11 +854,17 @@ pub fn personal_archive_records(
     consent: bool,
     query: String,
     offset: usize,
+    listening: Option<listening::View>,
 ) -> Result<Page, String> {
     if query.chars().count() > 120 {
         return Err("Use a shorter archive search.".into());
     }
     let (summary, mut rows) = records_for(&state, &id, category, consent)?;
+    if listening.is_some()
+        && (summary.provider != Provider::Spotify || category != Category::Listening)
+    {
+        return Err("Listening summaries are available for imported Spotify history.".into());
+    }
     let show_threads = summary.provider == Provider::X && category == Category::Posts;
     let parents: HashSet<_> = if show_threads {
         rows.iter().filter_map(Record::reply_parent).collect()
@@ -860,8 +877,19 @@ pub fn personal_archive_records(
             [&row.title, &row.text]
                 .into_iter()
                 .chain(row.author.as_ref())
+                .chain(
+                    row.listening_item
+                        .as_ref()
+                        .and_then(|item| item.album.as_ref()),
+                )
                 .any(|text| text.to_lowercase().contains(&query))
         });
+    }
+    if let Some(listening::View { by, key: Some(key) }) = &listening {
+        if key.len() != 64 || !key.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Err("Choose a group from this Spotify history.".into());
+        }
+        rows.retain(|row| listening::key(row, *by).as_ref() == Some(key));
     }
     let (start, end) = interval(&rows);
     let played_ms = rows
@@ -879,16 +907,13 @@ pub fn personal_archive_records(
             .filter(|row| row.reached_end == Some(true))
             .count()
     });
-    let mut artists = BTreeMap::new();
-    if category == Category::Listening {
-        for author in rows.iter().filter_map(|row| row.author.as_ref()) {
-            *artists.entry(author.clone()).or_insert(0) += 1;
-        }
-    }
-    let mut artists = artists.into_iter().collect::<Vec<_>>();
-    artists.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
-    artists.truncate(8);
     let total = rows.len();
+    let listening_groups = listening
+        .filter(|view| view.key.is_none())
+        .map(|view| listening::group_page(&rows, view.by, offset));
+    if listening_groups.is_some() {
+        rows.clear();
+    }
     Ok(Page {
         rows: rows
             .into_iter()
@@ -910,7 +935,7 @@ pub fn personal_archive_records(
         completions,
         completion_known,
         ended,
-        artists,
+        listening_groups,
     })
 }
 

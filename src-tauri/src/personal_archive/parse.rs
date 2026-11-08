@@ -230,8 +230,18 @@ pub struct Record {
     pub played_ms: Option<u64>,
     pub reached_end: Option<bool>,
     pub completed: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub listening_item: Option<ListeningItem>,
     pub tracks: Vec<Track>,
     pub media: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListeningItem {
+    pub uri: Option<String>,
+    pub album: Option<String>,
+    pub episode: bool,
 }
 
 impl Record {
@@ -391,6 +401,7 @@ fn empty(source: &str) -> Record {
         played_ms: None,
         reached_end: None,
         completed: None,
+        listening_item: None,
         tracks: vec![],
         media: None,
     }
@@ -543,6 +554,37 @@ fn json_record(
         );
     }
     if category == Category::Listening {
+        let episode = value["episode_name"]
+            .as_str()
+            .is_some_and(|name| !name.trim().is_empty());
+        let (uri_field, uri_prefix, album_field) = if episode {
+            (
+                "spotify_episode_uri",
+                "spotify:episode:",
+                "episode_show_name",
+            )
+        } else {
+            (
+                "spotify_track_uri",
+                "spotify:track:",
+                "master_metadata_album_album_name",
+            )
+        };
+        if !record.title.is_empty() {
+            let uri = value[uri_field]
+                .as_str()
+                .filter(|uri| {
+                    uri.strip_prefix(uri_prefix).is_some_and(|id| {
+                        id.len() == 22 && id.bytes().all(|byte| byte.is_ascii_alphanumeric())
+                    })
+                })
+                .map(str::to_owned);
+            record.listening_item = Some(ListeningItem {
+                uri,
+                album: string(value, &[album_field], 256),
+                episode,
+            });
+        }
         record.played_ms = ["msPlayed", "ms_played"]
             .iter()
             .find_map(|key| {

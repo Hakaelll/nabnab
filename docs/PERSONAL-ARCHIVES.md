@@ -19,6 +19,10 @@ For an X post with a recorded reply relationship, open **View thread**. Nabnab f
 
 ![Spotify listening history with separate event and completion counts](personal-archive-listening.png)
 
+In **Listening**, switch between **History**, **Artists and shows**, and **Tracks and episodes**. The summaries rank named entries by recorded listening time. Select an entry to view its events, date range, minutes, and the number of complete plays where the export supplies enough information. Entries with a Spotify track or episode URI are grouped by that identifier. Entries without one use the available labels, including album or show when present. You can reimport the same export to recover missing identifiers in an older index without duplicating its events.
+
+![Tracks and episodes grouped by time in Windows with synthetic history](personal-archive-listening-groups.png)
+
 Contacts and messages require explicit selection at import and explicit reveal when browsing. Private CSV export asks for confirmation and writes readable text to the chosen destination. The archive index uses Windows DPAPI. Managed media resides in a user-restricted local directory and can be copied out with **Save copy**. Personal archives live outside the ordinary Library index used by global search, portable collections, CLI, and MCP.
 
 Reimporting the same SHA-256 package under the same provider and account adds missing records and categories. Open **Provenance → Remove import** to delete the indexed records and managed media copies while preserving the source export.
@@ -32,4 +36,4 @@ Provider documentation on requesting an export
 - [Spotify data formats](https://support.spotify.com/article/understanding-your-data/)
 - [LinkedIn account data](https://www.linkedin.com/help/linkedin/answer/a1339364)
 
-Verification uses synthetic exports. The Windows tests exercise selective ZIP extraction, repeat and partial imports, DPAPI storage, removal, and reply chains with branches, missing parents, or cycles. A native WebView2 check opened a thread from a previously indexed fixture and confirmed that its rows came from the selected X package. The Edge test exercises pagination and return focus at 900 and 1180 pixels, account grouping, private reveal, CSV confirmation, and the handoff to Audio.
+Verification uses synthetic exports. The Windows tests exercise selective ZIP extraction, repeat and partial imports, DPAPI storage, removal, and reply chains with branches, missing parents, or cycles. Native WebView2 checks opened a thread from a previously indexed fixture and distinguished same-title Spotify recordings, including exact drilldown, album search, and legacy rows without an identifier. The Edge test exercises return focus at 900 and 1180 pixels, account grouping, private reveal, CSV confirmation, and the handoff to Audio.

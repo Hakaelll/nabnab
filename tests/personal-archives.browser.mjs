@@ -27,10 +27,23 @@ const setup = `
   const rows={
     posts:threadPosts.map(item=>item.row),
     messages:[row("m","Conversación de prueba","Texto privado sintético","Persona de prueba")],
-    listening:[row("l","Canción de prueba","","Artista de prueba",{playedMs:62000})],
+    listening:[
+      row("l","Canción de prueba","","Artista de prueba",{playedMs:132000}),
+      row("l2","Canción de prueba","","Artista de prueba",{playedMs:48000}),
+      row("l3","Episodio de prueba","","Programa de prueba",{playedMs:186000}),
+    ],
     playlists:[row("s","Lista de prueba","","",{trackCount:1})],
   };
   const summaries=[];
+  const group=(key,title,playedMs,extra={})=>({key:key.repeat(64),title,creator:null,album:null,episode:false,identified:false,events:1,playedMs,completions:null,completionKnown:0,...extra});
+  const listeningGroups={
+    items:[
+      group("a","Episodio de prueba",186000,{creator:"Programa de prueba",episode:true,identified:true}),
+      group("b","Canción de prueba",132000,{creator:"Artista de prueba",album:"En directo",identified:true}),
+      group("c","Canción de prueba",48000,{creator:"Artista de prueba",album:"En estudio",identified:true}),
+    ],
+    creators:[group("d","Programa de prueba",186000),group("e","Artista de prueba",180000,{events:2})],
+  };
   let imports=0;
   const calls=[];
   window.archiveCalls=calls;
@@ -42,7 +55,7 @@ const setup = `
     if(cmd==="plugin:window|is_maximized")return false;
     if(cmd==="personal_archive_list")return structuredClone(summaries);
     if(cmd==="personal_archive_choose")return {fingerprint,source:args.provider+"-export.zip",bytes:10234,categories:args.provider==="spotify"?
-      [preview("listening",1,"available"),preview("playlists",1,"available")]:
+      [preview("listening",3,"available"),preview("playlists",1,"available")]:
       [preview("posts",threadPosts.length,"available"),preview("likes",null,"absent",false,[]),preview("bookmarks",null,"unsupported",false,["unsupported"]),preview("media",0,"empty"),preview("messages",null,"requiresSelection",true)]};
     if(cmd==="personal_archive_import"){
       const selected=args.selection;
@@ -55,10 +68,16 @@ const setup = `
     }
     if(cmd==="personal_archive_records"){
       if(args.category==="messages"&&!args.consent)throw "Missing private consent";
-      const data=rows[args.category].filter(row=>!args.query||row.title.includes(args.query));
+      let data=rows[args.category].filter(row=>!args.query||row.title.includes(args.query));
       const isListening=args.category==="listening";
-      return {rows:data.slice(args.offset,args.offset+50),total:data.length,start:data.length?time:null,end:data.length?time:null,
-        playedMs:isListening?62000:null,completionKnown:0,completions:null,ended:isListening?1:null,artists:isListening?[["Artista de prueba",1]]:[]};
+      if(args.listening?.key) {
+        const ids={a:["l3"],b:["l"],c:["l2"],d:["l3"],e:["l","l2"]};
+        data=data.filter(row=>ids[args.listening.key[0]].includes(row.id));
+      }
+      const groups=args.listening&&!args.listening.key?listeningGroups[args.listening.by]:null;
+      return {rows:groups?[]:data.slice(args.offset,args.offset+50),total:data.length,start:data.length?time:null,end:data.length?time:null,
+        playedMs:isListening?data.reduce((total,row)=>total+row.playedMs,0):null,completionKnown:0,completions:null,ended:isListening?1:null,
+        listeningGroups:groups?{groups,total:groups.length}:null};
     }
     if(cmd==="personal_archive_thread"){
       if(!summaries.some(item=>item.id===args.id&&item.provider==="x")||args.record!=="p")throw "Unexpected thread selection";
@@ -186,6 +205,30 @@ try {
   assert.equal(await page.locator("#main").evaluate(element => element.scrollTop), 0);
   await page.locator("#notification [data-action='dismiss-message']").click();
   await page.screenshot({ path: `${directory}/listening.png` });
+  const tracksView = page.getByRole("button", { name: "Pistas y episodios", exact: true });
+  await tracksView.press("Enter");
+  const groups = page.getByRole("region", { name: "Pistas y episodios" });
+  const liveTrack = groups.getByRole("button", { name: /Canción de prueba.*En directo.*2,2 min/ });
+  await liveTrack.waitFor();
+  assert.equal(await groups.getByRole("button", { name: /Canción de prueba/ }).count(), 2);
+  assert.equal(await groups.getByRole("button", { name: /Episodio de prueba.*Programa de prueba/ }).count(), 1);
+  for (const [width, height] of [[1180, 890], [900, 620]]) {
+    await page.setViewportSize({ width, height });
+    assert.ok(await groups.evaluate(node => node.scrollWidth <= node.clientWidth + 1));
+    await page.locator("#main").evaluate(node => { node.scrollTop = 0; });
+    await page.screenshot({ path: `${directory}/listening-groups-${width}.png` });
+  }
+  await liveTrack.press("Enter");
+  const selectedTrack = page.getByRole("heading", { name: "Canción de prueba", exact: true });
+  await selectedTrack.waitFor();
+  assert.equal(await selectedTrack.evaluate(node => node === document.activeElement), true);
+  assert.equal(await page.locator(".archive-record").count(), 1);
+  await page.getByRole("button", { name: "Volver al resumen" }).press("Enter");
+  assert.equal(await liveTrack.evaluate(node => node === document.activeElement), true);
+  await page.getByRole("button", { name: "Artistas y programas" }).press("Enter");
+  const artists = page.getByRole("region", { name: "Artistas y programas" });
+  await artists.getByRole("button", { name: /Artista de prueba.*3 min.*2 eventos/ }).waitFor();
+  assert.equal((await calls()).some(call => call.cmd === "personal_archive_records" && call.args.listening?.key === "b".repeat(64)), true);
   const listeningArchive = action("open").getByText("spotify-export.zip", { exact: true });
   for (const [destination, privateMessages] of [["Archivo 2025", true], ["Archivo 2026", false]]) {
     await action("new").click();
@@ -234,7 +277,7 @@ try {
   await page.getByRole("heading", { name: "Audio", exact: true }).waitFor();
   await page.getByText("Canción de prueba", { exact: true }).waitFor();
   assert.deepEqual(errors, []);
-  console.log("Verified archived X threads, pagination and focus return, account grouping, private consent, removal, Spotify history and local playlist matching in Edge.");
+  console.log("Verified archived X threads, privacy, Spotify history by creator and recording, return focus and local playlist matching in Edge.");
 } finally {
   await browser.close();
 }
