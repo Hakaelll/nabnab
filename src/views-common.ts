@@ -33,6 +33,8 @@ const paths = {
   captions: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 11h4m2 0h4M7 15h6m2 0h2"/>',
   video: '<rect x="3" y="5" width="13" height="14" rx="2"/><path d="m16 10 5-3v10l-5-3"/>',
   audio: '<path d="M9 18V5l11-2v13M9 9l11-2"/><ellipse cx="6" cy="18" rx="3" ry="3"/><ellipse cx="17" cy="16" rx="3" ry="3"/>',
+  wave: '<path d="M2 12h4l3-7 4 14 3-7h6"/>',
+  heart: '<path d="M20.8 9.4c0 4.1-8.8 9.2-8.8 9.2S3.2 13.5 3.2 9.4A4.1 4.1 0 0 1 12 7.8a4.1 4.1 0 0 1 8.8 1.6Z"/>',
   image: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8" cy="8" r="2"/><path d="m3 17 6-5 4 3 4-5 4 4"/>',
   grid: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
   list: '<path d="M9 5h12M9 12h12M9 19h12M3 5h1M3 12h1M3 19h1"/>',

@@ -62,6 +62,7 @@ mod translation;
 mod personal_archive;
 mod delimited;
 mod local_media;
+mod playback_preview;
 mod media;
 mod model;
 mod options;
@@ -113,6 +114,7 @@ pub(crate) struct AppState {
     background: background::commands::BackgroundState,
     stems: stems::commands::StemsState,
     personal_archive: personal_archive::ArchiveState,
+    playback_preview: playback_preview::FramePreview,
     repository: Mutex<Option<store::Repository>>,
     runtime: queue::Runtime,
     metadata: Mutex<Option<(u64, watch::Sender<bool>)>>,
@@ -1264,6 +1266,8 @@ fn main() {
             locate_media,
             open_media,
             thumbnail,
+            playback_preview::playback_preview_frame,
+            playback_preview::playback_preview_cancel,
             cache_status,
             clear_cache,
             export_diagnostics,

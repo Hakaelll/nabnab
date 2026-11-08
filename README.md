@@ -34,6 +34,8 @@ Al reiniciar, los trabajos interrumpidos quedan pausados para revisión. Reinten
 
 Los formatos reproducibles dentro de la app dependen de WebView2. Para otros formatos se ofrece abrir con el reproductor de Windows. Las herramientas y la biblioteca funcionan sin conexión cuando los motores están instalados.
 
+La guía de reproducción recoge los controles de vídeo, las escenas musicales y los formatos probados en Windows. [Reproducción local](docs/playback.md)
+
 ## Ejecutar y empaquetar
 
 Requiere Node.js 24, Rust/MSVC, herramientas C++ de Windows y WebView2. La preparación de FFmpeg utiliza vcpkg; esas herramientas de desarrollo no forman parte de la aplicación instalada.

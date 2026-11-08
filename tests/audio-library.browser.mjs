@@ -108,6 +108,11 @@ try {
   await page.locator("#audio-next").click();
   await page.waitForFunction(() => document.getElementById("audio-engine").src.endsWith("/second"));
   await page.locator("#audio-open").click();
+  await page.locator('#playback-stage[data-kind="music"]').waitFor();
+  assert.equal(await audioEngine.evaluate(el => el === document.getElementById("audio-engine") && !el.paused), true);
+  await page.locator("#stage-back").click();
+  await page.locator("#audio-player").waitFor();
+  await page.locator("[data-page='library']").click();
   await section("audio").waitFor();
 
   await page.getByRole("checkbox", {name:"Seleccionar Primera pista",exact:true}).check();

@@ -1,12 +1,13 @@
 import "./playback-stage.css";
 import { escapeHtml as h, type Copy, type LibraryItem } from "./contracts";
 import { durationLabel } from "./presentation";
+import { createPlaybackPreview } from "./playback-preview";
 import { playbackRates, type PlaybackPreferences } from "./playback-preferences";
 import { icon, option, type Icon } from "./views-common";
 
 interface AudioTrack { label: string; language: string; enabled: boolean }
 type MediaTracks = HTMLVideoElement & { audioTracks?: EventTarget & ArrayLike<AudioTrack> };
-type Panel = "options" | "captions" | null;
+type Panel = "options" | "captions" | "scenes" | "queue" | "track" | null;
 export type StageState = "loading" | "paused" | "playing" | "seeking" | "ended" | "error";
 
 interface Hooks {
@@ -16,6 +17,7 @@ interface Hooks {
   resume(fromStart: boolean): void;
   mute(): void;
   volume(value: number): void;
+  sound(): { muted: boolean; volume: number };
   rate(value: number): void;
   preference(key: "fill" | "captionContrast" | "autoplay", value: boolean): void;
   captionSize(value: PlaybackPreferences["captionSize"]): void;
@@ -24,6 +26,11 @@ interface Hooks {
   convert(id: string): void;
   external(id: string): void;
   move(direction: 1 | -1): void;
+  musicTitle(item: LibraryItem): string;
+  queue(): string;
+  trackInfo(item: LibraryItem): string;
+  sceneControls(): void;
+  command<T>(name: string, args: Record<string, unknown>): Promise<T>;
   t: Copy;
 }
 
@@ -57,6 +64,7 @@ export function createPlaybackStage(host: HTMLElement, media: HTMLVideoElement, 
   const controls = host.querySelector<HTMLElement>(".stage-hud")!;
   const captions = host.querySelector<HTMLElement>(".stage-captions")!;
   const feedback = host.querySelector<HTMLElement>(".stage-feedback")!;
+  const preview = createPlaybackPreview(hooks.command);
   let item: LibraryItem | undefined;
   let panel: Panel = null;
   let caption = "";
@@ -83,7 +91,7 @@ export function createPlaybackStage(host: HTMLElement, media: HTMLVideoElement, 
   function schedule() {
     clearTimeout(timer);
     if (!active || state !== "playing" || panel || dragging || keyboard && controls.contains(document.activeElement)) return;
-    timer = setTimeout(() => { host.dataset.controls = "hidden"; }, hideDelay);
+    timer = setTimeout(() => { host.dataset.controls = "hidden"; preview.leave(); }, hideDelay);
   }
 
   function reveal() {
@@ -160,7 +168,7 @@ export function createPlaybackStage(host: HTMLElement, media: HTMLVideoElement, 
     if (elapsed) elapsed.textContent = durationLabel(time);
     if (duration) duration.textContent = remaining && total ? `−${durationLabel(total - time)}` : durationLabel(total);
     const status = find(".stage-status");
-    const message = state === "loading" ? t("Preparando vídeo…", "Preparing video…")
+    const message = state === "loading" ? t("Preparando archivo…", "Preparing media…")
       : state === "seeking" ? t("Buscando…", "Seeking…") : state === "ended" ? t("Reproducción finalizada", "Playback ended") : "";
     if (status && status.textContent !== message) status.textContent = message;
     const alert = find(".stage-error");
@@ -168,16 +176,21 @@ export function createPlaybackStage(host: HTMLElement, media: HTMLVideoElement, 
     const error = find(".stage-error p");
     if (error && error.textContent !== issue) error.textContent = issue;
     setButton(find("[data-stage-action='toggle']"), media.paused ? t("Reproducir", "Play") : t("Pausar", "Pause"), media.paused ? "play" : "pause");
-    setButton(find("[data-stage-action='mute']"), media.muted || media.volume === 0 ? t("Activar sonido", "Unmute") : t("Silenciar", "Mute"),
-      media.muted || media.volume === 0 ? "muted" : "volume");
+    const sound = hooks.sound();
+    const silent = sound.muted || sound.volume === 0;
+    setButton(find("[data-stage-action='mute']"), silent ? t("Activar sonido", "Unmute") : t("Silenciar", "Mute"), silent ? "muted" : "volume");
     const volume = find<HTMLInputElement>("#stage-volume");
-    if (volume && document.activeElement !== volume) volume.value = String(media.volume);
+    if (volume && document.activeElement !== volume) volume.value = String(sound.volume);
     paintCaption();
   }
 
   function render(current: LibraryItem, preferences: PlaybackPreferences, progress: number, issue: string) {
+    preview.leave();
     const fresh = item?.id !== current.id;
     item = current;
+    const music = current.kind === "audio";
+    const title = music ? hooks.musicTitle(current) : current.name.replace(/\.[^.]+$/, "");
+    host.dataset.kind = music ? "music" : "video";
     resumeAt = progress;
     if (fresh) { caption = ""; lastCaption = ""; offset = 0; language = "und"; panel = null; }
     const chapterOptions = (item.details?.chapters ?? []).map(chapter => option(String(chapter.start),
@@ -189,12 +202,17 @@ export function createPlaybackStage(host: HTMLElement, media: HTMLVideoElement, 
     controls.innerHTML = `
       <header class="stage-top">
         ${button("back", t("Atrás", "Back"), "back", 'id="stage-back"')}
-        <h1 title="${h(current.name)}">${h(current.name.replace(/\.[^.]+$/, ""))}</h1>
-        ${button("options", t("Opciones de reproducción", "Playback options"), "settings", 'id="stage-options" aria-expanded="false" aria-controls="stage-panel-options"')}
+        ${music ? `<div class="music-identity"><span class="audio-cover" aria-hidden="true"${current.details?.audioCover || current.details?.audio?.embeddedCover ? ` data-thumbnail-id="${h(current.id)}"` : ""}>${icon("audio")}</span><div>
+          <h1 title="${h(title)}">${h(title)}</h1>${current.details?.audio?.artist ? `<p>${h(current.details.audio.artist)}</p>` : ""}</div></div>` : `<h1 title="${h(current.name)}">${h(title)}</h1>`}
+        <div class="stage-top-actions">${music ? button("track", t("Información de la pista", "Track information"), "info", 'id="music-track" aria-expanded="false" aria-controls="stage-panel-track"') : ""}
+        ${button("options", t("Opciones de reproducción", "Playback options"), "settings", 'id="stage-options" aria-expanded="false" aria-controls="stage-panel-options"')}</div>
       </header>
+      ${music ? `<section class="stage-panel stage-options music-track" id="stage-panel-track" data-stage-panel="track" aria-label="${t("Información de la pista", "Track information")}" hidden></section>
+        <section class="stage-panel music-queue" id="stage-panel-queue" data-stage-panel="queue" aria-label="${t("Cola de reproducción", "Playback queue")}" hidden></section>
+        <section class="stage-panel music-scenes" id="stage-panel-scenes" data-stage-panel="scenes" aria-label="${t("Escenas", "Scenes")}" hidden><div id="music-scene-controls"></div></section>` : ""}
       <div class="stage-panel stage-options" id="stage-panel-options" data-stage-panel="options" hidden>
         <label for="stage-rate">${t("Velocidad", "Speed")}<select id="stage-rate">${playbackRates.map(rate => option(String(rate), `${rate}×`, String(preferences.rate))).join("")}</select></label>
-        <label for="stage-fit">${t("Imagen", "Picture")}<select id="stage-fit">${option("contain", t("Ajustar", "Fit"), preferences.fill ? "cover" : "contain")}${option("cover", t("Rellenar · recorta la imagen", "Fill · crops the image"), preferences.fill ? "cover" : "contain")}</select></label>
+        ${music ? `<label class="toggle"><input type="checkbox" id="audio-resume-music" ${preferences.resumeMusic ? "checked" : ""}>${t("Reanudar pistas de música", "Resume music tracks")}</label>` : `<label for="stage-fit">${t("Imagen", "Picture")}<select id="stage-fit">${option("contain", t("Ajustar", "Fit"), preferences.fill ? "cover" : "contain")}${option("cover", t("Rellenar · recorta la imagen", "Fill · crops the image"), preferences.fill ? "cover" : "contain")}</select></label>`}
         ${audio.length > 1 ? `<label for="stage-audio-track">${t("Pista de audio", "Audio track")}<select id="stage-audio-track">${audio.map((track, index) => option(String(index), [track.label, track.language].filter(Boolean).join(" · ") || `${t("Pista", "Track")} ${index + 1}`, String(audio.findIndex(track => track.enabled)))).join("")}</select></label>` : ""}
         ${chapterOptions.length ? `<label for="stage-chapter">${t("Capítulos", "Chapters")}<select id="stage-chapter">${option("", t("Ir a un capítulo", "Go to a chapter"), "")}${chapterOptions.join("")}</select></label>` : ""}
         <label class="toggle"><input type="checkbox" id="stage-autoplay" ${preferences.autoplay ? "checked" : ""}>${t("Reproducir el siguiente archivo", "Play next file")}</label>
@@ -208,19 +226,22 @@ export function createPlaybackStage(host: HTMLElement, media: HTMLVideoElement, 
         ${button("external", t("Abrir con el sistema", "Open with system"))}</div></section>
       <footer class="stage-bottom">
         <div class="stage-status" role="status"></div>
-        <div class="stage-scrub"><output id="stage-hover" hidden></output><input id="stage-seek" type="range" min="0" max="0" step="0.01" value="0" aria-label="${t("Posición de vídeo", "Video position")}" disabled></div>
+        <div class="stage-scrub"><output id="stage-hover" aria-hidden="true" hidden><img alt="" hidden><span></span></output><input id="stage-seek" type="range" min="0" max="0" step="0.01" value="0" aria-label="${t("Posición de reproducción", "Playback position")}" disabled></div>
         <div class="stage-toolbar">
+          ${music ? button("previous", t("Pista anterior", "Previous track"), "previous") : ""}
           ${button("toggle", t("Reproducir", "Play"), "play", 'id="stage-toggle"')}
-          ${button("back-ten", t("Retroceder 10 segundos", "Back 10 seconds"), "seekBack")}
-          ${button("forward-ten", t("Avanzar 10 segundos", "Forward 10 seconds"), "seekForward")}
+          ${music ? button("next", t("Pista siguiente", "Next track"), "next") : button("back-ten", t("Retroceder 10 segundos", "Back 10 seconds"), "seekBack") + button("forward-ten", t("Avanzar 10 segundos", "Forward 10 seconds"), "seekForward")}
           <div class="stage-volume">${button("mute", t("Silenciar", "Mute"), "volume", 'id="stage-mute"')}
             <input id="stage-volume" type="range" min="0" max="1" step="0.02" aria-label="${t("Volumen", "Volume")}" value="${preferences.volume}"></div>
           <div class="stage-clock"><span data-stage-elapsed>0:00</span><span aria-hidden="true"> / </span>${button("remaining", t("Alternar duración y tiempo restante", "Toggle duration and remaining time"))}</div>
           <span class="stage-spacer"></span>
-          ${button("captions", t("Subtítulos", "Subtitles"), "captions", 'id="stage-caption-button" aria-expanded="false" aria-controls="stage-panel-captions"')}
+          ${music ? `<button type="button" class="stage-button music-scenes-trigger" data-stage-action="scenes" id="music-scenes" aria-expanded="false" aria-controls="stage-panel-scenes" aria-label="${t("Escenas", "Scenes")}" title="${t("Escenas", "Scenes")}">${icon("wave")}<span>${t("Escenas", "Scenes")}</span></button>` +
+            button("queue", t("Cola de reproducción", "Playback queue"), "list", 'id="music-queue" aria-expanded="false" aria-controls="stage-panel-queue"') +
+            button("immerse", t("Ocultar controles", "Hide controls"), "image")
+            : button("captions", t("Subtítulos", "Subtitles"), "captions", 'id="stage-caption-button" aria-expanded="false" aria-controls="stage-panel-captions"')}
           ${button("fullscreen", t("Pantalla completa", "Full screen"), "fullscreen", 'id="stage-fullscreen"')}
         </div>
-        <div class="stage-panel stage-caption-panel" id="stage-panel-captions" data-stage-panel="captions" hidden>
+        ${music ? "" : `<div class="stage-panel stage-caption-panel" id="stage-panel-captions" data-stage-panel="captions" hidden>
           <label for="stage-caption-track">${t("Pista", "Track")}<select id="stage-caption-track">${option("", t("Desactivados", "Off"), caption)}
             ${captionOptions.join("")}${nativeCaptions().map((track, index) => option(`native-${index}`, [track.label, track.language].filter(Boolean).join(" · ") || `${t("Integrada", "Embedded")} ${index + 1}`, caption)).join("")}</select></label>
           <label for="stage-caption-size">${t("Tamaño", "Size")}<select id="stage-caption-size">${["small", "normal", "large"].map((size, index) => option(size,
@@ -229,12 +250,13 @@ export function createPlaybackStage(host: HTMLElement, media: HTMLVideoElement, 
           <label class="toggle"><input id="stage-caption-contrast" type="checkbox" ${preferences.captionContrast ? "checked" : ""}>${t("Fondo de alto contraste", "High-contrast background")}</label>
           <div class="stage-caption-import"><label for="stage-caption-language">${t("Idioma del archivo", "File language")}<input id="stage-caption-language" value="${h(language)}" maxlength="24"></label>
             ${button("import-caption", t("Cargar SRT o VTT", "Load SRT or VTT"), undefined, importingCaption ? "disabled" : "")}</div>
-        </div>
+        </div>`}
       </footer>`;
     host.dataset.fit = preferences.fill ? "cover" : "contain";
     host.dataset.captionSize = preferences.captionSize;
     host.dataset.captionContrast = String(preferences.captionContrast);
     selectCaption(caption);
+    if (music) { syncMusic(); hooks.sceneControls(); }
     setFullscreen(fullscreen);
     if (panel) showPanel(panel, false);
     if (chosen) find(`#${CSS.escape(chosen)}`)?.focus({ preventScroll: true });
@@ -245,7 +267,7 @@ export function createPlaybackStage(host: HTMLElement, media: HTMLVideoElement, 
     panel = next;
     for (const node of controls.querySelectorAll<HTMLElement>("[data-stage-panel]")) node.hidden = node.dataset.stagePanel !== panel;
     for (const node of controls.querySelectorAll<HTMLElement>("[aria-controls^='stage-panel']")) node.setAttribute("aria-expanded", String(node.dataset.stageAction === panel));
-    if (focus) find(`[data-stage-panel="${panel}"] select`)?.focus({ preventScroll: true });
+    if (focus) find(`[data-stage-panel="${panel}"] :is(select, button:not(:disabled), input:not(:disabled))`)?.focus({ preventScroll: true });
     reveal();
   }
 
@@ -254,7 +276,7 @@ export function createPlaybackStage(host: HTMLElement, media: HTMLVideoElement, 
     const opening = !active;
     active = true;
     host.hidden = false;
-    host.setAttribute("aria-label", t("Reproductor de vídeo", "Video player"));
+    host.setAttribute("aria-label", current.kind === "audio" ? t("Reproductor de música", "Music player") : t("Reproductor de vídeo", "Video player"));
     document.documentElement.classList.add("has-playback-stage");
     for (const node of document.querySelectorAll<HTMLElement>(".app-shell, .titlebar")) node.inert = true;
     render(current, preferences, progress, issue);
@@ -267,6 +289,7 @@ export function createPlaybackStage(host: HTMLElement, media: HTMLVideoElement, 
     active = false;
     clearTimeout(timer);
     clearTimeout(feedbackTimer);
+    preview.leave();
     feedback.hidden = true;
     panel = null; keyboard = false; dragging = false;
     host.hidden = true;
@@ -288,6 +311,19 @@ export function createPlaybackStage(host: HTMLElement, media: HTMLVideoElement, 
 
   function toggleCaptions() {
     selectCaption(caption ? "" : lastCaption || localCaptions()[0]?.id || (nativeCaptions().length ? "native-0" : ""));
+  }
+
+  function syncMusic() {
+    if (!active || item?.kind !== "audio") return;
+    for (const [selector, markup] of [["#stage-panel-queue", hooks.queue()], ["#stage-panel-track", hooks.trackInfo(item)]] as const) {
+      const target = find(selector);
+      if (!target) continue;
+      const focus = target.contains(document.activeElement) && document.activeElement instanceof HTMLElement ? document.activeElement.id : "";
+      const scroll = target.scrollTop;
+      target.innerHTML = markup;
+      target.scrollTop = scroll;
+      if (focus) target.querySelector<HTMLElement>(`#${CSS.escape(focus)}`)?.focus({ preventScroll: true });
+    }
   }
 
   function key(event: KeyboardEvent): boolean {
@@ -314,7 +350,7 @@ export function createPlaybackStage(host: HTMLElement, media: HTMLVideoElement, 
       case "arrowright": case "l": hooks.seek(media.currentTime + (lower === "l" ? 10 : 5)); break;
       case "m": hooks.mute(); break;
       case "f": hooks.fullscreen(); break;
-      case "c": toggleCaptions(); break;
+      case "c": if (item?.kind !== "video") return false; toggleCaptions(); break;
       default: return false;
     }
     return true;
@@ -329,11 +365,20 @@ export function createPlaybackStage(host: HTMLElement, media: HTMLVideoElement, 
     if (!hover.hidden) {
       const bounds = seek.getBoundingClientRect();
       const ratio = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width));
-      hover.textContent = durationLabel(ratio * media.duration);
-      hover.style.left = `${ratio * 100}%`;
-    }
+      const time = Math.min(ratio * media.duration, media.duration - 0.01);
+      const label = hover.querySelector("span");
+      const image = hover.querySelector("img");
+      if (label) label.textContent = durationLabel(time);
+      const margin = Math.min(83, bounds.width / 2);
+      hover.style.left = `${Math.min(bounds.width - margin, Math.max(margin, ratio * bounds.width))}px`;
+      if (image && item?.kind === "video" && !dragging) preview.hover(image, item.id, time);
+    } else preview.leave();
   });
-  host.addEventListener("pointerleave", () => { const hover = find("#stage-hover"); if (hover) hover.hidden = true; });
+  host.addEventListener("pointerleave", () => {
+    const hover = find("#stage-hover");
+    if (hover) hover.hidden = true;
+    preview.leave();
+  });
   host.addEventListener("pointerdown", event => {
     keyboard = false;
     dragging = event.target instanceof HTMLInputElement && event.target.id === "stage-seek";
@@ -349,7 +394,7 @@ export function createPlaybackStage(host: HTMLElement, media: HTMLVideoElement, 
     if (!(target instanceof Element)) return;
     const action = target.closest<HTMLButtonElement>("[data-stage-action]")?.dataset.stageAction;
     if (!action) {
-      if (target === media || target === host) { if (panel) closePanel(); else toggleOnSurface(); }
+      if (target === media || target === host || target.closest(".music-surface")) { if (panel) closePanel(); else toggleOnSurface(); }
       return;
     }
     switch (action) {
@@ -357,10 +402,14 @@ export function createPlaybackStage(host: HTMLElement, media: HTMLVideoElement, 
       case "toggle": if (resumeAt) hooks.resume(false); else hooks.toggle(); break;
       case "back-ten": hooks.seek(media.currentTime - 10); break;
       case "forward-ten": hooks.seek(media.currentTime + 10); break;
+      case "previous": case "next": hooks.move(action === "previous" ? -1 : 1); break;
       case "mute": hooks.mute(); break;
       case "fullscreen": hooks.fullscreen(); break;
       case "remaining": remaining = !remaining; update(state, find(".stage-error p")?.textContent ?? ""); break;
-      case "options": case "captions": if (panel === action) closePanel(); else showPanel(action, keyboard); break;
+      case "options": case "captions": case "scenes": case "queue": case "track":
+        if (panel === action) closePanel(); else showPanel(action, keyboard); break;
+      case "immerse":
+        closePanel(); clearTimeout(timer); host.focus({ preventScroll: true }); host.dataset.controls = "hidden"; return;
       case "resume": hooks.resume(false); break;
       case "restart": hooks.resume(true); break;
       case "convert": if (item) hooks.convert(item.id); break;
@@ -402,5 +451,5 @@ export function createPlaybackStage(host: HTMLElement, media: HTMLVideoElement, 
     }
   });
 
-  return { show, render, hide, update, key, setFullscreen, selectCaption };
+  return { show, render, hide, update, key, setFullscreen, selectCaption, syncMusic, clearPreview: preview.clear };
 }

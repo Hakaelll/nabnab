@@ -1,10 +1,12 @@
 import { escapeHtml as h, localMediaUrl, type Copy, type LibraryItem } from "./contracts";
 import { detailsFor } from "./library-features";
-import type { LocalTrack } from "./library-types";
+import type { AudioPlaylist, LocalTrack } from "./library-types";
+import type { createSceneControls } from "./music-scene-controls";
 import { isPlayable, playbackRates, readPlayback, resumePosition, savePlayback } from "./playback-preferences";
+import { connectPlaybackSignal } from "./playback-signal";
 import { createPlaybackStage, type StageState } from "./playback-stage";
 import { durationLabel } from "./presentation";
-import { icon } from "./views-common";
+import { icon, option } from "./views-common";
 
 export function audioTitle(item: LibraryItem): string {
   return item.details?.audio?.title || item.name.replace(/\.[^.]+$/, "");
@@ -18,7 +20,9 @@ interface Hooks {
   item(id: string): LibraryItem | undefined;
   command<T>(name: string, args: Record<string, unknown>): Promise<T>;
   render(): void;
-  open(): void;
+  playlists(): AudioPlaylist[];
+  thumbnails(): void;
+  windowVisible(): Promise<boolean>;
   refresh(): Promise<void>;
   fullscreen(enabled: boolean): Promise<void>;
   convert(id: string): void;
@@ -35,6 +39,11 @@ export function createAudioPlayer(hooks: Hooks) {
   let host: HTMLElement | null = null;
   let transport: HTMLElement | null = null;
   let stage: ReturnType<typeof createPlaybackStage> | null = null;
+  let scenes: ReturnType<typeof createSceneControls> | null = null;
+  let sceneModule: Promise<void> | undefined;
+  let visibilityTimer: ReturnType<typeof setTimeout> | undefined;
+  let signal: ReturnType<typeof connectPlaybackSignal> | undefined;
+  let signalUnavailable = false;
   let expanded = false;
   let fullscreen = false;
   let changingFullscreen = false;
@@ -65,23 +74,54 @@ export function createAudioPlayer(hooks: Hooks) {
     savePlayback(preferences, cursor >= 0 ? { tracks, order, cursor } : null);
   }
 
+  function showScenes() {
+    if (scenes) { scenes.show(); monitorVisibility(); return; }
+    sceneModule ??= import("./music-scene-controls").then(({ createSceneControls }) => {
+      const root = document.getElementById("playback-stage");
+      if (!root) return;
+      scenes = createSceneControls(root, t, (dt, playing) => signal?.read(dt, playing));
+      if (signalUnavailable) scenes.unavailable();
+      if (expanded && current()?.kind === "audio") { scenes.show(); monitorVisibility(); updateTime(); }
+    }).catch(() => { sceneModule = undefined; });
+  }
+
+  function monitorVisibility() {
+    clearTimeout(visibilityTimer);
+    if (!expanded || current()?.kind !== "audio") return;
+    visibilityTimer = setTimeout(() => {
+      void hooks.windowVisible().then(visible => {
+        if (expanded && current()?.kind === "audio") scenes?.visibility(visible);
+      }).catch(() => {}).finally(monitorVisibility);
+    }, 420);
+  }
+
   function showStage() {
     const item = current();
-    if (item?.kind !== "video" || !stage) return;
+    if (!isPlayable(item) || !stage || !media) return;
     expanded = true;
     queueOpen = false;
     stage.show(item, preferences, resumeChoice, issue);
+    if (item.kind === "audio") {
+      if (!signal && !signalUnavailable) {
+        try { signal = connectPlaybackSignal(media); }
+        catch { signalUnavailable = true; scenes?.unavailable(); }
+      }
+      if (signal) void signal.resume().catch(() => scenes?.unavailable());
+      showScenes();
+    } else { clearTimeout(visibilityTimer); scenes?.hide(); }
     render();
   }
 
   function hideStage() {
     expanded = false;
+    clearTimeout(visibilityTimer);
     stage?.hide();
+    scenes?.hide();
     if (fullscreen) void setFullscreen(false);
   }
 
   function backFromStage() {
-    media?.pause();
+    if (current()?.kind === "video") media?.pause();
     persist();
     hideStage();
     render();
@@ -108,8 +148,7 @@ export function createAudioPlayer(hooks: Hooks) {
       lastVolume = preferences.volume;
       preferences.muted = false;
     }
-    media.volume = preferences.volume;
-    media.muted = preferences.muted;
+    applyVolume();
     saveSession();
     updatePlaying();
   }
@@ -118,9 +157,14 @@ export function createAudioPlayer(hooks: Hooks) {
     if (!media) return;
     if (preferences.volume === 0) { volume(lastVolume); return; }
     preferences.muted = !preferences.muted;
-    media.muted = preferences.muted;
+    applyVolume();
     saveSession();
     updatePlaying();
+  }
+
+  function applyVolume() {
+    if (signal) signal.volume(preferences.muted ? 0 : preferences.volume);
+    else if (media) { media.volume = preferences.volume; media.muted = preferences.muted; }
   }
 
   function persist() {
@@ -132,7 +176,7 @@ export function createAudioPlayer(hooks: Hooks) {
     if (details.playbackPosition === position && (!playedAudio || details.lastPlayedAt)) return;
     item.details = { ...details, playbackPosition: position, lastPlayedAt: playedAudio ? Date.now() : details.lastPlayedAt };
     lastSaved = Date.now();
-    void hooks.command("library_playback", { id: item.id, position }).catch(hooks.showError);
+    return hooks.command<void>("library_playback", { id: item.id, position }).catch(hooks.showError);
   }
 
   function seek(time: number) {
@@ -148,6 +192,7 @@ export function createAudioPlayer(hooks: Hooks) {
   function updateTime() {
     if (!media || !transport) return;
     stage?.update(mediaState, issue);
+    scenes?.playing(mediaState === "playing" && !media.paused && !media.ended);
     const elapsed = transport.querySelector<HTMLElement>("[data-audio-elapsed]");
     const end = transport.querySelector<HTMLElement>("[data-audio-duration]");
     const input = transport.querySelector<HTMLInputElement>("#audio-seek");
@@ -158,6 +203,7 @@ export function createAudioPlayer(hooks: Hooks) {
       input.max = String(duration);
       input.value = String(media.currentTime);
       input.disabled = duration <= 0;
+      input.style.setProperty("--played", `${duration ? Math.min(100, 100 * media.currentTime / duration) : 0}%`);
       input.setAttribute("aria-valuetext", durationLabel(media.currentTime));
     }
     if (matchesSource() && duration > 0 && "mediaSession" in navigator) {
@@ -180,14 +226,14 @@ export function createAudioPlayer(hooks: Hooks) {
     }
     const muteButton = transport.querySelector<HTMLElement>("#audio-mute");
     if (muteButton) {
-      const muted = media.muted || media.volume === 0;
+      const muted = preferences.muted || preferences.volume === 0;
       const label = muted ? t("Activar sonido", "Unmute") : t("Silenciar", "Mute");
       muteButton.setAttribute("aria-label", label);
       muteButton.title = label;
       muteButton.innerHTML = icon(muted ? "muted" : "volume");
     }
     const volumeInput = transport.querySelector<HTMLInputElement>("#audio-volume");
-    if (volumeInput && document.activeElement !== volumeInput) volumeInput.value = String(media.volume);
+    if (volumeInput && document.activeElement !== volumeInput) volumeInput.value = String(preferences.volume);
     stage?.update(mediaState, issue);
     if ("mediaSession" in navigator) navigator.mediaSession.playbackState = media.paused ? "paused" : "playing";
   }
@@ -226,6 +272,33 @@ export function createAudioPlayer(hooks: Hooks) {
     render();
   }
 
+  function queueMarkup(stageMode: boolean) {
+    const prefix = stageMode ? "music" : "audio";
+    const queueButton = (action: string, label: string, pressed: boolean) => `<button id="${prefix}-${action}" type="button" class="button quiet" data-action="audio-player-${action}" aria-pressed="${pressed}">${label}</button>`;
+    return `<header><strong>${t("Cola de reproducción", "Playback queue")}</strong>
+        <div class="button-group">${queueButton("shuffle", t("Aleatorio", "Shuffle"), preferences.shuffled)}
+        ${queueButton("repeat", preferences.repeat === "all" ? t("Repetir todo", "Repeat all") : preferences.repeat === "one" ? t("Repetir pista", "Repeat track") : t("Repetición", "Repeat"), preferences.repeat !== "off")}</div></header>
+      <ol>${order.slice(cursor, cursor + 30).map((index, offset) => {
+        const queued = hooks.item(tracks[index]);
+        if (!queued) return "";
+        const entryButton = (direction: "up" | "down", text: string, disabled: boolean, symbol: string) => `<button id="${prefix}-queue-${index}-${direction}" type="button" class="icon-button" data-action="audio-player-queue-${direction}" data-position="${index}" aria-label="${text}" ${disabled ? "disabled" : ""}>${symbol}</button>`;
+        return `<li><span ${offset === 0 ? 'aria-current="true"' : ""}>${h(audioTitle(queued))}</span>${offset > 0
+          ? entryButton("up", t("Subir en la cola", "Move up in queue"), offset < 2, "↑") +
+            entryButton("down", t("Bajar en la cola", "Move down in queue"), cursor + offset + 1 >= order.length, "↓") : ""}</li>`;
+      }).join("")}</ol>
+      ${order.length - cursor > 30 ? `<p class="field-note">${t("Se muestran los primeros 30 archivos.", "Showing the first 30 files.")}</p>` : ""}`;
+  }
+
+  function trackInfo(item: LibraryItem) {
+    const tags = item.details?.audio;
+    const lists = hooks.playlists().filter(list => !list.entries.some(entry => entry.kind === "local" && entry.id === item.id));
+    return `<h2>${h(audioTitle(item))}</h2><dl>${[[t("Artista", "Artist"), tags?.artist], [t("Álbum", "Album"), tags?.album],
+      [t("Género", "Genre"), tags?.genre], [t("Archivo", "File"), item.name]].filter(([, value]) => value).map(([name, value]) => `<div><dt>${name}</dt><dd>${h(value ?? "")}</dd></div>`).join("")}</dl>
+      <button id="music-favorite" type="button" class="button quiet" data-action="audio-player-favorite" aria-pressed="${detailsFor(item).favorite}">${icon("heart")}<span>${detailsFor(item).favorite ? t("Quitar favorito", "Remove favorite") : t("Marcar como favorito", "Mark as favorite")}</span></button>
+      ${lists.length ? `<div class="music-add-list"><label for="music-add-list">${t("Añadir a una lista", "Add to a playlist")}<select id="music-add-list">${lists.map(list => option(list.id, list.name, "")).join("")}</select></label>
+        <button id="music-playlist-save" type="button" class="button secondary" data-action="audio-player-add-list">${t("Añadir", "Add")}</button></div>` : ""}`;
+  }
+
   function render() {
     if (!host || !transport || !media) return;
     const item = current();
@@ -240,8 +313,8 @@ export function createAudioPlayer(hooks: Hooks) {
     const button = (id: string, text: string, symbol?: Parameters<typeof icon>[0], attributes = "") =>
       `<button id="audio-${id}" class="${symbol ? "icon-button" : "button quiet"}" type="button" data-action="audio-player-${id}" aria-label="${h(text)}" title="${h(text)}" ${attributes}>${symbol ? icon(symbol) : h(text)}</button>`;
     transport.innerHTML = `
-      <div class="audio-playing"><span class="audio-cover" aria-hidden="true"${item.details?.audioCover || item.details?.audio?.embeddedCover ? ` data-thumbnail-id="${h(item.id)}"` : ""}>${icon(item.kind === "video" ? "video" : "audio")}</span>
-        <button id="audio-open" class="audio-open" type="button" data-action="audio-player-open" title="${h(title)}"><strong>${h(title)}</strong><small>${h(subtitle || (item.kind === "video" ? t("Vídeo local", "Local video") : t("Biblioteca de audio", "Audio library")))}</small></button></div>
+      <div class="audio-playing"><span class="audio-cover" aria-hidden="true"${item.details?.audioCover || item.details?.audio?.embeddedCover || item.kind === "video" ? ` data-thumbnail-id="${h(item.id)}"` : ""}>${icon(item.kind === "video" ? "video" : "audio")}</span>
+        <button id="audio-open" class="audio-open" type="button" data-action="audio-player-open" title="${h(item.kind === "video" ? t("Abrir vídeo", "Open video") : t("Abrir visualización", "Open visualization"))}"><strong>${h(title)}</strong><small>${h(subtitle || (item.kind === "video" ? t("Vídeo local", "Local video") : t("Biblioteca de audio", "Audio library")))}</small></button></div>
       <div class="audio-timeline"><div class="audio-transport-controls">
         ${book ? button("back", t("Retroceder 15 segundos", "Back 15 seconds"), "seekBack") : button("previous", t("Anterior", "Previous"), "previous")}
         ${button("toggle", t("Reproducir", "Play"), "play")}
@@ -252,28 +325,21 @@ export function createAudioPlayer(hooks: Hooks) {
         <select id="audio-sleep" aria-label="${t("Temporizador de descanso", "Sleep timer")}">${[["off", t("Descanso", "Sleep timer")], ["10", "10 min"], ["20", "20 min"], ["30", "30 min"], ["45", "45 min"], ["60", "60 min"], ["chapter", t("Fin del capítulo", "End of chapter")]].map(([value, name]) => `<option value="${value}" ${value === sleep ? "selected" : ""}>${name}</option>`).join("")}</select>
       ` : ""}
       <div class="audio-volume">${button("mute", t("Silenciar", "Mute"), "volume")}<input id="audio-volume" type="range" min="0" max="1" step="0.02" value="${preferences.volume}" aria-label="${t("Volumen", "Volume")}"></div>
+      ${item.kind === "audio" ? `<button type="button" class="icon-button audio-visualize" data-action="audio-player-open" aria-label="${t("Abrir visualización", "Open visualization")}" title="${t("Abrir visualización", "Open visualization")}">${icon("wave")}</button>` : ""}
       ${button("queue", t("Cola de reproducción", "Playback queue"), "list", `aria-expanded="${queueOpen}" aria-controls="audio-queue-panel"`)}
       ${button("close", t("Detener y cerrar", "Stop and close"), "close")}</div>
       ${issue && !expanded ? `<div class="audio-player-issue" role="alert"><span>${h(issue)}</span><div class="button-group">
         ${button("convert", t("Convertir una copia", "Convert a copy"))}${button("external", t("Abrir con el sistema", "Open with system"))}
       </div></div>` : ""}
       <section id="audio-queue-panel" class="audio-queue-panel" aria-label="${t("Cola de reproducción", "Playback queue")}" ${queueOpen ? "" : "hidden"}>
-        <header><strong>${t("Cola de reproducción", "Playback queue")}</strong>
-          <div class="button-group">${button("shuffle", t("Aleatorio", "Shuffle"), undefined, `aria-pressed="${preferences.shuffled}"`)}
-          ${button("repeat", preferences.repeat === "all" ? t("Repetir todo", "Repeat all") : preferences.repeat === "one" ? t("Repetir pista", "Repeat track") : t("Repetición", "Repeat"), undefined, `aria-pressed="${preferences.repeat !== "off"}"`)}</div></header>
-        <ol>${order.slice(cursor, cursor + 30).map((index, offset) => {
-          const queued = hooks.item(tracks[index]);
-          if (!queued) return "";
-          return `<li><span ${offset === 0 ? 'aria-current="true"' : ""}>${h(audioTitle(queued))}</span>${offset > 0
-            ? `<button class="icon-button" data-action="audio-player-queue-up" data-position="${index}" aria-label="${t("Subir en la cola", "Move up in queue")}" ${offset < 2 ? "disabled" : ""}>↑</button>
-               <button class="icon-button" data-action="audio-player-queue-down" data-position="${index}" aria-label="${t("Bajar en la cola", "Move down in queue")}" ${cursor + offset + 1 >= order.length ? "disabled" : ""}>↓</button>` : ""}</li>`;
-        }).join("")}</ol>
-        ${order.length - cursor > 30 ? `<p class="field-note">${t("Se muestran los primeros 30 archivos.", "Showing the first 30 files.")}</p>` : ""}
-        <label class="toggle"><input id="audio-resume-music" type="checkbox" ${preferences.resumeMusic ? "checked" : ""}>${t("Reanudar pistas de música", "Resume music tracks")}</label>
+        ${queueMarkup(false)}
+        <label class="toggle"><input id="audio-resume-music-compact" type="checkbox" ${preferences.resumeMusic ? "checked" : ""}>${t("Reanudar pistas de música", "Resume music tracks")}</label>
       </section>`;
     host.setAttribute("aria-label", t("Reproductor compacto", "Compact player"));
     updatePlaying();
     updateTime();
+    stage?.syncMusic();
+    hooks.thumbnails();
     if (active) document.getElementById(active)?.focus({ preventScroll: true });
   }
 
@@ -300,6 +366,7 @@ export function createAudioPlayer(hooks: Hooks) {
 
   async function playMedia() {
     if (!media) return;
+    if (signal) void signal.resume().catch(() => scenes?.unavailable());
     const revision = sourceRevision;
     try {
       if (media.ended) seek(0);
@@ -317,6 +384,15 @@ export function createAudioPlayer(hooks: Hooks) {
     if (current()?.missing || error?.code === 2) return t("El archivo no está disponible. Revisa su ubicación en Biblioteca.", "The file is unavailable. Check its location in Library.");
     if (error?.code === 3) return t("El motor no pudo decodificar el archivo. Puede estar dañado o incompleto.", "The engine could not decode the file. It may be damaged or incomplete.");
     return t("El formato o los códecs de este archivo no se pueden reproducir en este equipo.", "This device cannot play the file's format or codecs.");
+  }
+
+  function verifyMissing() {
+    const revision = sourceRevision;
+    void hooks.refresh().then(() => {
+      if (revision !== sourceRevision || !issue || !current()?.missing) return;
+      issue = playbackIssue(media?.error ?? null);
+      render(); updateTime();
+    }).catch(() => {});
   }
 
   function resumeVideo(fromStart: boolean) {
@@ -355,7 +431,8 @@ export function createAudioPlayer(hooks: Hooks) {
     lastSaved = Date.now();
     mediaSession(item);
     saveSession();
-    if (item.kind === "video" && openVideo) showStage();
+    signal?.reset(); scenes?.reset();
+    if (item.kind === "video" && openVideo || item.kind === "audio" && expanded) showStage();
     else hideStage();
     render();
     hooks.render();
@@ -388,7 +465,7 @@ export function createAudioPlayer(hooks: Hooks) {
     const position = reorder(index);
     if (same) {
       cursor = position;
-      if (item.kind === "video") showStage();
+      if (item.kind === "video" || expanded) showStage();
       if (!resumeChoice && media?.paused) void playMedia();
       saveSession();
       render();
@@ -441,6 +518,8 @@ export function createAudioPlayer(hooks: Hooks) {
     resumeChoice = 0;
     queueOpen = false;
     hideStage();
+    scenes?.release();
+    stage?.clearPreview();
     tracks = [];
     order = [];
     cursor = -1;
@@ -449,6 +528,7 @@ export function createAudioPlayer(hooks: Hooks) {
     media?.removeAttribute("src");
     media?.removeAttribute("data-local-player");
     media?.load();
+    if (signal) void signal.suspend().catch(() => {});
     saveSession();
     if ("mediaSession" in navigator) {
       navigator.mediaSession.metadata = null;
@@ -471,7 +551,8 @@ export function createAudioPlayer(hooks: Hooks) {
     element.muted = preferences.muted;
     transport = document.getElementById("audio-transport");
     stage = createPlaybackStage(stageHost, element, {
-      t, seek, mute, volume, back: backFromStage, resume: resumeVideo,
+      t, seek, mute, volume, sound: () => preferences, back: backFromStage, resume: resumeVideo, command: hooks.command,
+      musicTitle: audioTitle, queue: () => queueMarkup(true), trackInfo, sceneControls: () => scenes?.render(),
       toggle: () => { if (element.paused) void playMedia(); else element.pause(); },
       rate: value => { preferences.rate = value; element.playbackRate = value; saveSession(); },
       preference: (key, value) => { preferences[key] = value; saveSession(); },
@@ -515,18 +596,18 @@ export function createAudioPlayer(hooks: Hooks) {
       }
       if (resumeChoice && !resumePosition(resumeChoice, element.duration)) resumeChoice = 0;
       const item = current();
-      if (item && expanded) stage?.render(item, preferences, resumeChoice, issue);
+      if (item?.kind === "video" && expanded) stage?.render(item, preferences, resumeChoice, issue);
       if (element.paused && mediaState === "loading") mediaState = "paused";
       updateTime();
     });
     element.textTracks.addEventListener("addtrack", () => {
       const item = current();
-      if (item && expanded && matchesSource()) stage?.render(item, preferences, resumeChoice, issue);
+      if (item?.kind === "video" && expanded && matchesSource()) stage?.render(item, preferences, resumeChoice, issue);
     });
     for (const event of ["waiting", "stalled", "seeking", "seeked", "playing", "canplay", "progress"] as const) {
       element.addEventListener(event, () => {
         if (!matchesSource()) return;
-        if (event === "seeking") mediaState = "seeking";
+        if (event === "seeking") { mediaState = "seeking"; signal?.reset(); scenes?.reset(); }
         else if (event === "waiting" || event === "stalled") {
           if (!element.paused || element.readyState === 0) mediaState = "loading";
         } else if (event !== "progress" && !element.ended && !element.seeking) mediaState = element.paused ? "paused" : "playing";
@@ -557,6 +638,7 @@ export function createAudioPlayer(hooks: Hooks) {
       issue = playbackIssue(element.error);
       mediaState = "error";
       render(); updateTime();
+      if (element.error.code === 4) verifyMissing();
     });
     document.addEventListener("play", event => {
       if (!(event.target instanceof HTMLMediaElement)) return;
@@ -573,7 +655,7 @@ export function createAudioPlayer(hooks: Hooks) {
     if (element instanceof HTMLInputElement && element.id === "audio-volume") {
       volume(Number(element.value)); return true;
     }
-    if (element instanceof HTMLInputElement && element.id === "audio-resume-music") {
+    if (element instanceof HTMLInputElement && (element.id === "audio-resume-music" || element.id === "audio-resume-music-compact")) {
       preferences.resumeMusic = element.checked; saveSession(); return true;
     }
     if (element instanceof HTMLSelectElement && element.id === "audio-rate") {
@@ -677,9 +759,25 @@ export function createAudioPlayer(hooks: Hooks) {
       }
       case "audio-player-convert": if (currentId()) hooks.convert(currentId()); break;
       case "audio-player-external": if (currentId()) openExternal(currentId()); break;
+      case "audio-player-favorite": {
+        const item = current();
+        if (item) void hooks.command("library_favorite", { id: item.id, favorite: !detailsFor(item).favorite }).then(hooks.refresh).then(() => stage?.syncMusic()).catch(hooks.showError);
+        break;
+      }
+      case "audio-player-add-list": {
+        const item = current();
+        const choice = document.querySelector<HTMLSelectElement>("#music-add-list")?.value;
+        const list = hooks.playlists().find(candidate => candidate.id === choice);
+        if (item && list && control) {
+          (control as HTMLButtonElement).disabled = true;
+          const { id, name, entries } = list;
+          void hooks.command("audio_playlist_save", { id, name, entries: [...entries, { kind: "local", id: item.id, title: audioTitle(item) }] })
+            .then(hooks.refresh).then(() => stage?.syncMusic()).catch(hooks.showError).finally(() => { (control as HTMLButtonElement).disabled = false; });
+        }
+        break;
+      }
       case "audio-player-open":
-        if (current()?.kind === "video") { showStage(); hooks.render(); }
-        else hooks.open();
+        showStage(); hooks.render();
         break;
       case "audio-player-close": close(); break;
       default: return false;

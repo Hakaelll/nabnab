@@ -152,7 +152,13 @@ const audioPlayer=createAudioPlayer({
   fullscreen: enabled => getCurrentWindow().setFullscreen(enabled),
   convert: id => setToolInput([id]),
   timeChanged: (id,time)=>libraryFeatures.playbackChanged(id,time),
-  open: () => { librarySection = "audio"; navigate("library"); },
+  playlists: () => snapshot.audioPlaylists ?? [], thumbnails: observePlaybackCovers,
+  windowVisible: async () => {
+    if(!desktop)return true;
+    const window=getCurrentWindow();
+    const [minimized,visible]=await Promise.all([window.isMinimized(),window.isVisible()]);
+    return minimized!==true&&visible!==false;
+  },
 });
 const audioLibrary=createAudioLibrary({
   snapshot: () => snapshot, command, refresh, render: renderCurrent, notify, showError, t, player: audioPlayer,
@@ -390,13 +396,24 @@ function renderCurrent(): void {
   });
 }
 function observeThumbnails(): void {
-  thumbnailObserver?.disconnect();thumbnailQueue.length=0;
+  thumbnailObserver?.disconnect();
+  for(let index=thumbnailQueue.length-1;index>=0;index--)if(!thumbnailQueue[index].isConnected)thumbnailQueue.splice(index,1);
   if((page!=='library'&&page!=='tools')||!desktop)return;
   thumbnailObserver=new IntersectionObserver(entries=>{
-    for(const entry of entries)if(entry.isIntersecting&&entry.target instanceof HTMLElement){thumbnailObserver?.unobserve(entry.target);thumbnailQueue.push(entry.target);}
+    for(const entry of entries)if(entry.isIntersecting&&entry.target instanceof HTMLElement){thumbnailObserver?.unobserve(entry.target);enqueueThumbnail(entry.target);}
     void pumpThumbnails();
   },{root:required('#main'),rootMargin:'100px'});
-  for(const element of document.querySelectorAll<HTMLElement>('[data-thumbnail-id]'))thumbnailObserver.observe(element);
+  for(const element of document.querySelectorAll<HTMLElement>('#main [data-thumbnail-id]:not([data-thumbnail-queued])'))thumbnailObserver.observe(element);
+}
+function enqueueThumbnail(element: HTMLElement): void {
+  if(element.dataset.thumbnailQueued)return;
+  element.dataset.thumbnailQueued='true';
+  thumbnailQueue.push(element);
+}
+function observePlaybackCovers(): void {
+  if(!desktop)return;
+  for(const element of document.querySelectorAll<HTMLElement>('#audio-player:not([hidden]) [data-thumbnail-id], #playback-stage:not([hidden]) [data-thumbnail-id]'))enqueueThumbnail(element);
+  void pumpThumbnails();
 }
 async function pumpThumbnails(): Promise<void> {
   while(thumbnailWorkers<2&&thumbnailQueue.length){const element=thumbnailQueue.shift();if(!element||!element.isConnected)continue;const id=element.dataset.thumbnailId;if(!id)continue;thumbnailWorkers++;
@@ -806,7 +823,7 @@ if(desktop){
   const nativeWindow=getCurrentWindow();
   required('#minimize').addEventListener('click',()=>void nativeWindow.minimize().catch(showError));
   required('#maximize').addEventListener('click',()=>void nativeWindow.toggleMaximize().catch(showError));
-  required('#close').addEventListener('click',()=>void nativeWindow.close().catch(showError));
+  required('#close').addEventListener('click',()=>void Promise.resolve(audioPlayer.persist()).then(()=>nativeWindow.close()).catch(showError));
   const updateMaximize=async()=>{const maximized=await nativeWindow.isMaximized();const button=required('#maximize');button.dataset.maximized=String(maximized);const label=maximized?t("Restaurar", "Restore"):t("Maximizar", "Maximize");button.setAttribute('aria-label',label);button.title=label;};
   try{
     await nativeWindow.onResized(updateMaximize);await updateMaximize();
