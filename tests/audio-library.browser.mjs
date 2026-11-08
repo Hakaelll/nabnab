@@ -64,12 +64,13 @@ const setup = `
     if(cmd==="library_playback"){const details=state.library.find(item=>item.id===args.id).details;details.playbackPosition=args.position;details.lastPlayedAt=Date.now();return;}
     if(cmd==="audio_tags_edit"){for(const item of state.library.filter(item=>args.ids.includes(item.id)))Object.assign(item.details.audio,args.patch);return;}
     if(cmd==="audio_playlist_save"){const list={id:args.id??"fixture-playlist-"+state.audioPlaylists.length,name:args.name,entries:args.entries};state.audioPlaylists=state.audioPlaylists.filter(entry=>entry.id!==list.id).concat(list);return copy(state.audioPlaylists);}
-    if(cmd==="audio_playlist_choose")return {kind:"csv",id:"fixture-csv",name:"Lista exportada",columns:["Track name","Artist","Duration (ms)","Version"],sample:[["Versión buscada","Sonia","10000","En directo"]],count:2};
+    if(cmd==="audio_playlist_choose")return {kind:"csv",id:"fixture-csv",name:"Lista exportada",columns:["Track name","Artist","Duration (ms)","Version"],sample:[["Versión buscada","Sonia","10000","En directo"]],count:3};
     if(cmd==="audio_playlist_map")return {kind:"list",name:"Lista exportada",rows:[
       {entry:{kind:"remote",url:"https://example.org/audio",title:"Versión buscada"},artist:"Sonia",duration:10,version:"En directo",candidates:[
-        {id:"first",title:"Primera pista",artist:"Sonia",album:"Sesiones",duration:10,versionMatches:false},
-        {id:"last",title:"Tercera pista",artist:"Sonia",album:"Sesiones",duration:10,versionMatches:true}]},
+        {id:"first",title:"Versión buscada",artist:"Sonia",album:"Sesiones",duration:10,versionMatches:false},
+        {id:"last",title:"Versión buscada",artist:"Sonia",album:"Sesiones",duration:10,versionMatches:true}]},
       {entry:{kind:"missing",locator:"missing.mp3",title:"Ausente"},artist:null,duration:null,version:null,candidates:[]},
+      {entry:{kind:"remote",url:"https://example.org/remote",title:"Referencia remota"},artist:null,duration:null,version:null,candidates:[]},
     ]};
     if(cmd==="audio_lyrics")return state.library.find(item=>item.id===args.id)?.details.lyrics ??
       (args.id==="second"?[{time:0,text:"Letra de la segunda pista"}]:
@@ -287,17 +288,38 @@ try {
   await page.locator("#audio-csv-duration").selectOption("2");
   await page.locator("#audio-csv-ms").check();
   await page.getByRole("button", {name:"Buscar coincidencias locales",exact:true}).click();
-  await page.locator("#audio-import-match-0").waitFor();
-  assert.equal(await page.locator("#audio-import-match-0").inputValue(),"");
-  assert.equal(await page.locator("#audio-import-match-0 option").count(),3);
-  await page.locator("#audio-import-match-0").selectOption("last");
+  const comparison = page.locator("#audio-import-match-0");
+  await comparison.waitFor();
+  await page.setViewportSize({ width: 900, height: 620 });
+  assert.equal(await comparison.getAttribute("open"), null);
+  await comparison.locator("summary").press("Enter");
+  const originalReference = comparison.getByRole("radio", { name: "Conservar referencia original" });
+  assert.equal(await originalReference.isChecked(), true);
+  assert.equal(await comparison.getByRole("radio").count(), 3);
+  assert.equal(await comparison.getByText("C:/fixture/First.mp3", { exact: true }).isVisible(), true);
+  const localRecording = comparison.getByRole("radio", { name: /C:\/fixture\/Third\.wav/ });
+  await localRecording.press("Space");
+  assert.equal(await localRecording.isChecked(), true);
+  assert.ok(await localRecording.evaluate(input => input === document.activeElement));
+  await originalReference.press("Space");
+  assert.equal(await originalReference.isChecked(), true);
+  await localRecording.press("Space");
+  assert.ok(await comparison.evaluate(panel => panel.scrollWidth <= panel.clientWidth + 1));
+  const [first, second, transport] = await comparison.evaluate(panel => {
+    const options = [...panel.querySelectorAll(".audio-match-candidates label")].map(option => option.getBoundingClientRect().toJSON());
+    return [...options, document.querySelector("#audio-player").getBoundingClientRect().toJSON()];
+  });
+  await page.screenshot({path:`${directory}/playlist-matching-900.png`});
+  assert.equal(first.top, second.top);
+  assert.ok(Math.max(first.bottom, second.bottom) <= transport.top, `Candidate rows end at ${Math.max(first.bottom, second.bottom)} and the player begins at ${transport.top}`);
   await page.setViewportSize({width:1180,height:780});
+  await page.locator("#main").evaluate(main => { main.scrollTop = 0; });
   await page.screenshot({path:`${directory}/playlist-matching.png`});
   await page.getByRole("button", {name:"Preparar lista",exact:true}).click();
   await page.getByRole("button", {name:"Guardar lista",exact:true}).click();
   await page.getByRole("heading", {name:"Lista exportada",exact:true}).waitFor();
   const imported = await page.evaluate(() => window.audioFixture.state.audioPlaylists.find(list=>list.name==="Lista exportada"));
-  assert.deepEqual(imported.entries,[{kind:"local",id:"last",title:"Tercera pista"},{kind:"missing",locator:"missing.mp3",title:"Ausente"}]);
+  assert.deepEqual(imported.entries,[{kind:"local",id:"last",title:"Versión buscada"},{kind:"missing",locator:"missing.mp3",title:"Ausente"},{kind:"remote",url:"https://example.org/remote",title:"Referencia remota"}]);
   const mapping = await page.evaluate(() => window.audioFixture.calls.find(call=>call.cmd==="audio_playlist_map").args.mapping);
   assert.equal(mapping.duration,2);
   assert.equal(mapping.milliseconds,true);

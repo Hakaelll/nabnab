@@ -22,7 +22,7 @@ Desde la pista actual, **Elegir portada** permite asociar un JPEG, PNG o WebP lo
 
 ![Letras locales sincronizadas en el panel de Audio](audio-lyrics.png)
 
-En **Listas → Importar lista** puedes abrir M3U, M3U8, PLS o CSV en UTF-8. En CSV, confirma las columnas y la unidad de duración. nabnab reconoce identificadores y rutas de archivos que ya están en Biblioteca. Las coincidencias por título, artista, duración o versión son sugerencias. Puedes escoger la grabación o conservar la referencia remota o ausente. La lista conserva el orden y las URLs importadas permanecen como referencias.
+En **Listas → Importar lista** puedes abrir M3U, M3U8, PLS o CSV en UTF-8. En CSV, confirma las columnas y la unidad de duración. nabnab reconoce identificadores y rutas de archivos que ya están en Biblioteca. Abre las sugerencias de una entrada para comparar la duración y la ruta completa de las grabaciones. El indicador de versión compara el texto con el nombre del archivo o del álbum. La referencia remota o ausente queda seleccionada al empezar. Puedes elegir una grabación local y preparar la lista conservando su orden.
 
 La prueba de interfaz reproduce un WAV silencioso en Edge con almacenamiento de escritorio simulado. Comprueba el orden por disco y pista, la estantería con teclado, la continuidad del reproductor, el descanso de audiolibros, las letras y la edición de listas y etiquetas. La prueba nativa usa audio sintético y verifica que, después de reiniciar nabnab, **Continuar** abre el capítulo siguiente de un libro cuyo capítulo anterior terminó. La integración con Windows se comprueba mediante solicitudes del sistema a la sesión multimedia de prueba.
 

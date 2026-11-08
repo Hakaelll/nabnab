@@ -379,7 +379,9 @@ export function createAudioLibrary(hooks: Hooks) {
   }
 
   function importView(preview: ImportPreview) {
-    const header = `<div class="page-heading"><div><h2>${h(preview.name)}</h2><p>${t("Revisa el contenido antes de guardarlo como lista.", "Review the contents before saving as a playlist.")}</p></div>${action("audio-cancel-import", t("Cerrar importación", "Close import"), "close", "quiet", disabled())}</div>`;
+    const instruction = preview.kind === "csv" ? t("Confirma qué contiene cada columna.", "Confirm what each column contains.")
+      : t("Compara las grabaciones locales.", "Compare local recordings.");
+    const header = `<div class="page-heading"><div><h2>${h(preview.name)}</h2><p>${instruction}</p></div>${action("audio-cancel-import", t("Cerrar importación", "Close import"), "close", "quiet", disabled())}</div>`;
     if (preview.kind === "csv") {
       const labels: Record<Column, string> = {
         locator: t("Ruta o URL", "Path or URL"), id: t("Identificador", "Identifier"), title: tagName("title"),
@@ -394,17 +396,26 @@ export function createAudioLibrary(hooks: Hooks) {
     }
     const start = importPage * 40;
     const unresolved = preview.rows.filter((row, index) => row.entry.kind !== "local" && !resolutions.has(index)).length;
-    return `<section class="audio-editor">${header}<p class="field-note">${preview.rows.length} ${t("entradas", "entries")} · ${unresolved} ${t("referencias remotas o ausentes", "remote or missing references")}</p>
-      <p class="field-note">${t("Elige una grabación para resolver una sugerencia. Las URLs quedan como referencias y no se descargan.", "Choose a recording to resolve a suggestion. URLs remain references and are never downloaded.")}</p>
+    const filePaths = new Map(hooks.snapshot().library.map(item => [item.id, item.path]));
+    return `<section class="audio-editor audio-import-editor">${header}<p class="field-note">${preview.rows.length} ${t("entradas", "entries")} · ${unresolved} ${t("referencias remotas o ausentes", "remote or missing references")}</p>
       <ol class="audio-rows audio-import-rows" start="${start + 1}">${preview.rows.slice(start, start + 40).map((row, offset) => {
         const index = start + offset;
-        const original = resolutions.has(index) ? t("Copia local elegida", "Local copy chosen")
+        const selected = resolutions.get(index);
+        const original = selected ? t("Copia local elegida", "Local copy chosen")
           : row.entry.kind === "local" ? t("Archivo local", "Local file") : row.entry.kind === "remote" ? t("URL remota", "Remote URL") : t("Archivo ausente", "Missing file");
         const metadata = [row.artist, row.version, row.duration === null ? "" : durationLabel(row.duration), original].filter(Boolean).join(" · ");
-        return `<li class="audio-playlist-entry"><span>${index + 1}</span><div><strong>${h(row.entry.title)}</strong><small>${h(metadata)}</small></div>
-          ${row.candidates.length ? `<label class="audio-match">${t("Coincidencia local", "Local match")}<select id="audio-import-match-${index}" data-audio-match="${index}" ${disabled()}>
-            ${option("", t("Conservar referencia original", "Keep original reference"), resolutions.get(index) ?? "")}
-            ${row.candidates.map(candidate => option(candidate.id, [candidate.title, candidate.artist, candidate.album, candidate.duration === null ? "" : durationLabel(candidate.duration), candidate.versionMatches ? t("Versión indicada", "Reported version") : ""].filter(Boolean).join(" · "), resolutions.get(index) ?? "")).join("")}</select></label>` : ""}</li>`;
+        const count = row.candidates.length;
+        const radio = (optionIndex: number, id: string) => `<input type="radio" id="audio-match-${index}-${optionIndex}" name="audio-match-${index}" data-audio-match="${index}" value="${h(id)}" ${id === (selected ?? "") ? "checked" : ""} ${disabled()}>`;
+        return `<li class="audio-playlist-entry"><span>${index + 1}</span><div><strong id="audio-import-title-${index}">${h(row.entry.title)}</strong><small>${h(metadata)}</small></div>
+          ${count ? `<details class="audio-match" id="audio-import-match-${index}"><summary id="audio-match-summary-${index}" aria-describedby="audio-import-title-${index}">${count === 1 ? t("Revisar grabación local", "Review local recording") : `${count} ${t("grabaciones locales para comparar", "local recordings to compare")}`}</summary>
+            <fieldset><legend class="sr-only">${h(t("Grabaciones locales para ", "Local recordings for ") + row.entry.title)}</legend>
+              <label class="audio-match-option">${radio(0, "")}<span>${t("Conservar referencia original", "Keep original reference")}</span></label>
+              <div class="audio-match-candidates">${row.candidates.map((candidate, candidateIndex) => {
+                const details = [candidate.artist, candidate.album, candidate.duration === null ? "" : durationLabel(candidate.duration), candidate.versionMatches ? t("Coincide el texto de la versión", "Version text matches") : ""].filter(Boolean).join(" · ");
+                const filePath = filePaths.get(candidate.id);
+                return `<label class="audio-match-option">${radio(candidateIndex + 1, candidate.id)}<span><strong>${h(candidate.title)}</strong>${details ? `<small>${h(details)}</small>` : ""}${filePath ? `<small class="audio-match-path" dir="auto">${h(filePath)}</small>` : ""}</span></label>`;
+              }).join("")}</div>
+            </fieldset></details>` : ""}</li>`;
       }).join("")}</ol>
       ${preview.rows.length > 40 ? `<div class="library-pagination"><span>${start + 1}–${Math.min(preview.rows.length, start + 40)} / ${preview.rows.length}</span>
         ${action("audio-import-back", t("Anterior", "Previous"), undefined, "quiet", importPage ? disabled() : "disabled")}
@@ -764,6 +775,14 @@ export function createAudioLibrary(hooks: Hooks) {
     const view = views[category];
     const { selected, tags } = view;
     if (element instanceof HTMLInputElement) {
+      if (element.dataset.audioMatch !== undefined) {
+        if (element.checked) {
+          const index = Number(element.dataset.audioMatch);
+          if (element.value) resolutions.set(index, element.value); else resolutions.delete(index);
+          hooks.render();
+        }
+        return true;
+      }
       if (element.id === "audio-csv-ms") { milliseconds = element.checked; return true; }
       if (element.id === "audio-query") { view.query = element.value; view.offset = 0; view.shelfOffset = 0; hooks.render(); return true; }
       if (element.id === "audio-playlist-name" && editing) { editing.name = element.value; return true; }
@@ -790,11 +809,6 @@ export function createAudioLibrary(hooks: Hooks) {
     const column = columns.find(field => element.id === `audio-csv-${field}`);
     if (column) {
       if (element.value === "") delete mapping[column]; else mapping[column] = Number(element.value);
-      hooks.render(); return true;
-    }
-    if (element.dataset.audioMatch !== undefined) {
-      const index = Number(element.dataset.audioMatch);
-      if (element.value) resolutions.set(index, element.value); else resolutions.delete(index);
       hooks.render(); return true;
     }
     switch (element.id) {
