@@ -7,6 +7,7 @@ use tauri::State;
 use url::Url;
 
 pub(crate) const SKILLSHARE_LIMIT: u64 = 104 * 1024 * 1024;
+const RESOURCE_SECTION: &str = "skillshare-resources";
 
 pub(crate) struct Resource {
     pub url: Url,
@@ -122,10 +123,11 @@ pub fn add_skillshare_resources(
     url: String,
     title: String,
     links: Vec<String>,
+    lesson_id: Option<String>,
 ) -> Result<Course, String> {
     let mut guard = state.repository.lock().unwrap();
     let repo = guard.as_mut().ok_or("Open nabnab first.")?;
-    register(repo, &url, &title, &links)
+    register(repo, &url, &title, &links, lesson_id.as_deref())
 }
 
 fn register(
@@ -133,6 +135,7 @@ fn register(
     url: &str,
     title: &str,
     links: &[String],
+    lesson_id: Option<&str>,
 ) -> Result<Course, String> {
     let (id, url) = browser::skillshare_course(url)?;
     let title = label(title, 240);
@@ -162,55 +165,97 @@ fn register(
             sections: Vec::new(),
             created_at: queue::now(),
         });
-    let section = if let Some(index) = course
-        .sections
-        .iter()
-        .position(|section| section.id == "skillshare-resources")
-    {
-        &mut course.sections[index]
-    } else {
-        course.sections.push(CourseSection {
-            id: "skillshare-resources".into(),
-            title: "Recursos de Skillshare".into(),
-            lessons: Vec::new(),
-        });
-        course.sections.last_mut().unwrap()
+    let target = lesson_id
+        .map(|id| {
+            course
+                .sections
+                .iter()
+                .enumerate()
+                .find_map(|(section_index, section)| {
+                    if section.id == RESOURCE_SECTION {
+                        return None;
+                    }
+                    let lesson_index = section.lessons.iter().position(|lesson| lesson.id == id)?;
+                    Some((section_index, lesson_index))
+                })
+                .ok_or("Choose an existing lesson in this Skillshare course.")
+        })
+        .transpose()?;
+    for (section_index, section) in course.sections.iter().enumerate() {
+        for (lesson_index, lesson) in section.lessons.iter().enumerate() {
+            if target == Some((section_index, lesson_index))
+                || target.is_none() && section.id == RESOURCE_SECTION
+            {
+                continue;
+            }
+            if let Some(asset) = lesson.assets.iter().find(|asset| seen.contains(&asset.id)) {
+                return Err(format!(
+                    "{} is already listed under {}.",
+                    asset.title, lesson.title
+                ));
+            }
+        }
+    }
+    let section_index = match target {
+        Some((section_index, _)) => section_index,
+        None => match course
+            .sections
+            .iter()
+            .position(|section| section.id == RESOURCE_SECTION)
+        {
+            Some(index) => index,
+            None => {
+                course.sections.push(CourseSection {
+                    id: RESOURCE_SECTION.into(),
+                    title: "Recursos de Skillshare".into(),
+                    lessons: Vec::new(),
+                });
+                course.sections.len() - 1
+            }
+        },
     };
+    let section = &mut course.sections[section_index];
     for resource in resources {
         let asset_id = resource.identity(&course.id);
-        let lesson_id = format!("resource-{}", digest(&asset_id));
         let url_ref = sessions::seal_url(
             repo.root(),
             &format!("course-{}", digest(resource.url.as_str())),
             resource.url.as_str(),
         )?;
-        if let Some(lesson) = section
-            .lessons
-            .iter_mut()
-            .find(|lesson| lesson.id == lesson_id)
-        {
-            if let Some(asset) = lesson.assets.iter_mut().find(|asset| asset.id == asset_id) {
-                asset.title = resource.filename;
-                asset.url_ref = Some(url_ref);
-            }
+        let lesson_index = if let Some((_, index)) = target {
+            index
         } else {
-            section.lessons.push(CourseLesson {
-                id: lesson_id,
-                title: resource.filename.clone(),
-                learned: false,
-                notes: Vec::new(),
-                assets: vec![CourseAsset {
-                    id: asset_id,
-                    title: resource.filename,
-                    kind: "attachment".into(),
-                    status: "downloadable".into(),
-                    restriction: None,
-                    library_id: None,
-                    url_ref: Some(url_ref),
-                    job_ids: Vec::new(),
-                }],
-            });
+            let id = format!("resource-{}", digest(&asset_id));
+            match section.lessons.iter().position(|lesson| lesson.id == id) {
+                Some(index) => index,
+                None => {
+                    section.lessons.push(CourseLesson {
+                        id,
+                        title: resource.filename.clone(),
+                        learned: false,
+                        notes: Vec::new(),
+                        assets: Vec::new(),
+                    });
+                    section.lessons.len() - 1
+                }
+            }
+        };
+        let assets = &mut section.lessons[lesson_index].assets;
+        if let Some(asset) = assets.iter_mut().find(|asset| asset.id == asset_id) {
+            asset.title = resource.filename;
+            asset.url_ref = Some(url_ref);
+            continue;
         }
+        assets.push(CourseAsset {
+            id: asset_id,
+            title: resource.filename,
+            kind: "attachment".into(),
+            status: "downloadable".into(),
+            restriction: None,
+            library_id: None,
+            url_ref: Some(url_ref),
+            job_ids: Vec::new(),
+        });
     }
     save_course(repo, course)
 }
@@ -341,7 +386,8 @@ mod tests {
             let second =
                 "https://static.skillshare.com/uploads/attachment/12345679/90abcdef/Templates.zip"
                     .to_owned();
-            let course = register(&mut repo, class, "Fixture", &[first.clone(), second]).unwrap();
+            let course =
+                register(&mut repo, class, "Fixture", &[first.clone(), second], None).unwrap();
             let id = course.sections[0].lessons[0].assets[0].id.clone();
             assert_eq!(repo.data.jobs.len(), 0);
             let jobs = enqueue(
@@ -383,16 +429,106 @@ mod tests {
                 time: None,
                 bookmark_id: None,
             });
-            let refreshed = register(&mut repo, class, "Fixture", &[first]).unwrap();
+            let refreshed = register(
+                &mut repo,
+                class,
+                "Fixture",
+                std::slice::from_ref(&first),
+                None,
+            )
+            .unwrap();
             assert_eq!(refreshed.sections[0].lessons.len(), 2);
             assert!(refreshed.sections[0].lessons[0].learned);
             assert_eq!(
                 refreshed.sections[0].lessons[0].notes[0].text,
                 "Keep this note"
             );
+            repo.data.courses[0].sections.push(CourseSection {
+                id: "unit-2".into(),
+                title: "Unit 2".into(),
+                lessons: vec![CourseLesson {
+                    id: "lesson-2".into(),
+                    title: "Build the design".into(),
+                    learned: true,
+                    notes: refreshed.sections[0].lessons[0].notes.clone(),
+                    assets: vec![CourseAsset {
+                        id: "local-video".into(),
+                        title: "Lesson.mp4".into(),
+                        kind: "video".into(),
+                        status: "local".into(),
+                        restriction: None,
+                        library_id: None,
+                        url_ref: None,
+                        job_ids: Vec::new(),
+                    }],
+                }],
+            });
+            let third =
+                "https://static.skillshare.com/uploads/attachment/12345680/90abcdef/Reference.pdf"
+                    .to_owned();
+            let links = std::slice::from_ref(&third);
+            assert!(register(
+                &mut repo,
+                class,
+                "Fixture",
+                links,
+                Some("other-course-lesson")
+            )
+            .is_err());
+            assert!(register(
+                &mut repo,
+                class,
+                "Fixture",
+                links,
+                Some(&refreshed.sections[0].lessons[0].id)
+            )
+            .is_err());
+            assert!(
+                register(&mut repo, class, "Fixture", &[first], Some("lesson-2"))
+                    .unwrap_err()
+                    .contains("already listed")
+            );
+            let attached = register(&mut repo, class, "Fixture", links, Some("lesson-2")).unwrap();
+            assert_eq!(
+                attached.sections[1].lessons[0].assets[1].title,
+                "Reference.pdf"
+            );
+            let attached = register(&mut repo, class, "Fixture", links, Some("lesson-2")).unwrap();
+            assert_eq!(attached.sections[0].lessons.len(), 2);
+            let lesson = &attached.sections[1].lessons[0];
+            assert!(lesson.learned);
+            assert_eq!(lesson.notes[0].text, "Keep this note");
+            assert_eq!(
+                lesson
+                    .assets
+                    .iter()
+                    .map(|asset| asset.title.as_str())
+                    .collect::<Vec<_>>(),
+                ["Lesson.mp4", "Reference.pdf"]
+            );
+            assert!(register(&mut repo, class, "Fixture", links, None)
+                .unwrap_err()
+                .contains("Build the design"));
+            assert_eq!(repo.data.jobs.len(), 1);
+            let queued = enqueue(
+                &mut repo,
+                &attached,
+                std::slice::from_ref(&lesson.assets[1].id),
+                "lesson-resource",
+            )
+            .unwrap();
+            assert_eq!(queued.len(), 1);
+            let queue::Source::PublicFile { selection } = &queued[0].source else {
+                panic!("expected a direct attachment job")
+            };
+            assert_eq!(selection.source_url, third);
             drop(repo);
             let reopened = Repository::open(&root, &root).unwrap();
             assert_eq!(jobs_for(&reopened, &id).next().unwrap().id, jobs[0].id);
+            assert_eq!(
+                reopened.data.courses[0].sections[1].lessons[0].assets[1].title,
+                "Reference.pdf"
+            );
         }
         let resolved = root.canonicalize().unwrap();
         assert_eq!(resolved.parent(), Some(parent.as_path()));

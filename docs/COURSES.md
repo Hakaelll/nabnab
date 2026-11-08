@@ -47,6 +47,10 @@ En Rocketseat, Coursera y Domestika, la sesión y la descarga se gestionan en el
 
 Abre el curso en Skillshare con tu sesión. En **Proyectos y recursos → Descargar recursos**, copia el enlace directo de cada archivo que el docente haya habilitado para descargar. En nabnab, abre **Descargar adjuntos de Skillshare**, pega un enlace por línea y pulsa **Revisar enlaces**. Puedes revisar hasta 30 enlaces por operación. Marca los archivos en el curso y pulsa **Añadir a la cola**. Los trabajos guardan los archivos en la carpeta de Descargas configurada y los asocian al curso. [Descargas autorizadas en las condiciones de Skillshare](https://learn.skillshare.com/en/terms)
 
+Si ya importaste las lecciones del curso, usa **Guardar en** para elegir una de ellas. Tras revisar los enlaces, los adjuntos aparecen en **Materiales** junto al contenido y las notas de esa lección. **Recursos generales del curso** guarda los enlaces en la sección común. Si un adjunto ya está asociado a otro destino, nabnab indica dónde se encuentra.
+
+![Destino de un adjunto de Skillshare antes de enviarlo a la cola](course-skillshare-lesson.png)
+
 La cola acepta documentos, imágenes y archivos comprimidos desde el CDN oficial `static.skillshare.com`, con un límite de 104 MiB por archivo. Los adjuntos conservan su nombre y se ordenan como se pegaron. Volver a revisar el mismo adjunto conserva su estado y sus notas. Para un recurso que solo se pueda guardar en el navegador, usa **Elegir archivos guardados**. El flujo de enlaces revisa los adjuntos elegidos y deja el currículo y las videolecciones en Skillshare.
 
 Las pruebas usan enlaces y archivos sintéticos. Rust comprueba la selección persistente y la conservación de notas, y la interfaz en Edge comprueba la revisión y el envío selectivo a la cola a 900 y 1180 px. Queda por verificar la transferencia contra el CDN de Skillshare desde una clase autorizada.
