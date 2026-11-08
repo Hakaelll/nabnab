@@ -27,6 +27,7 @@ interface Hooks {
   windowVisible(): Promise<boolean>;
   refresh(): Promise<void>;
   fullscreen(enabled: boolean): Promise<void>;
+  miniWindow?(action: "detach-audio" | "detach-video" | "restore" | "drag" | "resize-audio" | "resize-video"): Promise<void>;
   convert(id: string): void;
   timeChanged(id: string, time: number): void;
   showError(error: unknown): void;
@@ -51,6 +52,8 @@ export function createAudioPlayer(hooks: Hooks) {
   let expanded = false;
   let fullscreen = false;
   let changingFullscreen = false;
+  let detached = false;
+  let changingWindow = false;
   let queueOpen = false;
   let tracks: string[] = [];
   let order: number[] = [];
@@ -102,6 +105,15 @@ export function createAudioPlayer(hooks: Hooks) {
     }, 420);
   }
 
+  function prepareSignal() {
+    if (!media) return;
+    if (!signal && !signalUnavailable) {
+      try { signal = connectPlaybackSignal(media); }
+      catch { signalUnavailable = true; scenes?.unavailable(); }
+    }
+    if (signal) void signal.resume().catch(() => scenes?.unavailable());
+  }
+
   function showStage() {
     const item = current();
     if (!isPlayable(item) || !stage || !media) return;
@@ -111,11 +123,7 @@ export function createAudioPlayer(hooks: Hooks) {
     queueOpen = false;
     stage.show(item, preferences, resumeChoice, issue);
     if (item.kind === "audio") {
-      if (!signal && !signalUnavailable) {
-        try { signal = connectPlaybackSignal(media); }
-        catch { signalUnavailable = true; scenes?.unavailable(); }
-      }
-      if (signal) void signal.resume().catch(() => scenes?.unavailable());
+      prepareSignal();
       showScenes();
     } else { clearTimeout(visibilityTimer); scenes?.hide(); }
     render();
@@ -135,6 +143,7 @@ export function createAudioPlayer(hooks: Hooks) {
     trackWheel?.dismiss();
     hideStage();
     queueOpen = false;
+    if (item.kind === "audio") prepareSignal();
     if (resumeChoice) {
       const position = resumeChoice;
       resumeChoice = 0;
@@ -151,6 +160,38 @@ export function createAudioPlayer(hooks: Hooks) {
     render();
     hooks.render();
     document.getElementById("audio-mini")?.focus({ preventScroll: true });
+  }
+
+  function setDetached(value: boolean) {
+    detached = value;
+    document.documentElement.classList.toggle("has-detached-mini", value);
+    mini?.detached(value);
+  }
+
+  async function restoreMini() {
+    if (changingWindow) return false;
+    if (!detached || !hooks.miniWindow) return true;
+    changingWindow = true;
+    try {
+      await hooks.miniWindow("restore");
+      setDetached(false);
+      return true;
+    } catch (error) { hooks.showError(error); return false; }
+    finally { changingWindow = false; }
+  }
+
+  function detachMini(): boolean {
+    const item = current();
+    if (!mini?.active() || !isPlayable(item) || !hooks.miniWindow) return false;
+    if (changingWindow || detached) return true;
+    changingWindow = true;
+    trackWheel?.dismiss();
+    setDetached(true);
+    void hooks.miniWindow(item.kind === "video" ? "detach-video" : "detach-audio").catch(error => {
+      setDetached(false);
+      hooks.showError(error);
+    }).finally(() => { changingWindow = false; });
+    return true;
   }
 
   function backFromStage() {
@@ -232,6 +273,7 @@ export function createAudioPlayer(hooks: Hooks) {
     if (!media || !transport) return;
     stage?.update(mediaState, issue);
     mini?.update();
+    trackWheel?.update();
     scenes?.playing(mediaState === "playing" && !media.paused && !media.ended);
     const elapsed = transport.querySelector<HTMLElement>("[data-audio-elapsed]");
     const end = transport.querySelector<HTMLElement>("[data-audio-duration]");
@@ -276,6 +318,7 @@ export function createAudioPlayer(hooks: Hooks) {
     if (volumeInput && document.activeElement !== volumeInput) volumeInput.value = String(preferences.volume);
     stage?.update(mediaState, issue);
     mini?.update();
+    trackWheel?.update();
     if ("mediaSession" in navigator) navigator.mediaSession.playbackState = media.paused ? "paused" : "playing";
   }
 
@@ -512,6 +555,7 @@ export function createAudioPlayer(hooks: Hooks) {
     const id = tracks[order[position] ?? -1];
     const item = id ? hooks.item(id) : undefined;
     if (!media || !isPlayable(item)) return;
+    if (detached && item.kind !== current()?.kind) void hooks.miniWindow?.(item.kind === "video" ? "resize-video" : "resize-audio").catch(hooks.showError);
     trackWheel?.dismiss();
     cancelAudioChange();
     persist();
@@ -542,6 +586,7 @@ export function createAudioPlayer(hooks: Hooks) {
     mediaSession(item);
     saveSession();
     signal?.reset(); scenes?.reset();
+    if (floating && item.kind === "audio") prepareSignal();
     if (!floating) {
       if (item.kind === "video" && openVideo || item.kind === "audio" && expanded) showStage();
       else hideStage();
@@ -699,6 +744,8 @@ export function createAudioPlayer(hooks: Hooks) {
     });
     trackWheel = createTrackWheel({
       t, title: audioTitle, thumbnails: hooks.thumbnails,
+      toggle: () => { if (element.paused) void playMedia(); else element.pause(); },
+      playing: () => !element.paused && !element.ended,
       enabled: () => current()?.kind === "audio" && !document.querySelector("dialog[open]"),
       entries: () => order.flatMap((track, position) => {
         const item = hooks.item(tracks[track]);
@@ -711,10 +758,14 @@ export function createAudioPlayer(hooks: Hooks) {
     });
     mini = createMiniPlayer(stageHost, element, {
       t, seek, mute, title: audioTitle, thumbnails: hooks.thumbnails,
+      sound: () => preferences,
+      signal: dt => signal?.read(dt, mediaState === "playing"),
       toggle: () => { if (element.paused) void playMedia(); else element.pause(); },
       move: direction => move(direction, true),
-      expand: () => { showStage(); hooks.render(); },
-      dock: dockMini,
+      expand: () => { void restoreMini().then(restored => { if (restored) { showStage(); hooks.render(); } }); },
+      dock: () => { void restoreMini().then(restored => { if (restored) dockMini(); }); },
+      float: hooks.miniWindow ? () => { if (detached) void restoreMini(); else detachMini(); } : undefined,
+      drag: () => { if (detached) void hooks.miniWindow?.("drag").catch(hooks.showError); },
       wheel: button => trackWheel?.toggle(button),
     });
     const playerHost = host;
@@ -871,7 +922,7 @@ export function createAudioPlayer(hooks: Hooks) {
     }
     const target = event.target;
     const inMini = target instanceof HTMLElement && mini?.contains(target);
-    if (inMini && event.key === "Escape") { dockMini(); return true; }
+    if ((inMini || detached) && event.key === "Escape") { void restoreMini().then(restored => { if (restored) dockMini(); }); return true; }
     if ((event.key === "ArrowUp" || event.key === "ArrowDown")
       && !event.altKey && !event.metaKey && !event.shiftKey && !event.ctrlKey
       && target instanceof HTMLElement && (inMini || host && !host.hidden && host.contains(target))
@@ -945,7 +996,8 @@ export function createAudioPlayer(hooks: Hooks) {
     return true;
   }
 
-  return { mount, render, restore, play, playAt, add, remove, input, click, key, current, nextEntries, seek, persist, isExpanded: () => expanded,
+  return { mount, render, restore, play, playAt, add, remove, input, click, key, current, nextEntries, seek, persist, detachMini,
+    nativeMiniRestored: () => setDetached(false), isExpanded: () => expanded, isDetached: () => detached,
     timeFor: (id: string) => id === currentId() && matchesSource() && media?.readyState ? media.currentTime : undefined,
     time: () => media?.currentTime ?? 0 };
 }

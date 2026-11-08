@@ -155,6 +155,7 @@ const audioPlayer=createAudioPlayer({
   item: id => snapshot.library.find(item => item.id === id),
   command, render: renderCurrent, refresh, showError, t,
   fullscreen: enabled => getCurrentWindow().setFullscreen(enabled),
+  miniWindow: desktop ? action => command("playback_mini_window", {action}) : undefined,
   convert: id => setToolInput([id]),
   timeChanged: (id,time)=>libraryFeatures.playbackChanged(id,time),
   playlists: () => snapshot.audioPlaylists ?? [], thumbnails: observePlaybackCovers,
@@ -859,7 +860,7 @@ async function submitForm(form: HTMLFormElement): Promise<void> {
 document.addEventListener('keydown',event=>{
   if(deviceShare.isOpen())return;
   if(audioPlayer.key(event)){event.preventDefault();return;}
-  if(audioPlayer.isExpanded())return;
+  if(audioPlayer.isExpanded()||audioPlayer.isDetached())return;
   if(event.ctrlKey&&!event.altKey&&!event.shiftKey&&event.key.toLowerCase()==='k'){event.preventDefault();palette.open();return;}
   if(palette.isOpen)return;
   if(event.key==='Escape'&&document.querySelector('dialog[open]:not(#detail-dialog)'))return;
@@ -900,11 +901,12 @@ audioPlayer.mount();
 renderCurrent();
 if(desktop){
   const nativeWindow=getCurrentWindow();
-  required('#minimize').addEventListener('click',()=>void nativeWindow.minimize().catch(showError));
+  required('#minimize').addEventListener('click',()=>{if(!audioPlayer.detachMini())void nativeWindow.minimize().catch(showError);});
   required('#maximize').addEventListener('click',()=>void nativeWindow.toggleMaximize().catch(showError));
   required('#close').addEventListener('click',()=>void Promise.resolve(audioPlayer.persist()).then(()=>nativeWindow.close()).catch(showError));
   const updateMaximize=async()=>{const maximized=await nativeWindow.isMaximized();const button=required('#maximize');button.dataset.maximized=String(maximized);const label=maximized?t("Restaurar", "Restore"):t("Maximizar", "Maximize");button.setAttribute('aria-label',label);button.title=label;};
   try{
+    await listen('playback-mini-restored',audioPlayer.nativeMiniRestored);
     await nativeWindow.onResized(updateMaximize);await updateMaximize();
     await nativeWindow.onDragDropEvent(event=>{if(event.payload.type==='drop')void receivePaths(event.payload.paths).catch(showError);else required('#drop-indicator').hidden=event.payload.type!=='enter'&&event.payload.type!=='over';});
     await listen<CaptureStatus>('capture-update',({payload})=>{const previous=captureStatus?.phase;screenCapture.acceptStatus(payload);if(page==='tools'&&localToolModule==='screenCapture'&&(captureIsActive(payload)||previous!==payload.phase))renderCurrent();if(previous!==payload.phase&&(payload.phase==='interrupted'||payload.phase==='error')){notify(payload.readyCapture?t('La captura se interrumpió. Revisa el archivo parcial en Captura.','Capture was interrupted. Review the partial file in Capture.'):t('No se pudo continuar la captura. Revisa Captura.','Capture could not continue. Review Capture.'),'error',payload.reason??'');if(page==='tools'&&localToolModule==='screenCapture')void screenCapture.open().catch(showError);}});

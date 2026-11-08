@@ -4,9 +4,11 @@ Biblioteca, descargas y marcadores usan una sesión con un elemento multimedia e
 
 El vídeo abre una vista de borde a borde con ajuste de proporción, subtítulos locales, velocidad, volumen y pantalla completa. Los controles se ocultan durante la reproducción y vuelven con el puntero o el teclado. La barra distingue la preparación indeterminada del progreso temporal. Volver de esta vista pausa el vídeo y conserva su posición en la barra compacta. La cola y las preferencias se restauran en pausa al reiniciar. Las posiciones inferiores a tres segundos o dentro del tramo final del archivo no se ofrecen para reanudar.
 
-Abre el **minirreproductor** desde la barra de reproducción o desde la vista grande. Se queda en una esquina mientras navegas por nabnab. El vídeo conserva la imagen y los controles básicos. El audio muestra la portada, el título y la posición. Puedes ampliar el reproductor o devolverlo a la barra desde el mini.
+Abre el **minirreproductor** desde la barra o la vista grande. Se queda en una esquina mientras navegas por nabnab. El vídeo conserva la imagen y los controles básicos. El audio muestra la portada, el título, el tiempo y una onda dibujada con la señal real de reproducción. [Referencia del mini de audio](https://spotifast.rocks/winamp/)
 
-Con una pista de audio en la sesión, mantén **Alt** y gira la rueda dentro de nabnab. Las tarjetas aparecen junto al puntero y giran para mostrar la pista elegida. Suelta **Alt** para reproducir la tarjeta central o pulsa **Esc** para cancelar. También puedes abrir **Salto rápido** desde el mini de audio y elegir con **↑**, **↓** e **Intro**, o pulsar una tarjeta. [Referencia de la rueda](https://github.com/ffoouuaadd/skip-dat)
+Pulsa **Sacar a una ventana** o usa **Minimizar** en la barra de título de nabnab con el mini abierto. La ventana flotante se queda sobre el escritorio y puedes arrastrarla desde el título de la pista. Al volver a nabnab, el mismo WebView2 conserva el archivo, la posición y la cola.
+
+Con una pista de audio en la sesión, mantén **Alt** y gira la rueda con el foco en nabnab o en el mini flotante. Las portadas aparecen junto al puntero y giran en profundidad. Suelta **Alt** para reproducir la tarjeta central o pulsa **Esc** para cancelar. También puedes abrir **Salto rápido** desde el mini de audio y elegir con **↑**, **↓** e **Intro**, pulsar una tarjeta o volver al tema anterior al último salto. [Referencia de la rueda](https://github.com/ffoouuaadd/skip-dat)
 
 Usa **↑** y **↓** para subir o bajar el volumen cinco puntos en vídeo o música. En la barra y el mini, el atajo funciona cuando el foco está en el reproductor. Los controles de formulario mantienen su manejo habitual con las flechas.
 

@@ -10,7 +10,7 @@ const TRAY_ID: &str = "nabnab";
 
 fn show_main(app: &AppHandle) -> Result<(), String> {
     let window = app
-        .get_webview_window("main")
+        .get_window("main")
         .ok_or("The main window is unavailable.")?;
     window
         .unminimize()
@@ -237,7 +237,7 @@ pub fn close_to_tray(app: &AppHandle) -> Result<(), String> {
     if app.tray_by_id(TRAY_ID).is_none() {
         return Err("The tray icon is unavailable. The window was kept open.".into());
     }
-    app.get_webview_window("main")
+    app.get_window("main")
         .ok_or("The main window is unavailable.")?
         .hide()
         .map_err(|_| "Could not hide nabnab in the tray.".into())

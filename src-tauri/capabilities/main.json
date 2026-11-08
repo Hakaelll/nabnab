@@ -1,9 +1,10 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
-  "description": "Only the local main window can control its own frame and receive download events.",
+  "description": "The local playback webview keeps its frame controls when moved into the mini player.",
   "windows": [
-    "main"
+    "main",
+    "playback-mini"
   ],
   "permissions": [
     "core:default",

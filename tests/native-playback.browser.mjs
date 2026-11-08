@@ -135,6 +135,10 @@ function playing() {
 const stage = () => page.locator("#playback-stage");
 const play = id => page.locator(`.media-play[data-id="${id}"]`).click();
 const clickStage = action => stage().locator(`[data-stage-action="${action}"]`).click();
+const mainMinimized = () => page.evaluate(async () => {
+  const { getCurrentWindow } = await import("/node_modules/@tauri-apps/api/window.js");
+  return getCurrentWindow().isMinimized();
+});
 const clip = file => JSON.parse(execFileSync(ffprobe, ["-v", "error", "-show_streams", "-of", "json", file], { windowsHide: true })).streams;
 
 const seekVideo = position => stage().locator("#stage-seek").evaluate((slider, position) => {
@@ -641,7 +645,15 @@ try {
   const miniTime = (await playing()).time;
   await wait(async () => (await playing()).time > miniTime + 0.25);
   await stage().screenshot({ path: path.join(output, "mini-video.png"), animations: "disabled" });
+  await page.locator("#mini-float").click();
+  await wait(async () => await mainMinimized() && await page.evaluate(() => innerWidth <= 400));
+  const floatedVideoTime = (await playing()).time;
+  await wait(async () => (await playing()).time > floatedVideoTime + 0.2);
+  assert.equal(await stage().locator("video").isVisible(), true);
+  assert.equal(await original.evaluate(element => element === document.getElementById("audio-engine")), true);
+  await stage().screenshot({ path: path.join(output, "mini-video-detached.png"), animations: "disabled" });
   await page.locator("#mini-expand").click();
+  await wait(async () => !await mainMinimized() && await page.evaluate(() => innerWidth >= 900));
   assert.equal(await original.evaluate(element => element === document.getElementById("audio-engine")), true);
   await seekVideo(5.5);
   await clickStage("captions");
@@ -956,18 +968,42 @@ try {
   const chosen = selectedTracks.find(track => (track.details?.audio?.title || path.parse(track.name).name) === title);
   assert.ok(chosen);
   const bounds = await wheel.boundingBox();
-  assert.ok(bounds.x > 400 && bounds.y >= 0);
+  assert.ok(bounds.x > 400 && bounds.y >= 0 && bounds.height > 420);
+  const centeredArt = await selection.locator(".audio-cover").boundingBox();
+  assert.ok(centeredArt.width > 128 && centeredArt.height > 128);
+  assert.equal(await wheel.evaluate(node => getComputedStyle(node).backgroundColor), "rgba(0, 0, 0, 0)");
   await wheel.screenshot({ path: path.join(output, "quick-skip.png"), animations: "disabled" });
   await page.keyboard.up("Alt");
   await wheel.waitFor({ state: "hidden" });
   await wait(async () => { const current = await playing(); return current.id === chosen.id && !current.paused; });
   assert.equal(await original.evaluate(element => element === document.getElementById("audio-engine")), true);
+  await wait(() => page.locator(".mini-monitor canvas").evaluate(canvas => {
+    const { data } = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height / 2 - 3);
+    return data.some((value, index) => index % 4 === 3 && value > 0);
+  }));
   await stage().screenshot({ path: path.join(output, "mini-audio.png"), animations: "disabled" });
+  await page.locator("#minimize").click();
+  await wait(async () => await mainMinimized() && await page.evaluate(() => innerWidth <= 400));
+  await page.locator("#mini-wheel").click();
+  await selection.waitFor();
+  await page.keyboard.press("ArrowUp");
+  const detachedTitle = await selection.locator("strong").textContent();
+  await page.keyboard.press("Enter");
+  await wait(async () => (await page.locator("#mini-title").textContent()) === detachedTitle && !(await playing()).paused);
+  await page.mouse.move(72, 87);
+  await page.keyboard.down("Alt");
+  await page.mouse.wheel(0, 120);
+  await selection.waitFor();
+  assert.equal(await selection.locator("strong").textContent(), title);
+  await page.keyboard.up("Alt");
+  await wait(async () => (await playing()).id === chosen.id && !(await playing()).paused);
+  await stage().screenshot({ path: path.join(output, "mini-audio-detached.png"), animations: "disabled" });
   await page.locator("#mini-dock").click();
+  await wait(async () => !await mainMinimized());
   await stage().waitFor({ state: "hidden" });
   assert.equal(await page.locator("#audio-mini").evaluate(button => button === document.activeElement), true);
   await page.locator('[data-action="clear-library-selection"]').click();
-  console.log("Both mini players preserved the media element. Alt + wheel jumped directly to the centered track.");
+  console.log("Both floating mini players preserved the media element with the main window minimized. Alt + wheel worked in the main and detached windows.");
 
   await play(musicId);
   await wait(async () => { const current = await playing(); return current.id === musicId && !current.paused && current.time > 0.15; });
