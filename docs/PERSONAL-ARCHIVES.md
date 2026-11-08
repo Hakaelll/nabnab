@@ -1,6 +1,6 @@
 # Personal archives
 
-Open **Library → Personal archives → Add export**, choose the provider, and select a ZIP or a recognized loose JSON, CSV, or HTML file. The preview shows the files and volume by category and gives record counts and dates when it can read the format. Enter an account label and archive group, then choose which categories to import. An optional UTC date interval includes both dates and skips undated records and media.
+Open **Library → Personal archives → Add export**, choose the provider, and select a ZIP or a recognized loose JSON, CSV, or HTML file. The preview shows the files and volume by category before filtering and gives record counts and dates when it can read the format. Enter an account label and archive group, then choose which categories to import. An optional UTC date interval includes both dates and skips undated records.
 
 ![Category selection before importing a fixture export](personal-archive-selection.png)
 
@@ -24,6 +24,8 @@ An X post with matching local media shows an attachment count in the posts list 
 For Instagram and Facebook JSON exports, select **Posts** and **Media** to see available photos and videos on their post, in export order. Select the attachment count to open the existing preview and save controls. Nabnab reads up to 64 references per post from `media[].uri` or `attachments[].data[].media.uri` and matches the exact path of a file imported into **Media** from the same package. Reimport the original ZIP with both categories to add the links to an older import. Unmatched files remain in **Media**. Private message media stays in **Messages**.
 
 ![Instagram post attachments in Windows with synthetic data](personal-archive-meta-attachments.png)
+
+When filtering an X, Instagram or Facebook ZIP by date, select **Posts** and **Media** to copy the attachments linked to posts in that interval. Loose media, attachments from other dates and undated private media are skipped. Importing a narrower interval adds to the previous import of the same package. To copy loose media, import its category without a date interval.
 
 ![Archived X thread opened in Windows with synthetic data](personal-archive-thread.png)
 
@@ -49,3 +51,5 @@ Provider documentation on requesting an export
 Verification uses synthetic exports. The Windows tests exercise selective ZIP extraction, repeat and partial imports, DPAPI storage, removal, and reply chains with branches, missing parents, or cycles. Native WebView2 checks opened a thread from a previously indexed fixture and distinguished same-title Spotify recordings, including exact drilldown, album search, and legacy rows without an identifier. The Edge test exercises return focus at 900 and 1180 pixels, account grouping, private reveal, CSV confirmation, and the handoff to Audio.
 
 The Facebook ZIP fixture verifies that the post keeps its identity across imports and that a same-name file from a different folder, an absent file, and a private photo stay out of its attachments. The native Instagram fixture verifies the attachment order, image decoding, and focus restoration at 900 and 1180 pixels.
+
+The Windows date-range tests use synthetic X and Facebook ZIPs. They check exclusion of an orphan and an attachment from the following day, preservation of a previous private import, and unchanged media size after repeating the same dated selection. The date instructions and submit button were checked in Edge with simulated archive data at both window widths.

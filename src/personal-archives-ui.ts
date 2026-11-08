@@ -27,7 +27,7 @@ interface CategoryPreview {
   end: number | null;
   formats: Format[];
 }
-interface Preview { source: string; fingerprint: string; bytes: number; categories: CategoryPreview[] }
+interface Preview { source: string; fingerprint: string; bytes: number; categories: CategoryPreview[]; datedPostMedia?: boolean }
 interface Archive {
   id: string;
   provider: Provider;
@@ -245,7 +245,10 @@ export function createPersonalArchives(hooks: Hooks) {
           <label for="archive-from">${t("Desde (opcional)", "From (optional)")}<input id="archive-from" name="from" type="date" value="${h(draft.from)}" ${disabled()}></label>
           <label for="archive-to">${t("Hasta (opcional)", "To (optional)")}<input id="archive-to" name="to" type="date" value="${h(draft.to)}" ${disabled()}></label>
         </div>
-        <p class="muted">${t("El intervalo usa UTC. Si lo aplicas, se omiten los registros y medios sin fecha.", "The date range uses UTC. Applying it skips undated records and media.")}</p>
+        <p class="muted">${t("El intervalo usa UTC y omite los registros sin fecha.", "The date range uses UTC and skips undated records.")}
+          ${preview.datedPostMedia
+            ? t("Marca Publicaciones y Multimedia para incluir los adjuntos vinculados del intervalo. Los tamaños de arriba corresponden al archivo completo.", "Select Posts and Media to include linked attachments in the date range. The sizes above are for the entire archive.")
+            : t("Si aplicas un intervalo, se omite el contenido multimedia sin fecha.", "Applying a date range skips undated media.")}</p>
         <button type="submit" class="button primary" ${disabled()}>${t("Importar selección", "Import selection")}</button>
       </form>` : ""}
     </section>`;

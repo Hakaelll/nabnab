@@ -62,7 +62,7 @@ const setup = `
     if(cmd==="personal_archive_list")return structuredClone(summaries);
     if(cmd==="personal_archive_choose"){
       provider=args.provider;
-      return {fingerprint,source:provider+"-export.zip",bytes:10234,categories:provider==="instagram"?
+      return {fingerprint,source:provider+"-export.zip",bytes:10234,datedPostMedia:["x","instagram","facebook"].includes(provider),categories:provider==="instagram"?
       [preview("media",3,"available",false,["media"])] : args.provider==="spotify"?
       [preview("listening",3,"available"),preview("playlists",1,"available")]:
       [preview("posts",threadPosts.length,"available"),preview("likes",null,"absent",false,[]),preview("bookmarks",null,"unsupported",false,["unsupported"]),
@@ -152,6 +152,7 @@ try {
   await page.locator("#archive-account").fill("Cuenta de prueba");
   await page.locator("#archive-destination").fill("Archivo de 2025");
   await page.locator("#archive-from").fill("2025-01-01");
+  assert.equal(await page.getByText(/Marca Publicaciones y Multimedia para incluir los adjuntos vinculados/).count(), 1);
   for (const [width, height] of [[1180, 890], [900, 620]]) {
     await page.setViewportSize({ width, height });
     const layout = await page.locator(".personal-archives").evaluate(element => {
@@ -159,6 +160,10 @@ try {
       return [panel.scrollWidth, panel.clientWidth];
     });
     assert(layout[0] <= layout[1] + 1, `Archive form overflows at ${width}px`);
+    const submit = page.getByRole("button", {name:"Importar selección",exact:true});
+    await submit.scrollIntoViewIfNeeded();
+    const note = await page.getByText(/Marca Publicaciones y Multimedia para incluir los adjuntos vinculados/).boundingBox();
+    assert.ok(note && note.y >= 0 && note.y + note.height < height);
     await page.screenshot({ path: `${directory}/selection-${width}.png` });
   }
   await page.locator("input[value='messages']").check();

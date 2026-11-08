@@ -104,6 +104,7 @@ pub struct Preview {
     fingerprint: String,
     bytes: u64,
     categories: Vec<CategoryPreview>,
+    dated_post_media: bool,
 }
 
 type Records = BTreeMap<Category, Vec<Record>>;
@@ -348,6 +349,7 @@ async fn inspect(
             fingerprint,
             bytes: size,
             categories,
+            dated_post_media: zipped && (provider.is_meta() || provider == Provider::X),
         },
     ))
 }
@@ -499,6 +501,36 @@ fn in_range(time: Option<u64>, from: Option<u64>, to: Option<u64>) -> bool {
     })
 }
 
+fn dated_post_media<'a>(plan: &'a Plan, posts: &[Record]) -> Vec<&'a Entry> {
+    let linked: HashSet<_> = if plan.provider.is_meta() {
+        posts
+            .iter()
+            .flat_map(|post| &post.attachment_ids)
+            .map(String::as_str)
+            .collect()
+    } else if plan.provider == Provider::X {
+        posts.iter().map(|post| post.id.as_str()).collect()
+    } else {
+        return Vec::new();
+    };
+    if linked.is_empty() {
+        return Vec::new();
+    }
+    plan.entries
+        .iter()
+        .filter(|entry| {
+            entry.classification.category == Category::Media
+                && entry.classification.format == Format::Media
+                && if plan.provider == Provider::X {
+                    parse::x_attachment_owner(&entry.name)
+                        .is_some_and(|id| linked.contains(id.as_str()))
+                } else {
+                    linked.contains(parse::record_id(&entry.name).as_str())
+                }
+        })
+        .collect()
+}
+
 fn merge(records: &mut Records, new: Records) -> Result<(), String> {
     for (category, rows) in new {
         let saved = records.entry(category).or_default();
@@ -573,13 +605,14 @@ async fn import(
     if queue::digest(plan.path.clone(), cancel.clone()).await? != plan.fingerprint {
         return Err("The export changed after preview. Choose it again.".into());
     }
+    let date_filter = from.is_some() || to.is_some();
     let entries = plan
         .entries
         .iter()
         .filter(|entry| {
             selected.contains(&entry.classification.category)
                 && entry.classification.format != Format::Unsupported
-                && (entry.classification.format != Format::Media || from.is_none() && to.is_none())
+                && (entry.classification.format != Format::Media || !date_filter)
         })
         .collect::<Vec<_>>();
     let mut text_bytes = 0;
@@ -604,7 +637,7 @@ async fn import(
     extract(root, &plan, &scratch, &entries, cancel.clone()).await?;
     let mut incoming = Records::new();
     let mut imported_formats = BTreeMap::<Category, Vec<Format>>::new();
-    let mut copies = Vec::new();
+    let mut media_entries = Vec::new();
     let mut first_error = None;
     let mut skipped_files = plan
         .entries
@@ -616,24 +649,22 @@ async fn import(
         .count();
     for entry in entries {
         cancelled(&cancel)?;
-        let path = entry_path(&plan, &scratch, entry);
         let category = entry.classification.category;
-        let rows = if entry.classification.format == Format::Media {
-            copies.push((path, media_name(&entry.name)?, entry.size));
-            vec![parse::media_record(&entry.name)]
-        } else {
-            match read_text(&path).and_then(|text| {
-                parse::parse(plan.provider, entry.classification, &entry.name, &text)
-            }) {
-                Ok(rows) => rows
-                    .into_iter()
-                    .filter(|row| in_range(row.time, from, to))
-                    .collect(),
-                Err(error) => {
-                    first_error.get_or_insert(error);
-                    skipped_files += 1;
-                    continue;
-                }
+        if entry.classification.format == Format::Media {
+            media_entries.push(entry);
+            continue;
+        }
+        let rows: Vec<_> = match read_text(&entry_path(&plan, &scratch, entry))
+            .and_then(|text| parse::parse(plan.provider, entry.classification, &entry.name, &text))
+        {
+            Ok(rows) => rows
+                .into_iter()
+                .filter(|row| in_range(row.time, from, to))
+                .collect(),
+            Err(error) => {
+                first_error.get_or_insert(error);
+                skipped_files += 1;
+                continue;
             }
         };
         if !rows.is_empty() {
@@ -643,8 +674,40 @@ async fn import(
             }
             incoming.entry(category).or_default().extend(rows);
         }
-        if incoming.values().map(Vec::len).sum::<usize>() > MAX_RECORDS {
+        if incoming.values().map(Vec::len).sum::<usize>() + media_entries.len() > MAX_RECORDS {
             return Err("Too many indexed records. Choose a narrower date range.".into());
+        }
+    }
+    if date_filter && selected.contains(&Category::Media) {
+        if let Some(posts) = incoming.get(&Category::Posts) {
+            media_entries = dated_post_media(&plan, posts);
+            if text_bytes + media_entries.iter().map(|entry| entry.size).sum::<u64>() > MAX_MEDIA {
+                return Err("The selected posts and their media exceed 256 MiB. Choose a narrower date range.".into());
+            }
+        }
+    }
+    if incoming.values().map(Vec::len).sum::<usize>() + media_entries.len() > MAX_RECORDS {
+        return Err("Too many indexed records. Choose a narrower date range.".into());
+    }
+    if date_filter {
+        extract(root, &plan, &scratch, &media_entries, cancel.clone()).await?;
+    }
+    let mut copies = Vec::new();
+    for entry in media_entries {
+        cancelled(&cancel)?;
+        let category = entry.classification.category;
+        copies.push((
+            entry_path(&plan, &scratch, entry),
+            media_name(&entry.name)?,
+            entry.size,
+        ));
+        incoming
+            .entry(category)
+            .or_default()
+            .push(parse::media_record(&entry.name));
+        let formats = imported_formats.entry(category).or_default();
+        if !formats.contains(&Format::Media) {
+            formats.push(Format::Media);
         }
     }
     if incoming.values().all(Vec::is_empty) {
@@ -1494,9 +1557,9 @@ mod tests {
         let archive = import(
             &root,
             &storage,
-            plan,
+            plan.clone(),
             selection(vec![Category::Media], vec![Category::Messages]),
-            cancel,
+            cancel.clone(),
         )
         .await
         .unwrap()
@@ -1521,6 +1584,28 @@ mod tests {
             ["1-a-video.mp4", "1-b-photo.png"]
         );
         assert!(attachment_page(Provider::X, records.clone(), &key(99), 0).is_err());
+        let dated = import(
+            &root,
+            &storage,
+            plan,
+            Selection {
+                account: "Cuenta con intervalo".into(),
+                from: Some("2024-06-01".into()),
+                to: Some("2024-06-01".into()),
+                ..selection(
+                    vec![Category::Posts, Category::Media],
+                    vec![Category::Messages],
+                )
+            },
+            cancel,
+        )
+        .await
+        .unwrap()
+        .archive;
+        let dated_records = read_records(&root, &dated).unwrap();
+        assert_eq!(dated_records[&Category::Media].len(), 3);
+        assert!(!dated_records.contains_key(&Category::Messages));
+        assert_eq!(x_attachment_counts(&dated_records)[&key(1)], 2);
         let rows = records.remove(&Category::Posts).unwrap();
 
         let first = archived_thread(rows.clone(), &key(1), None).unwrap();
@@ -1562,6 +1647,8 @@ mod tests {
                     {"media":{"uri":"your_facebook_activity/posts/media/day/photo.jpg"}},
                     {"media":{"uri":"your_facebook_activity/messages/inbox/thread/photos/photo.jpg"}},
                     {"media":{"uri":"your_facebook_activity/posts/media/day/missing.jpg"}}
+                ]}]},{"id":"2","content":"The following day","timestamp":1717286400,"attachments":[{"data":[
+                    {"media":{"uri":"your_facebook_activity/posts/media/other/photo.jpg"}}
                 ]}]}]"#,
             ),
             (
@@ -1608,6 +1695,7 @@ mod tests {
         let (plan, preview) = inspect(&root, Provider::Facebook, source.clone(), cancel.clone())
             .await
             .unwrap();
+        assert!(preview.dated_post_media);
         let messages = preview
             .categories
             .iter()
@@ -1634,7 +1722,11 @@ mod tests {
             &root,
             &archive,
             plan.clone(),
-            selection(vec![Category::Posts], vec![]),
+            Selection {
+                from: Some("2024-06-01".into()),
+                to: Some("2024-06-01".into()),
+                ..selection(vec![Category::Posts], vec![])
+            },
             cancel.clone(),
         )
         .await
@@ -1664,12 +1756,16 @@ mod tests {
         let repeated = import(
             &root,
             &archive,
-            plan,
-            selection(
-                vec![Category::Posts, Category::Media],
-                vec![Category::Messages],
-            ),
-            cancel,
+            plan.clone(),
+            Selection {
+                from: Some("2024-06-01".into()),
+                to: Some("2024-06-01".into()),
+                ..selection(
+                    vec![Category::Posts, Category::Media],
+                    vec![Category::Messages],
+                )
+            },
+            cancel.clone(),
         )
         .await
         .unwrap()
@@ -1679,12 +1775,12 @@ mod tests {
             BTreeMap::from([
                 (Category::Posts, 1),
                 (Category::Messages, 2),
-                (Category::Media, 3)
+                (Category::Media, 2)
             ])
         );
         assert_eq!(
             repeated.media_bytes,
-            [2, 4, 5, 6]
+            [2, 4, 5]
                 .iter()
                 .map(|index| files[*index].1.len() as u64)
                 .sum::<u64>()
@@ -1710,16 +1806,33 @@ mod tests {
             [Format::Json, Format::Media]
         );
         let media = media_dir(&root, &repeated.id).unwrap();
+        assert!(!media.join(media_name(files[6].0).unwrap()).exists());
         assert_eq!(
             fs::read(media.join(media_name(files[2].0).unwrap())).unwrap(),
             b"managed fixture bytes"
         );
+        let retried = import(
+            &root,
+            &archive,
+            plan,
+            Selection {
+                from: Some("2024-06-01".into()),
+                to: Some("2024-06-01".into()),
+                ..selection(vec![Category::Posts, Category::Media], vec![])
+            },
+            cancel,
+        )
+        .await
+        .unwrap()
+        .archive;
+        assert_eq!(retried.categories, repeated.categories);
+        assert_eq!(retried.media_bytes, repeated.media_bytes);
         let record_path =
-            sessions::personal_archive_record_path(&root, &blob_name(&repeated)).unwrap();
+            sessions::personal_archive_record_path(&root, &blob_name(&retried)).unwrap();
         let stored = fs::read(&record_path).unwrap();
         let phrase = b"Synthetic private message";
         assert!(!stored.windows(phrase.len()).any(|part| part == phrase));
-        assert!(read_records(&root, &repeated).unwrap()[&Category::Messages]
+        assert!(read_records(&root, &retried).unwrap()[&Category::Messages]
             .iter()
             .any(|row| row.text == "Synthetic private message"));
         assert_eq!(

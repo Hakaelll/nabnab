@@ -280,7 +280,7 @@ pub(super) fn x_attachment_owner(source: &str) -> Option<String> {
     numeric_record_id(id)
 }
 
-fn record_id(identity: &str) -> String {
+pub(super) fn record_id(identity: &str) -> String {
     format!("{:x}", Sha256::digest(identity))
 }
 
