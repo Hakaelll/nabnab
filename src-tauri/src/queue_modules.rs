@@ -1,5 +1,46 @@
 use super::*;
 
+pub(super) async fn run_dubbing(
+    app: &AppHandle, state: &Arc<AppState>, job: &Job, staging: &Path, cancel: watch::Receiver<bool>,
+) -> Result<PublishedOutput, String> {
+    let engines = crate::dependencies::engine_root(app)?;
+    let _processing = processing_permit(state, cancel.clone()).await?;
+    let run_id = job.run_id;
+    phase(app, state, &job.id, run_id, JobState::Processing)?;
+    let (file, info, parent, name) = match &job.source {
+        Source::DubVoice { selection } => {
+            crate::voice_operations::require_enabled(app)?;
+            let root = {
+                let guard = state.repository.lock().unwrap();
+                crate::translation::commands::completed_root(guard.as_ref().ok_or("Open nabnab first.")?, &selection.draft_id)?
+            };
+            let draft = selection.draft(&root)?;
+            let handle = app.clone(); let shared = state.clone(); let id = job.id.clone();
+            let file = crate::voice::timed::render(&root, &engines, staging, &draft, &selection.settings, cancel.clone(), run_id,
+                move |update| progress(&handle, &shared, &id, run_id, update)).await?;
+            let info = crate::media::probe(&engines, &file, cancel.clone()).await?;
+            (file, info, draft.selection.input.library_id, format!("Translated voice - {}.wav", job.id))
+        }
+        Source::DubVideo { options, pair } => {
+            let (video, wav) = {
+                let guard = state.repository.lock().unwrap();
+                let repo = guard.as_ref().ok_or("Open nabnab first.")?;
+                let (video, wav, _) = crate::dubbing::video_input(repo, options)?;
+                (video, wav)
+            };
+            let language = if pair.languages().1 == "es" { "spa" } else { "eng" };
+            let (file, info) = crate::dubbing::mux(&engines, &video.path, &wav, staging, options.mode, language, cancel.clone()).await?;
+            (file, info, video.id, format!("Dubbed video - {}.mkv", job.id))
+        }
+        _ => return Err("Dubbing execution was not dispatched.".into()),
+    };
+    phase(app, state, &job.id, run_id, JobState::Verifying)?;
+    let output = staging.join(name);
+    crate::direct::move_completed(&file, &output)?;
+    let item = library::index(&output, Some(&info), None, Some(parent))?;
+    publish_verified_output(state, job, staging, &output, item, cancel).await
+}
+
 pub(super) async fn run_translation(
     app: &AppHandle,
     state: &Arc<AppState>,

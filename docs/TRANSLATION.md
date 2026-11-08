@@ -14,6 +14,20 @@ Bergamot 0.4.9 requiere Windows x64 y usa el Deno de nabnab. Tanto el motor como
 
 La inferencia ejecuta Deno con acceso a las carpetas de entrada y de modelo estrictamente necesarias y con red, escritura, ejecución externa y FFI denegados. Los temporales y la caché de ese proceso se retiran al terminar. Desactivar una dirección conserva sus archivos. Eliminarla libera su espacio y elimina el runtime compartido si era la última. Los borradores y las exportaciones se conservan. Puedes retirar un borrador desde Herramientas para liberar su espacio.
 
+## Doblaje local
+
+En el borrador, guarda las ediciones y elige **Crear voz de la traducción**. Activa **Voz local** en Ajustes si hace falta. El selector muestra las voces de escritorio instaladas en Windows para el idioma de destino. Puedes elegir un segmento y escuchar una muestra antes de generar el audio.
+
+**Generar WAV sincronizado** añade un trabajo a Descargas. La voz ocupa el intervalo de cada subtítulo y las pausas quedan en silencio. Cuando dos intervalos se superponen, la primera frase dispone de tiempo hasta el comienzo de la siguiente. Si hace falta, la voz se acelera hasta un 25 %. Si la frase sigue sin caber, el panel indica qué segmento acortar. El flujo admite hasta 4096 segmentos en las primeras dos horas de la pista. [Filtro `atempo` de FFmpeg](https://ffmpeg.org/ffmpeg-filters.html#atempo)
+
+Cada segmento se reutiliza según su texto, voz, volumen y ritmo. Al editar el borrador, la nueva versión puede aprovechar el audio de los segmentos que conservan esos datos. La caché de voz comparte el espacio administrado con Narración local. El WAV y las copias de vídeo se guardan en el destino seleccionado.
+
+Con el WAV disponible, puedes escucharlo o crear una copia MKV del vídeo. **Pista alternativa** conserva el audio original y añade la voz. **Solo voz traducida** crea una copia con el WAV como audio. **Voz + original al 20 %** mezcla la voz al 80 % con la primera pista original al 20 %. Si el vídeo original contiene diálogo, seguirá presente en la mezcla. Los subtítulos de texto `mov_text` se convierten a SubRip para la copia MKV. El vídeo se copia sin recodificar.
+
+La copia de vídeo tiene su propio trabajo en Descargas. Si falla, **Reintentar copia** vuelve a ejecutar ese trabajo con el WAV ya publicado. Los originales y el borrador siguen disponibles. [Panel de doblaje en Windows](dubbing-native.png)
+
 ## Verificación
 
 El recorrido nativo de Windows instaló las dos direcciones desde Ajustes, con un único runtime y vocabulario. Tradujo un VTT local, conservó cuatro identificadores y sus tiempos, y mantuvo la cursiva. Se guardó una corrección, se reabrió el borrador y se verificaron el VTT bilingüe y el SRT traducido. El original quedó idéntico y los directorios temporales quedaron vacíos. La comparación se comprobó a 1180 y 900 px. [Comparación y aviso de longitud](translation-preview.png)
+
+`tests/native-dubbing.browser.mjs` parte de un borrador sintético y utiliza SAPI y FFmpeg reales. Comprueba la decodificación de la muestra, el aviso y el foco del segmento demasiado largo, la reutilización de una frase al editar otra y los silencios del WAV. Verifica las tres copias MKV con FFprobe, la diferencia entre mezclar y sustituir el audio, el reintento de un trabajo fallido y la integridad del WAV y del vídeo original. El panel se revisó a 1180 y 900 px.

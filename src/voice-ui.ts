@@ -13,7 +13,8 @@ interface Sample { wav: number[]; duration: number; segmentText: string; truncat
 interface Hooks { command<T>(name: string, args?: Record<string, unknown>): Promise<T>; snapshot(): Snapshot; refresh(): Promise<void>; render(): void; t: Copy; notify(message: string, kind?: "info" | "success" | "error"): void; settings?(): void; chooseFolder?(): void }
 function failure(error: unknown): string { if (typeof error === "string") return error; if (error instanceof Error) return error.message; if (typeof error === "object" && error !== null && "message" in error && typeof error.message === "string") return error.message; return String(error); }
 function duration(seconds: number): string { const value = Math.max(0, Math.round(seconds)); return `${Math.floor(value / 60)}:${String(value % 60).padStart(2, "0")}`; }
-function audioBlob(bytes: number[]): Blob {
+export type { Status as VoiceStatus, Sample as VoiceSample };
+export function audioBlob(bytes: number[]): Blob {
   if (bytes.length < 44 || bytes.length > 32 * 1024 * 1024 || bytes.some(value => !Number.isInteger(value) || value < 0 || value > 255) || String.fromCharCode(...bytes.slice(0, 4)) !== "RIFF" || String.fromCharCode(...bytes.slice(8, 12)) !== "WAVE") throw Error("The local voice engine did not return a bounded WAV segment.");
   return new Blob([new Uint8Array(bytes)], { type: "audio/wav" });
 }

@@ -30,6 +30,8 @@ export type JobSource = {kind:"webArchive";reference:string;format:"html"|"epub"
   | {kind:"stems";selection:{libraryId:string;inputHash:string}}
   | {kind:"captionTranslation";selection:{input:{libraryId:string;trackId:string};pair:"es-en"|"en-es";sourceHash:string}}
   | {kind:"captionTranslationExport";options:{draftId:string;revision:number;format:"srt"|"vtt";bilingual:boolean}}
+  | {kind:"dubVoice";selection:import('./dubbing-ui').DubSelection}
+  | {kind:"dubVideo";options:import('./dubbing-ui').DubVideoOptions;pair:"es-en"|"en-es"}
   | {kind:"fileAnalysis";libraryIds:string[];options:{kind:"exact"}|{kind:"similar";maxDistance:number}}
   | {kind:"fileRename";planId:string}
   | {kind:"fileUndo";operationId:string}

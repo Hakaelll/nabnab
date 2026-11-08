@@ -170,7 +170,8 @@ pub fn translation_remove(state: State<Arc<AppState>>, draft_id: String) -> Resu
     let root = completed_root(repo, &draft_id)?;
     let in_use = repo.data.jobs.iter().any(|job| {
         (job.state.active() || matches!(job.state, queue::JobState::Pending | queue::JobState::Paused))
-            && matches!(&job.source, queue::Source::CaptionTranslationExport { options } if options.draft_id == draft_id)
+            && (matches!(&job.source, queue::Source::CaptionTranslationExport { options } if options.draft_id == draft_id)
+                || matches!(&job.source, queue::Source::DubVoice { selection } if selection.draft_id == draft_id))
     });
     if in_use {
         return Err("Wait for exports using this translation to finish.".into());

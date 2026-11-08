@@ -20,3 +20,18 @@
 .translation-warning { color: var(--text); }
 .translation-pagination, .translation-confirm { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
 #translation-export > .translation-fields { margin-top: 12px; }
+.dub-section { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 16px; margin-top: 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--secondary); }
+.dub-section :is(p, small) { margin: 4px 0 0; }
+.dub-expanded { display: grid; grid-template-columns: minmax(0, 1fr); }
+.dub-expanded header, .dub-export, .dub-result { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.dub-expanded header { justify-content: space-between; }
+.dub-export { justify-content: flex-end; }
+.dub-export .field-note { margin-inline-end: auto; overflow-wrap: anywhere; }
+.dub-expanded .translation-fields { padding-top: 8px; border-top: 1px solid var(--border); }
+.dub-expanded .translation-fields > label { flex-basis: 114px; }
+.dub-expanded label[for="dub-voice"] { flex-basis: 160px; }
+.dub-sample { display: grid; grid-template-columns: minmax(0, 1fr) minmax(180px, 300px); gap: 10px; align-items: center; overflow-wrap: anywhere; }
+.dub-sample audio { display: block; width: 100%; height: 36px; }
+.dub-result { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.dub-result small { color: var(--muted); font-variant-numeric: tabular-nums; }
+@media (max-width: 960px) { .dub-sample { grid-template-columns: minmax(0, 1fr); } }

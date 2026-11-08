@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tauri::{AppHandle, State};
 use tokio::sync::watch;
 
-fn require_enabled(app: &AppHandle) -> Result<(), String> {
+pub(crate) fn require_enabled(app: &AppHandle) -> Result<(), String> {
     if !crate::components::root(app)?.join("voice.enabled").is_file() {
         return Err("Enable Local voice in Settings → Components before preparing or generating narration.".into());
     }

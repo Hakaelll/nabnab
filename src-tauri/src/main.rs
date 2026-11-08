@@ -59,6 +59,7 @@ mod upscale;
 mod background;
 mod stems;
 mod translation;
+mod dubbing;
 mod personal_archive;
 mod delimited;
 mod local_media;
@@ -1220,6 +1221,7 @@ fn main() {
             translation::commands::translation_drafts, translation::commands::translation_read,
             translation::commands::translation_edit, translation::commands::translation_remove,
             translation::commands::queue_translation_export,
+            dubbing::dub_sample, dubbing::queue_dub_voice, dubbing::queue_dub_video,
             file_operations::file_analysis,file_operations::queue_file_analysis,file_operations::file_rename_preview,file_operations::queue_file_rename,file_operations::file_rename_history,file_operations::queue_file_undo,file_operations::file_organize_review,file_operations::cancel_file_operation,
             file_operations::portable_preview_export,file_operations::queue_portable_export,file_operations::portable_choose_import,file_operations::portable_preview_import,file_operations::queue_portable_import,file_operations::cancel_portable_preview,
             document_operations::document_edit_info,document_operations::document_edit_preview,document_operations::cancel_document_edit_preview,document_operations::queue_document_edit,

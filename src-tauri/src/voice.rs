@@ -1,4 +1,5 @@
 mod cache;
+pub(crate) mod timed;
 mod wave;
 use crate::{
     engine,
@@ -521,7 +522,8 @@ struct Pending {
 }
 async fn generate(
     root: &Path,
-    plan: &VoicePlan,
+    settings: &VoiceSettings,
+    engine_fingerprint: &str,
     works: Vec<Work>,
     completed: usize,
     total: usize,
@@ -556,10 +558,10 @@ async fn generate(
         })
         .collect::<Vec<_>>();
     let bytes = serde_json::to_vec(&serde_json::json!({
-        "voiceId": plan.settings.voice_id,
-        "rate": plan.settings.rate,
-        "volume": plan.settings.volume,
-        "engineFingerprint": plan.engine_fingerprint,
+        "voiceId": settings.voice_id,
+        "rate": settings.rate,
+        "volume": settings.volume,
+        "engineFingerprint": engine_fingerprint,
         "items": items
     }))
     .map_err(|e| e.to_string())?;
@@ -621,6 +623,7 @@ async fn generate(
                     let _ = cancelled_on_error.send(true);
                     break;
                 }
+                let _ = fs::remove_file(&item.output);
                 state.0 += 1;
                 state.1 += item.work.weight;
             }
@@ -690,7 +693,8 @@ pub async fn sample(
     if cache::cached(root, &key, true, &cancel).is_none() {
         generate(
             root,
-            &plan,
+            &plan.settings,
+            &plan.engine_fingerprint,
             vec![Work {
                 key: key.clone(),
                 text: segment_text.clone(),
@@ -866,7 +870,8 @@ pub async fn execute(
     }
     generate(
         root,
-        &plan,
+        &plan.settings,
+        &plan.engine_fingerprint,
         work,
         complete,
         plan.segments.len(),

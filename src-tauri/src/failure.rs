@@ -52,6 +52,12 @@ impl Failure {
         let has = |items: &[&str]| items.iter().any(|s| text.contains(s));
         let (code, message, retryable) = if raw == crate::engine::CANCELLED {
             ("cancelled", "Download cancelled.", false)
+        } else if raw.starts_with("DUB_TIMING ") {
+            ("dubbing_timing", "Some translated cues do not fit. Shorten the indicated cues and generate the voice again.", false)
+        } else if raw == "DUB_NO_ORIGINAL" {
+            ("dubbing_no_original", "This video has no original audio to mix. Choose translated voice only or select another video. The synchronized WAV is available.", false)
+        } else if raw == "DUB_DURATION" {
+            ("dubbing_duration", "The synchronized WAV extends past the selected video. Choose the matching video. The synchronized WAV is available.", false)
         } else if text.starts_with("automation") && text.contains("budget") {
             ("budget_exceeded", "The approved automation budget was exceeded. Prepare a new plan with appropriate limits.", false)
         } else if text.starts_with("the rename operation stopped with partial results.") {

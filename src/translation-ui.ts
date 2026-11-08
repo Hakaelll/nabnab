@@ -1,5 +1,6 @@
 import "./translation.css";
 import { escapeHtml as h, type Copy, type Job, type Snapshot } from "./contracts";
+import { createDubbing } from "./dubbing-ui";
 import { action, icon, option, stateLabel } from "./views-common";
 
 type Pair = "es-en" | "en-es";
@@ -60,6 +61,14 @@ export function createTranslationTool(hooks: Hooks) {
   let format: "srt" | "vtt" = "vtt", bilingual = false;
   const edits = new Map<number, string>();
   const warnings = new Set<number>();
+  const dubbing = createDubbing({ ...hooks, hasEdits: () => edits.size > 0,
+    draft: () => draft ? { id: draft.id, revision: draft.revision, pair: draft.selection.pair, sourceId: draft.selection.input.libraryId, count: draft.original.length } : null,
+    focusCue: index => {
+      offset = Math.floor(index / pageSize) * pageSize;
+      hooks.render();
+      requestAnimationFrame(() => document.getElementById(`translation-cue-${index}`)?.focus());
+    },
+  });
 
   const directionLabel = (value: Pair) => value === "es-en"
     ? t("Español → Inglés", "Spanish → English") : t("Inglés → Español", "English → Spanish");
@@ -106,6 +115,7 @@ export function createTranslationTool(hooks: Hooks) {
 
   async function open(id: string) {
     const result = await hooks.command<Draft>("translation_read", { draftId: id });
+    dubbing.stopSample();
     draft = result; edits.clear(); offset = 0; confirmRemoval = false;
     updateWarnings(result);
     if (!draftIds.includes(id)) draftIds = [id, ...draftIds];
@@ -119,6 +129,7 @@ export function createTranslationTool(hooks: Hooks) {
   }
 
   function observe(job: Job) {
+    dubbing.observe(job);
     if (job.id !== workingId) return;
     if (job.state === "completed" && !edits.size && !busy) {
       workingId = "";
@@ -236,11 +247,12 @@ export function createTranslationTool(hooks: Hooks) {
         <select id="translation-draft" ${busy || edits.size ? "disabled" : ""}>${option("", t("Selecciona un borrador", "Select a draft"), draft?.id ?? "")}
         ${drafts.map(job => option(job.id, job.title, draft?.id ?? "")).join("")}</select></label>` : ""}
       ${error ? `<p role="alert" class="asset-error">${h(error)}</p>` : ""}
-      ${draft ? comparison(draft) + exportForm() : ""}
+      ${draft ? comparison(draft) + exportForm() + dubbing.render() : ""}
     </section>`;
   }
 
   async function click(kind: string) {
+    if (kind.startsWith("dub-")) return dubbing.click(kind);
     switch (kind) {
       case "translation-components": hooks.components(); return true;
       case "translation-inspect": {
@@ -286,6 +298,7 @@ export function createTranslationTool(hooks: Hooks) {
     const index = Number(element.dataset.translationIndex);
     if (element.value === draft.translated[index]) edits.delete(index);
     else edits.set(index, element.value);
+    dubbing.updateEdits();
     if (lengthWarning(element.value, draft.original[index])) warnings.add(index);
     else warnings.delete(index);
     const hint = document.getElementById(`translation-warning-${index}`);
@@ -302,6 +315,7 @@ export function createTranslationTool(hooks: Hooks) {
   }
 
   async function change(element: HTMLElement) {
+    if (dubbing.change(element)) return true;
     if (element instanceof HTMLSelectElement) {
       switch (element.id) {
         case "translation-source": {
@@ -365,5 +379,5 @@ export function createTranslationTool(hooks: Hooks) {
     await run(() => open(id));
   }
 
-  return { render, load, click, input, change, submit, observe, chooseTrack, openSaved };
+  return { render, load, click, input, change, submit, observe, chooseTrack, openSaved, bind: dubbing.bind, leave: dubbing.stopSample };
 }

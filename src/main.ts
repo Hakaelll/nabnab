@@ -354,6 +354,8 @@ function renderInspector(force=false): void {
 }
 function renderLibraryModules():void{preserveFocus(()=>{renderCurrent();renderInspector(true);libraryFeatures.bind();});}
 function renderCurrent(): void {
+  const showingTranslation=page==='tools'&&localToolModule==='translation';
+  if(!showingTranslation)translationTool.leave();
   const directoryScroll=document.querySelector<HTMLElement>('.tool-directory')?.scrollTop??0;
   preserveFocus(()=>{
     updateNavigation();required('#field').hidden=page!=='home';required("#home-page").hidden=page!=="home";required("#page-content").hidden=page==='home';
@@ -392,7 +394,7 @@ function renderCurrent(): void {
     if(page==='settings'&&preferences.section==='engines')required('.settings-content').insertAdjacentHTML('beforeend',platforms.renderComponents());
     if(page==='settings'&&preferences.section==='automation')required('.settings-content').insertAdjacentHTML('beforeend',automation.render());
     if(page==='settings'&&preferences.section==='connections')required('.settings-content').insertAdjacentHTML('beforeend',fileSources.renderConnections()+personalServers.renderConnections());
-    renderInspector();libraryFeatures.bind();if(page==='platforms'&&platformModule==='catalog')platforms.bind();if(page==='platforms'&&platformModule==='courses')courses.bind();updateActivity();observeThumbnails();screenCapture.bind();voice.bind();
+    renderInspector();libraryFeatures.bind();if(page==='platforms'&&platformModule==='catalog')platforms.bind();if(page==='platforms'&&platformModule==='courses')courses.bind();updateActivity();observeThumbnails();screenCapture.bind();voice.bind();if(showingTranslation)translationTool.bind();
   });
 }
 function observeThumbnails(): void {
@@ -729,7 +731,7 @@ document.addEventListener('change',event=>{
   if(target instanceof HTMLElement&&target.id!=='upscale-query'&&upscaleTool.input(target))return;
   if(target instanceof HTMLElement&&target.id!=='background-query'&&backgroundTool.input(target))return;
   if(target instanceof HTMLElement&&target.id==='stems-source'&&stemsTool.input(target))return;
-  if(target instanceof HTMLElement&&['translation-source','translation-pair','translation-format','translation-bilingual','translation-draft'].includes(target.id)){void translationTool.change(target).catch(showError);return;}
+  if(target instanceof HTMLElement&&(target.id.startsWith('dub-')||['translation-source','translation-pair','translation-format','translation-bilingual','translation-draft'].includes(target.id))){void translationTool.change(target).catch(showError);return;}
   if(target instanceof HTMLElement&&target.closest('.personal-archives')){void personalArchives.change(target).catch(showError);return;}
   if((target instanceof HTMLInputElement||target instanceof HTMLSelectElement||target instanceof HTMLTextAreaElement)&&(articles.change(target)||ocr.change(target)))return;
   if(target instanceof HTMLSelectElement&&target.id==='library-content-filter'){const value=target.value||'all';if(isLibraryFilter(value)){library.filter=value;library.offset=0;renderCurrent();}return;}
