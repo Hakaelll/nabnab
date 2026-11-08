@@ -9,7 +9,7 @@ interface DraftContext { id: string; revision: number; pair: "es-en" | "en-es"; 
 interface Hooks {
   draft(): DraftContext | null;
   hasEdits(): boolean;
-  focusCue(index: number): void;
+  focusCue(index: number): Promise<void>;
   snapshot(): Snapshot;
   command<T>(name: string, args?: Record<string, unknown>): Promise<T>;
   render(): void;
@@ -22,7 +22,7 @@ const pending = (job: Job | undefined) => job && (activeStates.includes(job.stat
 
 export function createDubbing(hooks: Hooks) {
   const { t } = hooks;
-  let open = false, status: VoiceStatus | null = null, busy = false, error = "";
+  let status: VoiceStatus | null = null, busy = false, error = "";
   let voiceId = "", rate = 0, volume = 100, videoId = "", sampleCue = 0;
   let mode: DubVideoOptions["mode"] = "alternate";
   let player: HTMLAudioElement | null = null, sampleUrl = "", sampleText = "", requestId = 0;
@@ -35,7 +35,7 @@ export function createDubbing(hooks: Hooks) {
   function selection(): DubSelection | null {
     const draft = hooks.draft();
     const voice = voices().find(value => value.id === voiceId) ?? voices()[0];
-    return draft && voice && status?.enabled ? { draftId: draft.id, revision: draft.revision, settings: { voiceId: voice.id, rate, volume } } : null;
+    return draft && voice && status?.enabled && status.available ? { draftId: draft.id, revision: draft.revision, settings: { voiceId: voice.id, rate, volume } } : null;
   }
 
   function matchingVoices() {
@@ -75,6 +75,13 @@ export function createDubbing(hooks: Hooks) {
     }
   }
 
+  function resetDraft() {
+    stopSample();
+    videoId = "";
+    sampleCue = 0;
+    error = "";
+  }
+
   function bind() {
     const slot = document.getElementById("dub-sample-slot");
     if (slot && player && player.parentElement !== slot) slot.append(player);
@@ -83,9 +90,6 @@ export function createDubbing(hooks: Hooks) {
   function render() {
     const draft = hooks.draft();
     if (!draft) return "";
-    if (!open) return `<section class="dub-section"><div><h3>${t("Voz de la traducción", "Translation voice")}</h3>
-      <p class="field-note">${t("Genera una pista de voz local que respeta los tiempos de los subtítulos.", "Generate a local voice track using the subtitle timing.")}</p></div>
-      ${action("dub-open", t("Crear voz de la traducción", "Create translation voice"), "audio", "secondary", `id="dub-open" ${hooks.hasEdits() ? "disabled" : ""}`)}</section>`;
     const choice = selection();
     const job = matchingVoices()[0];
     const wav = completedVoice();
@@ -96,9 +100,7 @@ export function createDubbing(hooks: Hooks) {
     const issues = timingIssues();
     const disabled = busy || hooks.hasEdits();
     const cue = Math.min(sampleCue, draft.count - 1);
-    return `<section class="dub-section dub-expanded" aria-labelledby="dub-heading"><header>
-      <div><h3 id="dub-heading">${t("Voz de la traducción", "Translation voice")}</h3><p class="field-note">${t("Voces instaladas en Windows · Síntesis local", "Installed Windows voices · Local synthesis")}</p></div>
-      ${action("dub-close", t("Cerrar voz", "Close voice"), "close", "quiet")}</header>
+    return `<section class="dub-expanded" aria-label="${t("Preparar la voz y el vídeo", "Prepare voice and video")}">
       ${!status ? `<p class="field-note" role="status">${busy ? t("Buscando voces locales…", "Finding local voices…") : t("Actualiza la lista de voces instaladas.", "Refresh installed voices.")}</p>` : !status.enabled || !status.available ? `<p class="field-note">${t("Activa Voz local en Ajustes y comprueba las voces de Windows.", "Enable Local voice in Settings and check Windows voices.")}</p>` : !choice ? `<p class="field-note">${t("Windows no tiene una voz local instalada para el idioma de destino.", "Windows has no installed local voice for the target language.")}</p>` : ""}
       ${!choice ? `<div class="button-group">${action("dub-settings", t("Ver componentes", "View components"), "settings", "secondary")}${action("dub-refresh", t("Actualizar voces", "Refresh voices"), "retry", "quiet", busy ? "disabled" : "")}</div>` : `
       <fieldset id="dub-controls" class="translation-fields" ${disabled ? "disabled" : ""}><legend>${t("1. Voz y muestra", "1. Voice and sample")}</legend>
@@ -110,7 +112,7 @@ export function createDubbing(hooks: Hooks) {
       </fieldset>
       ${sampleText ? `<div class="dub-sample"><span>${h(sampleText)}</span><div id="dub-sample-slot"></div></div>` : ""}
       ${job && job.id !== wav?.id ? `<div class="dub-result" role="status"><span>${stateLabel(job.state, t)} · WAV</span>${issues.length ? `<p>${t("Acorta los segmentos que no caben en su intervalo.", "Shorten the cues that do not fit their intervals.")}</p>${action("dub-edit-cue", `${t("Editar segmento", "Edit cue")} ${issues[0] + 1}`, "document", "quiet")}<small>${issues.map(index => index + 1).join(", ")}</small>` : job.error ? `<p>${h(job.error.message)}</p>` : ""}</div>` : ""}
-      <div class="dub-export"><span class="field-note">${h(hooks.snapshot().settings.folder)}</span>${action("choose-folder", t("Cambiar carpeta", "Change folder"), "folder", "quiet", busy ? "disabled" : "")}
+      <div class="asset-destination dub-export"><span>${t("Destino", "Destination")}<span class="path field-note">${h(hooks.snapshot().settings.folder)}</span></span>${action("choose-folder", t("Cambiar carpeta", "Change folder"), "folder", "quiet", busy ? "disabled" : "")}
         ${audio ? "" : action("dub-queue-voice", t("Generar WAV sincronizado", "Generate synchronized WAV"), "audio", "primary", `id="dub-queue-voice" ${disabled || pending(job) ? "disabled" : ""}`)}</div>
       ${audio ? translationOutput(audio, t("Voz sincronizada · WAV", "Synchronized voice · WAV"), t, t("Escuchar WAV", "Play WAV")) : ""}
       ${wav ? `<fieldset id="dub-video-controls" class="translation-fields" ${disabled ? "disabled" : ""}><legend>${t("2. Copia de vídeo", "2. Video copy")}</legend>
@@ -134,18 +136,18 @@ export function createDubbing(hooks: Hooks) {
     finally { busy = false; hooks.render(); }
   }
 
+  async function load() {
+    await run(async () => { status = await hooks.command<VoiceStatus>("voice_status"); });
+  }
+
   async function click(actionName: string): Promise<boolean> {
-    if (actionName === "dub-open" || actionName === "dub-refresh") {
-      if (!hooks.hasEdits()) {
-        open = true;
-        await run(async () => { status = await hooks.command<VoiceStatus>("voice_status"); });
-        requestAnimationFrame(() => document.getElementById("dub-voice")?.focus());
-      }
+    if (actionName === "dub-refresh") {
+      await load();
+      requestAnimationFrame(() => document.getElementById("dub-voice")?.focus());
       return true;
     }
-    if (actionName === "dub-close") { stopSample(); open = false; hooks.render(); return true; }
     if (actionName === "dub-settings") { hooks.components(); return true; }
-    if (actionName === "dub-edit-cue") { const index = timingIssues()[0]; if (index !== undefined) hooks.focusCue(index); return true; }
+    if (actionName === "dub-edit-cue") { const index = timingIssues()[0]; if (index !== undefined) await hooks.focusCue(index); return true; }
     if (actionName !== "dub-sample" && actionName !== "dub-queue-voice" && actionName !== "dub-queue-video") return false;
     const choice = selection(), draft = hooks.draft();
     if (!choice || !draft || hooks.hasEdits() || busy) return true;
@@ -198,21 +200,10 @@ export function createDubbing(hooks: Hooks) {
   }
 
   function observe(job: Job) {
-    if (!open || (job.source.kind !== "dubVoice" && job.source.kind !== "dubVideo")) return;
+    if (job.source.kind !== "dubVoice" && job.source.kind !== "dubVideo") return;
     const change = `${job.id}:${job.state}`;
     if (change !== observed && (matchingVoices()[0]?.id === job.id || videoJob()?.id === job.id)) { observed = change; hooks.render(); }
   }
 
-  function updateEdits() {
-    const dirty = hooks.hasEdits();
-    if (dirty) { stopSample(); document.querySelector(".dub-sample")?.remove(); }
-    for (const id of ["dub-controls", "dub-video-controls", "dub-queue-voice", "dub-open"]) {
-      const control = document.getElementById(id);
-      if (control instanceof HTMLFieldSetElement || control instanceof HTMLButtonElement) {
-        control.disabled = dirty || busy || id === "dub-queue-voice" && Boolean(pending(matchingVoices()[0]) || completedVoice());
-      }
-    }
-  }
-
-  return { bind, change, click, observe, render, stopSample, updateEdits };
+  return { bind, change, click, load, observe, render, resetDraft, stopSample };
 }

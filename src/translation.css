@@ -10,6 +10,7 @@
 .translation-tool time { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .translation-saved { margin-top: 16px; }
 .translation-review .section-heading { flex-wrap: wrap; }
+.translation-review-actions { flex-wrap: wrap; }
 .translation-review .section-heading p { margin: 3px 0 0; }
 .translation-cue { border-top: 1px solid var(--border); padding: 10px 0; }
 .translation-time { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; margin-bottom: 6px; }
@@ -25,14 +26,18 @@
 .translation-output p.field-note { margin: 0 0 4px; }
 .translation-output strong { font-size: 13px; font-weight: 600; }
 .translation-output .button-group { flex-wrap: wrap; }
-.dub-section { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 16px; margin-top: 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--secondary); }
-.dub-section :is(p, small) { margin: 4px 0 0; }
-.dub-expanded { display: grid; grid-template-columns: minmax(0, 1fr); }
-.dub-expanded header, .dub-export, .dub-result { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.dub-expanded header { justify-content: space-between; }
-.dub-export { justify-content: flex-end; }
-.dub-export .field-note { margin-inline-end: auto; overflow-wrap: anywhere; }
-.dub-expanded .translation-fields { padding-top: 8px; border-top: 1px solid var(--border); }
+.dubbing-source { display: flex; flex-wrap: wrap; align-items: end; gap: 8px 12px; }
+.dubbing-source .translation-saved { flex: 1 1 200px; min-width: 0; margin: 0; }
+.dubbing-source select { min-width: 0; width: 100%; }
+.dubbing-source-detail { margin: 8px 0 0; }
+.dubbing-empty, .dubbing-unsaved { padding-block: 12px; border-block-start: 1px solid var(--edge-quiet); }
+.dubbing-empty p { margin: 0 0 12px; }
+.dub-expanded { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; margin-top: 20px; }
+.dub-expanded p { margin: 0; }
+.dub-result { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.dub-export { justify-content: flex-end; margin: 0; }
+.dub-export > span { margin-inline-end: auto; }
+.dub-expanded .translation-fields { padding-top: 8px; border-top: 1px solid var(--edge-quiet); }
 .dub-expanded .translation-fields > label { flex-basis: 114px; }
 .dub-expanded label[for="dub-voice"] { flex-basis: 160px; }
 .dub-sample { display: grid; grid-template-columns: minmax(0, 1fr) minmax(180px, 300px); gap: 10px; align-items: center; overflow-wrap: anywhere; }

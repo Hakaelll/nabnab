@@ -123,7 +123,9 @@ const upscaleTool=createUpscaleTool({command,snapshot:()=>snapshot,refresh,rende
 const backgroundTool=createBackgroundTool({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t,components:()=>{preferences.section='engines';navigate('settings');}});
 const stemsTool=createStemsTool({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t,components:()=>{preferences.section='engines';navigate('settings');},
   compare:(id,group)=>audioPlayer.compareTrack(id,group),playingId:()=>audioPlayer.current()?.id,pausePlayback:()=>audioPlayer.pause(),share:ids=>deviceShare.open({ids})});
-const translationTool=createTranslationTool({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t,components:()=>{preferences.section='engines';navigate('settings');}});
+const translationTool=createTranslationTool({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t,
+  openTool:mode=>openToolDestination(()=>openLocalTool(mode),"subtitles"),
+  components:()=>{preferences.section='engines';navigate('settings');}});
 const fileOrganization=createFileOrganization({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t});
 const portable=createPortableCollections({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t});
 const deviceShare=createDeviceShare({command,t,item:id=>snapshot.library.find(item=>item.id===id),afterClose:()=>{renderInspector();libraryFeatures.bind();},package:ids=>{
@@ -416,12 +418,12 @@ function localToolGroups() {
     {key:'files',title:t('Archivos y colecciones','Files and collections'),items:[['fileOrganization',t('Revisar y renombrar','Review and rename'),'library'],['portable',t('Colección portátil','Portable collection'),'folder']]},
     {key:'capture',title:t('Captura','Capture'),items:[['screenCapture',t('Pantalla y repetición','Screen and replay'),'video']]},
     {key:'audio',title:t('Audio y voz','Audio and voice'),items:[['stems',t('Separar pistas','Separate stems'),'audio'],['voice',t('Narración local','Local narration'),'audio']]},
-    {key:'subtitles',title:t('Subtítulos','Subtitles'),items:[['translation',t('Traducir subtítulos','Translate subtitles'),'document']]}
+    {key:'subtitles',title:t('Subtítulos','Subtitles'),items:[['translation',t('Traducir subtítulos','Translate subtitles'),'document'],['dubbing',t('Crear doblaje','Create dubbing'),'audio']]}
   ] as const;
 }
 function renderCurrent(): void {
-  const showingTranslation=page==='tools'&&localToolModule==='translation';
-  if(!showingTranslation)translationTool.leave();
+  const showingDubbing=page==='tools'&&localToolModule==='dubbing'&&!showToolCatalog;
+  if(!showingDubbing)translationTool.leave();
   const directoryScroll=document.querySelector<HTMLElement>('.tool-directory')?.scrollTop??0;
   preserveFocus(()=>{
     updateNavigation();required("#home-page").hidden=page!=="home";required("#page-content").hidden=page==='home';
@@ -441,7 +443,7 @@ function renderCurrent(): void {
       directory.querySelector('.tool-search')?.insertAdjacentHTML('afterend',moduleNav);
       if(localToolModule!=='media'){
         for(const button of directory.querySelectorAll('[data-action="tool-kind"]'))button.setAttribute('aria-pressed','false');
-        required('.tool-workspace').innerHTML=localToolModule==='documents'?documentToolsPanel(snapshot,t):localToolModule==='pdfEdits'?documentEdits.render():localToolModule==='ocr'?ocr.renderTools():localToolModule==='composition'?mediaEditsPanel(snapshot,t):localToolModule==='imageAssets'?imageAssets.render():localToolModule==='stickers'?stickerTool.render():localToolModule==='upscale'?upscaleTool.render():localToolModule==='background'?backgroundTool.render():localToolModule==='stems'?stemsTool.render():localToolModule==='translation'?translationTool.render():localToolModule==='fileOrganization'?fileOrganization.renderTools():localToolModule==='portable'?portable.render():localToolModule==='screenCapture'?screenCapture.render():localToolModule==='voice'?voice.render():palettesPanel(snapshot,t);
+        required('.tool-workspace').innerHTML=localToolModule==='documents'?documentToolsPanel(snapshot,t):localToolModule==='pdfEdits'?documentEdits.render():localToolModule==='ocr'?ocr.renderTools():localToolModule==='composition'?mediaEditsPanel(snapshot,t):localToolModule==='imageAssets'?imageAssets.render():localToolModule==='stickers'?stickerTool.render():localToolModule==='upscale'?upscaleTool.render():localToolModule==='background'?backgroundTool.render():localToolModule==='stems'?stemsTool.render():localToolModule==='translation'||localToolModule==='dubbing'?translationTool.render(localToolModule):localToolModule==='fileOrganization'?fileOrganization.renderTools():localToolModule==='portable'?portable.render():localToolModule==='screenCapture'?screenCapture.render():localToolModule==='voice'?voice.render():palettesPanel(snapshot,t);
       }
       if(showToolCatalog){
         const studio=required('.tool-studio');
@@ -474,7 +476,7 @@ function renderCurrent(): void {
     if(page==='settings'&&preferences.section==='engines')required('.settings-content').insertAdjacentHTML('beforeend',platforms.renderComponents());
     if(page==='settings'&&preferences.section==='automation')required('.settings-content').insertAdjacentHTML('beforeend',automation.render());
     if(page==='settings'&&preferences.section==='connections')required('.settings-content').insertAdjacentHTML('beforeend',fileSources.renderConnections()+personalServers.renderConnections());
-    renderInspector();libraryFeatures.bind();if(page==='platforms'&&platformModule==='catalog')platforms.bind();updateActivity();observeThumbnails();screenCapture.bind();voice.bind();if(showingTranslation)translationTool.bind();
+    renderInspector();libraryFeatures.bind();if(page==='platforms'&&platformModule==='catalog')platforms.bind();updateActivity();observeThumbnails();screenCapture.bind();voice.bind();if(showingDubbing)translationTool.bind();
   });
 }
 function observeThumbnails(): void {
@@ -589,7 +591,7 @@ async function loadLocalTool() {
     case "upscale": await upscaleTool.load(); break;
     case "background": await backgroundTool.load(); break;
     case "stems": await stemsTool.load(); break;
-    case "translation": await translationTool.load(); break;
+    case "translation": case "dubbing": await translationTool.load(localToolModule); break;
     case "voice": await voice.open(); break;
     case "screenCapture": await screenCapture.open(); break;
   }
@@ -1065,7 +1067,7 @@ if(desktop){
       const current=snapshot.jobs.find(job=>job.id===payload.id);
       if(current&&(current.runId>payload.runId||(current.runId===payload.runId&&current.updatedAt>payload.updatedAt)))return;
       snapshot.jobs=current?snapshot.jobs.map(job=>job.id===payload.id?payload:job):[...snapshot.jobs,payload];
-      if(page==="tools"&&localToolModule==="translation")translationTool.observe(payload);
+      if(page==="tools"&&(localToolModule==="translation"||localToolModule==="dubbing"))translationTool.observe(payload,localToolModule);
       if(page==="tools"&&localToolModule==="portable"&&current?.state!==payload.state&&portable.isExportJob(payload.id))renderCurrent();
       scheduleJobsRender();
     });

@@ -86,6 +86,14 @@ async function jobOf(kind, index, state) {
   });
 }
 
+async function openDubbingFromPalette() {
+  await page.keyboard.press("Control+k");
+  await page.locator("#palette-query").fill("crear doblaje");
+  await page.getByRole("option", { name: /Crear doblaje/ }).waitFor({ timeout: 5000 });
+  await page.keyboard.press("Enter");
+  await page.getByRole("heading", { name: "Crear doblaje", exact: true }).waitFor();
+}
+
 const probe = file => JSON.parse(execFileSync(ffprobe, ["-v", "error", "-show_streams", "-show_format", "-of", "json", file], { windowsHide: true })).streams;
 async function shares() {
   const log = await readFile(path.join(data, "cli-arguments.jsonl"), "utf8").catch(error => {
@@ -132,6 +140,11 @@ function rms(bytes, from, to) {
 try {
   const initial = await launch();
   await rpc("save_settings", { settings: { ...initial.settings, folder: output, language: "es", reducedMotion: true, trayEnabled: false, closeToTray: false } });
+  await page.locator('[data-page="tools"]').click();
+  await openTool(page, "dubbing");
+  await page.locator(".dubbing-empty").waitFor();
+  await page.locator('.dubbing-empty [data-action="translation-edit-draft"]').click();
+  await page.locator("#translation-setup").waitFor();
   await rpc("enable_component", { id: "voice", enabled: true });
   const imported = await rpc("import_paths", { paths: [video, silent, subtitle] });
   const item = file => imported.library.find(candidate => candidate.name === path.basename(file));
@@ -157,11 +170,12 @@ try {
   await launch();
   const errors = [];
   page.on("pageerror", error => errors.push(error.message));
-  await page.locator('[data-page="tools"]').click();
-  await openTool(page, "translation");
-  await page.locator("#translation-draft").selectOption(draftId);
-  await page.locator("#dub-open").click();
+  await openDubbingFromPalette();
+  const picker = page.locator("#translation-draft");
+  await picker.focus();
+  await picker.selectOption(draftId);
   await page.locator("#dub-voice").waitFor();
+  assert.equal(await picker.evaluate(element => element === document.activeElement), true);
   await page.locator('[data-action="dub-sample"]').click();
   const sample = page.locator("#dub-sample-slot audio");
   await wait(async () => await sample.count() && sample.evaluate(audio => audio.readyState >= 2 && audio.duration > 0));
@@ -173,11 +187,19 @@ try {
   const cachedBefore = (await readdir(caches)).filter(name => name.endsWith(".wav")).sort();
   assert.equal(cachedBefore.length, 2);
   await page.locator('[data-action="dub-edit-cue"]').click();
+  await page.waitForFunction(() => document.activeElement?.id === "translation-cue-0");
   assert.equal(await page.locator("#translation-cue-0").evaluate(node => node === document.activeElement), true);
   await page.locator("#translation-cue-0").fill("Hello.");
+  await openDubbingFromPalette();
+  await page.getByText("Guarda la edición para generar la voz con esos cambios.").waitFor();
+  assert.equal(await page.locator("#translation-draft").isDisabled(), true);
   assert.equal(await page.locator("#dub-queue-voice").isDisabled(), true);
+  await page.getByRole("button", { name: "Editar traducción", exact: true }).click();
+  assert.equal(await page.locator("#translation-cue-0").inputValue(), "Hello.");
   await page.locator("#translation-save").click();
   await wait(async () => (await rpc("translation_read", { draftId })).revision === 2);
+  await page.locator("#dub-open").click();
+  assert.equal(await page.locator("#translation-draft").inputValue(), draftId);
   await page.locator("#dub-queue-voice").click();
   const wav = await jobOf("dubVoice", 1, "completed");
   const cachedAfter = (await readdir(caches)).filter(name => name.endsWith(".wav")).sort();
@@ -230,25 +252,26 @@ try {
   const speechGap = execFileSync(ffmpeg, ["-v", "error", "-ss", "2.4", "-i", replaced.outputs[0], "-t", "0.25", "-vn", "-ac", "1", "-ar", "22050", "-f", "s16le", "pipe:1"], { windowsHide: true });
   assert.ok(speechGap.every(value => value === 0));
   assert.equal(hash(await readFile(video)), hash(sourceBytes));
+  await shareOutput(wav);
+  await shareOutput(replaced);
+  await page.getByRole("button", { name: "Editar traducción", exact: true }).click();
   await page.locator("#translation-export-button").click();
   const exported = await jobOf("captionTranslationExport", 0, "completed");
   await shareOutput(exported);
-  await shareOutput(wav);
-  await shareOutput(replaced);
   assert.deepEqual(errors, []);
+  await page.locator("#dub-open").click();
+  await page.locator("#dub-voice:enabled").waitFor();
 
   for (const [width, height] of [[1180, 780], [900, 620]]) {
     await page.setViewportSize({ width, height });
-    const section = page.locator(".dub-expanded");
+    const section = page.locator(".dubbing-tool");
     await section.evaluate(node => node.scrollIntoView({ block: "start" }));
     assert.ok(await section.evaluate(node => node.scrollWidth <= node.clientWidth + 1));
-    for (const selector of [".dub-export .field-note", "#translation-export .path"]) {
-      await page.locator(selector).evaluate(node => { node.textContent = "C:\\Pruebas\\nabnab\\dubbing\\output"; });
-    }
+    await page.locator(".dub-export .field-note").evaluate(node => { node.textContent = "C:\\Pruebas\\nabnab\\dubbing\\output"; });
     await page.screenshot({ path: path.join(data, `dubbing-${width}.png`), animations: "disabled" });
     if (width === 1180) await section.screenshot({ path: path.join(data, "dubbing-results.png"), animations: "disabled" });
   }
-  console.log(JSON.stringify({ draftFixture: true, sapiSample: true, timingIssue: tooLong.error.technical, reusedCues: 1, synchronizedSeconds: 5.5,
+  console.log(JSON.stringify({ draftFixture: true, catalogAndPalette: true, editsPreservedBetweenTools: true, sapiSample: true, timingIssue: tooLong.error.technical, reusedCues: 1, synchronizedSeconds: 5.5,
     alternateTracks: 2, failedMixKeptWav: true, mixedTracks: 1, unchangedOriginal: true, shares: 3, viewports: [1180, 900] }));
 } catch (error) {
   console.error(log);

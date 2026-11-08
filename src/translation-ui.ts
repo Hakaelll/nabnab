@@ -5,6 +5,7 @@ import { publishedTranslationFile, translationOutput } from "./translation-outpu
 import { action, icon, option, stateLabel } from "./views-common";
 
 type Pair = "es-en" | "en-es";
+type Mode = "translation" | "dubbing";
 interface Input { libraryId: string; trackId: string }
 interface Cue { identifier: string | null; start: number; end: number; text: string }
 interface Preview { sourceHash: string; count: number; cues: Cue[] }
@@ -26,6 +27,7 @@ interface Hooks {
   refresh(): Promise<void>;
   notify(message: string): void;
   components(): void;
+  openTool(mode: Mode): Promise<void>;
   t: Copy;
 }
 
@@ -56,7 +58,7 @@ export function createTranslationTool(hooks: Hooks) {
   let sourceKey = "", query = "", workingId = "";
   let sourcePreview: Preview | null = null;
   let draft: Draft | null = null;
-  let draftIds: string[] = [];
+  let draftIds: string[] | null = null;
   let busy = false, error = "", confirmRemoval = false;
   let offset = 0;
   let format: "srt" | "vtt" = "vtt", bilingual = false;
@@ -64,9 +66,9 @@ export function createTranslationTool(hooks: Hooks) {
   const warnings = new Set<number>();
   const dubbing = createDubbing({ ...hooks, hasEdits: () => edits.size > 0,
     draft: () => draft ? { id: draft.id, revision: draft.revision, pair: draft.selection.pair, sourceId: draft.selection.input.libraryId, count: draft.original.length } : null,
-    focusCue: index => {
+    focusCue: async index => {
       offset = Math.floor(index / pageSize) * pageSize;
-      hooks.render();
+      await hooks.openTool("translation");
       requestAnimationFrame(() => document.getElementById(`translation-cue-${index}`)?.focus());
     },
   });
@@ -89,19 +91,23 @@ export function createTranslationTool(hooks: Hooks) {
   };
   const warning = () => t("Puede costar leerlo a tiempo. Prueba a acortar el texto o repartirlo en líneas.", "This cue may be hard to read in time. Try shortening it or splitting it into lines.");
 
-  async function load() {
+  async function load(mode: Mode) {
     try {
-      [components, draftIds] = await Promise.all([
-        hooks.command<Component[]>("optional_components"), hooks.command<string[]>("translation_drafts"),
-      ]);
-      const choices = installed();
-      if (!pair || !choices.includes(pair)) pair = choices[0] ?? "";
-      if (draft && !draftIds.includes(draft.id) && !edits.size) draft = null;
-      const pending = hooks.snapshot().jobs.find(job => job.source.kind === "captionTranslation"
-        && !["completed", "cancelled", "error"].includes(job.state));
-      if (!workingId && pending) workingId = pending.id;
-      const current = working();
-      if (current) observe(current);
+      const listing = hooks.command<string[]>("translation_drafts");
+      if (mode === "translation") {
+        [draftIds, components] = await Promise.all([listing, hooks.command<Component[]>("optional_components")]);
+        const choices = installed();
+        if (!pair || !choices.includes(pair)) pair = choices[0] ?? "";
+        const pending = hooks.snapshot().jobs.find(job => job.source.kind === "captionTranslation"
+          && !["completed", "cancelled", "error"].includes(job.state));
+        if (!workingId && pending) workingId = pending.id;
+        const current = working();
+        if (current?.state === "completed" && draft) workingId = "";
+        else if (current) observe(current, mode);
+      } else {
+        [draftIds] = await Promise.all([listing, dubbing.load()]);
+      }
+      if (draft && !draftIds.includes(draft.id) && !edits.size) clearDraft();
     } catch (cause) { error = String(cause); }
     hooks.render();
   }
@@ -116,10 +122,15 @@ export function createTranslationTool(hooks: Hooks) {
 
   async function open(id: string) {
     const result = await hooks.command<Draft>("translation_read", { draftId: id });
-    dubbing.stopSample();
+    dubbing.resetDraft();
     draft = result; edits.clear(); offset = 0; confirmRemoval = false;
     updateWarnings(result);
-    if (!draftIds.includes(id)) draftIds = [id, ...draftIds];
+    if (!draftIds?.includes(id)) draftIds = [id, ...(draftIds ?? [])];
+  }
+
+  function clearDraft() {
+    dubbing.resetDraft();
+    draft = null; edits.clear(); confirmRemoval = false;
   }
 
   function updateWarnings(current: Draft) {
@@ -129,8 +140,14 @@ export function createTranslationTool(hooks: Hooks) {
     });
   }
 
-  function observe(job: Job) {
-    dubbing.observe(job);
+  function observe(job: Job, mode: Mode) {
+    if (mode === "dubbing") {
+      dubbing.observe(job);
+      if (job.source.kind === "captionTranslation" && job.state === "completed" && draftIds && !draftIds.includes(job.id)) {
+        draftIds = [job.id, ...draftIds]; hooks.render();
+      }
+      return;
+    }
     if (job.id !== workingId) return;
     if (job.state === "completed" && !edits.size && !busy) {
       workingId = "";
@@ -202,7 +219,10 @@ export function createTranslationTool(hooks: Hooks) {
     return `<section class="asset-review translation-review" aria-labelledby="translation-title">
       <div class="section-heading"><div><h3 id="translation-title">${t("Comparar y editar", "Compare and edit")}</h3>
         <p class="field-note">${h(current.name)} · ${directionLabel(current.selection.pair)} · ${t("Traducción automática", "Machine translation")}</p></div>
-        ${action("translation-save", t("Guardar edición", "Save edits"), "check", "secondary", `id="translation-save" ${busy || !edits.size ? "disabled" : ""}`)}
+        <div class="button-group translation-review-actions">
+          ${action("translation-save", t("Guardar edición", "Save edits"), "check", "secondary", `id="translation-save" ${busy || !edits.size ? "disabled" : ""}`)}
+          ${action("dub-open", t("Crear doblaje", "Create dubbing"), "audio", "quiet", `id="dub-open" ${busy || edits.size ? "disabled" : ""}`)}
+        </div>
       </div>
       <p class="field-note">${current.contextualBlocks
         ? t(`Se usó contexto en ${current.contextualBlocks} bloques.`, `Context used in ${current.contextualBlocks} blocks.`)
@@ -244,23 +264,48 @@ export function createTranslationTool(hooks: Hooks) {
     </form>${exported ? translationOutput(exported, t("Última exportación", "Latest export"), t) : ""}`;
   }
 
-  function render() {
-    const drafts = hooks.snapshot().jobs.filter(job => draftIds.includes(job.id));
+  function draftPicker(drafts: Job[], label: string) {
+    return `<label class="translation-saved" for="translation-draft">${label}
+      <select id="translation-draft" ${busy || edits.size ? "disabled" : ""}>${option("", t("Selecciona un borrador", "Select a draft"), draft?.id ?? "")}
+      ${drafts.map(job => option(job.id, job.title, draft?.id ?? "")).join("")}</select></label>`;
+  }
+
+  function render(mode: Mode) {
+    const drafts = hooks.snapshot().jobs.filter(job => draftIds?.includes(job.id));
+    const problem = error ? `<p role="alert" class="asset-error">${h(error)}</p>` : "";
+    if (mode === "dubbing") {
+      const edit = action("translation-edit-draft", t("Editar traducción", "Edit translation"), "document", "quiet");
+      const status = draftIds === null ? (error ? "" : `<p class="field-note" role="status">${t("Buscando borradores…", "Finding drafts…")}</p>`)
+        : drafts.length ? "" : `<div class="dubbing-empty"><p>${t("Traduce una pista local para crear el primer borrador.", "Translate a local track to create your first draft.")}</p>
+          ${action("translation-edit-draft", t("Traducir subtítulos", "Translate subtitles"), "document", "secondary")}</div>`;
+      return `<section class="tool-section image-assets-panel translation-tool dubbing-tool">
+        <header class="asset-panel-heading"><span>${icon("audio")}</span><div><h2>${t("Crear doblaje", "Create dubbing")}</h2>
+          <p>${t("Genera una voz local con los tiempos de la traducción y guárdala como audio o en una copia del vídeo.", "Generate a local voice using the translation timing and save it as audio or in a video copy.")}</p></div></header>
+        ${drafts.length ? `<div class="dubbing-source">${draftPicker(drafts, t("Traducción guardada", "Saved translation"))}${draft ? edit : ""}</div>` : ""}
+        ${status}${problem}
+        ${draft ? `<p class="field-note dubbing-source-detail">${h(directionLabel(draft.selection.pair))} · ${draft.original.length} ${draft.original.length === 1 ? t("segmento", "cue") : t("segmentos", "cues")}</p>
+          ${edits.size ? `<p class="dubbing-unsaved" role="status">${t("Guarda la edición para generar la voz con esos cambios.", "Save the edits to generate the voice with those changes.")}</p>` : ""}
+          ${dubbing.render()}` : ""}
+      </section>`;
+    }
     return `<section class="tool-section image-assets-panel translation-tool">
       <header class="asset-panel-heading"><span>${icon("document")}</span><div><h2>${t("Traducir subtítulos", "Translate subtitles")}</h2>
         <p>${t("Traduce una pista local y revisa cada segmento junto al original.", "Translate a local track and review each cue alongside the original.")}</p></div></header>
       ${setup()}
-      ${drafts.length ? `<label class="translation-saved" for="translation-draft">${t("Borradores guardados", "Saved drafts")}
-        <select id="translation-draft" ${busy || edits.size ? "disabled" : ""}>${option("", t("Selecciona un borrador", "Select a draft"), draft?.id ?? "")}
-        ${drafts.map(job => option(job.id, job.title, draft?.id ?? "")).join("")}</select></label>` : ""}
-      ${error ? `<p role="alert" class="asset-error">${h(error)}</p>` : ""}
-      ${draft ? comparison(draft) + exportForm(draft) + dubbing.render() : ""}
+      ${drafts.length ? draftPicker(drafts, t("Borradores guardados", "Saved drafts")) : ""}
+      ${problem}
+      ${draft ? comparison(draft) + exportForm(draft) : ""}
     </section>`;
   }
 
   async function click(kind: string) {
+    if (kind === "dub-open") {
+      if (!busy && !edits.size) await hooks.openTool("dubbing");
+      return true;
+    }
     if (kind.startsWith("dub-")) return dubbing.click(kind);
     switch (kind) {
+      case "translation-edit-draft": await hooks.openTool("translation"); return true;
       case "translation-components": hooks.components(); return true;
       case "translation-inspect": {
         const item = source();
@@ -290,7 +335,7 @@ export function createTranslationTool(hooks: Hooks) {
         if (draft && confirmRemoval) await run(async () => {
           const id = draft?.id;
           await hooks.command("translation_remove", { draftId: id });
-          draftIds = draftIds.filter(entry => entry !== id); draft = null; edits.clear(); confirmRemoval = false;
+          draftIds = draftIds?.filter(entry => entry !== id) ?? []; clearDraft();
         });
         return true;
       default: return false;
@@ -305,12 +350,11 @@ export function createTranslationTool(hooks: Hooks) {
     const index = Number(element.dataset.translationIndex);
     if (element.value === draft.translated[index]) edits.delete(index);
     else edits.set(index, element.value);
-    dubbing.updateEdits();
     if (lengthWarning(element.value, draft.original[index])) warnings.add(index);
     else warnings.delete(index);
     const hint = document.getElementById(`translation-warning-${index}`);
     if (hint) hint.hidden = !warnings.has(index);
-    for (const id of ["translation-save", "translation-export-button", "translation-draft", "translation-source"]) {
+    for (const id of ["translation-save", "translation-export-button", "translation-draft", "translation-source", "dub-open"]) {
       const control = document.getElementById(id);
       if (control instanceof HTMLButtonElement || control instanceof HTMLSelectElement) {
         control.disabled = id === "translation-save" ? edits.size === 0 : edits.size > 0;
@@ -334,12 +378,17 @@ export function createTranslationTool(hooks: Hooks) {
         }
         case "translation-pair": pair = element.value as Pair; break;
         case "translation-format": format = element.value as "srt" | "vtt"; break;
-        case "translation-draft":
+        case "translation-draft": {
+          const focused = document.activeElement === element;
           if (!edits.size) {
             if (element.value) await run(() => open(element.value));
-            else draft = null;
+            else clearDraft();
+          }
+          if (focused && document.activeElement === document.body) {
+            document.getElementById(element.id)?.focus({ preventScroll: true });
           }
           break;
+        }
         default: return false;
       }
     } else if (element instanceof HTMLInputElement && element.id === "translation-bilingual") {
@@ -360,7 +409,7 @@ export function createTranslationTool(hooks: Hooks) {
           await hooks.refresh();
         });
         const current = working();
-        if (current) observe(current);
+        if (current) observe(current, "translation");
       }
       return true;
     }
