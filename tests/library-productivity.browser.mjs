@@ -33,7 +33,10 @@ const setup = `
     if(cmd==="get_snapshot")return copy(state);
     if(cmd==="local_timezone")return "Europe/Madrid";
     if(cmd==="screen_capture_status")return null;
-    if(cmd==="library_search")return [];
+    if(cmd==="library_search"){
+      if(args.query==="Lens marker fixture") await new Promise(resolve=>{window.libraryFixture.finishSearch=resolve;});
+      return [];
+    }
     if(cmd==="plugin:window|is_maximized")return false;
     if(cmd.startsWith("plugin:"))return null;
     const item=state.library.find(item=>item.id===args.id);
@@ -133,7 +136,13 @@ try {
     await page.locator('[data-condition-value]').selectOption('audio');
     await page.locator('[data-action="smart-add-condition"]').click();
     await page.locator('[data-condition-kind]').nth(1).selectOption('subtitleLanguage');
-    await page.locator('[data-condition-value]').nth(1).fill('es');
+    await page.locator('[data-condition-value]').nth(1).fill('ES');
+    await page.waitForFunction(()=>typeof window.libraryFixture.finishSearch==="function");
+    await page.evaluate(async ()=>{
+      window.libraryFixture.finishSearch();
+      await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+    });
+    assert.equal(await page.locator('[data-condition-value]').nth(1).inputValue(),'ES');
     await page.locator('#smart-collection-form button[type="submit"]').click();
     await page.waitForFunction(()=>window.libraryFixture.state.smartCollections.length===1);
     assert.equal(await page.evaluate(()=>window.libraryFixture.state.library.length),4,'Smart collections do not copy files');
