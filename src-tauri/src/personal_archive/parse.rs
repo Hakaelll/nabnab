@@ -246,10 +246,30 @@ pub struct ListeningItem {
 
 impl Record {
     pub(super) fn reply_parent(&self) -> Option<String> {
-        let id = self.thread_parent.as_deref()?;
-        (id.len() <= 20 && !id.is_empty() && id.bytes().all(|byte| byte.is_ascii_digit()))
-            .then(|| record_id(id))
+        numeric_record_id(self.thread_parent.as_deref()?)
     }
+}
+
+fn numeric_record_id(id: &str) -> Option<String> {
+    (id.len() <= 20 && !id.is_empty() && id.bytes().all(|byte| byte.is_ascii_digit()))
+        .then(|| record_id(id))
+}
+
+pub(super) fn x_attachment_owner(source: &str) -> Option<String> {
+    if classify(Provider::X, source)?
+        != (Classification {
+            category: Category::Media,
+            format: Format::Media,
+        })
+    {
+        return None;
+    }
+    let (id, original) = source.rsplit('/').next()?.split_once('-')?;
+    let (stem, _) = original.rsplit_once('.')?;
+    if stem.is_empty() {
+        return None;
+    }
+    numeric_record_id(id)
 }
 
 fn record_id(identity: &str) -> String {

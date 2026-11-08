@@ -19,6 +19,8 @@ The preview uses the installed FFmpeg engine. It decodes only the selected local
 
 For an X post with a recorded reply relationship, open **View thread**. Nabnab follows the reply identifiers within that export and shows the related posts in pages of up to 50, with the chosen post marked. A missing parent is indicated as an incomplete chain. **Back to posts** restores the search, selection, and focus. This also works with previously imported exports that contain reply identifiers.
 
+An X post with matching local media shows an attachment count in the posts list and in the thread. Open it to preview or save the matching files. Nabnab matches an exact numeric post ID at the start of the filename in a recognized post media folder in the same import. You can add the Media category by reimporting the same package. Unmatched files stay in **Media**. Attachments from private messages stay in their own category.
+
 ![Archived X thread opened in Windows with synthetic data](personal-archive-thread.png)
 
 ![Spotify listening history with separate event and completion counts](personal-archive-listening.png)

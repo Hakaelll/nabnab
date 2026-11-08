@@ -17,7 +17,7 @@ const setup = `
   const settings={folder:"C:/fixture",language:"es",networkLimit:3,processingLimit:1,reducedMotion:true,reducedTransparency:true,sidebarExpanded:true,trayEnabled:false};
   const state={settings,jobs:[],library:[],collections:[],drafts:[],sources:[],rules:[],smartCollections:[],presets:[],audioPlaylists:[]};
   const time=Date.UTC(2025,0,8), fingerprint="a".repeat(64);
-  const row=(id,title,text,author,extra={})=>({id,title,text,author,time,source:"fixture.json",link:null,media:null,threadParent:null,hasThread:false,playedMs:null,trackCount:0,...extra});
+  const row=(id,title,text,author,extra={})=>({id,title,text,author,time,source:"fixture.json",link:null,media:null,threadParent:null,hasThread:false,attachmentCount:0,playedMs:null,trackCount:0,...extra});
   const threadPosts=[
     {row:row("p","Una publicación","Una publicación de prueba","Cuenta de prueba",{link:"https://example.org/post",hasThread:true,threadParent:"99"}),replyTo:null},
     {row:row("r","Primera respuesta","Este es el primer mensaje guardado como respuesta.","Cuenta de prueba",{hasThread:true}),replyTo:1},
@@ -39,6 +39,7 @@ const setup = `
     ],
     playlists:[row("s","Lista de prueba","","",{trackCount:1})],
   };
+  const xAttachments=rows.media.slice(0,2).map(item=>({...item,title:"100-"+item.title,source:"data/tweets_media/100-"+item.title}));
   const summaries=[];
   const group=(key,title,playedMs,extra={})=>({key:key.repeat(64),title,creator:null,album:null,episode:false,identified:false,events:1,playedMs,completions:null,completionKnown:0,...extra});
   const listeningGroups={
@@ -49,7 +50,7 @@ const setup = `
     ],
     creators:[group("d","Programa de prueba",186000),group("e","Artista de prueba",180000,{events:2})],
   };
-  let imports=0;
+  let imports=0, provider="x";
   const calls=[];
   window.archiveCalls=calls;
   const preview=(category,records,availability,sensitive=false,formats=["json"])=>({category,records,sensitive,availability,formats,files:availability==="absent"?0:1,bytes:314,start:records?time:null,end:records?time:null});
@@ -59,22 +60,26 @@ const setup = `
     if(cmd==="get_snapshot")return structuredClone(state);
     if(cmd==="plugin:window|is_maximized")return false;
     if(cmd==="personal_archive_list")return structuredClone(summaries);
-    if(cmd==="personal_archive_choose")return {fingerprint,source:args.provider+"-export.zip",bytes:10234,categories:args.provider==="instagram"?
+    if(cmd==="personal_archive_choose"){
+      provider=args.provider;
+      return {fingerprint,source:provider+"-export.zip",bytes:10234,categories:provider==="instagram"?
       [preview("media",3,"available",false,["media"])] : args.provider==="spotify"?
       [preview("listening",3,"available"),preview("playlists",1,"available")]:
-      [preview("posts",threadPosts.length,"available"),preview("likes",null,"absent",false,[]),preview("bookmarks",null,"unsupported",false,["unsupported"]),preview("media",0,"empty"),preview("messages",null,"requiresSelection",true)]};
+      [preview("posts",threadPosts.length,"available"),preview("likes",null,"absent",false,[]),preview("bookmarks",null,"unsupported",false,["unsupported"]),
+        imports===0?preview("media",0,"empty"):preview("media",2,"available",false,["media"]),preview("messages",null,"requiresSelection",true)]};
+    }
     if(cmd==="personal_archive_import"){
       const selected=args.selection;
       const all=[...selected.categories,...selected.sensitive];
-      const provider=all.includes("listening")?"spotify":all.includes("media")?"instagram":"x";
       const archive={id:String(++imports),provider,source:provider+"-export.zip",fingerprint,mediaBytes:0,account:selected.account,destination:selected.destination,
-        categories:Object.fromEntries(all.map(key=>[key,rows[key].length])),formats:Object.fromEntries(all.map(key=>[key,["json"]])),pendingRemoval:false};
+        categories:Object.fromEntries(all.map(key=>[key,key==="media"&&provider==="x"?2:rows[key].length])),formats:Object.fromEntries(all.map(key=>[key,["json"]])),pendingRemoval:false};
       summaries.push(archive);
       return {archive,skippedFiles:0};
     }
     if(cmd==="personal_archive_records"){
       if(args.category==="messages"&&!args.consent)throw "Missing private consent";
       let data=rows[args.category].filter(row=>!args.query||row.title.includes(args.query));
+      if(args.category==="posts"&&summaries.find(item=>item.id===args.id)?.categories.media) data=data.map(row=>row.id==="p"?{...row,attachmentCount:2}:row);
       const isListening=args.category==="listening";
       if(args.listening?.key) {
         const ids={a:["l3"],b:["l"],c:["l2"],d:["l3"],e:["l","l2"]};
@@ -89,6 +94,10 @@ const setup = `
       if(!summaries.some(item=>item.id===args.id&&item.provider==="x")||args.record!=="p")throw "Unexpected thread selection";
       const offset=args.offset??0;
       return {posts:threadPosts.slice(offset,offset+50),offset,total:threadPosts.length,incomplete:true};
+    }
+    if(cmd==="personal_archive_attachments"){
+      if(args.post!=="p"||!summaries.find(item=>item.id===args.id&&item.provider==="x")?.categories.media)throw "Unexpected attachments request";
+      return {rows:xAttachments,total:xAttachments.length,offset:0};
     }
     if(cmd==="personal_archive_preview_media"){
       if(args.record==="broken")throw "This file could not be previewed.";
@@ -269,6 +278,26 @@ try {
   await categories("messages").waitFor();
   assert.equal(await firstExport.getAttribute("aria-current"), "true");
   assert.equal(await firstExport.evaluate(element => element === document.activeElement), true);
+  const attachmentsButton = page.getByRole("button", { name: "2 adjuntos" });
+  await attachmentsButton.press("Enter");
+  const attachmentsTitle = page.getByRole("heading", { name: "Adjuntos de la publicación" });
+  await attachmentsTitle.waitFor();
+  assert.ok(await attachmentsTitle.evaluate(node => node === document.activeElement));
+  assert.deepEqual(await page.locator(".archive-attachment-name strong").allTextContents(), ["Lago de prueba.jpg", "Vídeo dañado.mp4"]);
+  for (const [width, height] of [[1180, 890], [900, 620]]) {
+    await page.setViewportSize({ width, height });
+    await page.keyboard.press("Escape");
+    await attachmentsButton.press("Enter");
+    await attachmentsTitle.waitFor();
+    assert.ok(await page.locator(".archive-attachments").evaluate(node => node.scrollWidth <= node.clientWidth + 1));
+    const attachmentBounds = await page.locator(".archive-attachment-list").boundingBox();
+    assert.ok(attachmentBounds.y >= 0 && attachmentBounds.y + attachmentBounds.height <= height);
+    await page.screenshot({ path: `${directory}/x-attachments-${width}.png` });
+  }
+  await action("copy").and(page.locator('[data-id="photo"]')).click();
+  assert.equal((await calls()).filter(call => call.cmd === "personal_archive_copy_media").at(-1).args.category, "media");
+  await page.getByRole("button", { name: "Volver a publicaciones" }).click();
+  assert.ok(await attachmentsButton.evaluate(node => node === document.activeElement));
   await categories("messages").focus();
   await page.keyboard.press("Space");
   await action("reveal").waitFor();
@@ -343,7 +372,7 @@ try {
   assert.equal(await page.locator(".archive-media-stage img").count(), 0);
   assert.ok((await calls()).some(call => call.cmd === "personal_archive_preview_cancel"));
   assert.deepEqual(errors, []);
-  console.log("Verified archived X threads, privacy, Spotify history, local playlist matching and cancellable archive media previews at 900 and 1180 px in Edge.");
+  console.log("Verified archived X threads and attachments, privacy, Spotify history, local playlist matching and cancellable media previews at 900 and 1180 px in Edge.");
 } finally {
   await browser.close();
 }

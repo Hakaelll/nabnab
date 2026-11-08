@@ -1343,6 +1343,7 @@ fn main() {
             personal_archive::personal_archive_choose, personal_archive::personal_archive_import,
             personal_archive::personal_archive_list, personal_archive::personal_archive_records,
             personal_archive::personal_archive_thread,
+            personal_archive::personal_archive_attachments,
             personal_archive::personal_archive_links, personal_archive::personal_archive_export,
             personal_archive::personal_archive_copy_media, personal_archive::personal_archive_remove,
             personal_archive::preview::personal_archive_preview_media, personal_archive::preview::personal_archive_preview_cancel,

@@ -20,7 +20,13 @@ const row = (source) => ({
   id: digest(source), source, title: path.posix.basename(source), text: "", time: null, link: null,
   author: null, threadParent: null, playedMs: null, reachedEnd: null, completed: null, tracks: [], media: source,
 });
-const [photo, video, invalid, privatePhoto] = ["media/Paisaje.png", "media/Escena.mp4", "media/Lista.mp4", "messages/attachments/Foto privada.png"].map(row);
+const [photo, video, invalid, privatePhoto] = [
+  "data/tweets_media/100-Paisaje.png", "data/tweets_media/100-Escena.mp4",
+  "data/tweets_media/999-Lista.mp4", "data/direct_messages_media/100-Foto privada.png",
+].map(row);
+const post = (id, title, replyTo = null) => ({ ...row("data/tweets.js"), id: digest(id), title, text: title,
+  time: Date.UTC(2025, 0, Number(id) - 99), threadParent: replyTo, media: null });
+const first = post("100", "Salida al lago"), reply = post("101", "La segunda publicación", "100");
 const file = item => path.join(managed, digest(item.source) + path.extname(item.source));
 const ffmpeg = path.join(root, "src-tauri/engines/ffmpeg.exe");
 function encode(args) {
@@ -42,12 +48,12 @@ async function protect(directory, name, header, purpose, value) {
   await writeFile(path.join(directory, `${name}.bin`), Buffer.concat([Buffer.from(`${header}\n`), sealed]));
 }
 await protect(secrets, "personal-archive-index", "nabnab-module-secret-v1", "nabnab-module:personal-archive-index", [{
-  id, generation: 1, provider: "instagram", account: "Cuenta de prueba", destination: "Álbum de 2025", source: "instagram.zip",
-  fingerprint: "b".repeat(64), categories: { media: 3, messages: 1 }, formats: { media: ["media"], messages: ["media"] },
+  id, generation: 1, provider: "x", account: "Cuenta de prueba", destination: "Álbum de 2025", source: "x-export.zip",
+  fingerprint: "b".repeat(64), categories: { posts: 2, media: 3, messages: 1 }, formats: { posts: ["xAssignment"], media: ["media"], messages: ["media"] },
   mediaBytes: bytes.reduce((total, size) => total + size), pendingRemoval: false,
 }]);
 await protect(records, generation, "nabnab-personal-archive-v1", `nabnab-personal-archive:${generation}`, {
-  media: [photo, video, invalid], messages: [privatePhoto],
+  posts: [first, reply], media: [photo, video, invalid], messages: [privatePhoto],
 });
 
 const port = process.env.NABNAB_ARCHIVE_DEBUG_PORT || 9269;
@@ -80,11 +86,25 @@ try {
   page.on("pageerror", error => errors.push(error.message));
   await page.locator("[data-page='library']").click();
   await page.locator("[data-section='archives']").click();
-  await page.getByRole("button", { name: /instagram.zip/ }).click();
+  await page.getByRole("button", { name: /x-export.zip/ }).click();
+  const attachmentButton = page.getByRole("button", { name: "2 adjuntos" });
+  await attachmentButton.waitFor();
+  assert.equal(await page.locator('[data-action="archive-attachments"]').count(), 1);
+  await attachmentButton.press("Enter");
+  const attachmentTitle = page.getByRole("heading", { name: "Adjuntos de la publicación" });
+  await attachmentTitle.waitFor();
+  assert.ok(await attachmentTitle.evaluate(node => node === document.activeElement));
+  assert.deepEqual(await page.locator(".archive-attachment-name strong").allTextContents(), ["Escena.mp4", "Paisaje.png"]);
+  await page.screenshot({ path: path.join(data, "x-post-attachments.png") });
+  await page.keyboard.press("Escape");
+  assert.ok(await attachmentButton.evaluate(button => button === document.activeElement));
+  await page.locator(`[data-action="archive-thread"][data-id="${first.id}"]`).click();
+  await attachmentButton.click();
+  await page.getByRole("button", { name: "Volver al hilo" }).waitFor();
   const preview = item => page.locator(`[data-action="archive-media-preview"][data-id="${item.id}"]`);
   for (const [item, dimensions] of [[photo, [900, 600]], [video, [338, 600]]]) {
     await preview(item).click();
-    const image = page.getByRole("img", { name: item.title });
+    const image = page.getByRole("img", { name: item.title.replace(/^100-/, "") });
     await image.waitFor();
     await page.waitForFunction(() => {
       const image = document.querySelector(".archive-media-stage img");
@@ -96,6 +116,10 @@ try {
     await page.keyboard.press("Escape");
     assert.ok(await preview(item).evaluate(button => button === document.activeElement));
   }
+  await page.getByRole("button", { name: "Volver al hilo" }).click();
+  assert.ok(await attachmentButton.evaluate(button => button === document.activeElement));
+  await assert.rejects(rpc("personal_archive_attachments", { id, post: digest("999"), offset: 0 }), /post is no longer/);
+  await page.locator('[data-action="archive-category"][data-id="media"]').click();
   await preview(invalid).click();
   await page.getByRole("alert").filter({ hasText: "No se pudo mostrar la vista previa" }).waitFor();
   await page.getByRole("button", { name: "Volver a los registros" }).click();
@@ -112,7 +136,7 @@ try {
   assert.equal(await page.locator(".archive-media-stage img").count(), 0);
   assert.equal((await readdir(managed)).length, 4);
   assert.deepEqual(errors, []);
-  console.log(`Verified native previews for a PNG and a seekable MP4, malformed media rejection, private reveal and cleanup in ${data}`);
+  console.log(`Verified X post and thread attachments, native image and video previews, private reveal and unmatched media isolation in ${data}`);
 } catch (error) {
   console.error(log);
   throw error;

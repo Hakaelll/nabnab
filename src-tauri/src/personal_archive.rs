@@ -805,16 +805,32 @@ fn records_for(
     if category.sensitive() && !consent {
         return Err("Open this private category explicitly to read its records.".into());
     }
+    let (summary, mut records) = archive_records(state, id)?;
+    Ok((summary, records.remove(&category).unwrap_or_default()))
+}
+
+fn archive_records(state: &AppState, id: &str) -> Result<(Summary, Records), String> {
     let root = crate::config_root(state)?;
     let _lock = state.personal_archive.storage.lock().unwrap();
     let summary = load_index(&root)?
         .into_iter()
         .find(|item| item.id == id && !item.pending_removal)
         .ok_or("This personal import was removed.")?;
-    let rows = read_records(&root, &summary)?
-        .remove(&category)
-        .unwrap_or_default();
-    Ok((summary, rows))
+    let records = read_records(&root, &summary)?;
+    Ok((summary, records))
+}
+
+fn attachment_counts(records: &Records) -> HashMap<String, usize> {
+    let mut counts = HashMap::new();
+    for owner in records
+        .get(&Category::Media)
+        .into_iter()
+        .flatten()
+        .filter_map(|row| parse::x_attachment_owner(row.media.as_deref()?))
+    {
+        *counts.entry(owner).or_default() += 1;
+    }
+    counts
 }
 
 #[derive(Serialize)]
@@ -829,6 +845,7 @@ struct RowView {
     author: Option<String>,
     thread_parent: Option<String>,
     has_thread: bool,
+    attachment_count: usize,
     played_ms: Option<u64>,
     track_count: usize,
     media: Option<String>,
@@ -846,6 +863,7 @@ impl From<Record> for RowView {
             author: row.author,
             thread_parent: row.thread_parent,
             has_thread: false,
+            attachment_count: 0,
             played_ms: row.played_ms,
             track_count: row.tracks.len(),
             media: row.media,
@@ -880,13 +898,22 @@ pub fn personal_archive_records(
     if query.chars().count() > 120 {
         return Err("Use a shorter archive search.".into());
     }
-    let (summary, mut rows) = records_for(&state, &id, category, consent)?;
+    if category.sensitive() && !consent {
+        return Err("Open this private category explicitly to read its records.".into());
+    }
+    let (summary, mut records) = archive_records(&state, &id)?;
+    let mut rows = records.remove(&category).unwrap_or_default();
     if listening.is_some()
         && (summary.provider != Provider::Spotify || category != Category::Listening)
     {
         return Err("Listening summaries are available for imported Spotify history.".into());
     }
     let show_threads = summary.provider == Provider::X && category == Category::Posts;
+    let counts = if show_threads {
+        attachment_counts(&records)
+    } else {
+        HashMap::new()
+    };
     let parents: HashSet<_> = if show_threads {
         rows.iter().filter_map(Record::reply_parent).collect()
     } else {
@@ -945,6 +972,7 @@ pub fn personal_archive_records(
                     show_threads && (parents.contains(&row.id) || row.reply_parent().is_some());
                 RowView {
                     has_thread,
+                    attachment_count: counts.get(&row.id).copied().unwrap_or(0),
                     ..RowView::from(row)
                 }
             })
@@ -1065,14 +1093,77 @@ pub async fn personal_archive_thread(
 ) -> Result<ThreadPage, String> {
     let state = state.inner().clone();
     tokio::task::spawn_blocking(move || {
-        let (summary, rows) = records_for(&state, &id, Category::Posts, false)?;
+        let (summary, mut records) = archive_records(&state, &id)?;
         if summary.provider != Provider::X {
             return Err("Threads are available for imported X posts.".into());
         }
-        archived_thread(rows, &record, offset)
+        let rows = records.remove(&Category::Posts).unwrap_or_default();
+        let mut page = archived_thread(rows, &record, offset)?;
+        let counts = attachment_counts(&records);
+        for post in &mut page.posts {
+            post.row.attachment_count = counts.get(&post.row.id).copied().unwrap_or(0);
+        }
+        Ok(page)
     })
     .await
     .map_err(|_| "Could not read the archived thread.")?
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachmentPage {
+    rows: Vec<RowView>,
+    total: usize,
+    offset: usize,
+}
+
+fn attachment_page(
+    mut records: Records,
+    post: &str,
+    offset: usize,
+) -> Result<AttachmentPage, String> {
+    if !records
+        .get(&Category::Posts)
+        .is_some_and(|rows| rows.iter().any(|row| row.id == post))
+    {
+        return Err("The selected post is no longer in this export.".into());
+    }
+    let mut rows = records.remove(&Category::Media).unwrap_or_default();
+    rows.retain(|row| {
+        row.media
+            .as_deref()
+            .and_then(parse::x_attachment_owner)
+            .as_deref()
+            == Some(post)
+    });
+    rows.sort_by(|a, b| a.title.cmp(&b.title).then_with(|| a.source.cmp(&b.source)));
+    let total = rows.len();
+    let offset = offset.min(total.saturating_sub(1)) / PAGE * PAGE;
+    let rows = rows
+        .into_iter()
+        .skip(offset)
+        .take(PAGE)
+        .map(RowView::from)
+        .collect();
+    Ok(AttachmentPage {
+        rows,
+        total,
+        offset,
+    })
+}
+
+#[tauri::command(async)]
+pub fn personal_archive_attachments(
+    state: State<Arc<AppState>>,
+    id: String,
+    post: String,
+    offset: usize,
+) -> Result<AttachmentPage, String> {
+    let (summary, records) = archive_records(&state, &id)?;
+    if summary.provider != Provider::X {
+        return Err("Post attachments are available for imported X posts.".into());
+    }
+    attachment_page(records, &post, offset)
 }
 
 #[tauri::command]
@@ -1285,7 +1376,7 @@ mod tests {
 
     #[cfg(windows)]
     #[tokio::test]
-    async fn imported_x_threads_keep_branches_and_bound_incomplete_chains() {
+    async fn imported_x_threads_keep_branches_and_link_only_matching_local_attachments() {
         let fixture = Scratch(std::env::temp_dir().join(format!(
             "nabnab-thread-{}-{}",
             std::process::id(),
@@ -1313,10 +1404,20 @@ mod tests {
         )
         .unwrap();
         let export = fixture.0.join("x-export.zip");
+        let media = fixture.0.join("photo.png");
+        fs::write(&media, b"synthetic media bytes").unwrap();
         let (_sender, cancel) = watch::channel(false);
         crate::portable_zip::write_generated(
             &export,
-            &[("data/tweets.js".into(), data)],
+            &[
+                ("data/tweets.js".into(), data),
+                ("data/tweets_media/1-b-photo.png".into(), media.clone()),
+                ("data/tweets_media/1-a-video.mp4".into(), media.clone()),
+                ("data/tweets_media/11-photo.png".into(), media.clone()),
+                ("data/tweets_media/99-orphan.png".into(), media.clone()),
+                ("data/tweets_media/1+not-an-id.png".into(), media.clone()),
+                ("data/messages/tweets_media/1-private.png".into(), media),
+            ],
             cancel.clone(),
         )
         .await
@@ -1325,27 +1426,58 @@ mod tests {
         let (plan, preview) = inspect(&root, Provider::X, export, cancel.clone())
             .await
             .unwrap();
+        let plan = Arc::new(plan);
+        let storage = ArchiveState::default();
+        let selection = |categories, sensitive| Selection {
+            fingerprint: preview.fingerprint.clone(),
+            account: "Cuenta de prueba".into(),
+            destination: "Archivo".into(),
+            categories,
+            sensitive,
+            from: None,
+            to: None,
+        };
+        let first = import(
+            &root,
+            &storage,
+            plan.clone(),
+            selection(vec![Category::Posts], vec![]),
+            cancel.clone(),
+        )
+        .await
+        .unwrap()
+        .archive;
+        assert!(attachment_counts(&read_records(&root, &first).unwrap()).is_empty());
         let archive = import(
             &root,
-            &ArchiveState::default(),
-            Arc::new(plan),
-            Selection {
-                fingerprint: preview.fingerprint,
-                account: "Cuenta de prueba".into(),
-                destination: "Archivo".into(),
-                categories: vec![Category::Posts],
-                sensitive: vec![],
-                from: None,
-                to: None,
-            },
+            &storage,
+            plan,
+            selection(vec![Category::Media], vec![Category::Messages]),
             cancel,
         )
         .await
         .unwrap()
         .archive;
+        assert_eq!(archive.id, first.id);
         let mut records = read_records(&root, &archive).unwrap();
-        let rows = records.remove(&Category::Posts).unwrap();
         let key = |id| format!("{:x}", Sha256::digest(format!("{id}")));
+        assert_eq!(records[&Category::Messages].len(), 1);
+        let counts = attachment_counts(&records);
+        assert_eq!(counts[&key(1)], 2);
+        assert_eq!(counts[&key(11)], 1);
+        assert!(!counts.contains_key(&key(2)));
+        let attachments = attachment_page(records.clone(), &key(1), usize::MAX).unwrap();
+        assert_eq!((attachments.total, attachments.offset), (2, 0));
+        assert_eq!(
+            attachments
+                .rows
+                .iter()
+                .map(|row| row.title.as_str())
+                .collect::<Vec<_>>(),
+            ["1-a-video.mp4", "1-b-photo.png"]
+        );
+        assert!(attachment_page(records.clone(), &key(99), 0).is_err());
+        let rows = records.remove(&Category::Posts).unwrap();
 
         let first = archived_thread(rows.clone(), &key(1), None).unwrap();
         assert!(!first.incomplete);

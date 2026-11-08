@@ -175,6 +175,23 @@
 .archive-thread-meta > strong, .archive-thread-byline { color: var(--text); font-weight: 600; }
 .archive-thread-byline { font-size: 12px; }
 .archive-thread-posts .archive-text { line-height: 1.55; }
+.archive-thread-actions { justify-self: start; margin-inline-start: -8px; }
+.archive-attachments { display: grid; gap: 14px; min-width: 0; scroll-margin-block: 12px; }
+.archive-attachments h3 { width: fit-content; max-width: 100%; }
+.archive-attachment-post { line-height: 1.5; }
+.archive-attachment-list { list-style: none; margin: 0; padding: 0; }
+.archive-attachment-list > li {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; min-width: 0;
+  padding: 11px 0; border-top: 1px solid var(--border);
+}
+.archive-attachment-icon {
+  display: grid; place-items: center; width: 34px; height: 34px; flex: none;
+  border: 1px solid var(--border); border-radius: 9px; background: var(--secondary); color: var(--muted);
+}
+.archive-attachment-icon svg { width: 17px; height: 17px; }
+.archive-attachment-name { display: grid; gap: 3px; flex: 1 1 8rem; min-width: 0; overflow-wrap: anywhere; }
+.archive-attachment-name small { color: var(--muted); font-size: 11px; }
+.archive-attachment-actions { display: flex; flex-wrap: wrap; gap: 4px; }
 .archive-confirm { border-left: 2px solid var(--border); padding-left: 12px; }
 .archive-confirm p { margin-bottom: 8px; }
 .archive-error { color: var(--error); }

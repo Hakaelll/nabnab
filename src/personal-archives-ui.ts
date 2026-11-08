@@ -50,6 +50,7 @@ interface Row {
   author: string | null;
   threadParent: string | null;
   hasThread: boolean;
+  attachmentCount: number;
   playedMs: number | null;
   trackCount: number;
   media: string | null;
@@ -85,6 +86,7 @@ interface ThreadPage {
   total: number;
   incomplete: boolean;
 }
+interface AttachmentPage { rows: Row[]; total: number; offset: number }
 type MediaPreview = { row: Row } & (
   { kind: "loading"; request: string } | { kind: "ready"; src: string } | { kind: "unavailable" }
 );
@@ -103,6 +105,7 @@ const privateCategory = (category: Category) => category === "contacts" || categ
 const selectable = (item: CategoryPreview) => item.availability === "available" || item.availability === "requiresSelection";
 const formatName = (format: Format) => format === "xAssignment" ? "X · JS/JSON" : format.toUpperCase();
 const visualMedia = /\.(?:jpe?g|png|webp|gif|mp4|mov|webm)$/i;
+const videoMedia = /\.(?:mp4|mov|webm)$/i;
 
 export function createPersonalArchives(hooks: Hooks) {
   const { t } = hooks;
@@ -113,6 +116,7 @@ export function createPersonalArchives(hooks: Hooks) {
   let category: Category | null = null;
   let result: RecordPage | null = null;
   let thread: { anchor: string; page: ThreadPage } | null = null;
+  let postAttachments: { post: Row; page: AttachmentPage } | null = null;
   let mediaPreview: MediaPreview | null = null;
   let listeningView: ListeningView = "events";
   let listeningSelection: { group: ListeningGroup; offset: number; query: string } | null = null;
@@ -146,6 +150,7 @@ export function createPersonalArchives(hooks: Hooks) {
     offset = 0;
     result = null;
     thread = null;
+    postAttachments = null;
     listeningView = "events";
     listeningSelection = null;
     privateOpen = false;
@@ -176,6 +181,7 @@ export function createPersonalArchives(hooks: Hooks) {
   function leave() {
     visible = false;
     discardMediaPreview();
+    postAttachments = null;
     if (category && privateCategory(category)) resetRecords(category);
   }
 
@@ -278,11 +284,12 @@ export function createPersonalArchives(hooks: Hooks) {
     </nav>`;
   }
 
-  function pageControls(total: number) {
+  function pageControls(total: number, position = offset, scope: "thread" | "attachments" | null = null) {
+    const prefix = scope ? `archive-${scope}` : "archive";
     return total > PAGE ? `<div class="archive-actions">
-      ${action("archive-previous", t("Anterior", "Previous"), undefined, "secondary", offset > 0 ? disabled() : "disabled")}
-      <span>${number(offset + 1)}–${number(Math.min(offset + PAGE, total))} / ${number(total)}</span>
-      ${action("archive-next", t("Siguiente", "Next"), undefined, "secondary", offset + PAGE < total ? disabled() : "disabled")}
+      ${action(`${prefix}-previous`, t("Anterior", "Previous"), undefined, "secondary", position > 0 ? disabled() : "disabled")}
+      <span>${number(position + 1)}–${number(Math.min(position + PAGE, total))} / ${number(total)}</span>
+      ${action(`${prefix}-next`, t("Siguiente", "Next"), undefined, "secondary", position + PAGE < total ? disabled() : "disabled")}
     </div>` : "";
   }
 
@@ -312,11 +319,12 @@ export function createPersonalArchives(hooks: Hooks) {
     const id = `data-id="${h(row.id)}" ${disabled()}`;
     return `<li class="archive-record">
       <label class="archive-record-name"><input type="checkbox" name="archive-record" value="${h(row.id)}" ${selected.has(row.id) ? "checked" : ""} ${disabled()}>
-        <span><strong>${h(row.title)}</strong>${metadata ? `<small>${h(metadata)}</small>` : ""}</span>
+        <span><strong${row.attachmentCount ? ` id="archive-post-label-${h(row.id)}"` : ""}>${h(row.title)}</strong>${metadata ? `<small>${h(metadata)}</small>` : ""}</span>
       </label>
       ${row.media && visualMedia.test(row.media) ? action("archive-media-preview", t("Vista previa", "Preview"), "image", "secondary", id) : ""}
       ${row.media ? action("archive-copy", t("Guardar copia", "Save copy"), undefined, "secondary", id) : ""}
       ${row.trackCount ? action("archive-match", t("Buscar en Audio", "Match in Audio"), undefined, "secondary", id) : ""}
+      ${attachmentButton(row)}
       ${row.hasThread ? action("archive-thread", t("Ver hilo", "View thread"), "list", "quiet", id) : ""}
       <details class="archive-details"><summary>${t("Ver registro", "View record")}</summary>
         ${row.text ? `<p class="archive-text">${h(row.text)}</p>` : ""}
@@ -325,6 +333,60 @@ export function createPersonalArchives(hooks: Hooks) {
         <small>${t("Archivo de origen", "Source file")} · ${h(row.source)}</small>
       </details>
     </li>`;
+  }
+
+  function attachmentButton(row: Row) {
+    if (!row.attachmentCount) return "";
+    const count = number(row.attachmentCount);
+    const label = row.attachmentCount === 1 ? t("1 adjunto", "1 attachment") : t(`${count} adjuntos`, `${count} attachments`);
+    return action("archive-attachments", label, "image", "quiet", `data-id="${h(row.id)}" aria-describedby="archive-post-label-${h(row.id)}" ${disabled()}`);
+  }
+
+  function attachmentName(row: Row) { return row.title.replace(/^\d{1,20}-/, ""); }
+
+  function attachmentView(post: Row, page: AttachmentPage) {
+    const back = thread ? t("Volver al hilo", "Back to thread") : t("Volver a publicaciones", "Back to posts");
+    return `<section class="archive-attachments" aria-labelledby="archive-attachments-title">
+      <header class="archive-thread-heading">
+        ${action("archive-attachments-back", back, "back", "quiet", disabled())}
+        <h3 id="archive-attachments-title" tabindex="-1">${t("Adjuntos de la publicación", "Post attachments")}</h3>
+        <p class="archive-attachment-post">${h(post.title)}</p>
+      </header>
+      ${page.rows.length ? `<ul class="archive-attachment-list">${page.rows.map(row => {
+        const id = `data-id="${h(row.id)}" aria-describedby="archive-attachment-label-${h(row.id)}" ${disabled()}`;
+        const file = attachmentName(row);
+        const extension = file.split(".").at(-1)?.toUpperCase() ?? "";
+        const symbol = videoMedia.test(file) ? "video" : visualMedia.test(file) ? "image" : "wave";
+        return `<li><span class="archive-attachment-icon">${icon(symbol)}</span>
+          <span class="archive-attachment-name"><strong id="archive-attachment-label-${h(row.id)}">${h(file)}</strong><small>${h(extension)}</small></span>
+          <div class="archive-attachment-actions">
+            ${row.media && visualMedia.test(row.media) ? action("archive-media-preview", t("Vista previa", "Preview"), "image", "secondary", id) : ""}
+            ${action("archive-copy", t("Guardar copia", "Save copy"), undefined, "quiet", id)}
+          </div></li>`;
+      }).join("")}</ul>` : `<p>${t("Esta publicación no tiene adjuntos importados.", "This post has no imported attachments.")}</p>`}
+      ${pageControls(page.total, page.offset, "attachments")}
+    </section>`;
+  }
+
+  async function openAttachments(post: Row, position = 0) {
+    const id = archiveId;
+    await run(async () => {
+      const page = await hooks.command<AttachmentPage>("personal_archive_attachments", { id, post: post.id, offset: position });
+      if (visible && archiveId === id) postAttachments = { post, page };
+    });
+    if (postAttachments?.post === post) {
+      const title = document.getElementById("archive-attachments-title");
+      title?.focus({ preventScroll: true });
+      title?.closest(".archive-attachments")?.scrollIntoView({ block: "nearest" });
+    }
+  }
+
+  function backFromAttachments() {
+    const id = postAttachments?.post.id;
+    postAttachments = null;
+    error = "";
+    hooks.render();
+    if (id) document.querySelector<HTMLElement>(`[data-action="archive-attachments"][data-id="${CSS.escape(id)}"]`)?.focus();
   }
 
   function discardMediaPreview() {
@@ -354,7 +416,7 @@ export function createPersonalArchives(hooks: Hooks) {
     focusMediaTitle();
     try {
       const bytes = await hooks.command<ArrayBuffer>("personal_archive_preview_media", {
-        id: archiveId, category, record: row.id, consent: privateOpen, request: pending.request,
+        id: archiveId, category: postAttachments ? "media" : category, record: row.id, consent: privateOpen, request: pending.request,
       });
       if (mediaPreview !== pending) return;
       if (!(bytes instanceof ArrayBuffer) || bytes.byteLength === 0 || bytes.byteLength > 256 * 1024) throw Error("Invalid preview response.");
@@ -378,11 +440,11 @@ export function createPersonalArchives(hooks: Hooks) {
 
   function mediaView(preview: MediaPreview) {
     const { row } = preview;
-    const label = /\.(?:mp4|mov|webm)$/i.test(row.media ?? "")
+    const label = videoMedia.test(row.media ?? "")
       ? t("Primer fotograma", "First frame") : t("Imagen del archivo", "Archived image");
     return `<section class="archive-media-preview" aria-labelledby="archive-media-title">
       <header class="archive-heading">
-        ${action("archive-media-back", t("Volver a los registros", "Back to records"), "back", "quiet", disabled())}
+        ${action("archive-media-back", postAttachments ? t("Volver a adjuntos", "Back to attachments") : t("Volver a los registros", "Back to records"), "back", "quiet", disabled())}
         ${action("archive-copy", t("Guardar copia", "Save copy"), undefined, "secondary", `data-id="${h(row.id)}" ${disabled()}`)}
       </header>
       <div><p class="archive-media-caption">${h(label)}</p><h3 id="archive-media-title" tabindex="-1">${h(row.title)}</h3></div>
@@ -413,14 +475,11 @@ export function createPersonalArchives(hooks: Hooks) {
             ${selected ? `<strong>${t("Seleccionada", "Selected")}</strong>` : ""}
           </div>
           ${metadata ? `<p class="archive-thread-byline">${h(metadata)}</p>` : ""}
-          <p class="archive-text">${h(row.text || row.title)}</p>
+          <p class="archive-text"${row.attachmentCount ? ` id="archive-post-label-${h(row.id)}"` : ""}>${h(row.text || row.title)}</p>
+          ${row.attachmentCount ? `<div class="archive-thread-actions">${attachmentButton(row)}</div>` : ""}
         </li>`;
       }).join("")}</ol>
-      ${page.total > PAGE ? `<div class="archive-actions">
-        ${action("archive-thread-previous", t("Anterior", "Previous"), undefined, "secondary", page.offset > 0 ? disabled() : "disabled")}
-        <span>${number(page.offset + 1)}–${number(Math.min(page.offset + PAGE, page.total))} / ${number(page.total)}</span>
-        ${action("archive-thread-next", t("Siguiente", "Next"), undefined, "secondary", page.offset + PAGE < page.total ? disabled() : "disabled")}
-      </div>` : ""}
+      ${pageControls(page.total, page.offset, "thread")}
     </section>`;
   }
 
@@ -508,7 +567,8 @@ export function createPersonalArchives(hooks: Hooks) {
       ${archive.pendingRemoval ? "" : `<nav class="archive-tabs" aria-label="${t("Categorías del archivo", "Archive categories")}">
         ${categories.map(key => `<button type="button" data-action="archive-category" data-id="${key}" aria-pressed="${category === key}" aria-disabled="${busy}">
           ${icon(categoryIcons[key])}<span>${name(key)}</span><small>${number(archive.categories[key] ?? 0)}</small></button>`).join("")}
-      </nav>${mediaPreview ? mediaView(mediaPreview) : thread ? threadView(thread.anchor, thread.page) : recordList()}`}
+      </nav>${mediaPreview ? mediaView(mediaPreview) : postAttachments ? attachmentView(postAttachments.post, postAttachments.page) :
+        thread ? threadView(thread.anchor, thread.page) : recordList()}`}
     </section>`;
   }
 
@@ -565,7 +625,7 @@ export function createPersonalArchives(hooks: Hooks) {
     if (!kind.startsWith("archive-")) return false;
     switch (kind) {
       case "archive-new":
-        discardMediaPreview(); adding = true; error = ""; hooks.render(); document.getElementById("archive-provider")?.focus(); break;
+        discardMediaPreview(); postAttachments = null; adding = true; error = ""; hooks.render(); document.getElementById("archive-provider")?.focus(); break;
       case "archive-choose": await choose(); break;
       case "archive-close-form":
         adding = false; preview = null; error = ""; hooks.render();
@@ -633,6 +693,19 @@ export function createPersonalArchives(hooks: Hooks) {
       case "archive-thread-next":
         if (thread) await openThread(thread.anchor, thread.page.offset + PAGE);
         break;
+      case "archive-attachments": {
+        const post = thread ? thread.page.posts.find(item => item.row.id === button.dataset.id)?.row
+          : result?.rows.find(row => row.id === button.dataset.id);
+        if (post?.attachmentCount && category === "posts" && current()?.provider === "x") await openAttachments(post);
+        break;
+      }
+      case "archive-attachments-back": backFromAttachments(); break;
+      case "archive-attachments-previous":
+        if (postAttachments) await openAttachments(postAttachments.post, Math.max(0, postAttachments.page.offset - PAGE));
+        break;
+      case "archive-attachments-next":
+        if (postAttachments) await openAttachments(postAttachments.post, postAttachments.page.offset + PAGE);
+        break;
       case "archive-remove": confirming = true; hooks.render(); break;
       case "archive-cancel-confirm": confirming = false; privateExport = false; hooks.render(); break;
       case "archive-remove-confirm": await run(async () => {
@@ -655,14 +728,15 @@ export function createPersonalArchives(hooks: Hooks) {
         if (links.length) await hooks.prepareLinks(links);
       }); break;
       case "archive-media-preview": {
-        const row = result?.rows.find(item => item.id === button.dataset.id);
-        if (!busy && row?.media && visualMedia.test(row.media)) await openMedia(row);
+        const rows = postAttachments?.page.rows ?? result?.rows;
+        const row = rows?.find(item => item.id === button.dataset.id);
+        if (!busy && row?.media && visualMedia.test(row.media)) await openMedia(postAttachments ? { ...row, title: attachmentName(row) } : row);
         break;
       }
       case "archive-media-back": backFromMedia(); break;
       case "archive-copy": await run(async () => {
         if (await hooks.command<boolean>("personal_archive_copy_media", {
-          id: archiveId, category, record: button.dataset.id, consent: privateOpen,
+          id: archiveId, category: postAttachments ? "media" : category, record: button.dataset.id, consent: privateOpen,
         })) hooks.notify(t("Copia guardada.", "Copy saved."), "success");
       }); break;
       case "archive-match": await run(async () => {
@@ -735,9 +809,10 @@ export function createPersonalArchives(hooks: Hooks) {
   }
 
   function key(event: KeyboardEvent) {
-    if (event.key !== "Escape" || !mediaPreview || busy || !(event.target instanceof HTMLElement)
-      || !event.target.closest(".archive-media-preview")) return false;
-    backFromMedia();
+    if (event.key !== "Escape" || busy || !(event.target instanceof HTMLElement)) return false;
+    if (mediaPreview && event.target.closest(".archive-media-preview")) backFromMedia();
+    else if (postAttachments && event.target.closest(".archive-attachments")) backFromAttachments();
+    else return false;
     return true;
   }
 
