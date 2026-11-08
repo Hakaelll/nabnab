@@ -8,7 +8,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(import.meta.dirname, "..");
-const base = path.join(root, "artifacts/dubbing");
+const base = path.resolve(process.env.NABNAB_DUBBING_ARTIFACTS ?? path.join(root, "artifacts/dubbing"));
 await mkdir(base, { recursive: true });
 const data = await mkdtemp(path.join(base, "native-run-"));
 const output = path.join(data, "output");
@@ -24,8 +24,8 @@ const draftId = "19999-1";
 const port = Number(process.env.NABNAB_DUBBING_DEBUG_PORT || 9256);
 const hash = bytes => createHash("sha256").update(bytes).digest("hex");
 
-await writeFile(subtitle, "WEBVTT\n\nprimero\n00:00:00.500 --> 00:00:02.000\nHola.\n\nsegundo\n00:00:03.000 --> 00:00:05.500\nHasta luego.\n");
-execFileSync(ffmpeg, ["-v", "error", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=12:d=6", "-f", "lavfi", "-i", "sine=frequency=290:d=6",
+await writeFile(subtitle, "WEBVTT\n\nprimero\n00:00:00.500 --> 00:00:02.000\nHola.\n\nsegundo\n00:00:03.000 --> 00:00:05.500\nNos vemos pronto.\n\ntercero\n00:00:06.000 --> 00:00:08.500\nHasta luego.\n");
+execFileSync(ffmpeg, ["-v", "error", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=12:d=9", "-f", "lavfi", "-i", "sine=frequency=290:d=9",
   "-i", subtitle, "-map", "0:v", "-map", "1:a", "-map", "2:s", "-c:v", "libopenh264", "-c:a", "aac", "-c:s", "mov_text", video], { windowsHide: true });
 execFileSync(ffmpeg, ["-v", "error", "-i", video, "-map", "0:v:0", "-c:v", "copy", silent], { windowsHide: true });
 
@@ -49,7 +49,7 @@ function rpc(command, args = {}) {
 
 async function launch() {
   const endpoint = `http://127.0.0.1:${port + launches++}`;
-  child = spawn(path.join(root, "src-tauri/target/debug/nabnab.exe"), [], { cwd: root, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
+  child = spawn(process.env.NABNAB_DUBBING_TEST_EXE ?? path.join(root, "src-tauri/target/debug/nabnab.exe"), [], { cwd: root, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
     env: { ...process.env, Path: `${data}${path.delimiter}${process.env.Path ?? process.env.PATH ?? ""}`,
       NABNAB_TEST_DATA_DIR: data, WEBVIEW2_USER_DATA_FOLDER: path.join(data, `webview-${launches}`),
       WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${new URL(endpoint).port} --mute-audio` } });
@@ -163,7 +163,8 @@ try {
   const drafts = path.join(data, "subtitle-translations");
   await mkdir(drafts, { recursive: true });
   await writeFile(path.join(drafts, `${draftId}.json`), JSON.stringify({ id: draftId, revision: 1, name: "Subtítulos originales", selection, original: cues,
-    translated: ["This sentence is deliberately far too long to fit inside the first short subtitle interval even after speeding it up moderately.", "See you soon."],
+    translated: ["This sentence is deliberately far too long to fit inside the first short subtitle interval even after speeding it up moderately.", "See you soon.",
+      "The final sentence is deliberately long as well, so the test can check how a second timing warning opens its own line in the editor."],
     contextualBlocks: 1, edited: [] }));
 
   const sourceBytes = await readFile(video);
@@ -182,12 +183,15 @@ try {
   await page.locator("#dub-queue-voice").click();
   const tooLong = await jobOf("dubVoice", 0, "error");
   assert.equal(tooLong.error.code, "dubbing_timing");
+  assert.equal(tooLong.error.technical, "DUB_TIMING 1, 3");
   assert.deepEqual(tooLong.outputs, []);
   const caches = path.join(data, "voice-cache");
   const cachedBefore = (await readdir(caches)).filter(name => name.endsWith(".wav")).sort();
-  assert.equal(cachedBefore.length, 2);
-  await page.locator('[data-action="dub-edit-cue"]').click();
-  await page.waitForFunction(() => document.activeElement?.id === "translation-cue-0");
+  assert.equal(cachedBefore.length, 3);
+  await page.getByRole("button", { name: "Editar segmento 3", exact: true }).press("Enter");
+  await page.waitForFunction(() => document.activeElement?.id === "translation-cue-2");
+  await page.locator("#translation-cue-2").fill("Goodbye.");
+  await page.getByRole("button", { name: "Siguiente aviso de doblaje", exact: true }).press("Enter");
   assert.equal(await page.locator("#translation-cue-0").evaluate(node => node === document.activeElement), true);
   await page.locator("#translation-cue-0").fill("Hello.");
   await openDubbingFromPalette();
@@ -196,6 +200,7 @@ try {
   assert.equal(await page.locator("#dub-queue-voice").isDisabled(), true);
   await page.getByRole("button", { name: "Editar traducción", exact: true }).click();
   assert.equal(await page.locator("#translation-cue-0").inputValue(), "Hello.");
+  assert.equal(await page.locator("#translation-cue-2").inputValue(), "Goodbye.");
   await page.locator("#translation-save").click();
   await wait(async () => (await rpc("translation_read", { draftId })).revision === 2);
   await page.locator("#dub-open").click();
@@ -203,15 +208,17 @@ try {
   await page.locator("#dub-queue-voice").click();
   const wav = await jobOf("dubVoice", 1, "completed");
   const cachedAfter = (await readdir(caches)).filter(name => name.endsWith(".wav")).sort();
-  assert.equal(cachedAfter.length, 3);
+  assert.equal(cachedAfter.length, 5);
   assert.ok(cachedBefore.every(name => cachedAfter.includes(name)));
   const pcm = await readFile(wav.outputs[0]);
   assert.equal(pcm.subarray(0, 4).toString(), "RIFF");
-  assert.equal(pcm.readUInt32LE(40), 5.5 * 22050 * 2);
+  assert.equal(pcm.readUInt32LE(40), 8.5 * 22050 * 2);
   assert.equal(rms(pcm, 0, 0.49), 0);
   assert.ok(rms(pcm, 0.5, 2) > 0.01);
   assert.equal(rms(pcm, 2, 2.99), 0);
   assert.ok(rms(pcm, 3, 5.5) > 0.01);
+  assert.equal(rms(pcm, 5.5, 5.99), 0);
+  assert.ok(rms(pcm, 6, 8.5) > 0.01);
   await page.getByRole("button", { name: "Escuchar WAV", exact: true }).click();
   await wait(() => page.locator("#audio-engine").evaluate(media => media.currentTime > 0));
   await page.locator("#audio-close").click();
@@ -271,7 +278,7 @@ try {
     await page.screenshot({ path: path.join(data, `dubbing-${width}.png`), animations: "disabled" });
     if (width === 1180) await section.screenshot({ path: path.join(data, "dubbing-results.png"), animations: "disabled" });
   }
-  console.log(JSON.stringify({ draftFixture: true, catalogAndPalette: true, editsPreservedBetweenTools: true, sapiSample: true, timingIssue: tooLong.error.technical, reusedCues: 1, synchronizedSeconds: 5.5,
+  console.log(JSON.stringify({ draftFixture: true, catalogAndPalette: true, editsPreservedBetweenTools: true, sapiSample: true, timingIssue: tooLong.error.technical, reusedCues: 1, synchronizedSeconds: 8.5,
     alternateTracks: 2, failedMixKeptWav: true, mixedTracks: 1, unchangedOriginal: true, shares: 3, viewports: [1180, 900] }));
 } catch (error) {
   console.error(log);

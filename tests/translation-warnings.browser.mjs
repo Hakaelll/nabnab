@@ -18,7 +18,10 @@ const setup = `
   mockWindows("main");
   const settings = { folder: "C:/Fixture", language: "es", reducedMotion: true, reducedTransparency: true, sidebarExpanded: true, trayEnabled: false };
   const job = { id: "fixture", title: "Escenas de prueba", source: { kind: "captionTranslation" }, state: "completed", outputs: [], createdAt: 1, runId: 1 };
-  const snapshot = { settings, jobs: [job], library: [], collections: [], drafts: [], sources: [], rules: [], smartCollections: [], presets: [], audioPlaylists: [] };
+  const dub = { id: "fixture-dub", title: "Voz de prueba", state: "error", createdAt: 2, runId: 1, outputs: [],
+    source: { kind: "dubVoice", selection: { draftId: job.id, revision: 2, settings: { voiceId: "fixture-voice", rate: 0, volume: 100 } } },
+    error: { code: "dubbing_timing", technical: "DUB_TIMING 2, 14", message: "Some cues do not fit." } };
+  const snapshot = { settings, jobs: [job, dub], library: [], collections: [], drafts: [], sources: [], rules: [], smartCollections: [], presets: [], audioPlaylists: [] };
   const calls = window.translationCalls = [];
   const original = Array.from({ length: 15 }, (_, index) => ({ identifier: "escena-" + (index + 1), start: index * 8, end: index * 8 + (index === 13 ? 0.8 : 5), text: "Segmento original " + (index + 1) }));
   const translated = original.map((cue, index) => "Cue " + (index + 1));
@@ -30,6 +33,7 @@ const setup = `
     if (command === "startup") return { ...snapshot, folder: settings.folder, enginesReady: true, engineError: null };
     if (command === "get_snapshot") return snapshot;
     if (command === "optional_components") return [{ id: "translate-es-en", installed: true, enabled: true, available: true }];
+    if (command === "voice_status") return { enabled: true, available: true, voices: [{ id: "fixture-voice", name: "Fixture voice", language: "en-US", enabled: true }] };
     if (command === "translation_drafts") return [draft.id];
     if (command === "translation_read") return structuredClone(draft);
     if (command === "translation_edit") {
@@ -95,8 +99,46 @@ try {
   assert.deepEqual(calls.find(call => call.command === "translation_edit").args, {
     draftId: "fixture", revision: 1, edits: [{ index: 0, text: "A short line." }, { index: 13, text: "Brief." }],
   });
+  await tool.getByRole("button", { name: "Crear doblaje", exact: true }).press("Enter");
+  const dubbing = page.locator(".dubbing-tool");
+  const editSecond = dubbing.getByRole("button", { name: "Editar segmento 14", exact: true });
+  await dubbing.locator(".dub-result").waitFor();
+  await dubbing.locator(".dub-result").scrollIntoViewIfNeeded();
+  await page.screenshot({ path: path.join(directory, "dub-timing-900.png") });
+  await editSecond.press("Enter", { timeout: 2500 });
+  await page.waitForFunction(() => document.activeElement?.id === "translation-cue-13");
+  assert.equal(await tool.locator(".translation-pagination > span").innerText(), "13–15 / 15");
+  const dubNext = tool.getByRole("button", { name: "Siguiente aviso de doblaje", exact: true });
+  await second.fill("See you.");
+  await dubNext.press("Enter");
+  const other = tool.locator("#translation-cue-1");
+  assert.ok(await other.evaluate(input => input === document.activeElement));
+  await other.fill("Hello.");
+  await dubNext.press("Enter");
+  assert.ok(await second.evaluate(input => input === document.activeElement));
+  assert.equal(await second.inputValue(), "See you.");
+  await tool.getByText("No cabía en la última síntesis.", { exact: true }).waitFor();
+  for (const [width, height] of [[1180, 780], [900, 620]]) {
+    await page.setViewportSize({ width, height });
+    await second.scrollIntoViewIfNeeded();
+    assert.ok(await tool.evaluate(element => element.scrollWidth <= element.clientWidth + 1));
+    assert.ok(await dubNext.evaluate(button => {
+      const area = document.getElementById("main").getBoundingClientRect();
+      const { top, bottom } = button.getBoundingClientRect();
+      return top >= area.top && bottom <= area.bottom;
+    }));
+    await page.screenshot({ path: path.join(directory, `dub-timing-editor-${width}.png`) });
+  }
+  await tool.getByRole("button", { name: "Guardar edición", exact: true }).press("Enter");
+  await dubNext.waitFor({ state: "detached" });
+  await tool.getByRole("button", { name: "Crear doblaje", exact: true }).press("Enter");
+  await dubbing.locator("#dub-queue-voice").waitFor();
+  assert.equal(await editSecond.count(), 0);
+  assert.deepEqual(await page.evaluate(() => window.translationCalls.filter(call => call.command === "translation_edit").at(-1).args), {
+    draftId: "fixture", revision: 2, edits: [{ index: 13, text: "See you." }, { index: 1, text: "Hello." }],
+  });
   assert.deepEqual(errors, []);
-  console.log("Length warnings distinguish line width and reading speed, focus cues across pages, and keep both edits until save.");
+  console.log("Length and dubbing warnings focus cues across pages and keep edits until save.");
 } finally {
   await browser.close();
 }

@@ -834,7 +834,7 @@ async function handleAction(action: string, button: HTMLButtonElement): Promise<
   if(action==='open-torrents'||action==='open-torrent'){platformModule='torrent';navigate('platforms');await torrents.load();renderCurrent();return;}
   if(action==='platform-back'){showPlatformsCatalog();return;}
   if(await automation.click(action,button)||await screenCapture.click(action,button)||await voice.click(action,button))return;
-  if(await imageAssets.click(action,button)||await stickerTool.click(action)||await upscaleTool.click(action)||await backgroundTool.click(action)||await stemsTool.click(action,button)||await translationTool.click(action)||await fileOrganization.click(action,button)||await portable.click(action,button))return;
+  if(await imageAssets.click(action,button)||await stickerTool.click(action)||await upscaleTool.click(action)||await backgroundTool.click(action)||await stemsTool.click(action,button)||await translationTool.click(action,button)||await fileOrganization.click(action,button)||await portable.click(action,button))return;
   if(await articles.click(action,button)||await ocr.click(action,button)||await documentEdits.click(action))return;
   if(audioPlayer.click(action,button)||await audioLibrary.click(action,button)||await personalArchives.click(action,button))return;
   if(await personalServers.handleClick(action,button)||await fileSources.handleClick(action,button))return;

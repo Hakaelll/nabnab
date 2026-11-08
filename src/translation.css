@@ -47,5 +47,11 @@
 .dub-sample { display: grid; grid-template-columns: minmax(0, 1fr) minmax(180px, 300px); gap: 10px; align-items: center; overflow-wrap: anywhere; }
 .dub-sample audio { display: block; width: 100%; height: 36px; }
 .dub-result { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
-.dub-result small { color: var(--muted); font-variant-numeric: tabular-nums; }
+.dub-timing { display: grid; gap: 6px; }
+.dub-timing-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.dub-timing ol { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 186px), 1fr)); gap: 0 12px; margin: 2px 0 0; padding: 0; list-style: none; }
+.dub-timing li { display: flex; flex-direction: column; align-items: start; gap: 2px; border-block-start: 1px solid var(--edge-quiet); padding-block: 4px 8px; }
+.dub-timing li time { padding-inline-start: 8px; }
+.translation-dub-nav { position: sticky; top: 0; z-index: 1; justify-content: flex-end; border-block: 1px solid var(--edge-quiet); margin-top: 4px; background: var(--secondary); }
+.translation-columns textarea[aria-describedby*="translation-dub-warning"] { scroll-margin-block-start: 44px; }
 @media (max-width: 960px) { .dub-sample { grid-template-columns: minmax(0, 1fr); } }

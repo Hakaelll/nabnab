@@ -71,6 +71,10 @@ export function createTranslationTool(hooks: Hooks) {
   const warnings = new Set<number>();
   const dubbing = createDubbing({ ...hooks, hasEdits: () => edits.size > 0,
     draft: () => draft ? { id: draft.id, revision: draft.revision, pair: draft.selection.pair, sourceId: draft.selection.input.libraryId, count: draft.original.length } : null,
+    cueTiming: index => {
+      const cue = draft?.original[index];
+      return cue ? `${timing(cue.start)} – ${timing(cue.end)}` : "";
+    },
     focusCue: async index => {
       offset = Math.floor(index / pageSize) * pageSize;
       warningCursor = index;
@@ -219,10 +223,12 @@ export function createTranslationTool(hooks: Hooks) {
   }
 
   function comparison(current: Draft) {
+    const dubIssues = new Set(dubbing.timingIssues());
     const rows = current.original.slice(offset, offset + pageSize).map((cue, visibleIndex) => {
       const index = offset + visibleIndex;
       const target = edits.get(index) ?? current.translated[index];
       const details = warnings.has(index) ? lengthWarning(target, cue) : null;
+      const dubIssue = dubIssues.has(index);
       return `<li class="translation-cue">
         <div class="translation-time"><span>${h(cue.identifier ?? String(index + 1))}</span>
           <time>${timing(cue.start)} – ${timing(cue.end)}</time></div>
@@ -231,8 +237,9 @@ export function createTranslationTool(hooks: Hooks) {
             <p>${styled(cue.text)}</p></div>
           <label for="translation-cue-${index}"><span class="field-note">${t("Traducción", "Translation")}</span>
             <textarea id="translation-cue-${index}" data-translation-index="${index}" aria-label="${t("Traducción del segmento", "Translation of cue")} ${index + 1}"
-              aria-describedby="translation-warning-${index}" rows="2" maxlength="16000" ${busy ? "disabled" : ""}>${h(target)}</textarea>
+              aria-describedby="translation-warning-${index}${dubIssue ? ` translation-dub-warning-${index}` : ""}" rows="2" maxlength="16000" ${busy ? "disabled" : ""}>${h(target)}</textarea>
             <small id="translation-warning-${index}" class="translation-warning" ${details ? "" : "hidden"}>${details ? h(warning(details)) : ""}</small>
+            ${dubIssue ? `<small id="translation-dub-warning-${index}" class="translation-warning">${t("No cabía en la última síntesis.", "Did not fit in the last synthesis.")}</small>` : ""}
           </label>
         </div></li>`;
     }).join("");
@@ -249,6 +256,8 @@ export function createTranslationTool(hooks: Hooks) {
         : t("Los segmentos se tradujeron por separado.", "Cues were translated individually.")}</p>
         <div class="translation-warning-nav"><span id="translation-warning-count" role="status">${warningCountLabel()}</span>
           ${action("translation-next-warning", t("Siguiente aviso", "Next warning"), "arrow", "quiet", `id="translation-next-warning" ${busy || !warnings.size ? "disabled" : ""}`)}</div></div>
+      ${dubIssues.size ? `<div class="translation-warning-nav translation-dub-nav"><span>${dubIssues.size === 1 ? t("1 aviso de doblaje", "1 dubbing warning") : t(`${dubIssues.size} avisos de doblaje`, `${dubIssues.size} dubbing warnings`)}</span>
+        ${action("translation-next-dub-warning", t("Siguiente aviso de doblaje", "Next dubbing warning"), "arrow", "quiet", busy ? "disabled" : "")}</div>` : ""}
       <ol class="translation-cues">${rows}</ol>
       ${current.original.length > pageSize ? `<div class="translation-pagination">
         ${action("translation-prev", t("Anterior", "Previous"), undefined, "quiet", offset === 0 ? "disabled" : "")}
@@ -319,12 +328,12 @@ export function createTranslationTool(hooks: Hooks) {
     </section>`;
   }
 
-  async function click(kind: string) {
+  async function click(kind: string, button: HTMLElement) {
     if (kind === "dub-open") {
       if (!busy && !edits.size) await hooks.openTool("dubbing");
       return true;
     }
-    if (kind.startsWith("dub-")) return dubbing.click(kind);
+    if (kind.startsWith("dub-")) return dubbing.click(kind, button);
     switch (kind) {
       case "translation-edit-draft": await hooks.openTool("translation"); return true;
       case "translation-components": hooks.components(); return true;
@@ -350,9 +359,10 @@ export function createTranslationTool(hooks: Hooks) {
         return true;
       case "translation-prev": offset = Math.max(0, offset - pageSize); warningCursor = null; hooks.render(); return true;
       case "translation-next": offset += pageSize; warningCursor = null; hooks.render(); return true;
-      case "translation-next-warning": {
-        if (busy || !warnings.size) return true;
-        const ordered = [...warnings].sort((a, b) => a - b);
+      case "translation-next-warning":
+      case "translation-next-dub-warning": {
+        const ordered = (kind === "translation-next-warning" ? [...warnings] : dubbing.timingIssues()).sort((a, b) => a - b);
+        if (busy || !ordered.length) return true;
         const index = ordered.find(index => index > (warningCursor ?? offset - 1)) ?? ordered[0];
         warningCursor = index;
         offset = Math.floor(index / pageSize) * pageSize;
