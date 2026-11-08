@@ -81,13 +81,14 @@
 .stage-caption-heading { display: flex; align-items: center; gap: 9px; font-size: 15px; }
 .stage-caption-heading > span { display: grid; place-items: center; width: 32px; height: 32px; border: 1px solid var(--edge-quiet); border-radius: 9px; background: var(--surface); }
 .stage-caption-heading svg { width: 18px; height: 18px; }
+.stage-caption-heading small { margin-inline-start: auto; padding: 3px 8px; border: 1px solid var(--border); border-radius: 20px; color: var(--muted); font-size: 11px; }
 .stage-caption-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .stage-caption-panel .stage-caption-contrast { flex-direction: row; align-items: center; gap: 8px; min-height: 32px; }
 .stage-caption-contrast input { margin: 0; }
 .stage-caption-files { display: grid; gap: 8px; padding-top: 10px; border-top: 1px solid var(--edge-quiet); }
 .stage-caption-files > strong { font-size: 13px; font-weight: 600; }
 .stage-caption-files > .stage-button { justify-self: stretch; }
-#stage-styled-status { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.4; }
+.stage-caption-status { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.4; }
 .stage-caption-import { display: flex; align-items: end; gap: 6px; }
 .stage-caption-import label { flex: 1; min-width: 0; }
 .stage-prompt, .stage-error { top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(440px, calc(100vw - 32px)); }

@@ -1,6 +1,7 @@
 import type { PlaybackPreferences } from "./playback-preferences";
 
 type Command = <T>(name: string, args: Record<string, unknown>) => Promise<T>;
+type StyledSource = { kind: "file" } | { kind: "embedded"; video: string; index: number; title: string };
 
 export function createStyledCaptions(host: HTMLElement, video: HTMLVideoElement, command: Command, onError: () => void) {
   const canvas = document.createElement("canvas");
@@ -14,7 +15,7 @@ export function createStyledCaptions(host: HTMLElement, video: HTMLVideoElement,
   let enabled = false;
   let pending = false;
   let failed = false;
-  let loading = false;
+  let loading = "";
   let frame = 0;
   let lastTick = 0;
   let offset = 0;
@@ -111,15 +112,20 @@ export function createStyledCaptions(host: HTMLElement, video: HTMLVideoElement,
     draw();
   }
 
-  async function load() {
+  async function load(source: StyledSource) {
     if (!context) throw Error("The styled subtitle canvas is unavailable.");
     const id = crypto.randomUUID();
-    const requestRevision = revision;
-    loading = true;
+    loading = id;
     try {
-      const title = await command<string | null>("styled_caption_open", { id, path: null });
+      let title: string | null;
+      if (source.kind === "embedded") {
+        await command<void>("styled_caption_embedded", { id, video: source.video, index: source.index });
+        title = source.title;
+      } else {
+        title = await command<string | null>("styled_caption_open", { id, path: null });
+      }
       if (!title) return false;
-      if (revision !== requestRevision) {
+      if (loading !== id) {
         await command<void>("styled_caption_close", { id });
         return false;
       }
@@ -127,7 +133,7 @@ export function createStyledCaptions(host: HTMLElement, video: HTMLVideoElement,
       failed = false;
       clear();
       return true;
-    } finally { loading = false; }
+    } finally { if (loading === id) loading = ""; }
   }
 
   function close() {
@@ -135,6 +141,8 @@ export function createStyledCaptions(host: HTMLElement, video: HTMLVideoElement,
     enabled = false;
     cancelAnimationFrame(frame);
     frame = 0;
+    if (loading) void command<void>("styled_caption_close", { id: loading }).catch(() => {});
+    loading = "";
     if (track) void command<void>("styled_caption_close", { id: track.id }).catch(() => {});
     track = undefined;
     failed = false;

@@ -1,5 +1,6 @@
 use crate::{dependencies, library, AppState};
 use std::{
+    future::Future,
     process::Stdio,
     sync::{Arc, Mutex},
     time::Duration,
@@ -10,10 +11,33 @@ use tokio::{io::AsyncReadExt, process::Command, sync::watch};
 const MAX_FRAME_BYTES: usize = 48 * 1024;
 
 #[derive(Default)]
-pub struct FramePreview(Mutex<Option<(String, watch::Sender<bool>)>>);
+pub struct PlaybackRequest(Mutex<Option<(String, watch::Sender<bool>)>>);
 
-impl FramePreview {
-    fn cancel(&self, request: &str) {
+impl PlaybackRequest {
+    pub(crate) async fn run<T>(
+        &self,
+        id: &str,
+        operation: impl Future<Output = Result<T, String>>,
+    ) -> Result<T, String> {
+        let mut cancel = self.start(id.to_owned());
+        let result = tokio::select! {
+            biased;
+            _ = cancel.changed() => Err("Playback request cancelled.".into()),
+            result = operation => result,
+        };
+        self.cancel(id);
+        result
+    }
+
+    pub(crate) fn start(&self, request: String) -> watch::Receiver<bool> {
+        let (cancel, receiver) = watch::channel(false);
+        if let Some((_, previous)) = self.0.lock().unwrap().replace((request, cancel)) {
+            let _ = previous.send(true);
+        }
+        receiver
+    }
+
+    pub(crate) fn cancel(&self, request: &str) {
         let mut active = self.0.lock().unwrap();
         if active.as_ref().is_some_and(|(id, _)| id == request) {
             if let Some((_, cancel)) = active.take() {
@@ -62,16 +86,7 @@ pub async fn playback_preview_frame(
         library::authorized_path(&item.path)?
     };
     let executable = dependencies::engine_root(&app)?.join("ffmpeg.exe");
-    let (cancel, mut cancelled) = watch::channel(false);
-    if let Some((_, previous)) = state
-        .playback_preview
-        .0
-        .lock()
-        .unwrap()
-        .replace((request.clone(), cancel))
-    {
-        let _ = previous.send(true);
-    }
+    let mut cancelled = state.playback_preview.start(request.clone());
     let extract = async {
         let mut command = Command::new(executable);
         command

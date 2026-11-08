@@ -1,4 +1,20 @@
-use tauri::{ipc::Response, AppHandle};
+use crate::AppState;
+use std::sync::Arc;
+use tauri::{ipc::Response, AppHandle, State};
+
+#[cfg(windows)]
+mod embedded;
+
+#[derive(serde::Serialize)]
+pub struct EmbeddedTrack {
+    index: u32,
+    codec: &'static str,
+    title: Option<String>,
+    language: Option<String>,
+}
+
+#[cfg(windows)]
+const MAX_SCRIPT: usize = 2 * 1024 * 1024;
 
 #[derive(Clone, Copy, Default, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -21,7 +37,7 @@ pub struct StyledFrame {
 
 #[cfg(windows)]
 mod native {
-    use super::{Geometry, StyledFrame};
+    use super::{Geometry, StyledFrame, MAX_SCRIPT};
     use std::{
         ffi::{c_char, c_void},
         fs::File,
@@ -40,7 +56,6 @@ mod native {
         },
     };
 
-    const MAX_SCRIPT: usize = 2 * 1024 * 1024;
     const MAX_AREA: usize = 480_000;
     type Handle = *mut c_void;
     type Create = unsafe extern "C" fn() -> Handle;
@@ -308,12 +323,17 @@ mod native {
         Ok(output)
     }
 
+    pub(super) enum Source {
+        File(PathBuf),
+        Embedded(Vec<u8>),
+    }
+
     enum Message {
         Open {
             id: String,
             root: PathBuf,
-            path: PathBuf,
-            reply: oneshot::Sender<Result<String, String>>,
+            source: Source,
+            reply: oneshot::Sender<Result<(), String>>,
         },
         Frame(StyledFrame, oneshot::Sender<Result<Vec<u8>, String>>),
         Close(String),
@@ -332,10 +352,6 @@ mod native {
         File::open(path)
             .and_then(|file| file.take(MAX_SCRIPT as u64 + 1).read_to_end(&mut script))
             .map_err(|_| "Could not read the styled subtitle file.")?;
-        if script.len() > MAX_SCRIPT || script.contains(&0) || std::str::from_utf8(&script).is_err()
-        {
-            return Err("Choose a UTF-8 ASS/SSA file of at most 2 MiB.".into());
-        }
         Ok(script)
     }
 
@@ -351,20 +367,25 @@ mod native {
                         Message::Open {
                             id,
                             root,
-                            path,
+                            source,
                             reply,
                         } => {
-                            let result = read(&path)
-                                .and_then(|mut script| Renderer::open(&root, id, &mut script))
-                                .map(|renderer| {
-                                    let title = path
-                                        .file_name()
-                                        .unwrap_or_default()
-                                        .to_string_lossy()
-                                        .into_owned();
-                                    active = Some(renderer);
-                                    title
-                                });
+                            let script = match source {
+                                Source::File(path) => read(&path),
+                                Source::Embedded(script) => Ok(script),
+                            };
+                            let result = script.and_then(|mut script| {
+                                if script.len() > MAX_SCRIPT
+                                    || script.contains(&0)
+                                    || std::str::from_utf8(&script).is_err()
+                                {
+                                    return Err(
+                                        "The ASS/SSA track must be UTF-8 and at most 2 MiB.".into(),
+                                    );
+                                }
+                                active = Some(Renderer::open(&root, id, &mut script)?);
+                                Ok(())
+                            });
                             let _ = reply.send(result);
                         }
                         Message::Frame(frame, reply) => {
@@ -389,13 +410,13 @@ mod native {
         })
     }
 
-    pub(super) async fn open(id: String, root: PathBuf, path: PathBuf) -> Result<String, String> {
+    pub(super) async fn open(id: String, root: PathBuf, source: Source) -> Result<(), String> {
         let (reply, result) = oneshot::channel();
         worker()
             .try_send(Message::Open {
                 id,
                 root,
-                path,
+                source,
                 reply,
             })
             .map_err(|_| "The subtitle renderer is busy.")?;
@@ -428,46 +449,120 @@ mod native {
     }
 }
 
+#[cfg(windows)]
+fn validate_id(id: &str) -> Result<(), String> {
+    if id.len() == 36
+        && id.bytes().enumerate().all(|(index, byte)| {
+            if matches!(index, 8 | 13 | 18 | 23) {
+                byte == b'-'
+            } else {
+                byte.is_ascii_hexdigit()
+            }
+        })
+    {
+        Ok(())
+    } else {
+        Err("Invalid styled subtitle session.".into())
+    }
+}
+
 #[tauri::command]
 pub async fn styled_caption_open(
     app: AppHandle,
+    state: State<'_, Arc<AppState>>,
     id: String,
     path: Option<std::path::PathBuf>,
 ) -> Result<Option<String>, String> {
     #[cfg(windows)]
     {
         use tauri_plugin_dialog::DialogExt;
-        if id.len() != 36
-            || !id
-                .bytes()
-                .all(|byte| byte == b'-' || byte.is_ascii_hexdigit())
-        {
-            return Err("Invalid styled subtitle session.".into());
-        }
+        validate_id(&id)?;
         let root = crate::dependencies::bundled_root(&app)?;
-        let path = match path {
-            Some(path) => path,
-            None => {
-                let Some(file) = tauri::async_runtime::spawn_blocking(move || {
-                    app.dialog()
-                        .file()
-                        .add_filter("Styled subtitles", &["ass", "ssa"])
-                        .blocking_pick_file()
-                })
-                .await
-                .map_err(|_| "Could not open the subtitle file picker.")?
-                else {
-                    return Ok(None);
+        state
+            .styled_caption_request
+            .run(&id, async {
+                let path = match path {
+                    Some(path) => path,
+                    None => {
+                        let Some(file) = tauri::async_runtime::spawn_blocking(move || {
+                            app.dialog()
+                                .file()
+                                .add_filter("Styled subtitles", &["ass", "ssa"])
+                                .blocking_pick_file()
+                        })
+                        .await
+                        .map_err(|_| "Could not open the subtitle file picker.")?
+                        else {
+                            return Ok(None);
+                        };
+                        file.into_path()
+                            .map_err(|_| "Choose a local ASS or SSA subtitle file.")?
+                    }
                 };
-                file.into_path()
-                    .map_err(|_| "Choose a local ASS or SSA subtitle file.")?
-            }
-        };
-        native::open(id, root, path).await.map(Some)
+                let title = path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned();
+                native::open(id.clone(), root, native::Source::File(path)).await?;
+                Ok(Some(title))
+            })
+            .await
     }
     #[cfg(not(windows))]
     {
-        let _ = (app, id, path);
+        let _ = (app, state, id, path);
+        Err("The bundled ASS/SSA renderer is available on Windows.".into())
+    }
+}
+
+#[tauri::command]
+pub async fn styled_caption_tracks(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    video: String,
+    id: String,
+) -> Result<Vec<EmbeddedTrack>, String> {
+    #[cfg(windows)]
+    {
+        validate_id(&id)?;
+        let (root, path) = embedded::input(&app, &state, &video)?;
+        state
+            .styled_caption_probe
+            .run(&id, embedded::bounded(embedded::tracks(&root, &path)))
+            .await
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (app, state, video, id);
+        Ok(Vec::new())
+    }
+}
+
+#[tauri::command]
+pub async fn styled_caption_embedded(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    video: String,
+    id: String,
+    index: u32,
+) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        validate_id(&id)?;
+        let (root, path) = embedded::input(&app, &state, &video)?;
+        let renderer = crate::dependencies::bundled_root(&app)?;
+        state
+            .styled_caption_request
+            .run(&id, async {
+                let script = embedded::bounded(embedded::extract(&root, &path, index)).await?;
+                native::open(id.clone(), renderer, native::Source::Embedded(script)).await
+            })
+            .await
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (app, state, video, id, index);
         Err("The bundled ASS/SSA renderer is available on Windows.".into())
     }
 }
@@ -486,7 +581,9 @@ pub async fn styled_caption_frame(request: StyledFrame) -> Result<Response, Stri
 }
 
 #[tauri::command]
-pub fn styled_caption_close(id: String) {
+pub fn styled_caption_close(state: State<'_, Arc<AppState>>, id: String) {
+    state.styled_caption_probe.cancel(&id);
+    state.styled_caption_request.cancel(&id);
     #[cfg(windows)]
     native::close(id);
     #[cfg(not(windows))]

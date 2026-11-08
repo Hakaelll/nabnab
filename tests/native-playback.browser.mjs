@@ -44,7 +44,6 @@ encode("-f", "lavfi", "-i", "aevalsrc=if(between(t\\,4\\,10)\\,0\\,sin(2*PI*82*t
   "-metadata", "title=Señal para la cola", "-metadata", "artist=Laboratorio nabnab", music);
 encode("-f", "lavfi", "-i", "testsrc2=size=720x248:rate=20:duration=6", "-f", "lavfi",
   "-i", "sine=frequency=550:duration=6", "-c:v", "libvpx-vp9", "-deadline", "realtime", "-c:a", "libopus", "-shortest", webm);
-encode("-i", webm, "-c", "copy", mkv);
 for (const { file, codec } of audioSamples) encode("-f", "lavfi", "-i", "aevalsrc=(0.1+0.5*pow(0.5+0.5*cos(2*PI*3.5*t)\\,6))*sin(2*PI*550*t):d=10", "-c:a", codec, file);
 await writeFile(broken, "Archivo de prueba sin contenedor de vídeo.");
 await writeFile(captions, "WEBVTT\n\n00:00:04.000 --> 00:00:09.000\nTexto local &lt;b&gt;seguro&lt;/b&gt;\n");
@@ -64,6 +63,10 @@ await writeFile(styledSsa, [
   "[Events]", "Format: Marked, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
   "Dialogue: Marked=0,0:00:04.00,0:00:08.00,Default,,0,0,0,,Texto SSA",
 ].join("\n"));
+encode("-i", webm, "-i", styledAss, "-i", styledSsa,
+  "-map", "0:v", "-map", "0:a", "-map", "1:s", "-map", "2:s", "-c", "copy",
+  "-metadata:s:s:0", "title=Rótulos de prueba", "-metadata:s:s:0", "language=spa",
+  "-metadata:s:s:1", "title=Diálogo clásico", "-metadata:s:s:1", "language=eng", mkv);
 await writeFile(handout, "Material de estudio de prueba.\n");
 
 let child, browser, page, nativeHandle, log = "";
@@ -133,20 +136,13 @@ const play = id => page.locator(`.media-play[data-id="${id}"]`).click();
 const clickStage = action => stage().locator(`[data-stage-action="${action}"]`).click();
 const clip = file => JSON.parse(execFileSync(ffprobe, ["-v", "error", "-show_streams", "-of", "json", file], { windowsHide: true })).streams;
 
-async function verifyStyledCaptions(engine) {
-  const canvas = stage().locator(".stage-styled-captions");
-  const select = page.locator("#stage-caption-track");
-  const seek = position => stage().locator("#stage-seek").evaluate((slider, position) => {
-    slider.value = String(position);
-    slider.dispatchEvent(new Event("input", { bubbles: true }));
-  }, position);
-  const load = async file => {
-    await page.evaluate(file => { window.nabnabStyledFixture = file; }, file);
-    await clickStage("import-styled");
-    await select.locator('option[value="styled"]').filter({ hasText: path.basename(file) }).waitFor({ state: "attached" });
-    assert.equal(await select.inputValue(), "styled");
-  };
-  const pixels = () => canvas.evaluate(canvas => {
+const seekVideo = position => stage().locator("#stage-seek").evaluate((slider, position) => {
+  slider.value = String(position);
+  slider.dispatchEvent(new Event("input", { bubbles: true }));
+}, position);
+
+function captionPixels(canvas) {
+  return canvas.evaluate(canvas => {
     const result = { yellow: 0, cyan: 0, magenta: 0, left: canvas.width };
     if (canvas.hidden) return result;
     const { data } = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height);
@@ -162,16 +158,28 @@ async function verifyStyledCaptions(engine) {
     }
     return result;
   });
+}
+
+async function verifyStyledCaptions(engine) {
+  const canvas = stage().locator(".stage-styled-captions");
+  const select = page.locator("#stage-caption-track");
+  const load = async file => {
+    await page.evaluate(file => { window.nabnabStyledFixture = file; }, file);
+    await clickStage("import-styled");
+    await select.locator('option[value="styled"]').filter({ hasText: path.basename(file) }).waitFor({ state: "attached" });
+    assert.equal(await select.inputValue(), "styled");
+  };
+  const pixels = () => captionPixels(canvas);
   await clickStage("toggle");
   await wait(async () => (await playing()).paused);
-  await seek(5);
+  await seekVideo(5);
   await load(styledAss);
   const first = await wait(async () => {
     const painted = await pixels();
     return painted.yellow > 100 && painted.cyan > 100 && painted;
   });
   assert.equal(await stage().locator(".stage-captions").isVisible(), false);
-  await seek(6.5);
+  await seekVideo(6.5);
   await wait(async () => (await pixels()).left > first.left + 20 && (await pixels()).yellow > 100);
   const box = await canvas.boundingBox();
   assert.ok(Math.abs(box.width / box.height - 360 / 640) < 0.01);
@@ -187,10 +195,51 @@ async function verifyStyledCaptions(engine) {
   await wait(async () => (await pixels()).magenta > 100);
   await select.selectOption({ label: "es · Local" });
   await canvas.waitFor({ state: "hidden" });
-  await seek(5.25);
+  await seekVideo(5.25);
   assert.equal(await engine.evaluate(video => video === document.getElementById("audio-engine")), true);
   await clickStage("toggle");
   console.log("Native libass preserved overlapping colors and moving ASS text, rendered SSA and respected the subtitle offset without replacing the video engine.");
+}
+
+async function verifyEmbeddedCaptions(engine, video) {
+  const before = await playing();
+  assert.equal(before.error, undefined, "The WebView must play the Matroska sample");
+  await clickStage("toggle");
+  await wait(async () => (await playing()).paused);
+  await clickStage("captions");
+  const canvas = stage().locator(".stage-styled-captions");
+  const select = page.locator("#stage-caption-track");
+  const tracks = select.locator("#stage-embedded-options option");
+  await tracks.first().waitFor({ state: "attached" });
+  assert.deepEqual(await tracks.allTextContents(), ["Rótulos de prueba · spa · ASS", "Diálogo clásico · eng · ASS"]);
+  await assert.rejects(rpc("styled_caption_embedded", { id: "6d9df8bf-c66b-424a-b965-1adbe40bb411", video, index: 0 }),
+    /not an embedded ASS\/SSA subtitle/);
+  await seekVideo(4.5);
+  await select.selectOption({ label: "Rótulos de prueba · spa · ASS" });
+  await stage().locator("#stage-caption-origin").getByText("Integrada").waitFor();
+  const first = await wait(async () => {
+    const frame = await captionPixels(canvas);
+    return frame.yellow > 60 && frame.cyan > 60 && frame;
+  });
+  await seekVideo(5.75);
+  await wait(async () => {
+    const frame = await captionPixels(canvas);
+    return frame.yellow > 60 && frame.cyan > 60 && frame.left > first.left + 5;
+  });
+  await page.screenshot({ path: path.join(base, "video-embedded.png"), animations: "disabled" });
+  await select.selectOption({ label: "Diálogo clásico · eng · ASS" });
+  await wait(async () => {
+    const frame = await captionPixels(canvas);
+    return frame.magenta > 50 && frame.yellow === 0 && frame.cyan === 0;
+  });
+  const after = await playing();
+  assert.equal(after.src, before.src);
+  assert.ok(Math.abs(after.time - 5.75) < 0.05);
+  assert.equal(after.paused, true);
+  assert.equal(await engine.evaluate(element => element === document.getElementById("audio-engine")), true);
+  await select.selectOption("");
+  await canvas.waitFor({ state: "hidden" });
+  console.log("Native Matroska captions retained language, colors, layers and motion while switching styles in the same paused video.");
 }
 
 async function seedPlaybackFixtures(videoId, audioId, handoutId, bookIds) {
@@ -758,6 +807,7 @@ try {
     await wait(async () => { const current = await playing(); return current.error || current.width > 0; });
     const current = await playing();
     if (file === webm) assert.deepEqual([current.width, current.height], [720, 248]);
+    if (file === mkv) await verifyEmbeddedCaptions(original, item(mkv).id);
     if (current.error) await stage().locator(".stage-error").waitFor();
     console.log(JSON.stringify({ container: path.extname(file), codecs: clip(file).map(stream => stream.codec_name),
       outcome: current.error ? `media-error-${current.error}` : `${current.width}x${current.height}` }));
