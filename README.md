@@ -46,6 +46,8 @@ npm run engines:prepare
 npm run desktop:dev
 ```
 
+`npm run engines:prepare` reutiliza los motores instalados si coinciden con el manifiesto, la receta y los hashes. Para reconstruirlos, usa `npm run engines:prepare -- --rebuild`. La compilación limpia los temporales de cada dependencia y la preparación retira sus descargas y archivos intermedios cuando termina o falla. Los motores anteriores se conservan hasta verificar el nuevo conjunto. [Limpieza durante la compilación con vcpkg](https://learn.microsoft.com/es-es/vcpkg/commands/install#--clean-after-build)
+
 ```powershell
 npm run check
 npm test

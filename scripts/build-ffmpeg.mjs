@@ -1,18 +1,19 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { copyFile, mkdir, readdir, readFile, writeFile, rm } from "node:fs/promises";
+import { copyFile, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { publishEngineBundle, withEngineWorkspace } from "./engine-workspace.mjs";
+import { ffmpegBuildInputs } from "./engine-integrity.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
-export async function buildFFmpeg() {
+export async function buildFFmpeg(cache, output) {
   assert(process.platform === "win32" && process.arch === "x64", "FFmpeg targets Windows x64.");
   const recipe = path.join(root, "scripts", "ffmpeg");
-  const cache = path.join(root, ".cache", "ffmpeg-build");
   const installed = path.join(cache, "installed", "x64-ytnabber");
-  const output = path.join(cache, "bundle");
   assert(!cache.includes(" "), "The vcpkg FFmpeg build needs a checkout path without spaces; installed app paths may contain spaces.");
+  const buildInputs = await ffmpegBuildInputs(recipe);
   const vswhere = path.join(process.env["ProgramFiles(x86)"] ?? "C:/Program Files (x86)", "Microsoft Visual Studio", "Installer", "vswhere.exe");
   const visualStudio = execFileSync(vswhere, ["-latest", "-products", "*", "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64", "-property", "installationPath"], { encoding: "utf8", windowsHide: true }).trim();
   assert(visualStudio, "Visual Studio C++ Build Tools are required to build FFmpeg.");
@@ -21,15 +22,13 @@ export async function buildFFmpeg() {
   execFileSync(path.join(visualStudio, "VC", "vcpkg", "vcpkg.exe"), [
     "install", `--x-manifest-root=${recipe}`, "--triplet=x64-ytnabber", `--overlay-triplets=${path.join(recipe, "triplets")}`,
     `--x-install-root=${path.join(cache, "installed")}`, `--x-buildtrees-root=${path.join(cache, "buildtrees")}`,
-    `--x-packages-root=${path.join(cache, "packages")}`, "--binarysource=clear",
+    `--x-packages-root=${path.join(cache, "packages")}`, "--binarysource=clear", "--clean-after-build",
   ], { stdio: "inherit", windowsHide: true, env: { ...process.env, VCPKG_DOWNLOADS: path.join(cache, "downloads"), X_VCPKG_REGISTRIES_CACHE: path.join(cache, "registries") } });
-  assert(path.dirname(path.resolve(output)) === path.resolve(cache), "Bundle must stay within the build cache.");
-  await rm(output, { recursive: true, force: true });
   await mkdir(output, { recursive: true });
-  for (const name of await readdir(path.join(installed, "bin"))) {
-    if (name.endsWith(".dll")) await copyFile(path.join(installed, "bin", name), path.join(output, name));
-  }
-  for (const name of ["ffmpeg.exe", "ffprobe.exe"]) await copyFile(path.join(installed, "tools", "ffmpeg", name), path.join(output, name));
+  const libraries = (await readdir(path.join(installed, "bin"))).filter(name => name.endsWith(".dll"));
+  const tools = ["ffmpeg.exe", "ffprobe.exe"];
+  for (const name of libraries) await copyFile(path.join(installed, "bin", name), path.join(output, name));
+  for (const name of tools) await copyFile(path.join(installed, "tools", "ffmpeg", name), path.join(output, name));
   const licenses = path.join(output, "licenses");
   await mkdir(licenses, { recursive: true });
   for (const entry of await readdir(path.join(installed, "share"), { withFileTypes: true })) {
@@ -48,14 +47,25 @@ export async function buildFFmpeg() {
   assert(run(["-devices"]).includes("lavfi"), "FFmpeg must retain local fixture generation.");
   execFileSync(path.join(output, "ffprobe.exe"), ["-version"], { windowsHide: true });
   const files = {};
-  for (const name of await readdir(output)) {
-    if (name.endsWith(".dll") || name.endsWith(".exe")) files[name] = createHash("sha256").update(await readFile(path.join(output, name))).digest("hex");
+  for (const name of [...libraries, ...tools].sort()) {
+    files[name] = createHash("sha256").update(await readFile(path.join(output, name))).digest("hex");
   }
   const configuration = spawnSync(path.join(output, "ffmpeg.exe"), ["-hide_banner", "-buildconf"], { encoding: "utf8", windowsHide: true });
   assert.equal(configuration.status, 0, "FFmpeg configuration must be readable.");
-  const buildConfiguration = (configuration.stdout + configuration.stderr).replaceAll(root.replaceAll("\\", "/"), "$BUILD_ROOT/").replaceAll(root, "$BUILD_ROOT/");
-  await writeFile(path.join(output, "ffmpeg-build.json"), JSON.stringify({ recipe: JSON.parse(await readFile(path.join(recipe, "vcpkg.json"), "utf8")), configuration: buildConfiguration, files }, null, 2));
-  return output;
+  const buildConfiguration = (configuration.stdout + configuration.stderr)
+    .replaceAll(cache.replaceAll("\\", "/"), "$FFMPEG_BUILD").replaceAll(cache, "$FFMPEG_BUILD")
+    .replaceAll(root.replaceAll("\\", "/"), "$BUILD_ROOT/").replaceAll(root, "$BUILD_ROOT/");
+  await writeFile(path.join(output, "ffmpeg-build.json"), JSON.stringify({ ...buildInputs, configuration: buildConfiguration, files }, null, 2));
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) console.log(await buildFFmpeg());
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  await withEngineWorkspace(root, "ff-", async (workspace, cache) => {
+    const staged = path.join(workspace, "bundle");
+    await buildFFmpeg(path.join(workspace, "v"), staged);
+    const directory = path.join(cache, "ffmpeg-build");
+    await mkdir(directory, { recursive: true });
+    const output = path.join(directory, "bundle");
+    await publishEngineBundle(staged, output, cache);
+    console.log(output);
+  });
+}
