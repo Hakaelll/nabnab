@@ -35,7 +35,7 @@ import {browserCourseProvider, createCoursesController} from "./courses-ui";
 import {createTranscriptionManager} from "./transcription-ui";
 import {createTorrentsController} from "./torrents-ui";
 import {createPlatformsController} from "./platforms-ui";
-import {readExpandedToolOptions} from "./views-tools";
+import {readExpandedToolOptions, toolsCatalog} from "./views-tools";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -84,6 +84,8 @@ const t: Copy = (spanish, english) => snapshot.settings.language === "es" ? span
 let librarySection:'files'|'collections'|'sources'|'later'|'references'|'audio'|'archives'='files';
 let quickPreset='';
 let toolSearch='';
+let showToolCatalog=true;
+let toolCategory="";
 let quickRequest=0;
 let quickLoading=false;
 let libraryContentHits:import("./library-types").SearchHit[]=[];
@@ -208,11 +210,11 @@ async function command<T>(name: string, args?: Record<string, unknown>): Promise
   return invoke<T>(name, args);
 }
 
-required("#app").innerHTML = `<canvas id="field" aria-hidden="true"></canvas><header class="titlebar" data-tauri-drag-region><span class="titlebar-context" data-tauri-drag-region></span><div class="window-actions">
+required("#app").innerHTML = `<canvas id="field" aria-hidden="true"></canvas><header class="titlebar" data-tauri-drag-region><span class="titlebar-context" data-tauri-drag-region></span><button type="button" class="titlebar-search" data-action="open-palette" aria-keyshortcuts="Control+K">${icon("search")}<span></span><kbd aria-hidden="true">Ctrl K</kbd></button><div class="window-actions">
   <button id="minimize" aria-label="Minimizar" title="Minimizar"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10"/></svg></button>
   <button id="maximize" aria-label="Maximizar" title="Maximizar"><svg class="maximize-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="3.5" width="9" height="9" rx=".5"/></svg><svg class="restore-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 5.5v-2h7v7h-2"/><rect x="3.5" y="5.5" width="7" height="7" rx=".5"/></svg></button>
   <button id="close" aria-label="Cerrar" title="Cerrar"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg></button>
-  </div></header><div class="app-shell"><nav class="sidebar" aria-label="Navegación principal"><button id="toggle-sidebar" class="sidebar-toggle icon-button" data-action="toggle-sidebar" title="Contraer navegación" aria-label="Contraer navegación">${icon("menu")}</button><div class="nav-primary"></div><div class="nav-secondary"></div></nav>
+  </div></header><div class="app-shell"><nav class="sidebar" aria-label="Navegación principal"><div class="sidebar-header"><span class="sidebar-mark" aria-hidden="true"></span><button id="toggle-sidebar" class="sidebar-toggle icon-button" data-action="toggle-sidebar" title="Contraer navegación" aria-label="Contraer navegación">${icon("menu")}</button></div><div class="nav-primary"></div><div class="nav-secondary"></div></nav>
   <main id="main"><div id="notification" class="notification" hidden><span id="notification-icon"></span><div><span id="notification-text"></span><details id="notification-details" hidden><summary>Detalles técnicos</summary><pre></pre></details></div><button class="icon-button" data-action="dismiss-message" aria-label="Cerrar aviso">${icon("close")}</button></div><section id="home-page" class="home-page"><div id="home-content"></div></section><div class="content-layout"><section id="page-content" class="page-content" hidden></section><aside id="inspector" class="inspector" aria-label="Detalles" hidden></aside></div><button id="activity" class="activity" data-action="show-activity" hidden><span class="activity-dot"></span><span id="activity-text"></span>${icon("arrow")}</button></main><section class="audio-player" id="audio-player" hidden><div id="audio-transport"></div></section></div><section class="playback-stage" id="playback-stage" aria-label="Reproductor de vídeo" tabindex="-1" hidden><video id="audio-engine" crossorigin="anonymous" preload="metadata" playsinline></video><div class="stage-captions" hidden></div><div class="stage-feedback" aria-hidden="true" hidden></div><div class="stage-hud"></div></section><aside id="capture-indicator" class="capture-indicator" hidden aria-label="Controles de captura"><span class="capture-status-dot" aria-hidden="true"></span><div class="capture-status-copy"><strong id="capture-status-label" aria-live="polite"></strong><small id="capture-status-source"></small></div><time id="capture-status-time"></time><span id="capture-shortcut-label"></span><button class="button quiet" data-action="screen-capture-open">Captura</button><button class="button secondary" data-action="screen-capture-save-replay" hidden>Guardar</button><button class="button primary" data-action="screen-capture-stop">Detener</button></aside><dialog id="detail-dialog" class="detail-dialog" aria-label="Detalles"></dialog><div id="drop-indicator" class="drop-indicator" hidden>${icon("add")}<span></span></div>`;
 const inspectorBody = document.createElement("div");
 inspectorBody.className = "inspector-body";
@@ -291,6 +293,7 @@ function updateNavigation(): void {
   document.documentElement.classList.toggle("reduced-transparency", snapshot.settings.reducedTransparency);
   document.documentElement.classList.toggle("sidebar-collapsed", !snapshot.settings.sidebarExpanded);
   required(".sidebar").setAttribute("aria-label", t("Navegación principal", "Main navigation"));
+  required(".titlebar-search span").textContent=t("Buscar en nabnab", "Search nabnab");
   const names: [Page,string,Parameters<typeof icon>[0]][] = [["home",t("Inicio", "Home"),"home"],["downloads",t("Descargas", "Downloads"),"downloads"],["library",t("Biblioteca", "Library"),"library"],["tools",t("Herramientas", "Tools"),"tools"],["platforms",t("Plataformas","Platforms"),"grid"]];
   required(".nav-primary").innerHTML = names.map(([key,label,symbol])=>`<button class="nav-item" data-page="${key}" aria-current="${page===key?'page':'false'}" aria-label="${label}" title="${label}">${icon(symbol)}<span class="nav-label">${label}</span>${key==='downloads'&&snapshot.jobs.some(job=>activeStates.includes(job.state))?'<span class="nav-work-dot" aria-hidden="true"></span>':''}</button>`).join("");
   const settingsLabel=t("Ajustes", "Settings");
@@ -365,7 +368,7 @@ function renderCurrent(): void {
   preserveFocus(()=>{
     updateNavigation();required('#field').hidden=page!=='home';required("#home-page").hidden=page!=="home";required("#page-content").hidden=page==='home';
     if(page==='home')renderHome();
-    else {disposeGraphics?.();disposeGraphics=null;required("#page-content").innerHTML=page==='downloads'?downloadsView(snapshot,downloads,t):page==='library'?libraryView(snapshot,library,t):page==='tools'?toolsView(snapshot,tools,t):page==='platforms'?(platformModule==='torrent'?torrents.render():platformModule==='courses'?courses.render():platformModule==='telegram'?telegram.render():platformModule==='live'?live.render():platformModule==='exports'?sourceExports.render():platformModule==='files'?advancedFiles.render():platformModule==='fileSources'?fileSources.render():platforms.render()):settingsView(snapshot,preferences,t,desktop);}
+    else {disposeGraphics?.();disposeGraphics=null;required("#page-content").innerHTML=page==='downloads'?downloadsView(snapshot,downloads,t):page==='library'?libraryView(snapshot,library,t):page==='tools'?toolsView(snapshot,tools,t,showToolCatalog):page==='platforms'?(platformModule==='torrent'?torrents.render():platformModule==='courses'?courses.render():platformModule==='telegram'?telegram.render():platformModule==='live'?live.render():platformModule==='exports'?sourceExports.render():platformModule==='files'?advancedFiles.render():platformModule==='fileSources'?fileSources.render():platforms.render()):settingsView(snapshot,preferences,t,desktop);}
     if(page==='platforms'&&platformModule!=='catalog')required('#page-content').insertAdjacentHTML('afterbegin',`<button type="button" class="button quiet" data-action="platform-back">${t('← Plataformas','← Platforms')}</button>`);
     if(page==='library'){
       const container=required('#page-content');
@@ -377,24 +380,40 @@ function renderCurrent(): void {
     if(page==='tools'){
       const directory=required('.tool-directory');
       const groups=[
-        {title:t('Documentos','Documents'),items:[['documents',t('Operaciones PDF','PDF operations'),'document'],['pdfEdits',t('Editar PDF','Edit PDF'),'document'],['ocr',t('Reconocer texto · OCR','Recognize text · OCR'),'document']]},
-        {title:t('Imagen y composición','Image and composition'),items:[['upscale',t('Ampliar imagen','Upscale image'),'image'],['background',t('Eliminar fondo','Remove background'),'image'],['imageAssets',t('Capturas, iconos y atlas','Screenshots, icons and atlas'),'image'],['stickers','Stickers','image'],['palettes',t('Paleta de imagen','Image palette'),'image'],['composition',t('Componer medios','Compose media'),'video']]},
-        {title:t('Archivos y colecciones','Files and collections'),items:[['fileOrganization',t('Revisar y renombrar','Review and rename'),'library'],['portable',t('Colección portátil','Portable collection'),'folder']]},
-        {title:t('Captura','Capture'),items:[['screenCapture',t('Pantalla y repetición','Screen and replay'),'video']]},
-        {title:t('Audio y voz','Audio and voice'),items:[['stems',t('Separar pistas','Separate stems'),'audio'],['voice',t('Narración local','Local narration'),'audio']]},
-        {title:t('Subtítulos','Subtitles'),items:[['translation',t('Traducir subtítulos','Translate subtitles'),'document']]}
-      ] satisfies {title:string;items:[string,string,Parameters<typeof icon>[0]][]}[];
-      const moduleNav=groups.map(group=>`<section class="tool-group local-tool-group"><h2>${group.title}</h2><div class="tool-navigation">${group.items.map(([id,label,glyph])=>`<button type="button" id="local-tool-${id}" data-action="tool-module" data-id="${id}" data-tool-name="${h((group.title+' '+label+(id==='voice'?' tts speech voz':id==='screenCapture'?' grabar recording screenshot':'')).toLocaleLowerCase())}" aria-pressed="${localToolModule===id}">${icon(glyph)}<span>${label}</span></button>`).join('')}</div></section>`).join('');
+        {key:'documents',title:t('Documentos','Documents'),items:[['documents',t('Operaciones PDF','PDF operations'),'document'],['pdfEdits',t('Editar PDF','Edit PDF'),'document'],['ocr',t('Reconocer texto · OCR','Recognize text · OCR'),'document']]},
+        {key:'image',title:t('Imagen y composición','Image and composition'),items:[['upscale',t('Ampliar imagen','Upscale image'),'image'],['background',t('Eliminar fondo','Remove background'),'image'],['imageAssets',t('Capturas, iconos y atlas','Screenshots, icons and atlas'),'image'],['stickers','Stickers','image'],['palettes',t('Paleta de imagen','Image palette'),'image'],['composition',t('Componer medios','Compose media'),'video']]},
+        {key:'files',title:t('Archivos y colecciones','Files and collections'),items:[['fileOrganization',t('Revisar y renombrar','Review and rename'),'library'],['portable',t('Colección portátil','Portable collection'),'folder']]},
+        {key:'capture',title:t('Captura','Capture'),items:[['screenCapture',t('Pantalla y repetición','Screen and replay'),'video']]},
+        {key:'audio',title:t('Audio y voz','Audio and voice'),items:[['stems',t('Separar pistas','Separate stems'),'audio'],['voice',t('Narración local','Local narration'),'audio']]},
+        {key:'subtitles',title:t('Subtítulos','Subtitles'),items:[['translation',t('Traducir subtítulos','Translate subtitles'),'document']]}
+      ] satisfies {key:string;title:string;items:[string,string,Parameters<typeof icon>[0]][]}[];
+      const moduleNav=groups.map(group=>`<section class="tool-group local-tool-group" data-tool-category="${group.key}"><h2>${group.title}</h2><div class="tool-navigation">${group.items.map(([id,label,glyph])=>`<button type="button" id="local-tool-${id}" data-action="tool-module" data-id="${id}" data-tool-name="${h((group.title+' '+label+(id==='voice'?' tts speech voz':id==='screenCapture'?' grabar recording screenshot':'')).toLocaleLowerCase())}" aria-pressed="${localToolModule===id}">${icon(glyph)}<span>${label}</span></button>`).join('')}</div></section>`).join('');
       directory.querySelector('.tool-search')?.insertAdjacentHTML('afterend',moduleNav);
       if(localToolModule!=='media'){
         for(const button of directory.querySelectorAll('[data-action="tool-kind"]'))button.setAttribute('aria-pressed','false');
         required('.tool-workspace').innerHTML=localToolModule==='documents'?documentToolsPanel(snapshot,t):localToolModule==='pdfEdits'?documentEdits.render():localToolModule==='ocr'?ocr.renderTools():localToolModule==='composition'?mediaEditsPanel(snapshot,t):localToolModule==='imageAssets'?imageAssets.render():localToolModule==='stickers'?stickerTool.render():localToolModule==='upscale'?upscaleTool.render():localToolModule==='background'?backgroundTool.render():localToolModule==='stems'?stemsTool.render():localToolModule==='translation'?translationTool.render():localToolModule==='fileOrganization'?fileOrganization.renderTools():localToolModule==='portable'?portable.render():localToolModule==='screenCapture'?screenCapture.render():localToolModule==='voice'?voice.render():palettesPanel(snapshot,t);
       }
+      if(showToolCatalog){
+        required('.tool-studio').insertAdjacentHTML('beforebegin',toolsCatalog(directory,t));
+        const search=directory.querySelector('.tool-search');
+        if(search)required('.tool-catalog').prepend(search);
+      }
     }
     if(page==='tools'){
       const search=document.getElementById('tool-search');if(search instanceof HTMLInputElement)search.value=toolSearch;
       filterToolDirectory();
-      const directory=document.querySelector<HTMLElement>('.tool-directory');if(directory){directory.scrollTop=directoryScroll;const selected=directory.querySelector<HTMLElement>('[aria-pressed="true"]');if(selected?.getClientRects().length){const bounds=directory.getBoundingClientRect(),item=selected.getBoundingClientRect();const top=directory.querySelector('.tool-search')?.getBoundingClientRect().bottom??bounds.top;if(item.bottom>bounds.bottom)directory.scrollTop+=item.bottom-bounds.bottom+8;else if(item.top<top)directory.scrollTop-=top-item.top+8;}}
+      const directory=document.querySelector<HTMLElement>('.tool-directory');
+      if(directory){
+        directory.scrollTop=directoryScroll;
+        const selected=directory.querySelector<HTMLElement>('[aria-pressed="true"]');
+        if(!showToolCatalog&&selected?.getClientRects().length){
+          const bounds=directory.getBoundingClientRect(),item=selected.getBoundingClientRect();
+          const top=directory.querySelector('.tool-search')?.getBoundingClientRect().bottom??bounds.top;
+          const bottom=Math.min(bounds.bottom,required('#main').getBoundingClientRect().bottom);
+          if(item.bottom>bottom)directory.scrollTop+=item.bottom-bottom+8;
+          else if(item.top<top)directory.scrollTop-=top-item.top+8;
+        }
+      }
     }
     if(page==='settings'&&preferences.section==='engines')required('.settings-content').insertAdjacentHTML('beforeend',platforms.renderComponents());
     if(page==='settings'&&preferences.section==='automation')required('.settings-content').insertAdjacentHTML('beforeend',automation.render());
@@ -405,7 +424,7 @@ function renderCurrent(): void {
 function observeThumbnails(): void {
   thumbnailObserver?.disconnect();
   for(let index=thumbnailQueue.length-1;index>=0;index--)if(!thumbnailQueue[index].isConnected)thumbnailQueue.splice(index,1);
-  if((page!=='library'&&page!=='tools')||!desktop)return;
+  if((page!=='library'&&page!=='tools'&&page!=='downloads')||!desktop)return;
   thumbnailObserver=new IntersectionObserver(entries=>{
     for(const entry of entries)if(entry.isIntersecting&&entry.target instanceof HTMLElement){thumbnailObserver?.unobserve(entry.target);enqueueThumbnail(entry.target);}
     void pumpThumbnails();
@@ -428,9 +447,17 @@ async function pumpThumbnails(): Promise<void> {
   }
 }
 function filterToolDirectory():void{
-  const query=toolSearch.toLocaleLowerCase();
+  const query=toolSearch.trim().toLocaleLowerCase();
   for(const item of document.querySelectorAll<HTMLElement>('[data-tool-name]'))item.hidden=!item.dataset.toolName?.includes(query);
-  for(const group of document.querySelectorAll<HTMLElement>('.tool-group'))group.hidden=![...group.querySelectorAll<HTMLElement>('[data-tool-name]')].some(item=>!item.hidden);
+  for(const group of document.querySelectorAll<HTMLElement>('.tool-group')){
+    group.hidden=Boolean(toolCategory&&!query&&group.dataset.toolCategory!==toolCategory)
+      || ![...group.querySelectorAll<HTMLElement>('[data-tool-name]')].some(item=>!item.hidden);
+  }
+  const available=new Set([...document.querySelectorAll<HTMLElement>('[data-tool-category]:not([hidden])')].map(group=>group.dataset.toolCategory));
+  const cards=[...document.querySelectorAll<HTMLButtonElement>('.tool-catalog-item')];
+  for(const card of cards)card.hidden=!available.has(card.dataset.id);
+  const empty=document.getElementById('tool-catalog-empty');
+  if(empty)empty.hidden=cards.some(card=>!card.hidden);
 }
 function showCaptureStatus(value:CaptureStatus):void{
   captureStatus=value;
@@ -467,6 +494,7 @@ function navigate(next: Page): void {
   if(next!=='library'||librarySection!=='archives')personalArchives.leave();
   const changed=page!==next;cancelSurfaceMotion();
   if(page==='tools'){try{tools.options=readToolOptions();}catch{/* Keep the last valid options while a draft is incomplete. */}}
+  if(next==='tools'&&(localToolModule!=='media'||tools.ids.size)){showToolCatalog=false;toolCategory="";}
   scrollPositions.set(page,required("#main").scrollTop);page=next;inspectorKey="";
   renderCurrent();required("#main").scrollTop=scrollPositions.get(next)??0;
   if(changed&&next==='tools')void mediaEdits.load();
@@ -609,6 +637,23 @@ document.addEventListener("click",event=>{
 });
 async function handleAction(action: string, button: HTMLButtonElement): Promise<void> {
   const id=button.dataset.id??"";
+  if(action==='open-palette'){palette.open();return;}
+  if(action==='tool-catalog-open'){
+    showToolCatalog=true;toolCategory="";toolSearch='';renderCurrent();required('#main').scrollTop=0;
+    document.getElementById('tool-search')?.focus();return;
+  }
+  if(action==='tool-catalog-group'){
+    const group=[...document.querySelectorAll<HTMLElement>('[data-tool-category]:not([hidden])')].find(group=>group.dataset.toolCategory===id);
+    const tool=group?.querySelector<HTMLButtonElement>('button:not([hidden])');
+    if(tool?.dataset.action){
+      toolCategory=id;toolSearch='';
+      await handleAction(tool.dataset.action,tool);
+      required('#main').scrollTop=0;
+      const title=document.querySelector<HTMLElement>('.tool-workspace h2');
+      if(title){title.tabIndex=-1;title.focus({preventScroll:true});}
+    }
+    return;
+  }
   if(action==='share-open'){deviceShare.open();return;}
   if(action==='share-file'){deviceShare.open({ids:[id]});return;}
   if(action==='share-selected'){deviceShare.open({ids:[...library.selected]});return;}
@@ -626,7 +671,7 @@ async function handleAction(action: string, button: HTMLButtonElement): Promise<
   if(action==='emblem-activate'){const color=handleEmblemClick();if(color.toggled)renderHome();return;}
   if(action==='open-fileSources'){platformModule='fileSources';navigate('platforms');if(id==='personal'){fileSources.openPersonal();await personalServers.load();return;}if(id==='arxiv'||id==='zenodo'||id==='librivox'){fileSources.openCatalog(id);return;}await fileSources.open();if(id==='drive'||id==='onedrive'||id==='dropbox'){const tabButton=document.createElement('button');tabButton.dataset.tab=id;await fileSources.handleClick('file-source-tab',tabButton);}return;}
   if(action==='open-files'){platformModule='files';navigate('platforms');await advancedFiles.load();return;}
-  if(action==='tool-module'){const module=button.dataset.id;if(module==='documents'||module==='pdfEdits'||module==='ocr'||module==='composition'||module==='palettes'||module==='imageAssets'||module==='stickers'||module==='upscale'||module==='background'||module==='stems'||module==='translation'||module==='fileOrganization'||module==='portable'||module==='screenCapture'||module==='voice'){if(module!=='voice')voice.deactivate();if(module!=='stems')stemsTool.leave();localToolModule=module;renderCurrent();if(module==='screenCapture')await screenCapture.open();if(module==='voice')await voice.open();if(module==='upscale')await upscaleTool.load();if(module==='background')await backgroundTool.load();if(module==='stems')await stemsTool.load();if(module==='translation')await translationTool.load();}return;}
+  if(action==='tool-module'){const module=button.dataset.id;if(module==='documents'||module==='pdfEdits'||module==='ocr'||module==='composition'||module==='palettes'||module==='imageAssets'||module==='stickers'||module==='upscale'||module==='background'||module==='stems'||module==='translation'||module==='fileOrganization'||module==='portable'||module==='screenCapture'||module==='voice'){if(module!=='voice')voice.deactivate();if(module!=='stems')stemsTool.leave();showToolCatalog=false;localToolModule=module;renderCurrent();if(module==='screenCapture')await screenCapture.open();if(module==='voice')await voice.open();if(module==='upscale')await upscaleTool.load();if(module==='background')await backgroundTool.load();if(module==='stems')await stemsTool.load();if(module==='translation')await translationTool.load();}return;}
   if(action==='translation-from-library'){
     const select=document.getElementById('local-subtitle-track');
     if(select instanceof HTMLSelectElement){translationTool.chooseTrack(id,select.value);localToolModule='translation';navigate('tools');}
@@ -709,7 +754,7 @@ async function handleAction(action: string, button: HTMLButtonElement): Promise<
     case 'tool-media':setToolInput([id]);break;
     case 'tools-selected':setToolInput([...library.selected]);break;
     case 'clear-library-selection':library.selected.clear();renderCurrent();break;
-    case 'tool-kind':{stemsTool.leave();localToolModule='media';const kind=button.dataset.kind;if(isTool(kind)){tools.kind=kind;tools.options=defaultToolOptions(kind);renderCurrent();if(kind==='transcribe')await transcriptionManager.load();}break;}
+    case 'tool-kind':{stemsTool.leave();localToolModule='media';const kind=button.dataset.kind;if(isTool(kind)){showToolCatalog=false;tools.kind=kind;tools.options=defaultToolOptions(kind);renderCurrent();if(kind==='transcribe')await transcriptionManager.load();}break;}
     case 'pick-tool-files':tools.options=readToolOptions();await importMedia(false,true);break;
     case 'pick-tool-library':tools.options=readToolOptions();tools.picking=!tools.picking;renderCurrent();break;
     case 'finish-tool-picker':tools.picking=false;renderCurrent();break;

@@ -31,27 +31,50 @@ export function filteredJobs(snapshot: Snapshot, view: DownloadView): Job[] {
 }
 export function downloadsView(snapshot: Snapshot, view: DownloadView, t: Copy): string {
   const jobs = filteredJobs(snapshot, view);
-  const groups=new Map<string,Job[]>();for(const job of jobs){const key=job.groupId??job.id;const group=groups.get(key)??[];group.push(job);groups.set(key,group);}
-  const ordered=[...groups.values()].flat();
+  const section = (job: Job) => activeStates.includes(job.state) ? 0 : ["pending", "paused"].includes(job.state) ? 1 : 2;
+  const labels = [t("En curso", "In progress"), t("En espera", "Waiting"), t("Finalizadas", "Finished")];
+  const ordered = labels.flatMap((_, index) => {
+    const groups = new Map<string, Job[]>();
+    for (const job of jobs) {
+      if (section(job) !== index) continue;
+      const key = job.groupId ?? job.id;
+      const group = groups.get(key) ?? [];
+      group.push(job);
+      groups.set(key, group);
+    }
+    return [...groups.values()].flat();
+  });
   const playablePaths = new Set(snapshot.library.filter(isPlayable).map(item => item.path));
+  const previewItems = new Map(snapshot.library.filter(item => !item.missing && (item.kind === "image" || item.kind === "video")).map(item => [item.path, item.id]));
   const filters: [DownloadView["filter"],string][] = [["all",t("Todas", "All")],["activity",t("Actividad", "Activity")],["pending",t("Pendientes", "Pending")],["completed",t("Completadas", "Completed")],["error",t("Errores", "Errors")]];
+  const counts = { all: snapshot.jobs.length, activity: 0, pending: 0, completed: 0, error: 0 };
+  for (const job of snapshot.jobs) {
+    if (activeStates.includes(job.state)) counts.activity++;
+    else if (["pending", "paused"].includes(job.state)) counts.pending++;
+    else if (job.state === "completed") counts.completed++;
+    else if (["error", "cancelled"].includes(job.state)) counts.error++;
+  }
   return `<div class="page-heading"><div><h1>${t("Descargas", "Downloads")}</h1><p>${t("Descargas y operaciones locales en una misma cola.", "Downloads and local operations in one queue.")}</p></div>${action("go-home", t("Añadir enlace", "Add link"), "add", "primary")}</div>
-    <div class="view-toolbar queue-view-toolbar"><div class="filter-tabs" role="group" aria-label="${t("Estado de los trabajos", "Job status")}">${filters.map(([filter,label]) => `<button data-action="job-filter" data-filter="${filter}" aria-pressed="${view.filter === filter}">${label}${filter === "all" ? `<span>${snapshot.jobs.length}</span>` : ""}</button>`).join("")}</div><label class="search-control">${icon("search")}<input id="job-search" type="search" placeholder="${t("Buscar trabajos", "Search jobs")}" aria-label="${t("Buscar trabajos", "Search jobs")}" value="${h(view.query)}"></label></div>
+    <div class="view-toolbar queue-view-toolbar"><div class="filter-tabs" role="group" aria-label="${t("Estado de los trabajos", "Job status")}">${filters.map(([filter,label]) => `<button data-action="job-filter" data-filter="${filter}" aria-pressed="${view.filter === filter}">${label}<span>${counts[filter]}</span></button>`).join("")}</div><label class="search-control">${icon("search")}<input id="job-search" type="search" placeholder="${t("Buscar trabajos", "Search jobs")}" aria-label="${t("Buscar trabajos", "Search jobs")}" value="${h(view.query)}"></label></div>
     ${view.selected.size ? `<div class="selection-toolbar"><span>${view.selected.size} ${t("seleccionados", "selected")}</span>${action("cancel-selected", t("Cancelar compatibles", "Cancel eligible"), "close", "quiet")}${action("retry-selected", t("Reintentar errores", "Retry errors"), "retry", "quiet")}${action("clear-job-selection",t("Quitar selección", "Clear selection"),undefined,"quiet")}</div>` : ""}
     ${jobs.length ? `<ul class="job-list" aria-label="${t("Cola de trabajos", "Job queue")}">${ordered.slice(0,200).map((job,index) => {
       const transferring = job.state === "downloading";
-      const percent = transferring ? job.progress?.percent : null;
+      const percent = transferring ? job.progress?.percent ?? null : null;
       const selected = view.detailId === job.id;
       const size = transferring ? job.progress?.total : job.state === "completed" ? null : job.progress?.total;
+      const preview = job.outputs.map(output => previewItems.get(output)).find(Boolean);
+      const startsSection = index === 0 || section(job) !== section(ordered[index - 1]);
+      const sectionHeading = view.filter === "all" && startsSection ? `<li class="job-section-heading"><h2>${labels[section(job)]}</h2></li>` : "";
       const members=job.groupId?snapshot.jobs.filter(item=>item.groupId===job.groupId):[];
       const finished=members.filter(item=>item.state==='completed').length;const errors=members.filter(item=>item.state==='error'||item.state==='cancelled').length;
       const source=snapshot.sources?.find(source=>source.id===job.sourceId);
-      const heading=job.groupId&&(index===0||ordered[index-1].groupId!==job.groupId)?`<li class="job-group-summary">${h(source?.name??t('Lote de operaciones','Operations batch'))} · ${finished}/${members.length} ${t('salidas terminadas','outputs complete')}${finished&&errors?` · ${t('Éxito parcial. Puedes reintentar las salidas fallidas.','Partial success. Failed outputs can be retried.')}`:errors?` · ${errors} ${t('con incidencias','with issues')}`:''}</li>`:'';
-      return `${heading}<li class="job-row ${selected ? "is-selected" : ""} ${transferring ? "is-transferring" : ""}" data-state="${job.state}"><input type="checkbox" data-select-job="${h(job.id)}" aria-label="${h(t("Seleccionar ", "Select ") + job.title)}" ${view.selected.has(job.id) ? "checked" : ""}>
-        <div class="row-thumbnail">${job.thumbnail ? `<img src="${h(job.thumbnail)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : icon(job.source.kind === "transform" ? "tools" : job.source.kind === "cloudFile" || job.source.kind === "personalFile" || job.source.kind === "publicFile" || job.source.kind === "attribution" ? "document" : "video")}</div>
+      const heading=job.groupId&&(startsSection||ordered[index-1].groupId!==job.groupId)?`<li class="job-group-summary">${h(source?.name??t('Lote de operaciones','Operations batch'))} · ${finished}/${members.length} ${t('salidas terminadas','outputs complete')}${finished&&errors?` · ${t('Éxito parcial. Puedes reintentar las salidas fallidas.','Partial success. Failed outputs can be retried.')}`:errors?` · ${errors} ${t('con incidencias','with issues')}`:''}</li>`:'';
+      return `${sectionHeading}${heading}<li class="job-row ${selected ? "is-selected" : ""} ${transferring ? "is-transferring" : ""}" data-state="${job.state}"><input type="checkbox" data-select-job="${h(job.id)}" aria-label="${h(t("Seleccionar ", "Select ") + job.title)}" ${view.selected.has(job.id) ? "checked" : ""}>
+        <div class="row-thumbnail"${!job.thumbnail && preview ? ` data-thumbnail-id="${h(preview)}"` : ""}>${job.thumbnail ? `<img src="${h(job.thumbnail)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : icon(job.source.kind === "transform" ? "tools" : job.source.kind === "cloudFile" || job.source.kind === "personalFile" || job.source.kind === "publicFile" || job.source.kind === "attribution" ? "document" : "video")}</div>
         <button class="row-content" data-action="inspect-job" data-id="${h(job.id)}" aria-pressed="${selected}"><strong>${h(job.title)}</strong><span>${h(job.provider)} · ${h(sourceLabel(job,t))}${job.priority&&job.priority!=='normal'?` · ${priorityLabel(job.priority,t)}`:''}${job.schedule&&job.schedule.kind!=='immediate'?` · ${h(scheduleLabel(job.schedule,t))}`:''}${job.options?.values.subtitleMode==='only'?` · ${t('Solo subtítulos','Subtitles only')}`:''}</span>${job.error?`<small class="row-error">${h(jobErrorLabel(job,t))}</small>`:""}</button>
-        <div class="job-state"><span class="state-label state-${job.state}">${job.state === "completed" ? icon("check") : job.state === "error" ? icon("error") : ""}${activityLabel(job,t)}</span>${transferring ? `<div class="progress-rail ${percent === null ? "indeterminate" : ""}" role="progressbar" aria-label="${t("Descarga", "Download")}" aria-valuemin="0" aria-valuemax="100" ${percent !== null && percent !== undefined ? `aria-valuenow="${percent.toFixed(1)}"` : ""}><span style="width:${percent ?? 35}%"></span></div>` : ""}</div>
-        <div class="job-metrics">${job.source.kind==='live'&&job.progress?.phase.startsWith('recording:')?`<strong>${durationLabel(Number(job.progress.phase.slice(10)))}</strong><small>${bytesLabel(job.progress.downloaded??0)}</small>`:""}${percent !== null && percent !== undefined ? `<strong>${percent.toFixed(1)}%</strong>` : ""}<small>${transferring && job.progress?.speed ? bytesLabel(job.progress.speed) + "/s" : size ? bytesLabel(size) : job.state === "completed" ? job.source.kind === "captionTranslation" ? t("Borrador", "Draft") : `${job.outputs.length} ${t("archivo(s)", "file(s)")}` : ""}</small></div><div class="row-actions">${job.state==="completed"&&job.outputs.some(file=>playablePaths.has(file))?action("play-job",t("Reproducir","Play"),"play","icon-button",`data-id="${h(job.id)}" title="${t("Reproducir","Play")}"`):""}${jobActions(job,t)}</div></li>`;
+        <div class="job-state"><span class="state-label state-${job.state}">${job.state === "completed" ? icon("check") : job.state === "error" ? icon("error") : ""}${activityLabel(job,t)}</span></div>
+        <div class="job-metrics">${job.source.kind==='live'&&job.progress?.phase.startsWith('recording:')?`<strong>${durationLabel(Number(job.progress.phase.slice(10)))}</strong><small>${bytesLabel(job.progress.downloaded??0)}</small>`:""}${percent !== null ? `<strong>${percent.toFixed(1)}%</strong>` : ""}<small>${transferring && job.progress?.speed ? bytesLabel(job.progress.speed) + "/s" : size ? bytesLabel(size) : job.state === "completed" ? job.source.kind === "captionTranslation" ? t("Borrador", "Draft") : `${job.outputs.length} ${t("archivo(s)", "file(s)")}` : ""}</small></div><div class="row-actions">${job.state==="completed"&&job.outputs.some(file=>playablePaths.has(file))?action("play-job",t("Reproducir","Play"),"play","icon-button",`data-id="${h(job.id)}" title="${t("Reproducir","Play")}"`):""}${jobActions(job,t)}</div>
+        ${transferring ? `<div class="progress-rail ${percent === null ? "indeterminate" : ""}" role="progressbar" aria-label="${h(job.title)}" aria-valuemin="0" aria-valuemax="100" ${percent !== null ? `aria-valuenow="${percent.toFixed(1)}"` : ""}><span style="width:${percent ?? 35}%"></span></div>` : ""}</li>`;
     }).join("")}</ul>${jobs.length>200 ? `<p class="field-note">${t("Se muestran los 200 trabajos más recientes. Usa la búsqueda para acotar.", "Showing the 200 most recent jobs. Use search to narrow the list.")}</p>` : ""}` : `<div class="empty-state">${icon(view.filter === "error" ? "check" : "downloads")}<h2>${view.query ? t("No hay coincidencias", "No matches") : view.filter === "error" ? t("Sin errores en esta vista", "No errors in this view") : t("Tu cola está despejada", "Your queue is clear")}</h2><p>${view.query ? t("Prueba con otro título u origen.", "Try another title or source.") : t("Pega un enlace en Inicio o envía un archivo desde Herramientas.", "Paste a link in Home or send a file from Tools.")}</p></div>`}`;
 }
 

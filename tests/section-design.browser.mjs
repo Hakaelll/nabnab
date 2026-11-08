@@ -19,6 +19,7 @@ const library=[{id:"clip",name:"Entrevista de archivo.mp4",kind:"video",path:"C:
 const jobs=[
 {id:"live",title:"Un recorrido por la ciudad",state:"downloading",provider:"YouTube",source:{kind:"download",url:"https://youtube.com/watch?v=fixture",format:"source",height:1080,audioBitrate:null},progress:{phase:"downloading",percent:43.2,speed:6291456,downloaded:120000000,total:280000000},outputs:[],error:null},
 {id:"queued",title:"Entrevista de archivo · Audio",state:"pending",provider:"FFmpeg",source:{kind:"transform",libraryId:"clip",options:{kind:"extractAudio",format:"mp3"}},progress:null,outputs:[],error:null},
+{id:"saved-clip",title:"Entrevista de archivo",state:"completed",provider:"YouTube",source:{kind:"download",url:"https://youtube.com/watch?v=fixture2",format:"source"},progress:null,outputs:[library[0].path],error:null},
 {id:"complete",title:"Documento de referencia.pdf",state:"completed",provider:"Google Drive",source:{kind:"cloudFile",selection:{provider:"drive",accountId:"fixture",id:"doc",version:"v1",exportMime:null},collection:"Lecturas"},progress:null,outputs:["C:/Downloads/Documento de referencia.pdf"],error:null},
 {id:"failed",title:"Colección de imágenes",state:"error",provider:"Wikimedia Commons",source:{kind:"publicFile",selection:{sourceUrl:"https://commons.wikimedia.org/wiki/File:Fixture.jpg",filename:"Fixture.jpg",assetId:"commons:fixture",collection:"Referencias",author:null,license:null,attribution:null,sha256:null,version:null,size:null}},progress:null,outputs:[],error:{code:"network",message:"La conexión se interrumpió. Puedes reintentar el trabajo.",technical:"UI fixture only",retryable:true,retryAfter:null}}
 ].map((job,index)=>({...job,runId:1,createdAt:Date.now()-index*60000,updatedAt:Date.now(),folder:settings.folder,thumbnail:null,attempt:1,groupId:null}));
@@ -48,24 +49,45 @@ async function capture(section,width,height){
   await page.setViewportSize({width,height});
   await page.locator(`[data-page="${section}"]`).click();
   await page.locator("#page-content h1").waitFor();
-  await page.locator("#page-content").evaluate(el=>el.scrollTop=0);
+  await page.locator("#main").evaluate(el=>el.scrollTop=0);
   const dimensions=await page.locator("#page-content").evaluate(el=>({width:el.clientWidth,scroll:el.scrollWidth}));
   assert(dimensions.scroll<=dimensions.width+2,`${section} ${width} overflow ${JSON.stringify(dimensions)}`);
   await page.screenshot({path:`${directory}/${section}-${before?"before":"after"}-${width}x${height}.png`});
 }
 try{
   await page.goto(base);await page.locator("#url").waitFor();
-  if(!before)await page.addStyleTag({url:"/src/sections.css"});
-  for(const size of [[1180,780],[900,620]])for(const section of ["downloads","tools","platforms","settings"])await capture(section,...size);
+  for(const size of [[1180,780],[900,620]])for(const section of ["downloads","library","tools","platforms","settings"])await capture(section,...size);
   if(!before){
     await page.locator('[data-page="downloads"]').click();
-    assert.equal(await page.locator(".job-row").count(),4);
+    assert.equal(await page.locator(".job-row").count(),5);
+    assert.deepEqual(await page.locator(".job-section-heading h2").allTextContents(),["En curso","En espera","Finalizadas"]);
+    assert.equal(await page.getByRole("progressbar", {name:"Un recorrido por la ciudad"}).getAttribute("aria-valuenow"),"43.2");
+    assert.ok(await page.locator(".job-row.is-transferring").evaluate(row => row.querySelector(".progress-rail").clientWidth > row.clientWidth * 0.75));
+    await page.getByText("43.2%",{exact:true}).waitFor();
+    const preview=page.locator(".job-list .row-thumbnail[data-thumbnail-id='clip']");
+    await preview.scrollIntoViewIfNeeded();
+    await preview.locator("img").waitFor();
+    await page.locator("#toggle-sidebar").click();
+    await page.getByRole("button",{name:"Buscar en nabnab"}).click();
+    await page.locator(".action-palette").waitFor();
+    await page.keyboard.press("Escape");
+    assert.equal(await page.locator(".sidebar .nav-item[aria-current='page']").getAttribute("data-page"),"downloads");
+    assert.ok(await page.locator(".sidebar").evaluate(sidebar => sidebar.scrollWidth <= sidebar.clientWidth + 1));
+    await page.locator("#toggle-sidebar").click();
     await page.locator("[data-action='job-filter'][data-filter='error']").click();
     assert.equal(await page.locator(".job-row").count(),1);
     await page.locator("[data-action='job-filter'][data-filter='all']").click();
     await page.locator("#job-search").fill("Documento");assert.equal(await page.locator(".job-row").count(),1);
     checks.push("Queue filters and search preserve actual rows and actions.");
     await page.locator('[data-page="tools"]').click();
+    assert.equal(await page.locator(".tool-catalog-item:visible").count(),7);
+    await page.locator("#tool-search").fill("Extraer audio");
+    assert.equal(await page.locator(".tool-catalog-item:visible").count(),1);
+    const audioCategory=page.locator(".tool-catalog-item[data-id='audio']");
+    await audioCategory.focus();await page.keyboard.press("Enter");
+    await page.locator("#tool-audio-format").waitFor();
+    assert.equal(await page.locator(".tool-directory [data-tool-category='video']").isVisible(),false);
+    await page.getByRole("button",{name:"Ver categorías",exact:true}).click();
     await page.locator('[data-action="tool-kind"][data-kind="extractAudio"]').click();
     await page.locator("#tool-audio-format").waitFor();
     await page.locator("[data-action='pick-tool-library']").click();
@@ -73,7 +95,7 @@ try{
     await page.locator("[data-action='finish-tool-picker']").click();
     assert.equal(await page.locator(".tool-inputs li").count(),1);
     assert.equal(await page.locator("#tool-form button[type=submit]").isEnabled(),true);
-    checks.push("Tool navigation, library input selection and options remain connected.");
+    checks.push("Tool category search, keyboard activation, return to categories, library input selection and options passed.");
     for(const module of ['imageAssets','fileOrganization','portable']){
       await page.locator('[data-action="tool-module"][data-id="'+module+'"]').click();
       const heading=page.locator('.tool-workspace h2').first();
