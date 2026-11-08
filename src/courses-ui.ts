@@ -121,10 +121,10 @@ export function createCoursesController(hooks: CourseHooks) {
     }
   }
 
-  async function importMaterials(source: BrowserCourseProvider, url: string, title: string) {
+  async function importMaterials(source: BrowserCourseProvider, url: string, title: string, mode: "files" | "folder" = "files") {
     let opened = false;
     await perform(async () => {
-      const course = await hooks.command<Course | null>("import_course_materials", { provider: source, url, title });
+      const course = await hooks.command<Course | null>("import_course_materials", { provider: source, url, title, folder: mode === "folder" });
       if (!course) return false;
       if (courseId !== course.id) {
         lessonId = course.sections[0]?.lessons[0]?.id ?? null;
@@ -135,7 +135,8 @@ export function createCoursesController(hooks: CourseHooks) {
       hooks.notify(t("Materiales añadidos al curso.", "Materials added to the course."), "success");
     });
     if (opened) focusCourseHeading();
-    else document.getElementById(courseId ? "course-add-materials" : "course-browser-import")?.focus({ preventScroll: true });
+    else document.getElementById(mode === "folder" ? "course-add-folder"
+      : courseId ? "course-add-materials" : "course-browser-import")?.focus({ preventScroll: true });
   }
 
   function browserForm(source: BrowserCourseProvider, platformField: string, linkField: string): string {
@@ -151,8 +152,11 @@ export function createCoursesController(hooks: CourseHooks) {
         <section>
           <h3>${t("2. Añade tus archivos", "2. Add your files")}</h3>
           <label>${t("Nombre del curso", "Course name")}<input id="course-browser-title" maxlength="240" required value="${h(browserTitle)}" autocomplete="off"></label>
-          <p class="field-note">${t("Biblioteca indexa los archivos elegidos en su carpeta y agrupa las lecciones por nombre. Tu sesión permanece en el navegador.", "Library indexes selected files in place and groups lessons by name. Your session stays in the browser.")}</p>
-          <button type="submit" id="course-browser-import" class="button primary" ${busy ? "disabled" : ""}>${busy ? t("Preparando…", "Preparing…") : t("Elegir archivos guardados", "Choose saved files")}</button>
+          <p class="field-note">${t("Elige archivos sueltos o una carpeta con sus unidades. Biblioteca indexa hasta 200 archivos compatibles en su ubicación original.", "Choose individual files or a folder with its units. Library indexes up to 200 supported files in place.")}</p>
+          <div class="button-group">
+            <button type="submit" id="course-browser-import" class="button primary" ${busy ? "disabled" : ""}>${busy ? t("Preparando…", "Preparing…") : t("Elegir archivos guardados", "Choose saved files")}</button>
+            ${action("course-add-folder", t("Elegir carpeta del curso", "Choose course folder"), "folder", "secondary", `id="course-add-folder" ${busy ? "disabled" : ""}`)}
+          </div>
         </section>
       </div>
     </form>`;
@@ -175,7 +179,7 @@ export function createCoursesController(hooks: CourseHooks) {
     const course = current();
     const platformField = `<label><span id="course-platform-label">${t("Plataforma", "Platform")}</span><select id="course-provider" aria-labelledby="course-platform-label">${courseProviders.map(([id, name]) => option(id, name, provider)).join("")}</select></label>`;
     const linkField = `<label>${t("Enlace del curso", "Course URL")}<input id="course-url" type="url" required value="${h(input)}" placeholder="https://…" autocomplete="off"></label>`;
-    if (!course) return `<div class="page-heading"><div><h1 id="course-heading" tabindex="-1">${t("Cursos", "Courses")}</h1><p>${t("Descarga materiales autorizados y estudia tus archivos locales.", "Download authorized materials and study your local files.")}</p></div>${action("course-import", t("Importar carpeta", "Import folder"), "folder", isBrowserProvider(provider) ? "secondary" : "primary", busy ? "disabled" : "")}</div>
+    if (!course) return `<div class="page-heading"><div><h1 id="course-heading" tabindex="-1">${t("Cursos", "Courses")}</h1><p>${t("Descarga materiales autorizados y estudia tus archivos locales.", "Download authorized materials and study your local files.")}</p></div>${action("course-import", t("Importar curso local", "Import local course"), "folder", isBrowserProvider(provider) ? "secondary" : "primary", busy ? "disabled" : "")}</div>
       ${isBrowserProvider(provider) ? browserForm(provider, platformField, linkField) : `<form id="course-open-online" class="settings-form" aria-busy="${busy}"><h2>${t("Abrir un curso con acceso autorizado", "Open an authorized course")}</h2>${platformField}${linkField}${provider !== "udemy" ? `<div class="form-grid"><label>${t("ID numérico del curso o producto", "Numeric course or product ID")}<input id="course-product-id" inputmode="numeric" required value="${h(productId)}"></label>${provider === "hotmart" ? `<label>${t("Identificador del club, slug", "Club identifier, slug")}<input id="course-slug" required value="${h(slug)}"></label>` : ""}</div>` : ""}<div class="form-grid"><label>${t("Máximo de lecciones a explorar", "Lesson exploration limit")}<input id="course-limit" type="number" min="1" max="1000" value="${limit}"></label><div class="button-group"><button type="submit" class="button secondary" ${busy ? "disabled" : ""}>${busy ? t("Explorando…", "Exploring…") : t("Explorar con mi sesión", "Explore with my session")}</button></div></div><p class="field-note">${provider === "udemy" ? t("Importa tu sesión en Ajustes.", "Import your session in Settings.") : t("Conecta un token de alumno de esta plataforma. El ID y el slug se encuentran en el enlace o los datos del curso.", "Connect a student token for this platform. The ID and slug are in the course link or course data.")} ${t("Solo se ofrecen archivos con una ruta de descarga autorizada. Reproducir una lección no implica permiso para guardarla.", "Only materials with an authorized download route are offered. Playback access does not imply permission to save a lesson.")}</p></form>`}
       ${provider === "hotmart" || provider === "kiwify" ? `<form id="course-token" class="settings-form"><h2>${t("Conexión de alumno", "Student connection")} · ${h(provider)}</h2><label>${t("Token de acceso autorizado", "Authorized access token")}<input id="course-token-secret" type="password" required autocomplete="off"></label><p class="field-note">${t("Se protege localmente. No se publica ni se transfiere a otra plataforma. La conexión no descarga contenido por sí sola.", "Stored protected locally. It is not published or sent to another platform. Connecting does not download content.")}</p><div class="button-group"><button type="submit" class="button secondary" ${busy ? "disabled" : ""}>${t("Guardar conexión", "Save connection")}</button>${action("course-token-remove", t("Eliminar conexión", "Remove connection"), undefined, "quiet", busy ? "disabled" : "")}</div></form>` : ""}
       ${courses.length ? `<div class="source-list">${courses.map(course => `<article class="source-row"><button class="media-open" data-action="course-open" data-id="${h(course.id)}"><span class="media-info"><strong>${h(course.title)}</strong><span>${h(course.provider === "local" ? t("Carpeta local", "Local folder") : courseProviderName(course.provider))} · ${lessonCount(course.sections.flatMap(section => section.lessons).length)}</span></span>${icon("arrow")}</button></article>`).join("")}</div>` : isBrowserProvider(provider) ? "" : `<div class="empty-state">${icon("library")}<h2>${t("Tu primer curso", "Your first course")}</h2><p>${t("Importa una carpeta con clases legítimamente guardadas o abre un curso al que tengas acceso.", "Import a folder of legitimately saved lessons or open a course you can access.")}</p></div>`}`;
@@ -185,7 +189,7 @@ export function createCoursesController(hooks: CourseHooks) {
     const lessons = course.sections.flatMap(section => section.lessons);
     const item = lessonMedia(lesson);
     const queueable = course.sections.flatMap(section => section.lessons).flatMap(lesson => lesson.assets).filter(asset => selected.has(asset.id) && available(asset));
-    return `<div class="page-heading"><div>${action("course-back", t("Todos los cursos", "All courses"), undefined, "quiet")}<h1 id="course-heading" tabindex="-1">${h(course.title)}</h1><p>${h(course.provider === "local" ? t("Archivos locales", "Local files") : courseProviderName(course.provider))} · ${lessonCount(lessons.length)}</p></div>${browserAssisted ? `<div class="button-group">${action("course-browser-open", t("Abrir curso en el navegador", "Open course in browser"), "arrow", "quiet", busy ? "disabled" : "")}${action("course-add-materials", t("Añadir archivos guardados", "Add saved files"), "add", "primary", `id="course-add-materials" ${busy ? "disabled" : ""}`)}</div>` : course.url ? action("course-refresh", t("Actualizar materiales", "Refresh materials"), "retry", "quiet", busy ? "disabled" : "") : ""}</div>
+    return `<div class="page-heading"><div>${action("course-back", t("Todos los cursos", "All courses"), undefined, "quiet")}<h1 id="course-heading" tabindex="-1">${h(course.title)}</h1><p>${h(course.provider === "local" ? t("Archivos locales", "Local files") : courseProviderName(course.provider))} · ${lessonCount(lessons.length)}</p></div>${browserAssisted ? `<div class="button-group">${action("course-browser-open", t("Abrir curso en el navegador", "Open course in browser"), "arrow", "quiet", busy ? "disabled" : "")}${action("course-add-folder", t("Añadir carpeta", "Add folder"), "folder", "secondary", `id="course-add-folder" ${busy ? "disabled" : ""}`)}${action("course-add-materials", t("Añadir archivos guardados", "Add saved files"), "add", "primary", `id="course-add-materials" ${busy ? "disabled" : ""}`)}</div>` : course.url ? action("course-refresh", t("Actualizar materiales", "Refresh materials"), "retry", "quiet", busy ? "disabled" : "") : ""}</div>
       ${localStudy ? "" : `<div class="selection-toolbar"><span>${queueable.length} ${t("materiales seleccionados", "materials selected")}</span>${action("course-queue", t("Añadir a la cola", "Add to queue"), "add", "primary", busy || !queueable.length ? "disabled" : "")}${action("course-clear", t("Quitar selección", "Clear selection"), undefined, "quiet")}</div>`}
       <div class="course-layout${browserAssisted ? " course-layout--browser" : ""}"><nav aria-label="${t("Lecciones del curso", "Course lessons")}" class="course-tree"><label class="search-control">${icon("search")}<input id="course-search" type="search" value="${h(query)}" placeholder="${t("Buscar lección", "Find lesson")}" aria-label="${t("Buscar lección", "Find lesson")}"></label>${course.sections.map(section => `<details ${section.lessons.some(lesson => lesson.id === lessonId) || !lessonId ? "open" : ""}><summary>${h(section.title)}</summary>${localStudy ? "" : action("course-select-section", t("Seleccionar materiales disponibles", "Select available materials"), undefined, "quiet", `data-id="${h(section.id)}"`)}<ul>${section.lessons.filter(lesson => lesson.title.toLocaleLowerCase().includes(query.toLocaleLowerCase())).map(lesson => `<li><button type="button" class="course-lesson" data-action="course-lesson" data-id="${h(lesson.id)}" ${lesson.id === lessonId ? 'aria-current="true"' : ""}><span>${h(lesson.title)}</span>${lesson.learned ? `<small>${t("Aprendida", "Learned")}</small>` : ""}</button></li>`).join("")}</ul></details>`).join("")}</nav><section class="course-study">${lesson ? `<div class="page-heading"><h2>${h(lesson.title)}</h2>${action("course-learned", lesson.learned ? t("Marcar pendiente de aprender", "Mark as not learned") : t("Marcar aprendida", "Mark as learned"), "check", "quiet", `aria-pressed="${lesson.learned}" ${busy ? "disabled" : ""}`)}</div>
       ${item ? lessonPlayback(item) : ""}
@@ -239,6 +243,10 @@ export function createCoursesController(hooks: CourseHooks) {
       }
       case "course-add-materials":
         if (course?.url && isBrowserProvider(course.provider)) await importMaterials(course.provider, course.url, course.title);
+        return true;
+      case "course-add-folder":
+        if (course?.url && isBrowserProvider(course.provider)) await importMaterials(course.provider, course.url, course.title, "folder");
+        else if (isBrowserProvider(provider) && element.closest("form")?.reportValidity()) await importMaterials(provider, input, browserTitle, "folder");
         return true;
       case "course-token-remove": await perform(async () => { await hooks.command("save_course_token", { provider, token: "", remove: true }); hooks.notify(t("Conexión eliminada. Los archivos se conservan.", "Connection removed. Local files are kept."), "success"); }); break;
       case "course-import": await perform(async () => { const course = await hooks.command<Course>("import_local_course"); courseId = course.id; lessonId = course.sections[0]?.lessons[0]?.id ?? null; hooks.notify(t("Curso local importado.", "Local course imported."), "success"); }); break;

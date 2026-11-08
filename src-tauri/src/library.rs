@@ -36,7 +36,7 @@ pub struct LibraryItem {
     pub details: crate::library_features::LibraryDetails,
 }
 
-fn extension_kind(path: &Path) -> Option<&'static str> {
+pub(crate) fn extension_kind(path: &Path) -> Option<&'static str> {
     match path.extension()?.to_str()?.to_ascii_lowercase().as_str() {
         "mp4" | "mkv" | "webm" | "avi" | "mov" | "m4v" | "mpeg" | "mpg" | "ts" | "mts" | "m2ts"
         | "3gp" | "ogv" | "mxf" => Some("video"),
@@ -220,6 +220,7 @@ fn collect_files(
     boundary: &Path,
     files: &mut Vec<PathBuf>,
     count: &mut usize,
+    accepts: &impl Fn(&Path) -> bool,
 ) -> Result<(), String> {
     let mut pending = vec![path.to_owned()];
     while let Some(path) = pending.pop() {
@@ -247,14 +248,17 @@ fn collect_files(
                 }
                 pending.push(entry.map_err(|e| e.to_string())?.path());
             }
-        } else if metadata.is_file() && extension_kind(&canonical).is_some() {
+        } else if metadata.is_file() && accepts(&canonical) {
             files.push(canonical);
         }
     }
     Ok(())
 }
 
-pub fn import_paths(repository: &mut Repository, paths: &[PathBuf]) -> Result<usize, String> {
+pub(crate) fn files_for_import(
+    paths: &[PathBuf],
+    accepts: impl Fn(&Path) -> bool,
+) -> Result<Vec<PathBuf>, String> {
     if paths.len() > MAX_IMPORT_ENTRIES {
         return Err("Import at most 10,000 entries at a time.".into());
     }
@@ -262,11 +266,16 @@ pub fn import_paths(repository: &mut Repository, paths: &[PathBuf]) -> Result<us
     let mut count = 0;
     for path in paths {
         let canonical = authorized_path(path)?;
-        if canonical.is_file() && extension_kind(&canonical).is_none() {
+        if canonical.is_file() && !accepts(&canonical) {
             return Err("This file type cannot be added to the library.".into());
         }
-        collect_files(&canonical, &canonical, &mut files, &mut count)?;
+        collect_files(&canonical, &canonical, &mut files, &mut count, &accepts)?;
     }
+    Ok(files)
+}
+
+pub fn import_paths(repository: &mut Repository, paths: &[PathBuf]) -> Result<usize, String> {
+    let files = files_for_import(paths, |path| extension_kind(path).is_some())?;
     let mut known: HashSet<_> = repository
         .data
         .library

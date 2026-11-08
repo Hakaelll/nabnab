@@ -18,9 +18,9 @@ Los adjuntos PDF/EPUB dependen de la lectura y clasificación documental de la b
 
 ## Materiales de Rocketseat, Coursera, Domestika y Skillshare
 
-Abre **Plataformas → Cursos**, elige el proveedor y pega el enlace del curso. También puedes pegar el enlace en Inicio. Abre el curso en el navegador y elige allí el perfil o la sesión autorizada. Guarda el material desde los controles que la plataforma haya habilitado. En nabnab, indica el nombre del curso y pulsa **Elegir archivos guardados**. El selector admite hasta 200 archivos por operación.
+Abre **Plataformas → Cursos**, elige el proveedor y pega el enlace del curso. También puedes pegar el enlace en Inicio. Abre el curso en el navegador y elige allí el perfil o la sesión autorizada. Guarda el material desde los controles que la plataforma haya habilitado. En nabnab, indica el nombre del curso y pulsa **Elegir archivos guardados** o **Elegir carpeta del curso**. Puedes importar hasta 200 archivos compatibles por operación.
 
-La biblioteca indexa los archivos elegidos en su ubicación actual. Para conservar el orden del curso, guarda cada unidad en una carpeta numerada y numera los nombres de las lecciones. Los archivos con el mismo nombre base en la misma carpeta aparecen juntos, por ejemplo, un vídeo y su subtítulo. Los ZIP, RAR, 7z y archivos de diseño admitidos quedan como adjuntos para consultar en su carpeta. Al añadir archivos al mismo curso se conservan las notas, el estado aprendido y la posición asociada a los archivos ya indexados.
+La biblioteca indexa los archivos en su ubicación actual. Al elegir una carpeta, incluye las subcarpetas y se detiene si encuentra un enlace simbólico o una unión de directorios. Para conservar el orden del curso, guarda cada unidad en una carpeta numerada y numera los nombres de las lecciones. Los archivos con el mismo nombre base en la misma carpeta aparecen juntos, por ejemplo, un vídeo y su subtítulo. Los ZIP, RAR, 7z y archivos de diseño admitidos quedan como adjuntos para consultar en su carpeta. **Añadir carpeta** y **Añadir archivos guardados** amplían el curso existente y conservan las notas, el estado aprendido y la posición asociada a los archivos ya indexados.
 
 | Plataforma | Vía disponible |
 | --- | --- |

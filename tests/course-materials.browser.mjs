@@ -33,6 +33,12 @@ const setup = `
       const asset = {id:"asset-pdf",title:"02 Preparar.pdf",kind:"document",status:"local",libraryId:"material-pdf",urlRef:null,jobIds:[]};
       const lesson = {id:"lesson-1",title:"02 Preparar",learned:true,assets:[asset],notes:[{id:"note-1",text:"Revisar la plantilla",time:null,bookmarkId:null}]};
       const course = {id:"course-fixture",provider:args.provider,title:args.title,url:args.url,sections:[{id:"section-1",title:"01 Fundamentos",lessons:[lesson]}],createdAt:1};
+      if (args.folder) {
+        state.library.push({...state.library[0],id:"material-extras",name:"01 Repaso.pdf",path:"C:/Fixture/02 Extras/01 Repaso.pdf"});
+        course.sections.push({id:"section-2",title:"02 Extras",lessons:[
+          {id:"lesson-2",title:"01 Repaso",learned:false,assets:[{...asset,id:"asset-extras",title:"01 Repaso.pdf",libraryId:"material-extras"}],notes:[]},
+        ]});
+      }
       fixture.courses = [course];
       return structuredClone(course);
     }
@@ -74,9 +80,15 @@ try {
   await choose.click();
   await choose.waitFor();
   assert.equal(await page.locator(".course-layout").count(), 0, "Cancel leaves the import form open");
+  const chooseFolder = page.getByRole("button", { name: "Elegir carpeta del curso" });
+  await chooseFolder.click();
+  await page.waitForFunction(() => window.courseFixture.calls.some(call => call.cmd === "import_course_materials" && call.args.folder));
+  await chooseFolder.waitFor();
+  assert.equal(await chooseFolder.evaluate(button => button === document.activeElement), true);
   await page.screenshot({ path: `${directory}/form-1180x780.png` });
 
   await page.setViewportSize({ width: 900, height: 620 });
+  assert.ok(await page.locator("#course-browser-form").evaluate(form => form.scrollWidth <= form.clientWidth + 1));
   await page.evaluate(() => { window.courseFixture.cancel = false; });
   await choose.focus();
   await page.keyboard.press("Enter");
@@ -89,17 +101,20 @@ try {
   assert.ok(overflow <= 1, `Compact study view overflows horizontally by ${overflow}px`);
   await page.getByText("Materiales añadidos al curso.", { exact: true }).waitFor();
   await page.locator("[data-action='dismiss-message']").click();
-  await page.screenshot({ path: `${directory}/study-900x620.png` });
-
-  await page.getByRole("button", { name: "Añadir archivos guardados" }).click();
-  await page.waitForFunction(() => window.courseFixture.calls.filter(call => call.cmd === "import_course_materials").length === 3);
+  await page.getByRole("button", { name: "Añadir carpeta", exact: true }).click();
+  await page.getByText("02 Extras", { exact: true }).waitFor();
+  const imports = await page.evaluate(() => window.courseFixture.calls.filter(call => call.cmd === "import_course_materials").map(call => call.args.folder));
+  assert.deepEqual(imports, [false, true, false, true]);
   assert.equal(await page.getByText("Revisar la plantilla", { exact: true }).count(), 1);
+  await page.getByText("Materiales añadidos al curso.", { exact: true }).waitFor();
+  await page.locator("[data-action='dismiss-message']").click();
+  await page.screenshot({ path: `${directory}/study-900x620.png` });
   await page.locator("[data-page='home']").click();
   await page.locator("#url").fill("https://www.coursera.org/learn/apis/home");
   await page.locator("#course-browser-form").waitFor();
   assert.equal(await page.getByLabel("Plataforma", { exact: true }).inputValue(), "coursera");
   assert.deepEqual(errors, []);
-  console.log("Four browser-assisted course choices, cancellation, keyboard import, compact study, and incremental import passed.");
+  console.log("Four browser-assisted course choices, file and folder cancellation, keyboard import, compact study, and incremental folder import passed.");
 } finally {
   await browser.close();
 }

@@ -114,22 +114,36 @@ pub fn open_course_site(provider: String, url: String) -> Result<(), String> {
     crate::cloud_storage::browser(link.page.as_str())
 }
 
-fn index_material(path: &Path, link: &CourseLink) -> Result<library::LibraryItem, String> {
+fn is_course_attachment(path: &Path) -> bool {
     let extension = path
         .extension()
         .and_then(|value| value.to_str())
         .unwrap_or_default()
         .to_ascii_lowercase();
-    if matches!(
+    matches!(
         extension.as_str(),
         "zip" | "7z" | "rar" | "psd" | "ai" | "svg" | "abr" | "procreate"
-    ) {
+    )
+}
+
+fn index_material(path: &Path, link: &CourseLink) -> Result<library::LibraryItem, String> {
+    if is_course_attachment(path) {
         let mut item = library::index_file(path)?;
         item.source = Some(link.page.origin().ascii_serialization());
         Ok(item)
     } else {
         library::index(path, None, Some(link.page.to_string()), None)
     }
+}
+
+fn index_materials(paths: &[PathBuf], link: &CourseLink) -> Result<Vec<library::LibraryItem>, String> {
+    let paths = library::files_for_import(paths, |path| {
+        library::extension_kind(path).is_some() || is_course_attachment(path)
+    })?;
+    if paths.is_empty() || paths.len() > 200 {
+        return Err("Choose between 1 and 200 supported course files.".into());
+    }
+    paths.iter().map(|path| index_material(path, link)).collect()
 }
 
 fn path_identity(path: &Path) -> String {
@@ -265,6 +279,7 @@ pub async fn import_course_materials(
     provider: String,
     url: String,
     title: String,
+    folder: Option<bool>,
 ) -> Result<Option<Course>, String> {
     let link = CourseLink::selected(&provider, &url)?;
     let title = label(&title, 240);
@@ -272,10 +287,17 @@ pub async fn import_course_materials(
         return Err("Enter the name to use for this course.".into());
     }
     let picked = tauri::async_runtime::spawn_blocking(move || {
-        app.dialog()
-            .file()
-            .set_title("Choose authorized course files")
-            .blocking_pick_files()
+        let dialog = app.dialog().file();
+        if folder.unwrap_or(false) {
+            dialog
+                .set_title("Choose an authorized course folder")
+                .blocking_pick_folder()
+                .map(|folder| vec![folder])
+        } else {
+            dialog
+                .set_title("Choose authorized course files")
+                .blocking_pick_files()
+        }
     })
     .await
     .map_err(|_| "The course file picker failed.")?;
@@ -293,10 +315,7 @@ pub async fn import_course_materials(
         })
         .collect::<Result<Vec<PathBuf>, _>>()?;
     let (link, selected) = tauri::async_runtime::spawn_blocking(move || {
-        let selected = paths
-            .iter()
-            .map(|path| index_material(path, &link))
-            .collect::<Result<Vec<_>, _>>()?;
+        let selected = index_materials(&paths, &link)?;
         Ok::<_, String>((link, selected))
     })
     .await
@@ -373,10 +392,7 @@ mod tests {
         let original =
             CourseLink::selected("domestika", "https://domestika.org/en/courses/24-drawing")
                 .unwrap();
-        let selected = [&later, &first]
-            .iter()
-            .map(|path| index_material(path, &original).unwrap())
-            .collect();
+        let selected = index_materials(&[later.clone(), first.clone()], &original).unwrap();
         let saved = import_selected(&mut repo, original, "Drawing".into(), selected).unwrap();
         let lesson = &mut repo.data.courses[0].sections[0].lessons[0];
         assert_eq!(lesson.title, "2 Practice");
@@ -393,10 +409,12 @@ mod tests {
             "https://www.domestika.org/es/courses/24-dibujo",
         )
         .unwrap();
-        let selected = [&first, &attachment]
-            .iter()
-            .map(|path| index_material(path, &updated).unwrap())
-            .collect();
+        let nested = folder.join("11 Extras");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join("1 Notes.txt"), b"Course notes").unwrap();
+        std::fs::write(nested.join("ignore.exe"), b"Unsupported").unwrap();
+        let selected = index_materials(&[folder], &updated).unwrap();
+        assert_eq!(selected.len(), 4);
         let merged = import_selected(&mut repo, updated, "Dibujo".into(), selected).unwrap();
         assert_eq!(merged.id, saved.id);
         assert_eq!(merged.title, "Drawing");
@@ -407,7 +425,9 @@ mod tests {
         assert!(lesson.learned);
         assert_eq!(lesson.notes[0].text, "Keep this");
         assert_eq!(lesson.assets.len(), 2);
-        assert_eq!(repo.data.library.len(), 3);
+        assert_eq!(merged.sections[1].title, "11 Extras");
+        assert_eq!(merged.sections[1].lessons[0].title, "1 Notes");
+        assert_eq!(repo.data.library.len(), 4);
         assert_eq!(repo.data.courses.len(), 1);
         drop(repo);
         let root = std::fs::canonicalize(&root).unwrap();
