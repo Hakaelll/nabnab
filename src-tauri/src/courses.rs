@@ -16,6 +16,8 @@ use tauri_plugin_dialog::DialogExt;
 pub mod members;
 #[path = "course_browser.rs"]
 pub mod browser;
+#[path = "course_resources.rs"]
+pub mod resources;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -333,12 +335,11 @@ pub fn list_courses(state: State<Arc<AppState>>) -> Result<Vec<Course>, String> 
     let guard = state.repository.lock().unwrap();
     let repo = guard.as_ref().ok_or("Open the app first.")?;
     let mut courses = repo.data.courses.clone();
-    for asset in courses
-        .iter_mut()
-        .flat_map(|c| &mut c.sections)
-        .flat_map(|s| &mut s.lessons)
-        .flat_map(|l| &mut l.assets)
-    {
+    for asset in courses.iter_mut().flat_map(|course| &mut course.sections)
+        .flat_map(|section| &mut section.lessons).flat_map(|lesson| &mut lesson.assets) {
+        if asset.id.starts_with("skillshare:") {
+            asset.job_ids = resources::jobs_for(repo, &asset.id).map(|job| job.id.clone()).collect();
+        }
         if asset.library_id.is_none() {
             asset.library_id = asset
                 .job_ids
@@ -1015,6 +1016,13 @@ pub fn queue_course_assets(
         .find(|course| course.id == course_id)
         .cloned()
         .ok_or("Course not found.")?;
+    if course.provider == "skillshare" {
+        let jobs = resources::enqueue(repo, &course, &asset_ids, &client_request)?;
+        drop(guard);
+        for job in &jobs { let _ = app.emit("job-update", job); }
+        state.runtime.notify.notify_one();
+        return Ok(jobs);
+    }
     let mut prepared = Vec::new();
     let mut link = Vec::new();
     for (section, lesson, asset) in course

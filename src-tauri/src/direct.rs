@@ -24,6 +24,7 @@ const PREFIX_LIMIT: usize = 4096;
 enum Network {
     Public,
     Pixiv,
+    Skillshare,
     #[cfg(test)]
     Fixture(SocketAddr),
 }
@@ -53,6 +54,7 @@ fn parsed_url(input: &str, network: Network) -> Result<url::Url, String> {
     if input.len() > 8192 || input.chars().any(char::is_control) {
         return Err("The direct URL exceeds its size limit or contains control characters.".into());
     }
+    if matches!(network, Network::Skillshare) { return crate::courses::resources::parse(input).map(|resource| resource.url); }
     #[cfg(test)]
     if let Network::Fixture(address) = network {
         let parsed = url::Url::parse(input).map_err(|_| "Invalid fixture URL.")?;
@@ -173,6 +175,9 @@ async fn fetch(
                 .await
                 .map_err(|_| "The direct HTTP request failed. Check the connection and retry.")?;
             if response.status().is_redirection() {
+                if matches!(network, Network::Skillshare) {
+                    return Err("Skillshare redirected this attachment. Copy its current download link from the class.".into());
+                }
                 if hop == 5 {
                     return Err("The direct source exceeded the five-redirect limit.".into());
                 }
@@ -760,10 +765,18 @@ pub async fn download_file(
     download_named_with_network(url, staging, Some(filename), cancel, run_id, emit, Network::Public).await
 }
 
+pub async fn download_skillshare_resource(
+    url: &str, staging: &Path, filename: &str, cancel: watch::Receiver<bool>, run_id: u64,
+    emit: impl Fn(Progress) + Send + Sync + Clone + 'static,
+) -> Result<PathBuf, String> {
+    download_named_with_network(url, staging, Some(filename), cancel, run_id, emit, Network::Skillshare).await
+}
+
 async fn download_named_with_network(
     url: &str, staging: &Path, filename: Option<&str>, cancel: watch::Receiver<bool>, run_id: u64,
     emit: impl Fn(Progress) + Send + Sync + Clone + 'static, network: Network,
 ) -> Result<PathBuf, String> {
+    let max_bytes = if matches!(network, Network::Skillshare) { crate::courses::resources::SKILLSHARE_LIMIT } else { MAX_BYTES };
     if let Some(filename) = filename { validate_filename(filename)?; }
     parsed_url(url, network)?;
     let metadata = fs::symlink_metadata(staging)
@@ -798,7 +811,7 @@ async fn download_named_with_network(
     let part = staging.join(PART);
     let saved = read_resume(staging, &hash)?;
     let mut offset = regular(&part)?.map_or(0, |metadata| metadata.len());
-    if offset > MAX_BYTES {
+    if offset > max_bytes {
         return Err("The owned direct partial exceeds its size limit.".into());
     }
     if saved.is_none() {
@@ -850,6 +863,7 @@ async fn download_named_with_network(
         length
     };
     let same_resource = response.url() == &parsed_url(url, network)?;
+    if total.is_some_and(|length| length > max_bytes) { return Err("The selected file exceeds its download size limit.".into()); }
     if offset > 0 && !same_resource {
         return Err("The resumed resource changed its URL. The partial was preserved.".into());
     }
@@ -893,8 +907,8 @@ async fn download_named_with_network(
         };
         downloaded = downloaded
             .checked_add(chunk.len() as u64)
-            .filter(|value| *value <= MAX_BYTES && total.is_none_or(|total| *value <= total))
-            .ok_or("The direct response exceeded its declared size or 128 GiB limit.")?;
+            .filter(|value| *value <= max_bytes && total.is_none_or(|total| *value <= total))
+            .ok_or("The direct response exceeded its declared size or download limit.")?;
         if !checked_prefix {
             let take = (PREFIX_LIMIT - prefix.len()).min(chunk.len());
             prefix.extend_from_slice(&chunk[..take]);

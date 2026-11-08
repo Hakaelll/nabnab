@@ -31,7 +31,11 @@ pub struct PublicSelection {
 impl PublicSelection {
     pub fn validate(&self) -> Result<(), String> {
         let url = url::Url::parse(&self.source_url).map_err(|_|"Invalid public source identity.")?;
-        if !public_sources::supported(&self.source_url) || url.query().is_some() || url.fragment().is_some()
+        let supported = if self.asset_id.starts_with("skillshare:") {
+            crate::courses::resources::validate_selection(self)?;
+            true
+        } else { public_sources::supported(&self.source_url) };
+        if !supported || url.query().is_some() || url.fragment().is_some()
             || self.asset_id.is_empty() || self.asset_id.len()>2048
             || self.asset_id.chars().any(char::is_control)
             || self.sha256.as_ref().is_some_and(|hash| hash.len()!=64 || !hash.bytes().all(|v|v.is_ascii_hexdigit()))

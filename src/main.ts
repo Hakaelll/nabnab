@@ -1069,6 +1069,7 @@ if(desktop){
       snapshot.jobs=current?snapshot.jobs.map(job=>job.id===payload.id?payload:job):[...snapshot.jobs,payload];
       if(page==="tools"&&(localToolModule==="translation"||localToolModule==="dubbing"))translationTool.observe(payload,localToolModule);
       if(page==="tools"&&localToolModule==="portable"&&current?.state!==payload.state&&portable.isExportJob(payload.id))renderCurrent();
+      if(page==="platforms"&&platformModule==="courses"&&current?.state!==payload.state)courses.observeJob(payload.id);
       scheduleJobsRender();
     });
     await listen('library-update',()=>void refresh().catch(showError));

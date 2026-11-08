@@ -1250,6 +1250,7 @@ fn main() {
             courses::members::save_course_token, courses::members::inspect_member_course, courses::inspect_course, courses::queue_course_assets, courses::list_courses, courses::import_local_course, courses::course_learned, courses::save_course_note,
             courses::browser::open_course_site, courses::browser::preview_course_materials,
             courses::browser::discard_course_materials, courses::browser::import_course_materials,
+            courses::resources::add_skillshare_resources,
             queue_torrent, torrents::torrent_status, torrents::set_torrent_enabled, torrents::open_torrent, torrents::inspect_torrent_magnet, torrents::cancel_torrent_inspection,
             queue::modules::queue_advanced_file, queue::modules::queue_palette, queue::modules::queue_audio_preview, palettes::palette_preview, advanced_files::inspect_advanced_file,
             queue::modules::queue_source_export, queue::modules::queue_caption_edit, queue::modules::queue_media_edit, queue::modules::queue_document, queue::modules::queue_gallery_export, queue::modules::queue_telegram, queue::modules::queue_live, live::stop_recording,

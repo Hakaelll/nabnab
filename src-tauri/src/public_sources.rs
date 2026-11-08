@@ -110,7 +110,7 @@ enum Target {
     Librivox(librivox::LibrivoxTarget),
 }
 
-fn percent_decode(input: &str) -> Result<String, String> {
+pub(crate) fn percent_decode(input: &str) -> Result<String, String> {
     let mut bytes = Vec::new();
     let mut source = input.bytes();
     while let Some(byte) = source.next() {

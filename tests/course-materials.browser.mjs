@@ -27,6 +27,26 @@ const setup = `
     if (cmd === "get_snapshot") return structuredClone(state);
     if (cmd === "list_courses") return structuredClone(fixture.courses);
     if (cmd === "open_course_site") return;
+    if (cmd === "add_skillshare_resources") {
+      const attachments = ["Guía del proyecto.pdf", "Plantillas.zip"];
+      const course = {id:"skillshare-fixture",provider:"skillshare",title:args.title,url:args.url,createdAt:1,
+        sections:[{id:"skillshare-resources",title:"Recursos de Skillshare",lessons:attachments.map((name,index)=>({
+          id:"resource-"+index,title:name,learned:false,notes:[],assets:[{id:"skillshare-resource-"+index,title:name,
+            kind:"attachment",status:"downloadable",libraryId:null,urlRef:null,jobIds:[]}]}))}]};
+      fixture.courses.push(course);
+      return structuredClone(course);
+    }
+    if (cmd === "queue_course_assets") {
+      const course = fixture.courses.find(course => course.id === args.courseId);
+      const queued = course.sections.flatMap(section => section.lessons).flatMap(lesson => lesson.assets)
+        .filter(asset => args.assetIds.includes(asset.id)).map(asset => {
+          const id = "queued-" + asset.id;
+          asset.jobIds.push(id);
+          return {id,runId:1,updatedAt:1,state:"pending",outputs:[]};
+        });
+      state.jobs.push(...queued);
+      return structuredClone(queued);
+    }
     if (cmd === "preview_course_materials") {
       if (fixture.cancel) return null;
       const id = fixture.calls.length;
@@ -175,8 +195,48 @@ try {
   await page.locator("#url").fill("https://www.coursera.org/learn/apis/home");
   await page.locator("#course-browser-form").waitFor();
   assert.equal(await page.getByLabel("Plataforma", { exact: true }).inputValue(), "coursera");
+  await page.getByLabel("Plataforma", { exact: true }).selectOption("skillshare");
+  const skillshare = "https://www.skillshare.com/classes/Example-Design/123456";
+  const resources = ["https://static.skillshare.com/uploads/attachment/12345678/90abcdef/Guide.pdf",
+    "https://static.skillshare.com/uploads/attachment/12345679/90abcded/Templates.zip"];
+  await page.getByLabel("Enlace del curso").fill(skillshare);
+  await page.getByLabel("Nombre del curso").fill("Diseño de un cuaderno");
+  await page.locator("#course-skillshare-resources summary").press("Enter");
+  await page.getByLabel("Enlaces a adjuntos").fill(resources.join("\n"));
+  await page.getByRole("button", {name:"Revisar enlaces"}).click();
+  await page.getByRole("heading", {name:"Diseño de un cuaderno"}).waitFor();
+  assert.equal(await page.getByText("Skillshare · 2 adjuntos").count(), 1);
+  const reviewCall = await page.evaluate(() => window.courseFixture.calls.find(call => call.cmd === "add_skillshare_resources").args);
+  assert.deepEqual(reviewCall, {url:skillshare,title:"Diseño de un cuaderno",links:resources});
+  assert.equal(await page.evaluate(() => window.courseFixture.calls.some(call => call.cmd === "queue_course_assets")), false);
+  const queue = page.getByRole("button", {name:"Añadir a la cola"});
+  assert.equal(await queue.isDisabled(), true);
+  await page.getByRole("checkbox", {name:"Seleccionar Guía del proyecto.pdf"}).press("Space");
+  assert.equal(await page.locator("#course-skillshare-resources").evaluate(entry => entry.open), false);
+  for (const [width,height] of [[900,620],[1180,780]]) {
+    await page.setViewportSize({width,height});
+    assert.ok(await page.locator(".course-layout").evaluate(node => {
+      const tree = node.querySelector(".course-tree"), panel = node.querySelector(".course-study");
+      return node.scrollWidth <= node.clientWidth + 1 && tree.scrollWidth <= tree.clientWidth + 1
+        && tree.getBoundingClientRect().right <= panel.getBoundingClientRect().left;
+    }));
+    await page.locator("#main").evaluate(node => { node.scrollTop = 0; });
+    await page.screenshot({path:`${directory}/skillshare-${width}x${height}.png`,animations:"disabled"});
+  }
+  await queue.click();
+  await page.getByText("Adjunto · En cola", {exact:true}).waitFor();
+  const sent = await page.evaluate(() => window.courseFixture.calls.find(call => call.cmd === "queue_course_assets").args);
+  assert.deepEqual(sent.assetIds, ["skillshare-resource-0"]);
+  await page.evaluate(async () => {
+    const {emit} = await import("/node_modules/@tauri-apps/api/event.js");
+    await emit("job-update", {id:"queued-skillshare-resource-0",runId:1,updatedAt:2,state:"error",outputs:[]});
+  });
+  await page.getByText("Adjunto · Descarga fallida", {exact:true}).waitFor();
+  assert.equal(await page.getByRole("checkbox", {name:"Seleccionar Guía del proyecto.pdf"}).isEnabled(), true);
+  await page.getByRole("button", {name:"Plantillas.zip",exact:true}).click();
+  assert.equal(await page.getByRole("checkbox", {name:"Seleccionar Plantillas.zip"}).isChecked(), false);
   assert.deepEqual(errors, []);
-  console.log("Four browser-assisted course choices, cancelled reviews, keyboard selection, per-unit review at two widths and selected-only imports passed.");
+  console.log("Browser-assisted import and selective Skillshare attachment review and queueing passed at two widths.");
 } finally {
   await browser.close();
 }

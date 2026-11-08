@@ -29,15 +29,25 @@ Para conservar el orden del curso, guarda cada unidad en una carpeta numerada y 
 | Rocketseat | Abre la [formación](https://app.rocketseat.com.br/journey/discover/contents). Importa únicamente archivos que se te haya autorizado a guardar. Sus [condiciones de uso](https://www.rocketseat.com.br/termos-de-uso) prohíben descargar las videoclases. |
 | Coursera | Usa los controles habilitados en cada lección. La [API documentada](https://dev.coursera.com/get-started) requiere credenciales de una organización Business, Campus o Government. Las [condiciones de uso](https://www.coursera.org/about/terms) requieren autorización previa para extraer contenido automáticamente. |
 | Domestika | Guarda los [recursos adicionales](https://support.domestika.org/hc/en-us/articles/360003129937-I-can-t-download-the-additional-resources) desde la web. Los [vídeos offline](https://support.domestika.org/hc/en-us/articles/360003651177-Can-I-download-the-courses) se reproducen en la app de Domestika. |
-| Skillshare | Usa [Proyectos y recursos → Descargar recursos](https://help.skillshare.com/hc/en-us/articles/217440617-How-do-I-access-class-materials-or-additional-resources). Los [vídeos offline](https://help.skillshare.com/hc/en-us/articles/205221147-How-do-I-download-videos-for-offline-viewing) se reproducen en la app de Skillshare. |
+| Skillshare | Copia los enlaces a archivos de [Proyectos y recursos → Descargar recursos](https://help.skillshare.com/hc/en-us/articles/217440617-How-do-I-access-class-materials-or-additional-resources), o importa los archivos guardados. Los [vídeos offline](https://help.skillshare.com/hc/en-us/articles/205221147-How-do-I-download-videos-for-offline-viewing) se reproducen en la app de Skillshare. |
 
-En estos cuatro proveedores la sesión y la descarga se gestionan en el navegador oficial. nabnab recibe los archivos locales elegidos, con su procedencia y curso asociados. El índice local no enumera el currículo remoto ni crea trabajos de descarga. Las comprobaciones utilizan archivos sintéticos y un navegador con IPC simulado, sin acceso a cuentas.
+En Rocketseat, Coursera y Domestika, la sesión y la descarga se gestionan en el sitio oficial. El índice local asocia los archivos elegidos con su curso. En Skillshare, el flujo de enlaces directos que se describe abajo permite enviar adjuntos públicos a Descargas después de revisarlos.
 
 ![Apertura del curso e importación de adjuntos, a 1180 × 780 con IPC simulado](course-materials-form.png)
 
 ![Revisión de archivos de una unidad, a 900 × 620 con IPC simulado](course-materials-review.png)
 
 ![Estudio de materiales importados, a 900 × 620 con IPC simulado](course-materials-study.png)
+
+### Adjuntos de Skillshare
+
+Abre el curso en Skillshare con tu sesión. En **Proyectos y recursos → Descargar recursos**, copia el enlace directo de cada archivo que el docente haya habilitado para descargar. En nabnab, abre **Descargar adjuntos de Skillshare**, pega un enlace por línea y pulsa **Revisar enlaces**. Puedes revisar hasta 30 enlaces por operación. Marca los archivos en el curso y pulsa **Añadir a la cola**. Los trabajos guardan los archivos en la carpeta de Descargas configurada y los asocian al curso. [Descargas autorizadas en las condiciones de Skillshare](https://learn.skillshare.com/en/terms)
+
+La cola acepta documentos, imágenes y archivos comprimidos desde el CDN oficial `static.skillshare.com`, con un límite de 104 MiB por archivo. Los adjuntos conservan su nombre y se ordenan como se pegaron. Volver a revisar el mismo adjunto conserva su estado y sus notas. Para un recurso que solo se pueda guardar en el navegador, usa **Elegir archivos guardados**. El flujo de enlaces revisa los adjuntos elegidos y deja el currículo y las videolecciones en Skillshare.
+
+Las pruebas usan enlaces y archivos sintéticos. Rust comprueba la selección persistente y la conservación de notas, y la interfaz en Edge comprueba la revisión y el envío selectivo a la cola a 900 y 1180 px. Queda por verificar la transferencia contra el CDN de Skillshare desde una clase autorizada.
+
+![Selección de adjuntos de Skillshare con datos de prueba](course-skillshare-resources.png)
 
 ## Referencias y límites
 

@@ -386,6 +386,12 @@ pub(super) async fn run(app:&AppHandle,state:&Arc<AppState>,job:&Job,staging:&Pa
             let capture=crate::web_archive::load(&root,reference)?;
             Some((crate::web_archive::execute(&root,reference,*format,staging,cancel.clone(),run_id,emit.clone()).await?,Some(capture.url),None))
         },
+        Source::PublicFile {selection} if selection.asset_id.starts_with("skillshare:") => {
+            selection.validate()?;
+            phase(app,state,&job.id,run_id,JobState::Downloading)?;
+            let file=crate::direct::download_skillshare_resource(&selection.source_url,staging,&selection.filename,cancel.clone(),run_id,emit.clone()).await?;
+            Some((file,Some(selection.source_url.clone()),None))
+        },
         Source::PublicFile {selection} => {
             phase(app,state,&job.id,run_id,JobState::Downloading)?;
             let asset=crate::public_sources::resolve(&selection.source_url,&selection.asset_id,cancel.clone()).await?;
@@ -537,6 +543,7 @@ pub(super) async fn run(app:&AppHandle,state:&Arc<AppState>,job:&Job,staging:&Pa
             item.details.source_published_at = selection.published_at.clone();
             item.details.source_checksum = selection.checksum.clone();
             item.details.audiobook = selection.audiobook.clone();
+            if selection.asset_id.starts_with("skillshare:") { item.details.platform = Some("Skillshare".into()); }
             if let Some(chapter) = &selection.audiobook {
                 item.kind = "audio".into();
                 item.details.platform = Some("LibriVox".into());

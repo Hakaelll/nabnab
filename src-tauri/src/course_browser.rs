@@ -113,6 +113,11 @@ pub(crate) fn is_course_page(input: &str) -> bool {
     CourseLink::parse(input).is_some()
 }
 
+pub(super) fn skillshare_course(input: &str) -> Result<(String, String), String> {
+    let link = CourseLink::selected("skillshare", input)?;
+    Ok((link.id, link.page.to_string()))
+}
+
 #[tauri::command]
 pub fn open_course_site(provider: String, url: String) -> Result<(), String> {
     let link = CourseLink::selected(&provider, &url)?;
