@@ -51,7 +51,7 @@
   min-width: 0; display: grid; gap: 3px; text-align: left; justify-content: start; padding: 4px 0; background: none;
   border: 0; border-radius: 4px; color: var(--text); cursor: pointer;
 }
-.audio-track strong, .audio-track small, .audio-open strong, .audio-open small, .audio-next li span {
+.audio-track strong, .audio-track small, .audio-open strong, .audio-open small, .audio-next-copy strong {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .audio-track:focus-visible, .audio-open:focus-visible { outline: 2px solid var(--action); outline-offset: 3px; }
@@ -70,8 +70,15 @@
 .audio-current { padding-top: 16px; margin-top: 16px; border-top: 1px solid var(--edge-quiet); }
 .audio-current .button { white-space: normal; text-align: start; max-width: 100%; overflow-wrap: anywhere; }
 .audio-next li { grid-template-columns: minmax(0, 1fr) auto; }
+.audio-next li.is-next { background: var(--surface); border-radius: 7px; box-shadow: inset 2px 0 var(--action); padding-inline-start: 10px; }
+.audio-next-copy { display: grid; gap: 1px; min-width: 0; }
+.audio-next-copy strong { font-size: 12px; font-weight: 500; }
+.audio-next-copy small { color: var(--muted); font-size: 11px; }
 .audio-lyrics ol { list-style: none; padding: 0; max-height: 270px; overflow: auto; }
 .audio-selection, .audio-editor { display: grid; gap: 12px; padding: 14px; margin-bottom: 16px; border: 1px solid var(--edge-quiet); border-radius: 12px; }
+.audio-selection-heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; }
+.audio-selection-heading span { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.audio-selection-heading b { color: var(--text); font-weight: 550; }
 .audio-editor .page-heading { margin-bottom: 0; }
 .audio-editor .field-note { margin: 0; }
 .audio-editor > button { justify-self: start; }

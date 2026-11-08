@@ -3,7 +3,7 @@ import { audioTitle, isAudiobook, type createAudioPlayer } from "./audio-player"
 import { escapeHtml as h, type Copy, type LibraryItem, type Snapshot } from "./contracts";
 import { detailsFor } from "./library-features";
 import type { AudioPlaylist, AudioPlaylistEntry, AudioTags, Lyric } from "./library-types";
-import { audiobookChapterComplete, audiobookResumePosition } from "./playback-preferences";
+import { audiobookChapterComplete, audiobookResumePosition, isPlayable } from "./playback-preferences";
 import { durationLabel } from "./presentation";
 import { action, icon, option, type Icon } from "./views-common";
 
@@ -12,6 +12,7 @@ type TagField = Exclude<keyof AudioTags, "embeddedCover">;
 type Column = "locator" | "id" | "title" | "artist" | "duration" | "version";
 interface Candidate { id: string; title: string; artist: string | null; album: string | null; duration: number | null; versionMatches: boolean }
 interface ImportedRow { entry: AudioPlaylistEntry; artist: string | null; duration: number | null; version: string | null; candidates: Candidate[] }
+interface QueueEntry { position: number; item: LibraryItem | undefined }
 export type ImportPreview =
   | { kind: "csv"; id: string; name: string; columns: string[]; sample: string[][]; count: number }
   | { kind: "list"; name: string; rows: ImportedRow[] };
@@ -274,12 +275,20 @@ export function createAudioLibrary(hooks: Hooks) {
       ${tagPreview ? `<p class="field-note">${t("Las copias pasan por Descargas. Formatos admitidos: MP3, M4A, M4B, FLAC, OGG y Opus.", "Copies use Downloads. Supported formats: MP3, M4A, M4B, FLAC, OGG and Opus.")}</p>` : ""}</form>`;
   }
 
-  function selection() {
+  function selection(next: LibraryItem | undefined) {
     if (!selected.size) return "";
     const pending = [...selected].filter(id => !itemFor(id)?.details?.audio && !itemFor(id)?.missing).length;
     const playlists = lists();
-    return `<div class="audio-selection"><strong>${selected.size} ${t("en selección", "selected")}</strong><div class="button-group">
-      ${action("audio-edit-tags", t("Editar etiquetas", "Edit tags"), "settings", "secondary", disabled())}
+    const current = player.current();
+    const canQueueNext = [...selected].some(id => {
+      const item = itemFor(id);
+      return id !== current?.id && isPlayable(item) && !isAudiobook(item);
+    });
+    return `<div class="audio-selection"><div class="audio-selection-heading"><strong>${selected.size} ${t("en selección", "selected")}</strong>
+      ${next ? `<span>${t("Siguiente", "Next")} · <b>${h(audioTitle(next))}</b></span>` : ""}</div><div class="button-group">
+      ${category !== "books" && !(current && isAudiobook(current))
+        ? action("audio-queue-next", t("Reproducir a continuación", "Play next"), "next", "secondary", busy || !canQueueNext ? "disabled" : "") : ""}
+      ${action("audio-edit-tags", t("Editar etiquetas", "Edit tags"), "settings", "quiet", disabled())}
       ${pending ? action("audio-read-tags", t("Leer etiquetas pendientes", "Read pending tags"), "file", "quiet", disabled()) : ""}
       ${action("audio-create-list", t("Crear lista", "Create playlist"), "add", "quiet", disabled())}
       ${action("audio-clear", t("Quitar selección", "Clear selection"), undefined, "quiet", disabled())}</div>
@@ -344,13 +353,19 @@ export function createAudioLibrary(hooks: Hooks) {
       ${action("audio-import-review", t("Preparar lista", "Prepare playlist"), "check", "primary", disabled())}</section>`;
   }
 
-  function context() {
+  function context(upcoming: QueueEntry[], next: QueueEntry | undefined, remaining: number) {
     const item = player.current();
-    const queue = player.nextEntries();
     return `<aside class="audio-context" aria-label="${t("Reproducción actual", "Current playback")}"><h2>${t("A continuación", "Up next")}</h2>
-      ${queue.length ? `<ol class="audio-next">${queue.slice(0, 16).map(entry => `<li><span>${h(itemFor(entry.id) ? audioTitle(itemFor(entry.id)!) : t("Archivo ausente", "Missing file"))}</span>
-        ${action("audio-remove-queue", t("Quitar de la cola", "Remove from queue"), "close", "icon-button", `data-index="${entry.position}"`)}</li>`).join("")}</ol>
-        ${queue.length > 16 ? `<small>+${queue.length - 16}</small>` : ""}` : `<p class="field-note">${t("Las pistas siguientes aparecerán aquí.", "Upcoming tracks appear here.")}</p>`}
+      ${upcoming.length ? `<ol class="audio-next">${upcoming.map(entry => {
+        const title = entry.item ? audioTitle(entry.item) : t("Archivo ausente", "Missing file");
+        const isNext = entry === next;
+        const remove = t("Quitar de la cola", "Remove from queue");
+        return `<li class="${isNext ? "is-next" : ""}"><div class="audio-next-copy">
+          ${isNext ? `<small>${t("Siguiente", "Next")}</small>` : ""}<strong title="${h(title)}">${h(title)}</strong></div>
+          ${action("audio-remove-queue", remove, "close", "icon-button",
+            `data-index="${entry.position}" aria-label="${h(`${remove} · ${title}`)}"`)}</li>`;
+      }).join("")}</ol>
+        ${remaining ? `<small>+${remaining}</small>` : ""}` : `<p class="field-note">${t("Las pistas siguientes aparecerán aquí.", "Upcoming tracks appear here.")}</p>`}
       ${item ? `<div class="audio-current"><h2>${h(audioTitle(item))}</h2>
         ${isAudiobook(item) ? `<div class="button-group">${action("audio-add-bookmark", t("Marcar posición", "Bookmark position"), "add", "secondary", disabled())}</div>
         ${detailsFor(item).chapters.map(chapter => action("audio-seek-chapter", `${durationLabel(chapter.start)} · ${chapter.title}`, "play", "quiet", `data-time="${chapter.start}"`)).join("")}
@@ -364,17 +379,21 @@ export function createAudioLibrary(hooks: Hooks) {
 
   function render() {
     const { byCategory, results } = filterTracks(items());
+    const queue = player.nextEntries();
+    const library = hooks.snapshot().library;
+    const upcoming = queue.slice(0, 16).map(({ position, id }) => ({ position, item: library.find(item => item.id === id) }));
+    const next = upcoming.find(entry => isPlayable(entry.item));
     offset = Math.min(offset, Math.max(0, Math.floor((results.length - 1) / PAGE_SIZE) * PAGE_SIZE));
     return `<section class="audio-library"><div class="page-heading"><div><h1>${t("Audio", "Audio")}</h1>
       <p>${t("Música, podcasts y audiolibros de tu biblioteca.", "Music, podcasts and audiobooks from your library.")}</p></div>
       ${action("audio-import-media", t("Importar audio", "Import audio"), "add", "secondary", disabled())}</div>
       <nav class="audio-category-nav" aria-label="${t("Tipo de audio", "Audio type")}">${categories.map(value => `<button type="button" data-action="audio-category" data-id="${value}" ${value === category ? 'aria-current="page"' : ""}>${icon(categoryIcons[value])}${categoryName(value)}</button>`).join("")}</nav>
       <div class="audio-layout"><div class="audio-content">${category === "playlists" ? imported ? importView(imported) : playlistView() : `${continueBook(byCategory)}${shelf(results)}${filters(byCategory)}
-        ${selection()}${editTags()}${request ? `<p role="status" class="field-note">${t("Leyendo etiquetas locales…", "Reading local tags…")} ${action("audio-cancel-read", t("Cancelar", "Cancel"), undefined, "quiet")}</p>` : ""}
+        ${selection(next?.item)}${editTags()}${request ? `<p role="status" class="field-note">${t("Leyendo etiquetas locales…", "Reading local tags…")} ${action("audio-cancel-read", t("Cancelar", "Cancel"), undefined, "quiet")}</p>` : ""}
         ${results.length ? `<ol class="audio-rows">${results.slice(offset, offset + PAGE_SIZE).map(row).join("")}</ol>`
           : `<div class="empty-state">${icon("audio")}<h2>${t("Sin audio en esta vista", "No audio in this view")}</h2><p>${t("Importa archivos o cambia los filtros.", "Import files or change the filters.")}</p></div>`}
         ${results.length > PAGE_SIZE ? `<div class="library-pagination"><span>${offset + 1}–${Math.min(offset + PAGE_SIZE, results.length)} / ${results.length}</span>
-          ${action("audio-page-back", t("Anterior", "Previous"), undefined, "quiet", offset === 0 ? "disabled" : "")}${action("audio-page-next", t("Siguiente", "Next"), undefined, "quiet", offset + PAGE_SIZE >= results.length ? "disabled" : "")}</div>` : ""}`}</div>${context()}</div></section>`;
+          ${action("audio-page-back", t("Anterior", "Previous"), undefined, "quiet", offset === 0 ? "disabled" : "")}${action("audio-page-next", t("Siguiente", "Next"), undefined, "quiet", offset + PAGE_SIZE >= results.length ? "disabled" : "")}</div>` : ""}`}</div>${context(upcoming, next, queue.length - upcoming.length)}</div></section>`;
   }
 
   async function saveList(id: string | null, name: string, entries: AudioPlaylistEntry[]) {
@@ -442,6 +461,11 @@ export function createAudioLibrary(hooks: Hooks) {
       } break;
       case "audio-inspect": hooks.inspect(id); break;
       case "audio-add-queue": player.add(id); break;
+      case "audio-queue-next": {
+        const count = player.playNext(selected);
+        if (count) hooks.notify(count === 1 ? t("Pista colocada a continuación.", "Track queued next.")
+          : t(`${count} pistas colocadas a continuación.`, `${count} tracks queued next.`));
+      } break;
       case "audio-remove-queue": player.remove(index); break;
       case "audio-page-back": offset = Math.max(0, offset - PAGE_SIZE); hooks.render(); break;
       case "audio-page-next": offset += PAGE_SIZE; hooks.render(); break;

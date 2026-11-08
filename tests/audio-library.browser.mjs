@@ -109,6 +109,47 @@ try {
   await page.locator("#audio-artist").selectOption("");
   await page.locator("[data-action='audio-play'][data-id='first']").click();
   await page.waitForFunction(() => { const audio=document.getElementById("audio-engine"); return audio.readyState>=2 && !audio.paused && audio.currentTime>0; });
+  await page.getByRole("checkbox", { name:"Seleccionar Tercera pista", exact:true }).check();
+  await page.getByRole("checkbox", { name:"Seleccionar Segunda pista", exact:true }).check();
+  await page.locator(".audio-selection").scrollIntoViewIfNeeded();
+  {
+    const engine = await page.locator("#audio-engine").elementHandle();
+    const next = page.getByRole("button", { name:"Reproducir a continuación", exact:true });
+    assert.equal(await next.count(), 1, "The audio selection must offer to play tracks next.");
+    await next.press("Enter");
+    assert.equal(await next.evaluate(button => button === document.activeElement), true);
+    assert.deepEqual(await page.locator(".audio-next li strong").allTextContents(),
+      ["Tercera pista", "Segunda pista", "En directo", "Improvisación", "Toma nocturna"]);
+    assert.equal(await engine.evaluate(media => media === document.getElementById("audio-engine")
+      && media.dataset.localPlayer === "first" && !media.paused), true);
+    assert.match(await page.locator(".audio-next .is-next").innerText(), /Siguiente\s*Tercera pista/);
+    assert.match(await page.locator(".audio-selection-heading").innerText(), /Siguiente · Tercera pista/);
+    await page.locator(".audio-selection").scrollIntoViewIfNeeded();
+    await page.screenshot({ path:`${directory}/audio-next-after.png`, animations:"disabled" });
+    await page.setViewportSize({ width:900, height:620 });
+    assert.ok(await page.locator(".audio-selection").evaluate(panel => panel.scrollWidth <= panel.clientWidth + 1));
+    await page.screenshot({ path:`${directory}/audio-next-900.png`, animations:"disabled" });
+    await page.setViewportSize({ width:1180, height:780 });
+    await page.reload();
+    await page.locator("button[data-page='library']").click();
+    await section("audio").click();
+    assert.deepEqual(await page.locator(".audio-next li strong").allTextContents(),
+      ["Tercera pista", "Segunda pista", "En directo", "Improvisación", "Toma nocturna"]);
+    await page.locator("#audio-next").click();
+    await page.waitForFunction(() => document.getElementById("audio-engine").dataset.localPlayer === "last");
+    await page.locator("#audio-close").click();
+    await page.getByRole("checkbox", { name:"Seleccionar Primera pista", exact:true }).check();
+    await page.getByRole("checkbox", { name:"Seleccionar Segunda pista", exact:true }).check();
+    await next.press("Enter");
+    await page.waitForFunction(() => {
+      const media = document.getElementById("audio-engine");
+      return media.dataset.localPlayer === "first" && media.paused;
+    });
+    assert.deepEqual(await page.locator(".audio-next li strong").allTextContents(), ["Segunda pista"]);
+    await page.locator("[data-action='audio-clear']").click();
+  }
+  await page.locator("[data-action='audio-play'][data-id='first']").click();
+  await page.waitForFunction(() => !document.getElementById("audio-engine").paused);
   await page.locator("[data-action='audio-open-lyrics']").click();
   await page.getByText("Una letra local", {exact:true}).waitFor();
   await page.locator("[data-action='audio-choose-lyrics']").click();
@@ -222,7 +263,7 @@ try {
   await resume.press("Enter");
   await page.waitForFunction(() => document.getElementById("audio-engine").src.endsWith("/chapter2") && !document.getElementById("audio-engine").paused);
   assert.deepEqual(await trackTitles(), ["Capítulo 1", "Capítulo 2", "Capítulo 3"]);
-  assert.deepEqual(await page.locator(".audio-next li > span").allTextContents(), ["Capítulo 3"]);
+  assert.deepEqual(await page.locator(".audio-next li strong").allTextContents(), ["Capítulo 3"]);
   assert.deepEqual(errors, []);
   console.log("Audio shelves, keyboard filtering, persistent playback, playlist review, and audiobook sleep and chapter resumption passed.");
 } finally { await browser.close(); }

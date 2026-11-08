@@ -693,6 +693,26 @@ export function createAudioPlayer(hooks: Hooks) {
     else { saveSession(); render(); hooks.render(); }
   }
 
+  function playNext(ids: Iterable<string>) {
+    const playing = current();
+    if (playing && isAudiobook(playing)) return 0;
+    const upcoming = order.slice(cursor + 1);
+    const next: number[] = [];
+    for (const id of new Set(ids)) {
+      const item = hooks.item(id);
+      if (!isPlayable(item) || item.kind !== "audio" || id === playing?.id || isAudiobook(item)) continue;
+      const queued = upcoming.findIndex(index => tracks[index] === id);
+      if (queued >= 0) next.push(upcoming.splice(queued, 1)[0]);
+      else if (tracks.length < 2000) next.push(tracks.push(id) - 1);
+    }
+    if (!next.length) return 0;
+    trackWheel?.dismiss();
+    order = [...order.slice(0, cursor + 1), ...next, ...upcoming];
+    if (cursor < 0) { resumeAudioId = undefined; activate(0, false, true, false); }
+    else { saveSession(); render(); hooks.render(); }
+    return next.length;
+  }
+
   function remove(position: number) {
     const playing = order[cursor];
     if (position === playing || !order.includes(position)) return;
@@ -1061,7 +1081,7 @@ export function createAudioPlayer(hooks: Hooks) {
     return true;
   }
 
-  return { mount, render, restore, play, playAt, compareTrack, pause: () => media?.pause(), add, remove, input, click, key, current, nextEntries, seek, persist, detachMini, openFloatingMini,
+  return { mount, render, restore, play, playAt, compareTrack, pause: () => media?.pause(), add, playNext, remove, input, click, key, current, nextEntries, seek, persist, detachMini, openFloatingMini,
     nativeMiniRestored: (dock: boolean) => { setDetached(false); if (dock) dockMini(); },
     syncDesktopWheel, wheelAction, isExpanded: () => expanded, isDetached: () => detached,
     timeFor: (id: string) => id === currentId() && matchesSource() && media?.readyState ? media.currentTime : undefined,

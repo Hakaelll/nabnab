@@ -4,6 +4,8 @@ En **Biblioteca → Audio** puedes alternar entre Música, Podcasts, Audiolibros
 
 El minirreproductor permanece visible al cambiar de sección. La cola **A continuación** es independiente de Descargas. En música, puedes activar el modo aleatorio y alternar entre repetir toda la cola o repetir una pista. Los controles multimedia de Windows muestran el título, el artista y la carátula disponible. Utilizan la misma cola aunque la ventana principal esté minimizada.
 
+En Música o Podcasts, marca una o varias pistas y pulsa **Reproducir a continuación**. Las pistas se colocan en el orden en que las marcaste, incluidas las que ya estaban en cola. La pista actual sigue sonando y el orden se conserva al reiniciar. La próxima pista aparece junto a la selección y en **A continuación**. Con la cola vacía, la primera pista queda preparada en pausa.
+
 En **Ajustes → Sesiones y privacidad → Caché de miniaturas** puedes ver cuánto ocupan las carátulas y otras miniaturas generadas. nabnab retira las más antiguas al superar 512 imágenes o 128 MiB. **Vaciar miniaturas…** pide confirmación. Las imágenes se generan de nuevo al necesitarlas.
 
 La **Estantería** de audiolibros agrupa capítulos de LibriVox y reconoce archivos M4B. **Continuar** recupera el punto guardado del capítulo o abre el siguiente si el anterior llegó al final. La cola de capítulos se limita al libro que estás escuchando. El minirreproductor ofrece velocidad, retroceso de 15 segundos y temporizador por minutos o al final del capítulo. Los marcadores se guardan en Biblioteca. Si hay capítulos incrustados, se puede saltar a ellos.
@@ -25,3 +27,5 @@ La prueba de interfaz reproduce un WAV silencioso en Edge con almacenamiento de 
 ![Revisión de una lista importada y elección de una grabación local](audio-playlist-matching.png)
 
 ![Previsualización de etiquetas y creación explícita de copias](audio-tags-preview.png)
+
+![Selección de audio y próxima pista en una ventana de 900 píxeles](audio-play-next.png)
