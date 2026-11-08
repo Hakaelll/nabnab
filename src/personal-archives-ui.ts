@@ -2,13 +2,18 @@ import "./personal-archives.css";
 import type { ImportPreview } from "./audio-library-ui";
 import { escapeHtml as h, type Copy } from "./contracts";
 import { bytesLabel, isCancelled } from "./presentation";
-import { action, option } from "./views-common";
+import { action, icon, option, type Icon } from "./views-common";
 
 const providers = {
   instagram: "Instagram", facebook: "Facebook", x: "X", spotify: "Spotify", linkedin: "LinkedIn",
 };
 type Provider = keyof typeof providers;
 type Category = "posts" | "saved" | "media" | "likes" | "bookmarks" | "listening" | "playlists" | "contacts" | "messages";
+const categoryIcons: Record<Category, Icon> = {
+  posts: "document", saved: "folder", media: "image", likes: "heart", bookmarks: "link",
+  listening: "wave", playlists: "list", contacts: "lock", messages: "lock",
+};
+const categoryKeys = Object.keys(categoryIcons) as Category[];
 type Availability = "absent" | "unsupported" | "empty" | "available" | "requiresSelection";
 type Format = "json" | "csv" | "html" | "media" | "xAssignment" | "unsupported";
 interface CategoryPreview {
@@ -236,8 +241,12 @@ export function createPersonalArchives(hooks: Hooks) {
 
   function recordList() {
     if (!category) return "";
-    if (privateCategory(category) && !privateOpen) return `<p>${t("Abre esta categoría para leer su contenido privado.", "Open this category to read its private records.")}</p>
-      ${action("archive-reveal", t("Mostrar categoría privada", "Show private category"), undefined, "secondary", disabled())}`;
+    if (privateCategory(category) && !privateOpen) return `<div class="archive-empty archive-locked">
+      <span class="archive-mark">${icon("lock")}</span>
+      <div><h3>${t("Categoría privada", "Private category")}</h3>
+        <p>${t("Los registros permanecen ocultos hasta que abras esta categoría.", "Records stay hidden until you open this category.")}</p></div>
+      ${action("archive-reveal", t("Mostrar categoría privada", "Show private category"), undefined, "secondary", disabled())}
+    </div>`;
     const page = result;
     const linkCount = [...selected.values()].filter(row => row.link).length;
     const range = page ? dates(page.start, page.end) : "";
@@ -245,7 +254,7 @@ export function createPersonalArchives(hooks: Hooks) {
       <label for="archive-query">${t("Buscar en esta categoría", "Search this category")}
         <input id="archive-query" name="query" type="search" maxlength="120" value="${h(query)}" ${disabled()}>
       </label>
-      <button type="submit" class="button secondary" ${disabled()}>${t("Buscar", "Search")}</button>
+      <button type="submit" class="button secondary" ${disabled()}>${icon("search")}${t("Buscar", "Search")}</button>
     </form>
     ${page ? `${range ? `<p class="muted">${h(range)} · UTC</p>` : ""}
       ${category === "listening" ? listening(page) : ""}
@@ -265,23 +274,48 @@ export function createPersonalArchives(hooks: Hooks) {
       </div>` : ""}` : ""}`;
   }
 
+  function accountIndex() {
+    const accounts = new Map<string, Archive[]>();
+    for (const archive of archives) {
+      const key = JSON.stringify([archive.provider, archive.account.toLowerCase()]);
+      const group = accounts.get(key);
+      if (group) group.push(archive);
+      else accounts.set(key, [archive]);
+    }
+    return `<nav class="archive-index" aria-labelledby="archive-index-title">
+      <h2 id="archive-index-title">${t("Cuentas", "Accounts")} <span>${number(accounts.size)}</span></h2>
+      ${[...accounts.values()].map((group, index) => {
+        const { account, provider } = group[0];
+        return `<section class="archive-account-group" aria-labelledby="archive-account-${index}-title">
+          <header><span class="archive-provider">${providers[provider]}</span><h3 id="archive-account-${index}-title">${h(account)}</h3></header>
+          <ul>${group.map(item => `<li><button type="button" class="archive-package" data-action="archive-open" data-id="${h(item.id)}"
+            aria-current="${item.id === archiveId ? "true" : "false"}" aria-disabled="${busy}">
+            ${icon("document")}<span><strong>${h(item.source)}</strong><small>${h(item.destination)}</small></span>
+          </button></li>`).join("")}</ul>
+        </section>`;
+      }).join("")}
+    </nav>`;
+  }
+
   function browse(archive: Archive) {
-    const categories = Object.entries(archive.categories).filter(([, count]) => count > 0) as [Category, number][];
-    return `<section class="archive-panel archive-browser" aria-labelledby="archive-current">
-      <div class="archive-heading"><div>
-        <p class="muted">${h(archive.destination)} · ${providers[archive.provider]}</p>
-        <h2 id="archive-current">${h(archive.account)}</h2>
-      </div>${action("archive-remove", archive.pendingRemoval ? t("Reintentar retirada", "Retry removal") : t("Retirar importación", "Remove import"), undefined, "secondary", disabled())}</div>
-      <details class="archive-details"><summary>${t("Procedencia", "Provenance")}</summary>
-        <p>${h(archive.source)} · ${bytesLabel(archive.mediaBytes)} ${t("en copias", "in copies")}</p>
-        <p>SHA-256 <code>${h(archive.fingerprint)}</code></p>
-        ${categories.map(([key]) => `<p>${name(key)} · ${h((archive.formats[key] ?? []).map(formatName).join(", "))}</p>`).join("")}
-      </details>
+    const categories = categoryKeys.filter(key => (archive.categories[key] ?? 0) > 0);
+    return `<section class="archive-browser" aria-labelledby="archive-current">
+      <header class="archive-heading archive-browser-heading">
+        <div><p class="archive-location">${icon("folder")}${h(archive.destination)}</p>
+          <h2 id="archive-current">${h(archive.account)}</h2></div>
+        <details class="archive-details archive-provenance" id="archive-source-${h(archive.id)}"><summary>${t("Procedencia", "Provenance")}</summary>
+          <p>${h(archive.source)} · ${bytesLabel(archive.mediaBytes)} ${t("en copias", "in copies")}</p>
+          <p>SHA-256 <code>${h(archive.fingerprint)}</code></p>
+          ${categories.map(key => `<p>${name(key)} · ${h((archive.formats[key] ?? []).map(formatName).join(", "))}</p>`).join("")}
+          ${action("archive-remove", archive.pendingRemoval ? t("Reintentar retirada", "Retry removal") : t("Retirar importación", "Remove import"), undefined, "secondary", disabled())}
+        </details>
+      </header>
       ${confirming ? `<div class="archive-confirm"><p>${t("Se borrarán el índice privado y las copias administradas de esta importación. Se conserva el archivo original.", "This removes the private index and managed copies for this import. The original export is preserved.")}</p>
         ${action("archive-remove-confirm", t("Retirar", "Remove"), undefined, "primary", disabled())}
         ${action("archive-cancel-confirm", t("Cancelar", "Cancel"), undefined, "secondary", disabled())}</div>` : ""}
-      ${archive.pendingRemoval ? "" : `<nav class="archive-tabs filter-tabs" aria-label="${t("Categorías del archivo", "Archive categories")}">
-        ${categories.map(([key, count]) => `<button type="button" data-action="archive-category" data-id="${key}" aria-pressed="${category === key}" ${disabled()}>${name(key)} · ${number(count)}</button>`).join("")}
+      ${archive.pendingRemoval ? "" : `<nav class="archive-tabs" aria-label="${t("Categorías del archivo", "Archive categories")}">
+        ${categories.map(key => `<button type="button" data-action="archive-category" data-id="${key}" aria-pressed="${category === key}" aria-disabled="${busy}">
+          ${icon(categoryIcons[key])}<span>${name(key)}</span><small>${number(archive.categories[key] ?? 0)}</small></button>`).join("")}
       </nav>${recordList()}`}
     </section>`;
   }
@@ -289,21 +323,29 @@ export function createPersonalArchives(hooks: Hooks) {
   function render() {
     const archive = current();
     return `<div class="personal-archives">
-      <header class="archive-heading"><div><h1 id="archive-title" tabindex="-1">${t("Archivos personales", "Personal archives")}</h1>
-        <p>${t("Explora tus exportaciones por cuenta y categoría. El índice se guarda cifrado en este equipo.", "Explore your exports by account and category. The index is encrypted on this device.")}</p></div>
-        ${!adding ? action("archive-new", t("Añadir exportación", "Add export"), undefined, "primary", disabled()) : ""}
+      <header class="archive-heading archive-page-heading">
+        <div class="archive-title-group"><span class="archive-mark">${icon("library")}</span><div>
+          <h1 id="archive-title" tabindex="-1">${t("Archivos personales", "Personal archives")}</h1>
+          <p>${icon("lock")}${t("Índice cifrado en este equipo", "Index encrypted on this device")}</p>
+        </div></div>
+        ${!adding ? action("archive-new", t("Añadir exportación", "Add export"), "add", "primary", disabled()) : ""}
       </header>
       ${busy ? `<div class="archive-actions"><span role="status">${t("Procesando archivo…", "Working on archive…")}</span>
         ${requestId ? action("archive-cancel", t("Cancelar", "Cancel")) : ""}</div>` : ""}
       ${error ? `<p class="archive-error" role="alert">${h(error)}</p>` : ""}
       ${!loaded && !busy && error ? action("archive-retry", t("Reintentar", "Retry")) : ""}
       ${adding ? importForm() : ""}
-      ${archives.length ? `<label class="archive-account" for="archive-active">${t("Importación", "Import")}
-        <select id="archive-active" ${disabled()}>
-          ${option("", t("Elegir una importación", "Choose an import"), archiveId)}
-          ${archives.map(item => option(item.id, `${item.destination} / ${item.account} · ${providers[item.provider]} · ${item.source}`, archiveId)).join("")}
-        </select></label>` : ""}
-      ${archive ? browse(archive) : loaded && !adding && !archives.length ? `<p class="archive-panel">${t("Aún no hay exportaciones importadas.", "No exports have been imported yet.")}</p>` : ""}
+      ${!adding && archives.length ? `<div class="archive-workspace">
+        ${accountIndex()}
+        ${archive ? browse(archive) : `<div class="archive-empty"><span class="archive-mark">${icon("document")}</span>
+          <h2>${t("Elige una exportación", "Choose an export")}</h2>
+          <p>${t("Abre un paquete del índice para explorar sus categorías.", "Open a package from the index to browse its categories.")}</p></div>`}
+      </div>` : ""}
+      ${loaded && !adding && !archives.length ? `<section class="archive-panel archive-empty">
+        <span class="archive-mark">${icon("folder")}</span>
+        <h2>${t("Aún no hay exportaciones importadas.", "No exports have been imported yet.")}</h2>
+        <p>${t("Añade un ZIP o un archivo de exportación que ya tengas en el equipo.", "Add a ZIP or an export file you already have on this device.")}</p>
+      </section>` : ""}
     </div>`;
   }
 
@@ -311,7 +353,7 @@ export function createPersonalArchives(hooks: Hooks) {
     archiveId = id;
     confirming = false;
     const archive = current();
-    const categories = Object.keys(archive?.categories ?? {}) as Category[];
+    const categories = categoryKeys.filter(key => (archive?.categories[key] ?? 0) > 0);
     resetRecords(archive?.pendingRemoval ? null : categories.find(item => !privateCategory(item)) ?? categories[0] ?? null);
     await read();
   }
@@ -333,13 +375,27 @@ export function createPersonalArchives(hooks: Hooks) {
       case "archive-new":
         adding = true; error = ""; hooks.render(); document.getElementById("archive-provider")?.focus(); break;
       case "archive-choose": await choose(); break;
-      case "archive-close-form": adding = false; preview = null; error = ""; hooks.render(); break;
+      case "archive-close-form":
+        adding = false; preview = null; error = ""; hooks.render();
+        document.querySelector<HTMLElement>('[data-action="archive-new"]')?.focus({ preventScroll: true }); break;
+      case "archive-open": {
+        const id = button.dataset.id;
+        if (id && id !== archiveId && archives.some(item => item.id === id)) await run(() => open(id));
+        break;
+      }
       case "archive-retry": await load(); break;
       case "archive-cancel":
         if (requestId) await hooks.command("cancel_file_source_inspection", { requestId });
         break;
-      case "archive-category": await run(async () => { resetRecords(button.dataset.id as Category); await read(); }); break;
-      case "archive-reveal": await run(async () => { privateOpen = true; await read(); }); break;
+      case "archive-category": {
+        const key = categoryKeys.find(item => item === button.dataset.id);
+        if (key && key !== category) await run(async () => { resetRecords(key); await read(); });
+        break;
+      }
+      case "archive-reveal":
+        await run(async () => { privateOpen = true; await read(); });
+        if (visible) document.getElementById("archive-query")?.focus({ preventScroll: true });
+        break;
       case "archive-previous": await run(async () => { offset = Math.max(0, offset - PAGE); await read(); }); break;
       case "archive-next": await run(async () => { offset += PAGE; await read(); }); break;
       case "archive-remove": confirming = true; hooks.render(); break;
@@ -387,9 +443,7 @@ export function createPersonalArchives(hooks: Hooks) {
   }
 
   async function change(target: HTMLElement) {
-    if (target instanceof HTMLSelectElement && target.id === "archive-active") {
-      await run(() => open(target.value));
-    } else if (target instanceof HTMLSelectElement && target.id === "archive-provider") {
+    if (target instanceof HTMLSelectElement && target.id === "archive-provider") {
       provider = target.value as Provider;
       preview = null;
       included.clear();

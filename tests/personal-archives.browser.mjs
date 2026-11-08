@@ -25,6 +25,7 @@ const setup = `
     playlists:[row("s","Lista de prueba","","",{trackCount:1})],
   };
   const summaries=[];
+  let imports=0;
   const calls=[];
   window.archiveCalls=calls;
   const preview=(category,records,availability,sensitive=false,formats=["json"])=>({category,records,sensitive,availability,formats,files:availability==="absent"?0:1,bytes:314,start:records?time:null,end:records?time:null});
@@ -41,7 +42,7 @@ const setup = `
       const selected=args.selection;
       const all=[...selected.categories,...selected.sensitive];
       const provider=all.includes("listening")?"spotify":"x";
-      const archive={id:provider,provider,source:provider+"-export.zip",fingerprint,mediaBytes:0,account:selected.account,destination:selected.destination,
+      const archive={id:String(++imports),provider,source:provider+"-export.zip",fingerprint,mediaBytes:0,account:selected.account,destination:selected.destination,
         categories:Object.fromEntries(all.map(key=>[key,1])),formats:Object.fromEntries(all.map(key=>[key,["json"]])),pendingRemoval:false};
       summaries.push(archive);
       return {archive,skippedFiles:0};
@@ -114,6 +115,7 @@ try {
   assert.equal((await calls()).filter(call => call.cmd === "personal_archive_records" && call.args.category === "messages").length, 0);
   await action("reveal").click();
   await page.getByText("Conversación de prueba", { exact: true }).waitFor();
+  assert.equal(await page.locator("#archive-query").evaluate(element => element === document.activeElement), true);
   assert.equal(await action("links").count(), 0);
   await page.getByRole("checkbox", { name: /Conversación de prueba/ }).check();
   await action("export").click();
@@ -132,6 +134,7 @@ try {
   assert.equal((await calls()).find(call => call.cmd === "batch_create").args.text, "https://example.org/post");
   assert.equal((await calls()).some(call => call.cmd === "batch_queue"), false);
   await page.locator("[data-page='library']").click();
+  await page.locator(".archive-provenance summary").click();
   await action("remove").click();
   await action("remove-confirm").click();
   await page.getByText("Aún no hay exportaciones importadas.").waitFor();
@@ -148,12 +151,55 @@ try {
   assert.equal(await page.locator("#main").evaluate(element => element.scrollTop), 0);
   await page.locator("#notification [data-action='dismiss-message']").click();
   await page.screenshot({ path: `${directory}/listening.png` });
+  const listeningArchive = action("open").getByText("spotify-export.zip", { exact: true });
+  for (const [destination, privateMessages] of [["Archivo 2025", true], ["Archivo 2026", false]]) {
+    await action("new").click();
+    await page.locator("#archive-provider").selectOption("x");
+    await action("choose").click();
+    await page.locator("#archive-account").fill("Cuenta de prueba");
+    await page.locator("#archive-destination").fill(destination);
+    if (privateMessages) await page.locator("input[value='messages']").check();
+    await page.getByRole("button", { name: "Importar selección" }).click();
+    await page.locator("#archive-current").getByText("Cuenta de prueba", { exact: true }).waitFor();
+  }
+  const index = page.getByRole("navigation", { name: "Cuentas 2" });
+  assert.equal(await index.getByRole("region", { name: "Cuenta de prueba" }).getByRole("button").count(), 2);
+  const firstExport = index.getByRole("button", { name: /Archivo 2025/ });
+  const secondExport = index.getByRole("button", { name: /Archivo 2026/ });
+  await firstExport.focus();
+  await page.keyboard.press("Enter");
+  await categories("messages").waitFor();
+  assert.equal(await firstExport.getAttribute("aria-current"), "true");
+  assert.equal(await firstExport.evaluate(element => element === document.activeElement), true);
+  await categories("messages").focus();
+  await page.keyboard.press("Space");
+  await action("reveal").waitFor();
+  assert.equal(await categories("messages").evaluate(element => element === document.activeElement), true);
+  await action("reveal").click();
+  await page.getByText("Conversación de prueba", { exact: true }).waitFor();
+  await secondExport.click();
+  await page.getByText("Una publicación", { exact: true }).waitFor();
+  await firstExport.click();
+  await categories("messages").click();
+  await action("reveal").waitFor();
+  assert.equal(await page.getByText("Conversación de prueba", { exact: true }).count(), 0);
+  await page.locator("#notification [data-action='dismiss-message']").click();
+  await page.setViewportSize({ width: 900, height: 620 });
+  const overflows = await page.locator(".archive-workspace, .archive-index, .archive-browser").evaluateAll(
+    elements => elements.some(element => element.scrollWidth > element.clientWidth + 1)
+  );
+  assert.equal(overflows, false, "Archive workspace overflows at minimum size");
+  await page.screenshot({ path: `${directory}/private-900.png` });
+  await listeningArchive.click();
+  await page.getByText("Reproducciones completas", { exact: true }).waitFor();
+  await page.setViewportSize({ width: 1180, height: 890 });
+  await page.screenshot({ path: `${directory}/accounts.png` });
   await categories("playlists").click();
   await action("match").click();
   await page.getByRole("heading", { name: "Audio", exact: true }).waitFor();
   await page.getByText("Canción de prueba", { exact: true }).waitFor();
   assert.deepEqual(errors, []);
-  console.log("Verified archive selection, private consent, removal, Spotify history and local playlist matching in Edge.");
+  console.log("Verified account grouping, keyboard navigation, private consent, removal, Spotify history and local playlist matching in Edge.");
 } finally {
   await browser.close();
 }

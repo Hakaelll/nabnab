@@ -11,13 +11,13 @@ Open **Library → Personal archives → Add export**, choose the provider, and 
 | Spotify | Basic or extended listening history and exported playlists. Listening separates events, elapsed time, reported track endings, and plays with enough information to establish completion. **Match in Audio** opens the local playlist review. |
 | LinkedIn | Contacts, posts, and messages from recognized CSV and JSON layouts. Contacts and messages require separate selection. |
 
-Browse an import by account and category. Search applies to the open category. Use the row checkboxes to export a selection to CSV or open its public links in the batch preparer. Selecting **Prepare links** starts the usual metadata preparation. Downloading from that batch requires a separate action.
+The account index groups exports by provider and account and lists each package with its archive group. Open a package and select a category in the workspace. Search applies to that category. Use the row checkboxes to export a selection to CSV or open its public links in the batch preparer. Selecting **Prepare links** starts metadata preparation. Downloading from that batch requires a separate action.
 
 ![Spotify listening history with separate event and completion counts](personal-archive-listening.png)
 
 Contacts and messages require explicit selection at import and explicit reveal when browsing. Private CSV export asks for confirmation and writes readable text to the chosen destination. The archive index uses Windows DPAPI. Managed media resides in a user-restricted local directory and can be copied out with **Save copy**. Personal archives live outside the ordinary Library index used by global search, portable collections, CLI, and MCP.
 
-Reimporting the same SHA-256 package under the same provider and account adds missing records and categories. **Remove import** deletes the indexed records and managed media copies while preserving the source export.
+Reimporting the same SHA-256 package under the same provider and account adds missing records and categories. Open **Provenance → Remove import** to delete the indexed records and managed media copies while preserving the source export.
 
 ZIP processing uses the Windows ZIP reader and validates paths before extraction. The source limit is 1 GiB, with up to 10,000 entries, 24 path components, and 2 GiB of declared expanded data. A selection can extract up to 256 MiB, including up to 32 MiB of metadata. Media storage is limited to 2 GiB across imports. Archives with unknown filenames or schemas may have missing or unsupported categories. Exporting a narrower set of data can help with size limits.
 
@@ -28,4 +28,4 @@ Provider documentation on requesting an export
 - [Spotify data formats](https://support.spotify.com/article/understanding-your-data/)
 - [LinkedIn account data](https://www.linkedin.com/help/linkedin/answer/a1339364)
 
-Verification uses synthetic exports. The Windows test exercises selective ZIP extraction, repeat and partial imports, DPAPI storage, and removal. The Edge test uses fixture responses to exercise category selection, private reveal, CSV confirmation, and the handoff to Audio.
+Verification uses synthetic exports. The Windows test exercises selective ZIP extraction, repeat and partial imports, DPAPI storage, and removal. The Edge test uses fixture responses to exercise account grouping, keyboard navigation, private reveal, CSV confirmation, and the handoff to Audio.
