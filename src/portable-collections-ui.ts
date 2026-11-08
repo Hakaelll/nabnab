@@ -69,6 +69,6 @@ export function createPortableCollections(hooks: Hooks) {
     }
     return true;
   }
-  function open(ids: string[] = []) { mode = "export"; selected.clear(); const available = new Set(hooks.snapshot().library.filter(item => !item.missing).map(item => item.id)); for (const id of ids.slice(0, 2000)) if (available.has(id)) selected.add(id); invalidate(); hooks.render(); }
+  function open(ids: string[] = [], forSharing = false) { mode = "export"; selected.clear(); if (forSharing) options = { metadata: false, notes: false, ocr: false }; const available = new Set(hooks.snapshot().library.filter(item => !item.missing).map(item => item.id)); for (const id of ids.slice(0, 2000)) if (available.has(id)) selected.add(id); invalidate(); hooks.render(); }
   return { render, open, click, change, submit };
 }

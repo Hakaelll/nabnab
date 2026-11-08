@@ -55,6 +55,8 @@ const setup = `
       const item=state.library.find(value=>value.id===args.id);item.details.articleAnnotations=item.details.articleAnnotations.filter(value=>value.id!==args.annotationId);return copy(state);
     }
     if(cmd==="queue_article_export")return [];
+    if(cmd==="device_share_status")return {state:"ready",devices:[{id:"reader-fixture",name:"Lector de prueba"}],share:true,shareText:true};
+    if(cmd==="device_share_prepare")return {token:"reader-share-token",device:{id:args.deviceId,name:"Lector de prueba"},entries:[{name:args.selection.text,bytes:15}],total:15};
     if(cmd==="engine_status"||cmd==="sessions_status"||cmd==="optional_components"||cmd==="list_courses")return [];
     if(cmd==="cache_status")return {bytes:0,files:0};
     if(cmd==="telegram_status")return {installed:false,accounts:[]};
@@ -95,13 +97,25 @@ try {
     assert.match(await dialog.locator("[data-article-block='1']").innerText(), /<script>/);
     assert.match(await dialog.locator("[data-article-note='old-version']").innerText(), /otra versión/);
     assert.match(await dialog.locator("[data-article-note='ambiguous']").innerText(), /inequívoca/);
-    await page.evaluate(() => {
+    const selectSecondPhrase = () => page.evaluate(() => {
       const block = document.querySelector("[data-article-block='2']"), node = block.firstChild;
       const text = "repeated phrase", start = block.textContent.lastIndexOf(text);
       const range = document.createRange(); range.setStart(node, start); range.setEnd(node, start + text.length);
       const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
       document.dispatchEvent(new Event("selectionchange"));
     });
+    await selectSecondPhrase();
+    await dialog.locator("[data-action='article-share-selection']").click();
+    const share = page.locator(".device-share[open]");
+    assert.equal(await share.locator("#share-text-value").inputValue(), "repeated phrase");
+    await share.locator("#share-device").selectOption("reader-fixture");
+    await share.locator("#share-review").click();
+    await share.locator("#share-send").waitFor();
+    const request = await page.evaluate(() => window.articleFixture.calls.find(call => call.cmd === "device_share_prepare").args);
+    assert.deepEqual(request.selection, { kind: "text", text: "repeated phrase" });
+    await share.locator("#share-close").click();
+    await share.waitFor({ state: "hidden" });
+    await selectSecondPhrase();
     await dialog.locator("[data-action='article-use-selection']").click();
     await dialog.locator("#article-note").fill('<img src="https://source.example/note" onerror="window.articleXss=true"> A note for the second phrase.');
     await dialog.locator("#article-note-form button[type='submit']").click();
@@ -126,7 +140,7 @@ try {
     assert.ok(exports.every(call => call.id === "article-v1" && typeof call.clientRequest === "string"));
     await page.keyboard.press("Escape");
     await dialog.waitFor({ state: "hidden" });
-    assert.equal(await page.locator("[data-action='article-open'][data-id='article-v1']").evaluate(element => element === document.activeElement), true);
+    await page.waitForFunction(() => document.activeElement?.matches("[data-action='article-open'][data-id='article-v1']"));
     if (width < 1120) assert.equal(await page.locator("#detail-dialog").evaluate(element => element.open), true, "Escape closes only the topmost reader dialog.");
 
     await open("article-v2");

@@ -22,6 +22,7 @@ export interface ArticleHooks {
   command<T>(name: string, args?: Record<string, unknown>): Promise<T>;
   snapshot(): Snapshot; refresh(): Promise<void>; render(): void; t: Copy;
   notify(message: string, kind?: "info" | "success" | "error"): void;
+  share?(input: { ids: string[]; text?: string; url?: string }): void;
 }
 interface Anchor { version: string; block: number; quote: string; prefix: string; suffix: string }
 type ReaderState =
@@ -82,6 +83,7 @@ export function createArticles(hooks: ArticleHooks) {
   let working = false;
   let error = "";
   let selection: Anchor | null = null;
+  let shareSelection = "";
   let draft: Anchor | null = null;
   let note = "";
   let focusNote = false;
@@ -127,7 +129,7 @@ export function createArticles(hooks: ArticleHooks) {
     if (reader.kind === "error") return `<div class="article-reader-state"><p role="alert">${h(reader.error)}</p>${action("article-open", t("Reintentar", "Retry"), "retry", "secondary", `data-id="${h(item.id)}"`)}</div>`;
     if (reader.kind !== "ready" || reader.id !== item.id) return "";
     const { document, version } = reader;
-    return `<header class="article-heading"><span class="article-mode">${document.mode === "selection" ? t("Selección guardada", "Saved selection") : document.mode === "page" ? t("Página estática", "Static page") : t("Copia de lectura", "Reading copy")}</span><h2 id="article-reader-title" tabindex="-1">${h(document.title)}</h2>${document.author ? `<p class="article-author">${h(document.author)}</p>` : ""}<p class="article-source-url">${h(document.url)}</p>${action("article-copy-source",t("Copiar vínculo al origen","Copy source link"),"copy","quiet")}<dl class="article-dates"><div><dt>${t("Archivado", "Archived")}</dt><dd>${h(dateText(document.archivedAt, t))}</dd></div>${document.publishedAt ? `<div><dt>${t("Publicado según el origen", "Published according to the source")}</dt><dd>${h(dateText(document.publishedAt, t))}</dd></div>` : ""}</dl></header>${document.warnings.length ? `<details class="article-capture-warnings"><summary>${t("Límites de esta captura", "Capture limitations")} · ${document.warnings.length}</summary><ul>${document.warnings.map(warning => `<li>${h(warning)}</li>`).join("")}</ul></details>` : ""}${document.selectionContext ? `<details class="article-selection-context"><summary>${t("Contexto de la selección", "Selection context")}</summary><dl><div><dt>${t("Antes de la selección", "Before the selection")}</dt><dd>${h(document.selectionContext.prefix)}</dd></div><div><dt>${t("Después de la selección", "After the selection")}</dt><dd>${h(document.selectionContext.suffix)}</dd></div></dl></details>` : ""}<article class="article-text" aria-label="${t("Texto de la versión local", "Local version text")}">${renderBlocks(document, item, version)}</article><div class="article-selection-tools"><span id="article-selection-status" role="status">${t("Selecciona texto de un solo bloque para resaltarlo.", "Select text within one block to highlight it.")}</span>${action("article-use-selection", t("Resaltar o anotar selección", "Highlight or annotate selection"), "add", "secondary", "disabled")}</div>${draft ? `<form id="article-note-form" data-id="${h(item.id)}" class="article-note-form"><h3>${t("Añadir a esta versión", "Add to this version")}</h3><blockquote>${h(draft.quote)}</blockquote><label for="article-note">${t("Nota, opcional", "Note, optional")}</label><textarea id="article-note" rows="3" maxlength="4000" placeholder="${t("Escribe una nota sobre este fragmento", "Write a note about this passage")}" ${working ? "disabled" : ""}>${h(note)}</textarea><div class="button-group"><button type="submit" class="button primary" ${working ? "disabled" : ""}>${working ? t("Guardando…", "Saving…") : t("Guardar resaltado y nota", "Save highlight and note")}</button>${action("article-cancel-note", t("Cancelar", "Cancel"), undefined, "quiet", working ? "disabled" : "")}</div></form>` : ""}${error ? `<p class="article-reader-error" role="alert">${h(error)}</p>` : ""}${renderNotes(item, document, version)}`;
+    return `<header class="article-heading"><span class="article-mode">${document.mode === "selection" ? t("Selección guardada", "Saved selection") : document.mode === "page" ? t("Página estática", "Static page") : t("Copia de lectura", "Reading copy")}</span><h2 id="article-reader-title" tabindex="-1">${h(document.title)}</h2>${document.author ? `<p class="article-author">${h(document.author)}</p>` : ""}<p class="article-source-url">${h(document.url)}</p>${action("article-copy-source",t("Copiar vínculo al origen","Copy source link"),"copy","quiet")}${hooks.share ? action("article-share-source",t("Enviar enlace público","Share public link"),"arrow","quiet") : ""}<dl class="article-dates"><div><dt>${t("Archivado", "Archived")}</dt><dd>${h(dateText(document.archivedAt, t))}</dd></div>${document.publishedAt ? `<div><dt>${t("Publicado según el origen", "Published according to the source")}</dt><dd>${h(dateText(document.publishedAt, t))}</dd></div>` : ""}</dl></header>${document.warnings.length ? `<details class="article-capture-warnings"><summary>${t("Límites de esta captura", "Capture limitations")} · ${document.warnings.length}</summary><ul>${document.warnings.map(warning => `<li>${h(warning)}</li>`).join("")}</ul></details>` : ""}${document.selectionContext ? `<details class="article-selection-context"><summary>${t("Contexto de la selección", "Selection context")}</summary><dl><div><dt>${t("Antes de la selección", "Before the selection")}</dt><dd>${h(document.selectionContext.prefix)}</dd></div><div><dt>${t("Después de la selección", "After the selection")}</dt><dd>${h(document.selectionContext.suffix)}</dd></div></dl></details>` : ""}<article class="article-text" aria-label="${t("Texto de la versión local", "Local version text")}">${renderBlocks(document, item, version)}</article><div class="article-selection-tools"><span id="article-selection-status" role="status">${t("Selecciona texto de un solo bloque para resaltarlo.", "Select text within one block to highlight it.")}</span>${action("article-use-selection", t("Resaltar o anotar selección", "Highlight or annotate selection"), "add", "secondary", "disabled")}${hooks.share ? action("article-share-selection",t("Enviar texto seleccionado","Share selected text"),"arrow","quiet","disabled") : ""}</div>${draft ? `<form id="article-note-form" data-id="${h(item.id)}" class="article-note-form"><h3>${t("Añadir a esta versión", "Add to this version")}</h3><blockquote>${h(draft.quote)}</blockquote><label for="article-note">${t("Nota, opcional", "Note, optional")}</label><textarea id="article-note" rows="3" maxlength="4000" placeholder="${t("Escribe una nota sobre este fragmento", "Write a note about this passage")}" ${working ? "disabled" : ""}>${h(note)}</textarea><div class="button-group"><button type="submit" class="button primary" ${working ? "disabled" : ""}>${working ? t("Guardando…", "Saving…") : t("Guardar resaltado y nota", "Save highlight and note")}</button>${action("article-cancel-note", t("Cancelar", "Cancel"), undefined, "quiet", working ? "disabled" : "")}</div></form>` : ""}${error ? `<p class="article-reader-error" role="alert">${h(error)}</p>` : ""}${renderNotes(item, document, version)}`;
   }
   function renderInspector(item: LibraryItem): string {
     const active = reader.kind !== "idle" && reader.id === item.id;
@@ -155,15 +157,22 @@ export function createArticles(hooks: ArticleHooks) {
   function updateSelection() {
     if (!requested || working) return;
     selection = readSelection();
+    const selected = window.getSelection();
+    const range = selected?.rangeCount === 1 ? selected.getRangeAt(0) : null;
+    const article = document.querySelector("#article-dialog .article-text");
+    const text = range && article?.contains(range.startContainer) && article.contains(range.endContainer) ? selected?.toString() ?? "" : "";
+    shareSelection = text.trim() && new TextEncoder().encode(text).length <= 8192 ? text : "";
     const button = document.querySelector<HTMLButtonElement>("[data-action='article-use-selection']");
     if (button) button.disabled = !selection;
+    const shareButton = document.querySelector<HTMLButtonElement>("[data-action='article-share-selection']");
+    if (shareButton) shareButton.disabled = !shareSelection;
     const status = document.getElementById("article-selection-status");
     if (status) status.textContent = selection ? `${selection.quote.length} ${t("caracteres seleccionados", "characters selected")}` : t("Selecciona texto de un solo bloque para resaltarlo.", "Select text within one block to highlight it.");
   }
   async function open(id: string) {
     const item = itemFor(id);
     if (!item?.details?.webArchiveRef) return;
-    requested = true; restoreId = id; selection = null; draft = null; note = ""; error = "";
+    requested = true; restoreId = id; selection = null; shareSelection = ""; draft = null; note = ""; error = "";
     if (reader.kind === "ready" && reader.id === id && reader.version === item.details.webArchiveRef) { hooks.render(); return; }
     const current = ++generation; reader = { kind: "loading", id }; hooks.render();
     try {
@@ -199,6 +208,10 @@ export function createArticles(hooks: ArticleHooks) {
         const anchor = readSelection() ?? selection;
         if (anchor && !working) { draft = anchor; note = ""; selection = null; focusNote = true; hooks.render(); }
       } break;
+      case "article-share-selection": {
+        if (shareSelection && reader.kind === "ready") hooks.share?.({ ids: [reader.id], text: shareSelection });
+      } break;
+      case "article-share-source": if (reader.kind === "ready") hooks.share?.({ ids: [reader.id], url: reader.document.url }); break;
       case "article-annotate-block": {
         if (reader.kind !== "ready" || working) break;
         const blockIndex = Number(button.dataset.block), block = reader.document.blocks[blockIndex];
@@ -242,6 +255,9 @@ export function createArticles(hooks: ArticleHooks) {
     const dialog = document.getElementById("article-dialog");
     if (!(dialog instanceof HTMLDialogElement) || !requested) return;
     if (!boundDialogs.has(dialog)) {
+      dialog.addEventListener("pointerdown", event => {
+        if (event.target instanceof Element && event.target.closest("[data-action='article-share-selection']") && shareSelection) event.preventDefault();
+      });
       dialog.addEventListener("close", () => { requested = false; selection = null; if (reader.kind === "loading") { generation++; reader = { kind: "idle" }; } document.querySelector<HTMLElement>(`[data-action='article-open'][data-id="${CSS.escape(restoreId)}"]`)?.focus({ preventScroll: true }); });
       boundDialogs.add(dialog);
     }

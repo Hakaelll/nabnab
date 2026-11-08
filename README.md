@@ -75,6 +75,7 @@ Las sesiones se importan por sitio desde un archivo Netscape elegido por el usua
 - [Eliminar fondo](docs/REMOVE-BACKGROUND.md) con segmentación local, ajuste de máscara y exportación transparente.
 - [Separar pistas](docs/STEMS.md) con escucha sincronizada y exportación local de voz e instrumental.
 - [Traducir subtítulos y crear doblaje](docs/TRANSLATION.md) con modelos locales, revisión por segmento, exportación bilingüe y voz sincronizada.
+- [Enviar a un dispositivo](docs/DEVICE-SHARE.md) con KDE Connect instalado en Windows.
 - [Red, motores y privacidad](docs/NETWORK.md), [diseño](docs/design-reference.md) y [plan de trabajo](docs/PLAN.md).
 - [Licencias y avisos](THIRD_PARTY_NOTICES.md).
 

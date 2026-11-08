@@ -12,6 +12,7 @@ import {createStemsTool} from "./stems-ui";
 import {createTranslationTool} from "./translation-ui";
 import {createFileOrganization} from "./file-organization-ui";
 import {createPortableCollections} from "./portable-collections-ui";
+import {createDeviceShare} from "./device-share-ui";
 import {createArticles} from "./articles-ui";
 import {createOcr} from "./ocr-ui";
 import {createDocumentEdits} from "./document-edits-ui";
@@ -45,7 +46,7 @@ import { downloadsView, homeView, icon, jobInspector, libraryView, mediaInspecto
 import { filteredLibrary } from "./views-library";
 import {createBatchController} from './batch-ui';
 import {createSourcesController} from './sources-ui';
-import {createLibraryFeatures} from './library-features';
+import {collectionIncludes, createLibraryFeatures} from './library-features';
 import {createOrganizationController} from './organization-ui';
 import {escapeHtml as h} from './contracts';
 import {option} from './views-common';
@@ -109,7 +110,7 @@ const captionEditor=createCaptionEditor({command,snapshot:()=>snapshot,refresh,r
 const sourceExports=createSourceExportsController({command,refresh,render:renderCurrent,notify,showError,t});
 const live=createLiveController({command,refresh,render:renderCurrent,notify,t});
 const telegram=createTelegramController({command,refresh,render:renderCurrent,notify,showError,t,settings:()=>{preferences.section='engines';navigate('settings');void loadSettingsSection().catch(showError);},folder:()=>snapshot.settings.folder});
-const articles=createArticles({command,snapshot:()=>snapshot,refresh,render:renderLibraryModules,notify,t});
+const articles=createArticles({command,snapshot:()=>snapshot,refresh,render:renderLibraryModules,notify,t,share:input=>deviceShare.open(input)});
 const ocr=createOcr({command,snapshot:()=>snapshot,refresh,render:renderLibraryModules,notify,t,settings:()=>{preferences.section="engines";navigate("settings");void loadSettingsSection().catch(showError);}});
 const imageAssets=createImageAssets({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t});
 const stickerTool=createStickerTool({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t});
@@ -119,6 +120,9 @@ const stemsTool=createStemsTool({command,snapshot:()=>snapshot,refresh,render:re
 const translationTool=createTranslationTool({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t,components:()=>{preferences.section='engines';navigate('settings');}});
 const fileOrganization=createFileOrganization({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t});
 const portable=createPortableCollections({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t});
+const deviceShare=createDeviceShare({command,t,item:id=>snapshot.library.find(item=>item.id===id),afterClose:()=>{renderInspector();libraryFeatures.bind();},package:ids=>{
+  localToolModule='portable';navigate('tools');portable.open(ids,true);
+}});
 type CaptureStatus=CaptureState&{shortcutLabel?:string|null;shortcutReason?:string|null};
 let captureStatus:CaptureStatus|null=null;
 const screenCapture=createScreenCapture({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t,onStatus:showCaptureStatus,settings:()=>{preferences.section='engines';navigate('settings');void loadSettingsSection().catch(showError);},chooseFolder:()=>{void chooseFolder().then(renderCurrent).catch(showError);}});
@@ -336,6 +340,7 @@ function renderHome(): void {
   renderedPreviewRequest=previewRequest;
 }
 function renderInspector(force=false): void {
+  if(deviceShare.isOpen())return;
   const job=page==='downloads'?snapshot.jobs.find(item=>item.id===downloads.detailId):null;
   const item=page==='library'&&librarySection==='files'?snapshot.library.find(item=>item.id===library.detailId):null;
   const key=job?`job:${job.id}:${job.runId}:${job.updatedAt}:${job.state}`:item?`media:${item.id}:${item.path}:${item.collections.join(',')}:${item.tags.join(',')}`:"";
@@ -604,6 +609,19 @@ document.addEventListener("click",event=>{
 });
 async function handleAction(action: string, button: HTMLButtonElement): Promise<void> {
   const id=button.dataset.id??"";
+  if(action==='share-open'){deviceShare.open();return;}
+  if(action==='share-file'){deviceShare.open({ids:[id]});return;}
+  if(action==='share-selected'){deviceShare.open({ids:[...library.selected]});return;}
+  if(action==='share-collection'){
+    const collection=button.dataset.collection??'';
+    if(collection)deviceShare.open({ids:snapshot.library.filter(item=>collectionIncludes(item,collection,snapshot)).map(item=>item.id),label:button.dataset.label});
+    return;
+  }
+  if(action==='share-job'){
+    const job=snapshot.jobs.find(item=>item.id===id&&item.state==='completed');
+    if(job)deviceShare.open({ids:snapshot.library.filter(item=>job.outputs.includes(item.path)).map(item=>item.id),label:job.title});
+    return;
+  }
   if(action==='batch-open'||action==='batch-new')navigate('home');
   if(action==='emblem-activate'){const color=handleEmblemClick();if(color.toggled)renderHome();return;}
   if(action==='open-fileSources'){platformModule='fileSources';navigate('platforms');if(id==='personal'){fileSources.openPersonal();await personalServers.load();return;}if(id==='arxiv'||id==='zenodo'||id==='librivox'){fileSources.openCatalog(id);return;}await fileSources.open();if(id==='drive'||id==='onedrive'||id==='dropbox'){const tabButton=document.createElement('button');tabButton.dataset.tab=id;await fileSources.handleClick('file-source-tab',tabButton);}return;}
@@ -781,6 +799,7 @@ async function submitForm(form: HTMLFormElement): Promise<void> {
   }
 }
 document.addEventListener('keydown',event=>{
+  if(deviceShare.isOpen())return;
   if(audioPlayer.key(event)){event.preventDefault();return;}
   if(audioPlayer.isExpanded())return;
   if(event.ctrlKey&&!event.altKey&&!event.shiftKey&&event.key.toLowerCase()==='k'){event.preventDefault();palette.open();return;}
