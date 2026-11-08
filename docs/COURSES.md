@@ -18,7 +18,7 @@ Los adjuntos PDF/EPUB dependen de la lectura y clasificación documental de la b
 
 ## Materiales de Rocketseat, Coursera, Domestika y Skillshare
 
-Abre **Plataformas → Cursos**, elige el proveedor y pega el enlace del curso. También puedes pegar el enlace en Inicio. Abre el curso en el navegador y elige allí el perfil o la sesión autorizada. Guarda el material desde los controles que la plataforma haya habilitado. En nabnab, indica el nombre del curso y pulsa **Elegir archivos guardados** o **Elegir carpeta del curso**. Puedes importar hasta 200 archivos compatibles por operación.
+Abre **Plataformas → Cursos**, elige el proveedor y pega el enlace del curso. También puedes pegar el enlace en Inicio. Abre el curso en el navegador y elige allí el perfil o la sesión autorizada. Guarda el material desde los controles que la plataforma haya habilitado. En nabnab, indica el nombre del curso y pulsa **Elegir archivos guardados** o **Elegir carpeta del curso**. También puedes arrastrar los archivos o una carpeta desde el Explorador de Windows sobre la vista del curso. Puedes revisar hasta 200 archivos compatibles por operación.
 
 **Revisar materiales** agrupa los archivos por carpeta y muestra el tipo, el tamaño y el total seleccionado. Marca archivos individuales o una unidad completa y pulsa **Añadir al curso**. La biblioteca indexa los archivos elegidos en su ubicación actual. Si eliges una carpeta, nabnab incluye las subcarpetas y se detiene si encuentra un enlace simbólico o una unión de directorios. Si cambia el tamaño o la fecha de un archivo seleccionado durante la revisión, vuelve a elegirlo.
 
@@ -36,6 +36,8 @@ Si un documento, subtítulo, imagen o archivo comprimido pertenece a una lecció
 En Rocketseat, Coursera y Domestika, la sesión y la descarga se gestionan en el sitio oficial. El índice local asocia los archivos elegidos con su curso. En Skillshare, el flujo de enlaces directos que se describe abajo permite enviar adjuntos públicos a Descargas después de revisarlos.
 
 ![Apertura del curso e importación de adjuntos, a 1180 × 780 con IPC simulado](course-materials-form.png)
+
+![Aviso al arrastrar archivos sobre el curso, a 900 × 620 con un evento simulado](course-materials-drop.png)
 
 ![Revisión de archivos de una unidad, a 900 × 620 con IPC simulado](course-materials-review.png)
 

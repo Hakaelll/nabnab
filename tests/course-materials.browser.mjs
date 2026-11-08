@@ -145,10 +145,30 @@ try {
 
   await page.setViewportSize({ width: 900, height: 620 });
   assert.ok(await page.locator("#course-browser-form").evaluate(form => form.scrollWidth <= form.clientWidth + 1));
+  await page.screenshot({ path: `${directory}/form-900x620.png` });
   await page.evaluate(() => { window.courseFixture.cancel = false; });
+  const paths = ["C:/Fixture/01 Fundamentos/02 Preparar.pdf"];
+  const emitDrag = (event, paths) => page.evaluate(async ({ event, paths }) => {
+    const { emit } = await import("/node_modules/@tauri-apps/api/event.js");
+    await emit(`tauri://drag-${event}`, { paths, position: { x: 460, y: 290 } });
+  }, { event, paths });
+  await emitDrag("enter", paths);
+  const dropIndicator = page.locator("#drop-indicator");
+  await dropIndicator.waitFor();
+  assert.equal(await dropIndicator.innerText(), "Suelta para revisar materiales del curso");
+  await page.screenshot({ path: `${directory}/course-drop-900x620.png` });
+  await emitDrag("drop", paths);
+  await dropIndicator.waitFor({ state: "hidden" });
+  const heading = page.getByRole("heading", { name: "Revisar materiales" });
+  await heading.waitFor();
+  assert.deepEqual(await page.evaluate(() => window.courseFixture.calls.filter(call => call.cmd === "preview_course_materials").at(-1).args.droppedPaths), paths);
+  assert.equal(await page.evaluate(() => window.courseFixture.calls.some(call => call.cmd === "import_paths" || call.cmd === "import_course_materials")), false);
+  await emitDrag("drop", ["C:/Fixture/Otro.pdf"]);
+  assert.equal(await page.evaluate(() => window.courseFixture.calls.filter(call => call.cmd === "preview_course_materials" && call.args.droppedPaths).length), 1);
+  await page.getByRole("button", { name: "Volver", exact: true }).click();
+  assert.equal(await choose.evaluate(node => node === document.activeElement), true);
   await choose.focus();
   await page.keyboard.press("Enter");
-  const heading = page.getByRole("heading", { name: "Revisar materiales" });
   await heading.waitFor();
   assert.equal(await heading.evaluate(node => node === document.activeElement), true);
   const add = page.getByRole("button", { name: "Añadir al curso" });
@@ -156,7 +176,7 @@ try {
   await page.getByRole("button", { name: "Volver", exact: true }).click();
   assert.equal(await choose.evaluate(node => node === document.activeElement), true);
   assert.equal(await page.evaluate(() => window.courseFixture.calls.some(call => call.cmd === "import_course_materials")), false);
-  await choose.click();
+  await emitDrag("drop", paths);
   const chosen = page.getByRole("checkbox", { name: /^02 Preparar.pdf/ });
   await chosen.press("Space");
   assert.equal(await chosen.evaluate(node => node === document.activeElement), true);

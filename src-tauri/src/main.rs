@@ -1209,9 +1209,18 @@ fn main() {
         })
         .on_window_event(|window, event| playback_mini::window_event(window.app_handle(), window.label(), event))
         .on_window_event(|window, event| {
-            if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed) {
-                quick_skip::shutdown(window.app_handle());
-                preferences::release_playback_shortcut(window.app_handle());
+            if window.label() != "main" {
+                return;
+            }
+            match event {
+                tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) => {
+                    window.state::<courses::browser::Reviews>().remember_drop(paths);
+                }
+                tauri::WindowEvent::Destroyed => {
+                    quick_skip::shutdown(window.app_handle());
+                    preferences::release_playback_shortcut(window.app_handle());
+                }
+                _ => {}
             }
         })
         .invoke_handler(tauri::generate_handler![

@@ -209,6 +209,30 @@ struct Plan {
 pub(crate) struct Reviews {
     next: AtomicU32,
     pending: Mutex<Option<Plan>>,
+    dropped: Mutex<Option<(Vec<PathBuf>, Instant)>>,
+}
+
+impl Reviews {
+    pub(crate) fn remember_drop(&self, paths: &[PathBuf]) {
+        *self.dropped.lock().unwrap() = (1..=200)
+            .contains(&paths.len())
+            .then(|| (paths.to_vec(), Instant::now()));
+    }
+
+    fn take_drop(&self, paths: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
+        if !(1..=200).contains(&paths.len()) {
+            return Err("Choose between 1 and 200 saved course files.".into());
+        }
+        let mut dropped = self.dropped.lock().unwrap();
+        dropped
+            .take_if(|(saved, received)| {
+                saved.as_slice() == paths && received.elapsed() < Duration::from_secs(10)
+            })
+            .map(|(saved, _)| saved)
+            .ok_or_else(|| {
+                "Drop the course files from Explorer again or use the file picker.".into()
+            })
+    }
 }
 
 fn prepare_review(
@@ -531,51 +555,64 @@ pub async fn preview_course_materials(
     title: String,
     folder: bool,
     lesson_id: Option<String>,
+    dropped_paths: Option<Vec<PathBuf>>,
 ) -> Result<Option<Review>, String> {
     let link = CourseLink::selected(&provider, &url)?;
     let title = label(&title, 240);
     if title.is_empty() {
         return Err("Enter the name to use for this course.".into());
     }
-    let attaching = lesson_id.is_some();
-    let picked = tauri::async_runtime::spawn_blocking(move || {
-        let dialog = app.dialog().file();
-        if folder {
-            dialog
-                .set_title("Choose an authorized course folder")
-                .blocking_pick_folder()
-                .map(|folder| vec![folder])
-        } else {
-            dialog
-                .set_title(if attaching {
-                    "Choose attachments for this lesson"
-                } else {
-                    "Choose authorized course files"
-                })
-                .blocking_pick_files()
-        }
-    })
-    .await
-    .map_err(|_| "The course file picker failed.")?;
-    let Some(picked) = picked else {
-        return Ok(None);
-    };
-    if picked.is_empty() || picked.len() > 200 {
-        return Err("Choose between 1 and 200 saved course files.".into());
-    }
-    let paths = picked
-        .into_iter()
-        .map(|file| {
-            file.into_path()
-                .map_err(|_| "Choose files saved on this computer.")
-        })
-        .collect::<Result<Vec<PathBuf>, _>>()?;
+    let from_drop = dropped_paths.is_some();
+    let dropped = dropped_paths
+        .map(|paths| reviews.take_drop(&paths))
+        .transpose()?;
     let id = reviews.next.fetch_add(1, Ordering::Relaxed);
-    let (review, plan) = tauri::async_runtime::spawn_blocking(move || {
-        prepare_review(id, link, title, &paths, folder, lesson_id)
+    let prepared = tauri::async_runtime::spawn_blocking(move || {
+        let paths = match dropped {
+            Some(paths) => paths,
+            None => {
+                let dialog = app.dialog().file();
+                let picked = if folder {
+                    dialog
+                        .set_title("Choose an authorized course folder")
+                        .blocking_pick_folder()
+                        .map(|folder| vec![folder])
+                } else {
+                    dialog
+                        .set_title(if lesson_id.is_some() {
+                            "Choose attachments for this lesson"
+                        } else {
+                            "Choose authorized course files"
+                        })
+                        .blocking_pick_files()
+                };
+                let Some(picked) = picked else {
+                    return Ok(None);
+                };
+                if picked.is_empty() || picked.len() > 200 {
+                    return Err("Choose between 1 and 200 saved course files.".into());
+                }
+                picked
+                    .into_iter()
+                    .map(|file| {
+                        file.into_path()
+                            .map_err(|_| "Choose files saved on this computer.")
+                    })
+                    .collect::<Result<Vec<_>, _>>()?
+            }
+        };
+        let folder = if from_drop {
+            paths.len() == 1 && paths[0].is_dir()
+        } else {
+            folder
+        };
+        prepare_review(id, link, title, &paths, folder, lesson_id).map(Some)
     })
     .await
     .map_err(|_| "Course file review failed.")??;
+    let Some((review, plan)) = prepared else {
+        return Ok(None);
+    };
     *reviews.pending.lock().unwrap() = Some(plan);
     Ok(Some(review))
 }
@@ -624,6 +661,20 @@ pub async fn import_course_materials(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn course_drop_only_consumes_the_matching_recent_native_selection_once() {
+        let reviews = Reviews::default();
+        let files = [PathBuf::from("lesson.pdf"), PathBuf::from("notes.txt")];
+        assert!(reviews.take_drop(&files).is_err());
+        reviews.remember_drop(&files);
+        assert!(reviews.take_drop(&files[..1]).is_err());
+        assert_eq!(reviews.take_drop(&files).unwrap(), files);
+        assert!(reviews.take_drop(&files).is_err());
+        *reviews.dropped.lock().unwrap() =
+            Some((files.to_vec(), Instant::now() - Duration::from_secs(10)));
+        assert!(reviews.take_drop(&files).is_err());
+    }
 
     #[test]
     fn course_links_remove_session_data_and_keep_stable_ids() {

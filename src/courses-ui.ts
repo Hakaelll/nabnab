@@ -148,15 +148,30 @@ export function createCoursesController(hooks: CourseHooks) {
     }
   }
 
-  async function reviewMaterials(source: BrowserCourseProvider, url: string, title: string, folder = false, lesson?: CourseLesson) {
+  async function reviewMaterials(source: BrowserCourseProvider, url: string, title: string, folder = false, lesson?: CourseLesson, droppedPaths?: string[]) {
     const trigger = lesson ? "course-add-attachments" : folder ? "course-add-folder" : courseId ? "course-add-materials" : "course-browser-import";
     await perform(async () => {
-      const plan = await hooks.command<MaterialReview | null>("preview_course_materials", { provider: source, url, title, folder, lessonId: lesson?.id ?? null });
+      const plan = await hooks.command<MaterialReview | null>("preview_course_materials", { provider: source, url, title, folder, lessonId: lesson?.id ?? null, droppedPaths });
       if (plan) review = { plan, files: new Set(), trigger, lessonTitle: lesson?.title };
       return false;
     });
     if (review) focusCourseHeading();
     else document.getElementById(trigger)?.focus({ preventScroll: true });
+  }
+
+  function supportsDrop(): boolean {
+    const course = current();
+    return course ? Boolean(course.url && isBrowserProvider(course.provider)) : isBrowserProvider(provider);
+  }
+
+  async function receiveDrop(paths: string[]): Promise<void> {
+    if (!paths.length || busy || review) return;
+    const course = current();
+    if (course?.url && isBrowserProvider(course.provider)) {
+      await reviewMaterials(course.provider, course.url, course.title, false, undefined, paths);
+    } else if (isBrowserProvider(provider) && document.querySelector<HTMLFormElement>("#course-browser-form")?.reportValidity()) {
+      await reviewMaterials(provider, input, browserTitle, false, undefined, paths);
+    }
   }
 
   async function finishReview(commit: boolean) {
@@ -233,7 +248,7 @@ export function createCoursesController(hooks: CourseHooks) {
         <section>
           <h3>${t("2. Añade tus archivos", "2. Add your files")}</h3>
           <label>${t("Nombre del curso", "Course name")}<input id="course-browser-title" maxlength="240" required value="${h(browserTitle)}" autocomplete="off"></label>
-          <p class="field-note">${t("Elige archivos sueltos o una carpeta con sus unidades. Biblioteca indexa hasta 200 archivos compatibles en su ubicación original.", "Choose individual files or a folder with its units. Library indexes up to 200 supported files in place.")}</p>
+          <p class="field-note">${t("Elige o arrastra hasta 200 archivos o una carpeta con sus unidades. Podrás revisarlos antes de añadirlos.", "Choose or drop up to 200 files or a folder with its units. You can review them before adding them.")}</p>
           <div class="button-group">
             <button type="submit" id="course-browser-import" class="button primary" ${busy ? "disabled" : ""}>${busy ? t("Preparando…", "Preparing…") : t("Elegir archivos guardados", "Choose saved files")}</button>
             ${action("course-add-folder", t("Elegir carpeta del curso", "Choose course folder"), "folder", "secondary", `id="course-add-folder" ${busy ? "disabled" : ""}`)}
@@ -448,5 +463,5 @@ export function createCoursesController(hooks: CourseHooks) {
   function observeJob(id: string) {
     if (current()?.sections.some(section => section.lessons.some(lesson => lesson.assets.some(asset => asset.jobIds.includes(id))))) hooks.render();
   }
-  return { open, render, handleInput, handleSubmit, handleClick, observeJob };
+  return { open, render, handleInput, handleSubmit, handleClick, observeJob, supportsDrop, receiveDrop };
 }

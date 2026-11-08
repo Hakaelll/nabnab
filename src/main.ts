@@ -1025,8 +1025,13 @@ required<HTMLDialogElement>('#detail-dialog').addEventListener('click',event=>{i
 document.addEventListener('error',event=>{const target=event.target;if(target instanceof HTMLImageElement&&target.classList.contains('preview-image'))target.hidden=true;},true);
 window.addEventListener('resize',()=>preserveFocus(()=>renderInspector()));
 
+function droppingCourseMaterials(): boolean {
+  return page === 'platforms' && platformModule === 'courses' && courses.supportsDrop();
+}
+
 async function receivePaths(paths: string[]): Promise<void> {
   required('#drop-indicator').hidden=true;
+  if (droppingCourseMaterials()) { await courses.receiveDrop(paths); return; }
   const textFiles=page==='home'?paths.filter(path=>path.toLowerCase().endsWith('.txt')):[];const mediaFiles=paths.filter(path=>!textFiles.includes(path));
   for(const path of textFiles)await importUrlFile(path);
   if(mediaFiles.length){
@@ -1060,7 +1065,14 @@ if(desktop){
     await listen<WheelAction>('quick-skip-action',({payload})=>audioPlayer.wheelAction(payload),{target:{kind:"Webview",label:"main"}});
     await nativeWindow.onResized(async()=>{if(await nativeWindow.isMinimized())audioPlayer.detachMini(true);await updateMaximize();});
     await updateMaximize();
-    await nativeWindow.onDragDropEvent(event=>{if(event.payload.type==='drop')void receivePaths(event.payload.paths).catch(showError);else required('#drop-indicator').hidden=event.payload.type!=='enter'&&event.payload.type!=='over';});
+    await nativeWindow.onDragDropEvent(event=>{
+      if(event.payload.type==='drop') { void receivePaths(event.payload.paths).catch(showError); return; }
+      const courseDrop = droppingCourseMaterials();
+      const indicator = required('#drop-indicator');
+      required('#drop-indicator span').textContent = courseDrop ? t('Suelta para revisar materiales del curso', 'Drop to review course materials') : t('Suelta para importar', 'Drop to import');
+      indicator.classList.toggle('is-course-drop', courseDrop);
+      indicator.hidden = event.payload.type!=='enter' && event.payload.type!=='over';
+    });
     await listen<CaptureStatus>('capture-update',({payload})=>{const previous=captureStatus?.phase;screenCapture.acceptStatus(payload);if(page==='tools'&&localToolModule==='screenCapture'&&(captureIsActive(payload)||previous!==payload.phase))renderCurrent();if(previous!==payload.phase&&(payload.phase==='interrupted'||payload.phase==='error')){notify(payload.readyCapture?t('La captura se interrumpió. Revisa el archivo parcial en Captura.','Capture was interrupted. Review the partial file in Capture.'):t('No se pudo continuar la captura. Revisa Captura.','Capture could not continue. Review Capture.'),'error',payload.reason??'');if(page==='tools'&&localToolModule==='screenCapture')void screenCapture.open().catch(showError);}});
     await listen('capture-saved',()=>{notify(t('Repetición enviada a Descargas.','Replay sent to Downloads.'),'success');void refresh().catch(showError);});
     await listen<string>('capture-error',({payload})=>showError(payload));
