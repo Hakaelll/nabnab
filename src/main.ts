@@ -944,7 +944,7 @@ async function handleAction(action: string, button: HTMLButtonElement): Promise<
 }
 document.addEventListener('input',event=>{
   if(event.target instanceof HTMLElement&&event.target.id==='sticker-query'&&stickerTool.input(event.target))return;
-  if(event.target instanceof HTMLElement&&event.target.id==='upscale-query'&&upscaleTool.input(event.target))return;
+  if(event.target instanceof HTMLElement&&['upscale-query','upscale-split'].includes(event.target.id)&&upscaleTool.input(event.target))return;
   if(event.target instanceof HTMLElement&&event.target.id==='background-query'&&backgroundTool.input(event.target))return;
   if(event.target instanceof HTMLElement&&['stems-query','stems-start','stems-position'].includes(event.target.id)&&stemsTool.input(event.target))return;
   if(event.target instanceof HTMLElement&&translationTool.input(event.target))return;
@@ -960,7 +960,7 @@ document.addEventListener('input',event=>{
 document.addEventListener('change',event=>{
   const target=event.target;
   if(target instanceof HTMLElement&&target.id!=='sticker-query'&&stickerTool.input(target))return;
-  if(target instanceof HTMLElement&&target.id!=='upscale-query'&&upscaleTool.input(target))return;
+  if(target instanceof HTMLElement&&!['upscale-query','upscale-split'].includes(target.id)&&upscaleTool.input(target))return;
   if(target instanceof HTMLElement&&target.id!=='background-query'&&backgroundTool.input(target))return;
   if(target instanceof HTMLElement&&target.id==='stems-source'&&stemsTool.input(target))return;
   if(target instanceof HTMLElement&&(target.id.startsWith('dub-')||['translation-source','translation-pair','translation-format','translation-bilingual','translation-draft'].includes(target.id))){void translationTool.change(target).catch(showError);return;}

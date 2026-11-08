@@ -43,6 +43,8 @@ export function createUpscaleTool(hooks: Hooks) {
   let settings: Options = { model: "photo", scale: 4, tile: 64 };
   let anchor = { x: 50, y: 50 };
   let preview: (Omit<Preview, "before" | "after"> & { before: string; after: string }) | null = null;
+  let comparisonMode: "pair" | "wipe" = "pair";
+  let split = 50;
   let busy = false, requestId = 0, error = "";
   const ready = () => component?.installed && component.enabled && component.available;
   const disabled = () => busy ? "disabled" : "";
@@ -60,7 +62,7 @@ export function createUpscaleTool(hooks: Hooks) {
     hooks.render();
   }
 
-  function invalidate() { preview = null; error = ""; }
+  function invalidate() { preview = null; split = 50; error = ""; }
 
   async function run(task: () => Promise<void>) {
     if (busy) return;
@@ -114,12 +116,22 @@ export function createUpscaleTool(hooks: Hooks) {
   function comparison() {
     if (!preview) return `<div class="upscale-empty">${t("Genera una muestra para comparar los detalles del mismo recorte.", "Generate a preview to compare details in the same crop.")}</div>`;
     const d = preview.dimensions;
-    return `<div class="upscale-pair">
-      <figure><figcaption>${t("Original · bicúbico", "Original · bicubic")}</figcaption>
-        <div class="asset-preview-image"><img alt="${t("Recorte original ampliado para comparar", "Original crop enlarged for comparison")}" src="${preview.before}"></div></figure>
-      <figure><figcaption>Real-ESRGAN ×${settings.scale}</figcaption>
-        <div class="asset-preview-image"><img alt="${t("El mismo recorte procesado con Real-ESRGAN", "The same crop processed with Real-ESRGAN")}" src="${preview.after}"></div></figure>
-    </div><p class="field-note">${t("Recorte", "Crop")} ${preview.cropWidth} × ${preview.cropHeight} px · x=${preview.cropX}, y=${preview.cropY} · ${t("Imagen completa", "Full image")} ${d.width} × ${d.height} → ${d.outputWidth} × ${d.outputHeight} px</p>`;
+    const original = t("Original · bicúbico", "Original · bicubic");
+    const processed = `Real-ESRGAN ×${settings.scale}`;
+    const before = `<img alt="${t("Recorte original ampliado para comparar", "Original crop enlarged for comparison")}" src="${preview.before}">`;
+    const after = `<img alt="${t("El mismo recorte procesado con Real-ESRGAN", "The same crop processed with Real-ESRGAN")}" src="${preview.after}">`;
+    return `<div class="upscale-comparison-modes" role="group" aria-label="${t("Vista de comparación", "Comparison view")}">
+      ${action("upscale-compare-pair", t("Lado a lado", "Side by side"), undefined, "quiet", `aria-pressed="${comparisonMode === "pair"}" ${disabled()}`)}
+      ${action("upscale-compare-wipe", t("Deslizador", "Slider"), undefined, "quiet", `aria-pressed="${comparisonMode === "wipe"}" ${disabled()}`)}
+    </div>${comparisonMode === "pair" ? `<div class="upscale-pair">
+      <figure><figcaption>${original}</figcaption><div class="asset-preview-image">${before}</div></figure>
+      <figure><figcaption>${processed}</figcaption><div class="asset-preview-image">${after}</div></figure>
+    </div>` : `<figure class="upscale-wipe" style="--split:${split}%;--crop-ratio:${preview.cropWidth / preview.cropHeight}">
+      <figcaption><span>${original}</span><span>${processed}</span></figcaption>
+      <div class="asset-preview-image upscale-wipe-frame">${before}${after}<span class="upscale-wipe-divider" aria-hidden="true"></span></div>
+      <label for="upscale-split">${t("Original visible", "Visible original")} <span class="upscale-split-value" aria-hidden="true">${split}%</span></label>
+      <input id="upscale-split" type="range" min="0" max="100" value="${split}" aria-valuetext="${t(`${split}% de original`, `${split}% original`)}" ${disabled()}>
+    </figure>`}<p class="field-note">${t("Recorte", "Crop")} ${preview.cropWidth} × ${preview.cropHeight} px · x=${preview.cropX}, y=${preview.cropY} · ${t("Imagen completa", "Full image")} ${d.width} × ${d.height} → ${d.outputWidth} × ${d.outputHeight} px</p>`;
   }
 
   function render() {
@@ -158,6 +170,11 @@ export function createUpscaleTool(hooks: Hooks) {
   async function click(kind: string) {
     switch (kind) {
       case "upscale-component": hooks.components(); return true;
+      case "upscale-compare-pair":
+      case "upscale-compare-wipe":
+        comparisonMode = kind === "upscale-compare-pair" ? "pair" : "wipe";
+        hooks.render();
+        return true;
       case "upscale-picker":
         picking = !picking; hooks.render();
         if (picking) document.getElementById("upscale-query")?.focus();
@@ -181,6 +198,15 @@ export function createUpscaleTool(hooks: Hooks) {
   function input(target: HTMLElement) {
     if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) return false;
     if (target.id === "upscale-query") { query = target.value; hooks.render(); return true; }
+    if (target instanceof HTMLInputElement && target.id === "upscale-split") {
+      split = target.valueAsNumber;
+      const wipe = target.closest<HTMLElement>(".upscale-wipe");
+      wipe?.style.setProperty("--split", `${split}%`);
+      const value = wipe?.querySelector(".upscale-split-value");
+      if (value) value.textContent = `${split}%`;
+      target.setAttribute("aria-valuetext", t(`${split}% de original`, `${split}% original`));
+      return true;
+    }
     if (target instanceof HTMLInputElement && target.dataset.upscaleId) {
       const id = target.dataset.upscaleId;
       if (target.checked && ids.length < MAX_BATCH) ids = [...ids, id];

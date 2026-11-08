@@ -13,6 +13,10 @@ Generate a sample for one image in the batch. The horizontal and vertical contro
 
 ![Matched native crop comparison on an illustration](upscale-preview.png)
 
+Choose **Slider** to see the two images overlaid in the same frame. Move **Visible original** with the pointer or arrow keys. **Home** shows the processed crop and **End** shows the original. **Side by side** returns to the paired view. Both views use the same generated sample.
+
+![Slider comparison using synthetic crops in Edge](upscale-slider.png)
+
 The memory estimate covers uncompressed input and output RGBA pixels. Additional Vulkan model and driver allocations vary. The 64 and 128 pixel tiles let you choose between lower GPU memory use and larger blocks. Upscaling uses one GPU task at a time and also takes a slot from nabnab's processing limit.
 
 Review the destination and select **Queue upscale**. The queue checks the source fingerprint again and publishes a new PNG linked to each original in Library. Jobs process stored pixel orientation and accept inputs up to 64 MiB. The output limit is 8192 pixels per side and 24 million pixels total. Cancelling a preview or job stops its local processes.
