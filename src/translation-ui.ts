@@ -33,6 +33,8 @@ interface Hooks {
 
 const directions: Pair[] = ["es-en", "en-es"];
 const pageSize = 12;
+const lineLimit = 42;
+const readingLimit = 20;
 function styled(text: string) {
   return h(text).replace(/&lt;(\/?(?:b|i|u))&gt;/g, "<$1>").replace(/&amp;(lt|gt|amp);/g, "&$1;");
 }
@@ -48,7 +50,9 @@ function timing(time: number) {
 function lengthWarning(text: string, cue: Cue) {
   const lines = text.replace(/<\/?(?:b|i|u)>/gi, "").replace(/&(lt|gt|amp|quot|#39);/g, "_").split("\n");
   const counts = lines.map(line => Array.from(line).length);
-  return Math.max(...counts) > 42 || counts.reduce((total, length) => total + length, 0) / (cue.end - cue.start) > 20;
+  const longest = Math.max(...counts);
+  const rate = counts.reduce((total, length) => total + length, 0) / (cue.end - cue.start);
+  return longest > lineLimit || rate > readingLimit ? { longest, rate } : null;
 }
 
 export function createTranslationTool(hooks: Hooks) {
@@ -61,6 +65,7 @@ export function createTranslationTool(hooks: Hooks) {
   let draftIds: string[] | null = null;
   let busy = false, error = "", confirmRemoval = false;
   let offset = 0;
+  let warningCursor: number | null = null;
   let format: "srt" | "vtt" = "vtt", bilingual = false;
   const edits = new Map<number, string>();
   const warnings = new Set<number>();
@@ -68,6 +73,7 @@ export function createTranslationTool(hooks: Hooks) {
     draft: () => draft ? { id: draft.id, revision: draft.revision, pair: draft.selection.pair, sourceId: draft.selection.input.libraryId, count: draft.original.length } : null,
     focusCue: async index => {
       offset = Math.floor(index / pageSize) * pageSize;
+      warningCursor = index;
       await hooks.openTool("translation");
       requestAnimationFrame(() => document.getElementById(`translation-cue-${index}`)?.focus());
     },
@@ -89,7 +95,20 @@ export function createTranslationTool(hooks: Hooks) {
     const job = working();
     return Boolean(job && !["completed", "cancelled", "error"].includes(job.state));
   };
-  const warning = () => t("Puede costar leerlo a tiempo. Prueba a acortar el texto o repartirlo en líneas.", "This cue may be hard to read in time. Try shortening it or splitting it into lines.");
+  const warningCountLabel = () => `${warnings.size} ${warnings.size === 1 ? t("aviso de longitud", "length warning") : t("avisos de longitud", "length warnings")}`;
+
+  function warning(details: NonNullable<ReturnType<typeof lengthWarning>>) {
+    const reasons: string[] = [];
+    if (details.longest > lineLimit) reasons.push(t(`${details.longest} caracteres en la línea más larga (referencia ${lineLimit})`,
+      `${details.longest} characters in the longest line (guideline ${lineLimit})`));
+    if (details.rate > readingLimit) {
+      const rate = (Math.ceil(details.rate * 10) / 10).toLocaleString(t("es", "en"));
+      reasons.push(t(`${rate} caracteres por segundo (referencia ${readingLimit})`, `${rate} characters per second (guideline ${readingLimit})`));
+    }
+    const remedy = details.rate > readingLimit ? t("Acorta el texto.", "Shorten the text.")
+      : t("Divide la línea o acórtala.", "Split or shorten the line.");
+    return `${reasons.join(" · ")}. ${remedy}`;
+  }
 
   async function load(mode: Mode) {
     try {
@@ -123,14 +142,14 @@ export function createTranslationTool(hooks: Hooks) {
   async function open(id: string) {
     const result = await hooks.command<Draft>("translation_read", { draftId: id });
     dubbing.resetDraft();
-    draft = result; edits.clear(); offset = 0; confirmRemoval = false;
+    draft = result; edits.clear(); offset = 0; warningCursor = null; confirmRemoval = false;
     updateWarnings(result);
     if (!draftIds?.includes(id)) draftIds = [id, ...(draftIds ?? [])];
   }
 
   function clearDraft() {
     dubbing.resetDraft();
-    draft = null; edits.clear(); confirmRemoval = false;
+    draft = null; edits.clear(); warnings.clear(); warningCursor = null; confirmRemoval = false;
   }
 
   function updateWarnings(current: Draft) {
@@ -203,6 +222,7 @@ export function createTranslationTool(hooks: Hooks) {
     const rows = current.original.slice(offset, offset + pageSize).map((cue, visibleIndex) => {
       const index = offset + visibleIndex;
       const target = edits.get(index) ?? current.translated[index];
+      const details = warnings.has(index) ? lengthWarning(target, cue) : null;
       return `<li class="translation-cue">
         <div class="translation-time"><span>${h(cue.identifier ?? String(index + 1))}</span>
           <time>${timing(cue.start)} – ${timing(cue.end)}</time></div>
@@ -212,7 +232,7 @@ export function createTranslationTool(hooks: Hooks) {
           <label for="translation-cue-${index}"><span class="field-note">${t("Traducción", "Translation")}</span>
             <textarea id="translation-cue-${index}" data-translation-index="${index}" aria-label="${t("Traducción del segmento", "Translation of cue")} ${index + 1}"
               aria-describedby="translation-warning-${index}" rows="2" maxlength="16000" ${busy ? "disabled" : ""}>${h(target)}</textarea>
-            <small id="translation-warning-${index}" class="translation-warning" ${warnings.has(index) ? "" : "hidden"}>${warning()}</small>
+            <small id="translation-warning-${index}" class="translation-warning" ${details ? "" : "hidden"}>${details ? h(warning(details)) : ""}</small>
           </label>
         </div></li>`;
     }).join("");
@@ -224,10 +244,11 @@ export function createTranslationTool(hooks: Hooks) {
           ${action("dub-open", t("Crear doblaje", "Create dubbing"), "audio", "quiet", `id="dub-open" ${busy || edits.size ? "disabled" : ""}`)}
         </div>
       </div>
-      <p class="field-note">${current.contextualBlocks
+      <div class="translation-review-status"><p class="field-note">${current.contextualBlocks
         ? t(`Se usó contexto en ${current.contextualBlocks} bloques.`, `Context used in ${current.contextualBlocks} blocks.`)
-        : t("Los segmentos se tradujeron por separado.", "Cues were translated individually.")}
-        <span id="translation-warning-count">${warnings.size} ${t("avisos de longitud", "length warnings")}</span></p>
+        : t("Los segmentos se tradujeron por separado.", "Cues were translated individually.")}</p>
+        <div class="translation-warning-nav"><span id="translation-warning-count" role="status">${warningCountLabel()}</span>
+          ${action("translation-next-warning", t("Siguiente aviso", "Next warning"), "arrow", "quiet", `id="translation-next-warning" ${busy || !warnings.size ? "disabled" : ""}`)}</div></div>
       <ol class="translation-cues">${rows}</ol>
       ${current.original.length > pageSize ? `<div class="translation-pagination">
         ${action("translation-prev", t("Anterior", "Previous"), undefined, "quiet", offset === 0 ? "disabled" : "")}
@@ -327,8 +348,18 @@ export function createTranslationTool(hooks: Hooks) {
           await hooks.refresh();
         });
         return true;
-      case "translation-prev": offset = Math.max(0, offset - pageSize); hooks.render(); return true;
-      case "translation-next": offset += pageSize; hooks.render(); return true;
+      case "translation-prev": offset = Math.max(0, offset - pageSize); warningCursor = null; hooks.render(); return true;
+      case "translation-next": offset += pageSize; warningCursor = null; hooks.render(); return true;
+      case "translation-next-warning": {
+        if (busy || !warnings.size) return true;
+        const ordered = [...warnings].sort((a, b) => a - b);
+        const index = ordered.find(index => index > (warningCursor ?? offset - 1)) ?? ordered[0];
+        warningCursor = index;
+        offset = Math.floor(index / pageSize) * pageSize;
+        hooks.render();
+        document.getElementById(`translation-cue-${index}`)?.focus();
+        return true;
+      }
       case "translation-confirm-remove": confirmRemoval = true; hooks.render(); return true;
       case "translation-keep": confirmRemoval = false; hooks.render(); return true;
       case "translation-remove":
@@ -348,12 +379,17 @@ export function createTranslationTool(hooks: Hooks) {
     }
     if (!(element instanceof HTMLTextAreaElement) || element.dataset.translationIndex === undefined || !draft) return false;
     const index = Number(element.dataset.translationIndex);
+    warningCursor = index;
     if (element.value === draft.translated[index]) edits.delete(index);
     else edits.set(index, element.value);
-    if (lengthWarning(element.value, draft.original[index])) warnings.add(index);
+    const details = lengthWarning(element.value, draft.original[index]);
+    if (details) warnings.add(index);
     else warnings.delete(index);
     const hint = document.getElementById(`translation-warning-${index}`);
-    if (hint) hint.hidden = !warnings.has(index);
+    if (hint) {
+      hint.hidden = !details;
+      hint.textContent = details ? warning(details) : "";
+    }
     for (const id of ["translation-save", "translation-export-button", "translation-draft", "translation-source", "dub-open"]) {
       const control = document.getElementById(id);
       if (control instanceof HTMLButtonElement || control instanceof HTMLSelectElement) {
@@ -361,7 +397,10 @@ export function createTranslationTool(hooks: Hooks) {
       }
     }
     const warningCount = document.getElementById("translation-warning-count");
-    if (warningCount) warningCount.textContent = `${warnings.size} ${t("avisos de longitud", "length warnings")}`;
+    const label = warningCountLabel();
+    if (warningCount && warningCount.textContent !== label) warningCount.textContent = label;
+    const nextWarning = document.getElementById("translation-next-warning");
+    if (nextWarning instanceof HTMLButtonElement) nextWarning.disabled = busy || !warnings.size;
     return true;
   }
 

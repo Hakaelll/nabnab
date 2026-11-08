@@ -10,6 +10,10 @@ Cuando la exportación está lista, **Última exportación** muestra el archivo 
 
 El motor agrupa segmentos cercanos cuando puede recuperar cada traducción en orden. Si un bloque pierde la correspondencia, traduce sus segmentos por separado. Se conservan los tiempos y las etiquetas simples de negrita, cursiva y subrayado cuando las mantiene el motor. La herramienta avisa si un segmento supera 42 caracteres por línea o 20 por segundo. VTT conserva tiempos a milisegundos. Los estilos de posición, regiones y CSS quedan en el archivo original.
 
+**Siguiente aviso** abre la página del próximo segmento y enfoca su traducción. Cada aviso distingue una línea larga de una lectura demasiado rápida y se actualiza al editar. Las correcciones que hagas en páginas distintas se guardan juntas al pulsar **Guardar edición**.
+
+![Aviso de velocidad de lectura en un borrador de prueba](translation-reading-warning.png)
+
 ## Componentes
 
 Bergamot 0.4.9 requiere Windows x64 y usa el Deno de nabnab. Tanto el motor como los pesos se distribuyen bajo MPL-2.0. La primera instalación descarga aproximadamente entre 15,8 y 16,6 MiB, según la dirección. El runtime y el vocabulario compartidos ocupan 5,8 MiB. Una segunda dirección descarga únicamente sus propios pesos y tabla léxica. Los archivos descomprimidos y el paquete del motor se verifican con SHA-256. [Motor y procedencia](https://github.com/browsermt/bergamot-translator/tree/main/wasm/module) · [Modelos de Firefox](https://github.com/mozilla/firefox-translations-models)
