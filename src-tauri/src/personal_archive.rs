@@ -5,7 +5,7 @@ use parse::{Category, Classification, Format, Provider, Record};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     fs::{self, File, OpenOptions},
     io::{Read, Write},
     path::{Path, PathBuf},
@@ -796,6 +796,7 @@ struct RowView {
     link: Option<String>,
     author: Option<String>,
     thread_parent: Option<String>,
+    has_thread: bool,
     played_ms: Option<u64>,
     track_count: usize,
     media: Option<String>,
@@ -812,6 +813,7 @@ impl From<Record> for RowView {
             link: row.link,
             author: row.author,
             thread_parent: row.thread_parent,
+            has_thread: false,
             played_ms: row.played_ms,
             track_count: row.tracks.len(),
             media: row.media,
@@ -845,7 +847,13 @@ pub fn personal_archive_records(
     if query.chars().count() > 120 {
         return Err("Use a shorter archive search.".into());
     }
-    let (_, mut rows) = records_for(&state, &id, category, consent)?;
+    let (summary, mut rows) = records_for(&state, &id, category, consent)?;
+    let show_threads = summary.provider == Provider::X && category == Category::Posts;
+    let parents: HashSet<_> = if show_threads {
+        rows.iter().filter_map(Record::reply_parent).collect()
+    } else {
+        HashSet::new()
+    };
     let query = query.trim().to_lowercase();
     if !query.is_empty() {
         rows.retain(|row| {
@@ -886,7 +894,14 @@ pub fn personal_archive_records(
             .into_iter()
             .skip(offset)
             .take(PAGE)
-            .map(RowView::from)
+            .map(|row| {
+                let has_thread =
+                    show_threads && (parents.contains(&row.id) || row.reply_parent().is_some());
+                RowView {
+                    has_thread,
+                    ..RowView::from(row)
+                }
+            })
             .collect(),
         total,
         start,
@@ -897,6 +912,121 @@ pub fn personal_archive_records(
         ended,
         artists,
     })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ThreadPost {
+    row: RowView,
+    reply_to: Option<usize>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadPage {
+    posts: Vec<ThreadPost>,
+    offset: usize,
+    total: usize,
+    incomplete: bool,
+}
+
+fn archived_thread(
+    rows: Vec<Record>,
+    record: &str,
+    offset: Option<usize>,
+) -> Result<ThreadPage, String> {
+    let by_id: HashMap<_, _> = rows.iter().map(|row| (row.id.as_str(), row)).collect();
+    let parents: HashMap<_, _> = rows
+        .iter()
+        .filter_map(|row| Some((row.id.as_str(), row.reply_parent()?)))
+        .collect();
+    let mut replies = HashMap::<&str, Vec<&Record>>::new();
+    for (child, parent) in &parents {
+        replies.entry(parent).or_default().push(by_id[child]);
+    }
+    for siblings in replies.values_mut() {
+        siblings.sort_by(|a, b| {
+            a.time
+                .unwrap_or(u64::MAX)
+                .cmp(&b.time.unwrap_or(u64::MAX))
+                .then_with(|| a.id.cmp(&b.id))
+        });
+    }
+
+    let mut root = by_id
+        .get(record)
+        .ok_or("The selected post is no longer in this export.")?
+        .id
+        .as_str();
+    let mut seen = HashSet::from([root]);
+    let mut incomplete = false;
+    while let Some(parent) = parents.get(root) {
+        if !seen.insert(parent) || !by_id.contains_key(parent.as_str()) {
+            incomplete = true;
+            root = parent;
+            break;
+        }
+        root = parent;
+    }
+    let mut stack = vec![root];
+    let mut ordered = Vec::new();
+    let mut positions = HashMap::new();
+    seen.clear();
+    while let Some(id) = stack.pop() {
+        if !seen.insert(id) {
+            continue;
+        }
+        if let Some(row) = by_id.get(id) {
+            ordered.push(*row);
+            positions.insert(id, ordered.len());
+        }
+        if let Some(children) = replies.get(id) {
+            stack.extend(children.iter().rev().map(|row| row.id.as_str()));
+        }
+    }
+    let total = ordered.len();
+    let selected = positions
+        .get(record)
+        .copied()
+        .ok_or("The selected post could not be placed in the thread.")?;
+    let offset = offset.unwrap_or(selected - 1).min(total - 1) / PAGE * PAGE;
+    let posts = ordered
+        .into_iter()
+        .skip(offset)
+        .take(PAGE)
+        .map(|row| ThreadPost {
+            row: RowView::from(row.clone()),
+            reply_to: parents
+                .get(row.id.as_str())
+                .and_then(|parent| positions.get(parent.as_str()))
+                .copied(),
+        })
+        .collect();
+    Ok(ThreadPage {
+        posts,
+        offset,
+        total,
+        incomplete,
+    })
+}
+
+#[tauri::command]
+pub async fn personal_archive_thread(
+    state: State<'_, Arc<AppState>>,
+    id: String,
+    record: String,
+    offset: Option<usize>,
+) -> Result<ThreadPage, String> {
+    let state = state.inner().clone();
+    tokio::task::spawn_blocking(move || {
+        let (summary, rows) = records_for(&state, &id, Category::Posts, false)?;
+        if summary.provider != Provider::X {
+            return Err("Threads are available for imported X posts.".into());
+        }
+        archived_thread(rows, &record, offset)
+    })
+    .await
+    .map_err(|_| "Could not read the archived thread.")?
 }
 
 #[tauri::command]
@@ -1112,6 +1242,91 @@ pub fn personal_archive_match(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn imported_x_threads_keep_branches_and_bound_incomplete_chains() {
+        let fixture = Scratch(std::env::temp_dir().join(format!(
+            "nabnab-thread-{}-{}",
+            std::process::id(),
+            queue::now()
+        )));
+        fs::create_dir(&fixture.0).unwrap();
+        let tweet = |id: u64, parent: Option<u64>| {
+            serde_json::json!({"tweet": {
+                "id_str": id.to_string(), "full_text": format!("Post {id}"), "timestamp": 1717200000 + id,
+                "in_reply_to_status_id_str": parent.map(|value| value.to_string()),
+            }})
+        };
+        let mut posts = vec![tweet(1, None), tweet(2, Some(1)), tweet(3, Some(1))];
+        posts.extend((4..=55).map(|id| tweet(id, Some(if id == 4 { 2 } else { id - 1 }))));
+        posts.extend([
+            tweet(56, Some(99)),
+            tweet(57, Some(99)),
+            tweet(58, Some(59)),
+            tweet(59, Some(58)),
+        ]);
+        let data = fixture.0.join("tweets.js");
+        fs::write(
+            &data,
+            format!("window.YTD.tweets.part0 = {};", serde_json::json!(posts)),
+        )
+        .unwrap();
+        let export = fixture.0.join("x-export.zip");
+        let (_sender, cancel) = watch::channel(false);
+        crate::portable_zip::write_generated(
+            &export,
+            &[("data/tweets.js".into(), data)],
+            cancel.clone(),
+        )
+        .await
+        .unwrap();
+        let root = fixture.0.join("profile");
+        let (plan, preview) = inspect(&root, Provider::X, export, cancel.clone())
+            .await
+            .unwrap();
+        let archive = import(
+            &root,
+            &ArchiveState::default(),
+            Arc::new(plan),
+            Selection {
+                fingerprint: preview.fingerprint,
+                account: "Cuenta de prueba".into(),
+                destination: "Archivo".into(),
+                categories: vec![Category::Posts],
+                sensitive: vec![],
+                from: None,
+                to: None,
+            },
+            cancel,
+        )
+        .await
+        .unwrap()
+        .archive;
+        let mut records = read_records(&root, &archive).unwrap();
+        let rows = records.remove(&Category::Posts).unwrap();
+        let key = |id| format!("{:x}", Sha256::digest(format!("{id}")));
+
+        let first = archived_thread(rows.clone(), &key(1), None).unwrap();
+        assert!(!first.incomplete);
+        assert_eq!((first.offset, first.total, first.posts.len()), (0, 55, 50));
+        assert_eq!(first.posts[0].row.text, "Post 1");
+        assert_eq!(first.posts[1].reply_to, Some(1));
+        assert_eq!(first.posts[2].row.text, "Post 4");
+        assert_eq!(first.posts[2].reply_to, Some(2));
+        let last = archived_thread(rows.clone(), &key(55), None).unwrap();
+        assert_eq!((last.offset, last.posts.len()), (50, 5));
+        assert_eq!(last.posts[4].row.text, "Post 3");
+        assert_eq!(last.posts[4].reply_to, Some(1));
+        assert!(last.posts.iter().any(|post| post.row.id == key(55)));
+        let gap = archived_thread(rows.clone(), &key(56), None).unwrap();
+        assert!(gap.incomplete);
+        assert_eq!(gap.total, 2);
+        assert_eq!(gap.posts[0].reply_to, None);
+        let cycle = archived_thread(rows, &key(58), None).unwrap();
+        assert!(cycle.incomplete);
+        assert_eq!(cycle.total, 2);
+    }
 
     #[cfg(windows)]
     #[tokio::test]

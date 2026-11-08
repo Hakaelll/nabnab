@@ -234,6 +234,18 @@ pub struct Record {
     pub media: Option<String>,
 }
 
+impl Record {
+    pub(super) fn reply_parent(&self) -> Option<String> {
+        let id = self.thread_parent.as_deref()?;
+        (id.len() <= 20 && !id.is_empty() && id.bytes().all(|byte| byte.is_ascii_digit()))
+            .then(|| record_id(id))
+    }
+}
+
+fn record_id(identity: &str) -> String {
+    format!("{:x}", Sha256::digest(identity))
+}
+
 fn clean(value: &str, limit: usize) -> Option<String> {
     let value = value
         .trim()
@@ -391,7 +403,7 @@ fn finish(mut record: Record, external_id: Option<String>) -> Record {
             record.time, record.title, record.text, record.link, record.author, record.played_ms
         )
     });
-    record.id = format!("{:x}", Sha256::digest(identity));
+    record.id = record_id(&identity);
     record
 }
 

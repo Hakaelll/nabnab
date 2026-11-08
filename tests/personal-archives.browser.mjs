@@ -17,9 +17,15 @@ const setup = `
   const settings={folder:"C:/fixture",language:"es",networkLimit:3,processingLimit:1,reducedMotion:true,reducedTransparency:true,sidebarExpanded:true,trayEnabled:false};
   const state={settings,jobs:[],library:[],collections:[],drafts:[],sources:[],rules:[],smartCollections:[],presets:[],audioPlaylists:[]};
   const time=Date.UTC(2025,0,8), fingerprint="a".repeat(64);
-  const row=(id,title,text,author,extra={})=>({id,title,text,author,time,source:"fixture.json",link:null,media:null,threadParent:null,playedMs:null,trackCount:0,...extra});
+  const row=(id,title,text,author,extra={})=>({id,title,text,author,time,source:"fixture.json",link:null,media:null,threadParent:null,hasThread:false,playedMs:null,trackCount:0,...extra});
+  const threadPosts=[
+    {row:row("p","Una publicación","Una publicación de prueba","Cuenta de prueba",{link:"https://example.org/post",hasThread:true,threadParent:"99"}),replyTo:null},
+    {row:row("r","Primera respuesta","Este es el primer mensaje guardado como respuesta.","Cuenta de prueba",{hasThread:true}),replyTo:1},
+    {row:row("siguiente","Otra rama","Una respuesta distinta a la misma publicación.","Cuenta de prueba",{hasThread:true}),replyTo:1},
+    ...Array.from({length:50},(_,index)=>({row:row("post-"+index,"Continuación "+(index+4),"Otra publicación guardada.","Cuenta de prueba",{hasThread:true}),replyTo:index+3})),
+  ];
   const rows={
-    posts:[row("p","Una publicación","Una publicación de prueba","Cuenta de prueba",{link:"https://example.org/post"})],
+    posts:threadPosts.map(item=>item.row),
     messages:[row("m","Conversación de prueba","Texto privado sintético","Persona de prueba")],
     listening:[row("l","Canción de prueba","","Artista de prueba",{playedMs:62000})],
     playlists:[row("s","Lista de prueba","","",{trackCount:1})],
@@ -37,13 +43,13 @@ const setup = `
     if(cmd==="personal_archive_list")return structuredClone(summaries);
     if(cmd==="personal_archive_choose")return {fingerprint,source:args.provider+"-export.zip",bytes:10234,categories:args.provider==="spotify"?
       [preview("listening",1,"available"),preview("playlists",1,"available")]:
-      [preview("posts",1,"available"),preview("likes",null,"absent",false,[]),preview("bookmarks",null,"unsupported",false,["unsupported"]),preview("media",0,"empty"),preview("messages",null,"requiresSelection",true)]};
+      [preview("posts",threadPosts.length,"available"),preview("likes",null,"absent",false,[]),preview("bookmarks",null,"unsupported",false,["unsupported"]),preview("media",0,"empty"),preview("messages",null,"requiresSelection",true)]};
     if(cmd==="personal_archive_import"){
       const selected=args.selection;
       const all=[...selected.categories,...selected.sensitive];
       const provider=all.includes("listening")?"spotify":"x";
       const archive={id:String(++imports),provider,source:provider+"-export.zip",fingerprint,mediaBytes:0,account:selected.account,destination:selected.destination,
-        categories:Object.fromEntries(all.map(key=>[key,1])),formats:Object.fromEntries(all.map(key=>[key,["json"]])),pendingRemoval:false};
+        categories:Object.fromEntries(all.map(key=>[key,rows[key].length])),formats:Object.fromEntries(all.map(key=>[key,["json"]])),pendingRemoval:false};
       summaries.push(archive);
       return {archive,skippedFiles:0};
     }
@@ -51,8 +57,13 @@ const setup = `
       if(args.category==="messages"&&!args.consent)throw "Missing private consent";
       const data=rows[args.category].filter(row=>!args.query||row.title.includes(args.query));
       const isListening=args.category==="listening";
-      return {rows:data,total:data.length,start:data.length?time:null,end:data.length?time:null,
+      return {rows:data.slice(args.offset,args.offset+50),total:data.length,start:data.length?time:null,end:data.length?time:null,
         playedMs:isListening?62000:null,completionKnown:0,completions:null,ended:isListening?1:null,artists:isListening?[["Artista de prueba",1]]:[]};
+    }
+    if(cmd==="personal_archive_thread"){
+      if(!summaries.some(item=>item.id===args.id&&item.provider==="x")||args.record!=="p")throw "Unexpected thread selection";
+      const offset=args.offset??0;
+      return {posts:threadPosts.slice(offset,offset+50),offset,total:threadPosts.length,incomplete:true};
     }
     if(cmd==="personal_archive_match")return {kind:"list",name:"Lista de prueba",rows:[{entry:{kind:"missing",title:"Canción de prueba",locator:""},artist:"Artista de prueba",duration:null,version:null,candidates:[]}]};
     if(cmd==="personal_archive_export")return true;
@@ -110,6 +121,30 @@ try {
   assert.deepEqual(selection.categories, ["posts"]);
   assert.deepEqual(selection.sensitive, ["messages"]);
   assert.equal(selection.from, "2025-01-01");
+  await page.locator("#archive-query").fill("Una publicación");
+  await page.getByRole("button", { name: "Buscar", exact: true }).click();
+  const threadButton = page.locator('[data-action="archive-thread"][data-id="p"]');
+  await threadButton.focus();
+  await page.keyboard.press("Enter");
+  const threadTitle = page.getByRole("heading", { name: "Hilo en esta exportación" });
+  await threadTitle.waitFor();
+  assert.equal(await threadTitle.evaluate(element => element === document.activeElement), true);
+  await page.getByText("La cadena de respuestas está incompleta en esta exportación.").waitFor();
+  assert.equal(await page.locator(".archive-thread-posts [aria-current='true']").innerText().then(text => text.includes("Una publicación de prueba")), true);
+  assert.equal(await page.getByText("Responde a la publicación 1", { exact: true }).count(), 2);
+  for (const [width, height] of [[1180, 890], [900, 620]]) {
+    await page.setViewportSize({ width, height });
+    const fits = await page.locator(".archive-thread").evaluate(element => element.scrollWidth <= element.clientWidth + 1);
+    assert.equal(fits, true, `Thread overflows at ${width}px`);
+    await page.locator("#main").evaluate(element => { element.scrollTop = 0; });
+    await page.screenshot({ path: `${directory}/thread-${width}.png` });
+  }
+  await action("thread-next").click();
+  await page.getByText("51–53 / 53", { exact: true }).waitFor();
+  await action("thread-back").click();
+  assert.equal(await page.locator("#archive-query").inputValue(), "Una publicación");
+  assert.equal(await threadButton.evaluate(element => element === document.activeElement), true);
+  assert.equal((await calls()).some(call => call.cmd === "batch_create"), false);
   await categories("messages").click();
   await action("reveal").waitFor();
   assert.equal((await calls()).filter(call => call.cmd === "personal_archive_records" && call.args.category === "messages").length, 0);
@@ -199,7 +234,7 @@ try {
   await page.getByRole("heading", { name: "Audio", exact: true }).waitFor();
   await page.getByText("Canción de prueba", { exact: true }).waitFor();
   assert.deepEqual(errors, []);
-  console.log("Verified account grouping, keyboard navigation, private consent, removal, Spotify history and local playlist matching in Edge.");
+  console.log("Verified archived X threads, pagination and focus return, account grouping, private consent, removal, Spotify history and local playlist matching in Edge.");
 } finally {
   await browser.close();
 }

@@ -49,6 +49,7 @@ interface Row {
   link: string | null;
   author: string | null;
   threadParent: string | null;
+  hasThread: boolean;
   playedMs: number | null;
   trackCount: number;
   media: string | null;
@@ -63,6 +64,12 @@ interface RecordPage {
   completionKnown: number;
   ended: number | null;
   artists: [string, number][];
+}
+interface ThreadPage {
+  posts: { row: Row; replyTo: number | null }[];
+  offset: number;
+  total: number;
+  incomplete: boolean;
 }
 interface Hooks {
   command<T>(name: string, args?: Record<string, unknown>): Promise<T>;
@@ -87,6 +94,7 @@ export function createPersonalArchives(hooks: Hooks) {
   let archiveId = "";
   let category: Category | null = null;
   let result: RecordPage | null = null;
+  let thread: { anchor: string; page: ThreadPage } | null = null;
   let query = "", offset = 0, requestId = 0;
   let privateOpen = false, confirming = false, privateExport = false;
   let loaded = false, busy = false, visible = false, adding = false;
@@ -115,6 +123,7 @@ export function createPersonalArchives(hooks: Hooks) {
     query = "";
     offset = 0;
     result = null;
+    thread = null;
     privateOpen = false;
     privateExport = false;
     selected.clear();
@@ -230,6 +239,7 @@ export function createPersonalArchives(hooks: Hooks) {
       </label>
       ${row.media ? action("archive-copy", t("Guardar copia", "Save copy"), undefined, "secondary", id) : ""}
       ${row.trackCount ? action("archive-match", t("Buscar en Audio", "Match in Audio"), undefined, "secondary", id) : ""}
+      ${row.hasThread ? action("archive-thread", t("Ver hilo", "View thread"), "list", "quiet", id) : ""}
       <details class="archive-details"><summary>${t("Ver registro", "View record")}</summary>
         ${row.text ? `<p class="archive-text">${h(row.text)}</p>` : ""}
         ${row.link ? `<p>${h(row.link)}</p>` : ""}
@@ -237,6 +247,43 @@ export function createPersonalArchives(hooks: Hooks) {
         <small>${t("Archivo de origen", "Source file")} · ${h(row.source)}</small>
       </details>
     </li>`;
+  }
+
+  function threadView(anchor: string, page: ThreadPage) {
+    return `<section class="archive-thread" aria-labelledby="archive-thread-title">
+      <header class="archive-thread-heading">
+        ${action("archive-thread-back", t("Volver a publicaciones", "Back to posts"), "back", "quiet", disabled())}
+        <h3 id="archive-thread-title" tabindex="-1">${t("Hilo en esta exportación", "Thread in this export")}</h3>
+        <p>${number(page.total)} ${page.total === 1 ? t("publicación", "post") : t("publicaciones", "posts")}</p>
+        ${page.incomplete ? `<p class="archive-thread-gap">${icon("info")}${t("La cadena de respuestas está incompleta en esta exportación.", "The reply chain is incomplete in this export.")}</p>` : ""}
+      </header>
+      <ol class="archive-thread-posts" start="${page.offset + 1}">${page.posts.map(({ row, replyTo }, index) => {
+        const selected = row.id === anchor;
+        const metadata = [row.author, row.time === null ? null : day(row.time)].filter(Boolean).join(" · ");
+        return `<li ${selected ? 'aria-current="true"' : ""}>
+          <div class="archive-thread-meta">
+            <span>${t("Publicación", "Post")} ${number(page.offset + index + 1)}</span>
+            ${replyTo === null ? "" : `<span>${t(`Responde a la publicación ${number(replyTo)}`, `Replies to post ${number(replyTo)}`)}</span>`}
+            ${selected ? `<strong>${t("Seleccionada", "Selected")}</strong>` : ""}
+          </div>
+          ${metadata ? `<p class="archive-thread-byline">${h(metadata)}</p>` : ""}
+          <p class="archive-text">${h(row.text || row.title)}</p>
+        </li>`;
+      }).join("")}</ol>
+      ${page.total > PAGE ? `<div class="archive-actions">
+        ${action("archive-thread-previous", t("Anterior", "Previous"), undefined, "secondary", page.offset > 0 ? disabled() : "disabled")}
+        <span>${number(page.offset + 1)}–${number(Math.min(page.offset + PAGE, page.total))} / ${number(page.total)}</span>
+        ${action("archive-thread-next", t("Siguiente", "Next"), undefined, "secondary", page.offset + PAGE < page.total ? disabled() : "disabled")}
+      </div>` : ""}
+    </section>`;
+  }
+
+  async function openThread(anchor: string, offset: number | null = null) {
+    await run(async () => {
+      const page = await hooks.command<ThreadPage>("personal_archive_thread", { id: archiveId, record: anchor, offset });
+      if (visible) thread = { anchor, page };
+    });
+    if (visible && thread) document.getElementById("archive-thread-title")?.focus();
   }
 
   function recordList() {
@@ -316,7 +363,7 @@ export function createPersonalArchives(hooks: Hooks) {
       ${archive.pendingRemoval ? "" : `<nav class="archive-tabs" aria-label="${t("Categorías del archivo", "Archive categories")}">
         ${categories.map(key => `<button type="button" data-action="archive-category" data-id="${key}" aria-pressed="${category === key}" aria-disabled="${busy}">
           ${icon(categoryIcons[key])}<span>${name(key)}</span><small>${number(archive.categories[key] ?? 0)}</small></button>`).join("")}
-      </nav>${recordList()}`}
+      </nav>${thread ? threadView(thread.anchor, thread.page) : recordList()}`}
     </section>`;
   }
 
@@ -398,6 +445,25 @@ export function createPersonalArchives(hooks: Hooks) {
         break;
       case "archive-previous": await run(async () => { offset = Math.max(0, offset - PAGE); await read(); }); break;
       case "archive-next": await run(async () => { offset += PAGE; await read(); }); break;
+      case "archive-thread": {
+        const anchor = result?.rows.find(row => row.id === button.dataset.id && row.hasThread)?.id;
+        if (anchor && category === "posts" && current()?.provider === "x") await openThread(anchor);
+        break;
+      }
+      case "archive-thread-back": {
+        const anchor = thread?.anchor;
+        thread = null;
+        error = "";
+        hooks.render();
+        if (anchor) document.querySelector<HTMLElement>(`[data-action="archive-thread"][data-id="${CSS.escape(anchor)}"]`)?.focus();
+        break;
+      }
+      case "archive-thread-previous":
+        if (thread) await openThread(thread.anchor, Math.max(0, thread.page.offset - PAGE));
+        break;
+      case "archive-thread-next":
+        if (thread) await openThread(thread.anchor, thread.page.offset + PAGE);
+        break;
       case "archive-remove": confirming = true; hooks.render(); break;
       case "archive-cancel-confirm": confirming = false; privateExport = false; hooks.render(); break;
       case "archive-remove-confirm": await run(async () => {

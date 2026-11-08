@@ -7,11 +7,15 @@ Open **Library → Personal archives → Add export**, choose the provider, and 
 | Provider | Recognized content |
 | --- | --- |
 | Instagram and Facebook | Posts, saved items, media from recognized folders, and separately selected contacts and messages. JSON has the most detail. HTML is indexed as plain text, one record per document. |
-| X | Posts and reply references, likes, bookmarks, and media when present. The ZIP reader accepts known X data assignments as JSON. Direct messages require separate selection. |
+| X | Posts and local threads, likes, bookmarks, and media when present. The ZIP reader accepts known X data assignments as JSON. Direct messages require separate selection. |
 | Spotify | Basic or extended listening history and exported playlists. Listening separates events, elapsed time, reported track endings, and plays with enough information to establish completion. **Match in Audio** opens the local playlist review. |
 | LinkedIn | Contacts, posts, and messages from recognized CSV and JSON layouts. Contacts and messages require separate selection. |
 
 The account index groups exports by provider and account and lists each package with its archive group. Open a package and select a category in the workspace. Search applies to that category. Use the row checkboxes to export a selection to CSV or open its public links in the batch preparer. Selecting **Prepare links** starts metadata preparation. Downloading from that batch requires a separate action.
+
+For an X post with a recorded reply relationship, open **View thread**. Nabnab follows the reply identifiers within that export and shows the related posts in pages of up to 50, with the chosen post marked. A missing parent is indicated as an incomplete chain. **Back to posts** restores the search, selection, and focus. This also works with previously imported exports that contain reply identifiers.
+
+![Archived X thread opened in Windows with synthetic data](personal-archive-thread.png)
 
 ![Spotify listening history with separate event and completion counts](personal-archive-listening.png)
 
@@ -28,4 +32,4 @@ Provider documentation on requesting an export
 - [Spotify data formats](https://support.spotify.com/article/understanding-your-data/)
 - [LinkedIn account data](https://www.linkedin.com/help/linkedin/answer/a1339364)
 
-Verification uses synthetic exports. The Windows test exercises selective ZIP extraction, repeat and partial imports, DPAPI storage, and removal. The Edge test uses fixture responses to exercise account grouping, keyboard navigation, private reveal, CSV confirmation, and the handoff to Audio.
+Verification uses synthetic exports. The Windows tests exercise selective ZIP extraction, repeat and partial imports, DPAPI storage, removal, and reply chains with branches, missing parents, or cycles. A native WebView2 check opened a thread from a previously indexed fixture and confirmed that its rows came from the selected X package. The Edge test exercises pagination and return focus at 900 and 1180 pixels, account grouping, private reveal, CSV confirmation, and the handoff to Audio.
