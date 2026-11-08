@@ -27,13 +27,29 @@ const setup = `
     if (cmd === "get_snapshot") return structuredClone(state);
     if (cmd === "list_courses") return structuredClone(fixture.courses);
     if (cmd === "open_course_site") return;
-    if (cmd === "import_course_materials") {
+    if (cmd === "preview_course_materials") {
       if (fixture.cancel) return null;
+      const id = fixture.calls.length;
+      fixture.plan = {id, provider:args.provider, title:args.title, url:args.url, folder:args.folder};
+      if (fixture.many) return {id, provider:args.provider, title:args.title, groups:[{title:"02 Extras",
+        files:Array.from({length:24}, (_, i) => ({id:i,name:"Apuntes de la unidad "+(i+1)+".txt",kind:"document",size:1024}))}]};
+      return {id, provider:args.provider, title:args.title, groups:args.folder
+        ? [{title:"02 Extras", files:[{id:1,name:"01 Repaso.pdf",kind:"document",size:1024},{id:2,name:"03 Guía opcional.txt",kind:"document",size:2048}]}]
+        : [{title:"01 Fundamentos",files:[{id:0,name:"02 Preparar.pdf",kind:"document",size:1024}]}]};
+    }
+    if (cmd === "discard_course_materials") {
+      if (fixture.plan?.id === args.reviewId) fixture.plan = null;
+      return;
+    }
+    if (cmd === "import_course_materials") {
+      const plan = fixture.plan;
+      if (!plan || plan.id !== args.reviewId) throw Error("Fixture review expired.");
+      fixture.plan = null;
       state.library = [{id:"material-pdf",name:"02 Preparar.pdf",path:"C:/Fixture/01 Fundamentos/02 Preparar.pdf",kind:"document",size:1024,missing:false,collections:[],tags:[]}];
       const asset = {id:"asset-pdf",title:"02 Preparar.pdf",kind:"document",status:"local",libraryId:"material-pdf",urlRef:null,jobIds:[]};
       const lesson = {id:"lesson-1",title:"02 Preparar",learned:true,assets:[asset],notes:[{id:"note-1",text:"Revisar la plantilla",time:null,bookmarkId:null}]};
-      const course = {id:"course-fixture",provider:args.provider,title:args.title,url:args.url,sections:[{id:"section-1",title:"01 Fundamentos",lessons:[lesson]}],createdAt:1};
-      if (args.folder) {
+      const course = {id:"course-fixture",provider:plan.provider,title:plan.title,url:plan.url,sections:[{id:"section-1",title:"01 Fundamentos",lessons:[lesson]}],createdAt:1};
+      if (plan.folder && args.ids.includes(1)) {
         state.library.push({...state.library[0],id:"material-extras",name:"01 Repaso.pdf",path:"C:/Fixture/02 Extras/01 Repaso.pdf"});
         course.sections.push({id:"section-2",title:"02 Extras",lessons:[
           {id:"lesson-2",title:"01 Repaso",learned:false,assets:[{...asset,id:"asset-extras",title:"01 Repaso.pdf",libraryId:"material-extras"}],notes:[]},
@@ -82,7 +98,7 @@ try {
   assert.equal(await page.locator(".course-layout").count(), 0, "Cancel leaves the import form open");
   const chooseFolder = page.getByRole("button", { name: "Elegir carpeta del curso" });
   await chooseFolder.click();
-  await page.waitForFunction(() => window.courseFixture.calls.some(call => call.cmd === "import_course_materials" && call.args.folder));
+  await page.waitForFunction(() => window.courseFixture.calls.some(call => call.cmd === "preview_course_materials" && call.args.folder));
   await chooseFolder.waitFor();
   assert.equal(await chooseFolder.evaluate(button => button === document.activeElement), true);
   await page.screenshot({ path: `${directory}/form-1180x780.png` });
@@ -92,6 +108,20 @@ try {
   await page.evaluate(() => { window.courseFixture.cancel = false; });
   await choose.focus();
   await page.keyboard.press("Enter");
+  const heading = page.getByRole("heading", { name: "Revisar materiales" });
+  await heading.waitFor();
+  assert.equal(await heading.evaluate(node => node === document.activeElement), true);
+  const add = page.getByRole("button", { name: "Añadir al curso" });
+  assert.equal(await add.isDisabled(), true);
+  await page.getByRole("button", { name: "Volver", exact: true }).click();
+  assert.equal(await choose.evaluate(node => node === document.activeElement), true);
+  assert.equal(await page.evaluate(() => window.courseFixture.calls.some(call => call.cmd === "import_course_materials")), false);
+  await choose.click();
+  const chosen = page.getByRole("checkbox", { name: /^02 Preparar.pdf/ });
+  await chosen.press("Space");
+  assert.equal(await chosen.evaluate(node => node === document.activeElement), true);
+  assert.match(await page.locator(".course-review-footer output").innerText(), /1 archivo/);
+  await add.click();
   await page.getByRole("heading", { name: "Dibujo y composición" }).waitFor();
   assert.equal(await page.getByText("Revisar la plantilla", { exact: true }).count(), 1);
   assert.equal(await page.getByText("Adjunto · Guardado", { exact: true }).count(), 1);
@@ -102,19 +132,51 @@ try {
   await page.getByText("Materiales añadidos al curso.", { exact: true }).waitFor();
   await page.locator("[data-action='dismiss-message']").click();
   await page.getByRole("button", { name: "Añadir carpeta", exact: true }).click();
+  await heading.waitFor();
+  assert.equal(await add.isDisabled(), true);
+  await page.getByRole("button", { name: "Seleccionar unidad" }).click();
+  const optional = page.getByRole("checkbox", { name: /^03 Guía opcional/ });
+  assert.equal(await optional.isChecked(), true);
+  await optional.uncheck();
+  for (const [width, height] of [[900, 620], [1180, 780]]) {
+    await page.setViewportSize({ width, height });
+    assert.ok(await page.locator(".course-review").evaluate(node => node.scrollWidth <= node.clientWidth + 1));
+    await page.screenshot({ path: `${directory}/review-${width}x${height}.png` });
+  }
+  await page.setViewportSize({ width: 900, height: 620 });
+  await add.click();
   await page.getByText("02 Extras", { exact: true }).waitFor();
-  const imports = await page.evaluate(() => window.courseFixture.calls.filter(call => call.cmd === "import_course_materials").map(call => call.args.folder));
-  assert.deepEqual(imports, [false, true, false, true]);
+  const imports = await page.evaluate(() => window.courseFixture.calls.filter(call => call.cmd === "import_course_materials").map(call => call.args.ids));
+  assert.deepEqual(imports, [[0], [1]]);
   assert.equal(await page.getByText("Revisar la plantilla", { exact: true }).count(), 1);
   await page.getByText("Materiales añadidos al curso.", { exact: true }).waitFor();
   await page.locator("[data-action='dismiss-message']").click();
   await page.screenshot({ path: `${directory}/study-900x620.png` });
+  await page.evaluate(() => { window.courseFixture.many = true; });
+  await page.getByRole("button", { name: "Añadir carpeta", exact: true }).click();
+  await heading.waitFor();
+  const reviewFooter = page.locator(".course-review-footer");
+  assert.ok(await reviewFooter.evaluate(node => {
+    const main = node.closest("main");
+    return main.scrollHeight > main.clientHeight && node.getBoundingClientRect().bottom <= main.getBoundingClientRect().bottom + 1;
+  }));
+  const ratio = await page.locator(".course-review-file span small").first().evaluate(label => {
+    const linear = channel => channel <= .04045 ? channel / 12.92 : ((channel + .055) / 1.055) ** 2.4;
+    const luminance = color => {
+      const values = color.match(/[\d.]+/g).slice(0, 3).map(value => linear(Number(value) / 255));
+      return .2126 * values[0] + .7152 * values[1] + .0722 * values[2];
+    };
+    return (luminance(getComputedStyle(label).color) + .05) /
+      (luminance(getComputedStyle(label.closest("details")).backgroundColor) + .05);
+  });
+  assert.ok(ratio >= 4.5, `Course review file metadata contrast was ${ratio.toFixed(2)}:1`);
+  await page.getByRole("button", { name: "Volver", exact: true }).click();
   await page.locator("[data-page='home']").click();
   await page.locator("#url").fill("https://www.coursera.org/learn/apis/home");
   await page.locator("#course-browser-form").waitFor();
   assert.equal(await page.getByLabel("Plataforma", { exact: true }).inputValue(), "coursera");
   assert.deepEqual(errors, []);
-  console.log("Four browser-assisted course choices, file and folder cancellation, keyboard import, compact study, and incremental folder import passed.");
+  console.log("Four browser-assisted course choices, cancelled reviews, keyboard selection, per-unit review at two widths and selected-only imports passed.");
 } finally {
   await browser.close();
 }

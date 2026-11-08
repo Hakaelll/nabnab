@@ -5,8 +5,13 @@ use super::{
 use crate::{library, queue, AppState};
 use std::{
     collections::{BTreeMap, HashSet},
+    fs,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{
+        atomic::{AtomicU32, Ordering},
+        Arc, Mutex,
+    },
+    time::{Duration, Instant, SystemTime},
 };
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
@@ -136,14 +141,183 @@ fn index_material(path: &Path, link: &CourseLink) -> Result<library::LibraryItem
     }
 }
 
-fn index_materials(paths: &[PathBuf], link: &CourseLink) -> Result<Vec<library::LibraryItem>, String> {
-    let paths = library::files_for_import(paths, |path| {
+fn material_paths(paths: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
+    let mut paths = library::files_for_import(paths, |path| {
         library::extension_kind(path).is_some() || is_course_attachment(path)
     })?;
+    paths.sort_unstable();
+    paths.dedup();
     if paths.is_empty() || paths.len() > 200 {
         return Err("Choose between 1 and 200 supported course files.".into());
     }
-    paths.iter().map(|path| index_material(path, link)).collect()
+    Ok(paths)
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Review {
+    id: u32,
+    title: String,
+    provider: &'static str,
+    groups: Vec<ReviewGroup>,
+}
+
+#[derive(serde::Serialize)]
+struct ReviewGroup {
+    title: String,
+    files: Vec<ReviewFile>,
+}
+
+#[derive(serde::Serialize)]
+struct ReviewFile {
+    id: usize,
+    name: String,
+    kind: &'static str,
+    size: u64,
+}
+
+struct ReviewedFile {
+    path: PathBuf,
+    size: u64,
+    modified: SystemTime,
+}
+
+struct Plan {
+    id: u32,
+    link: CourseLink,
+    title: String,
+    files: Vec<ReviewedFile>,
+    created: Instant,
+}
+
+#[derive(Default)]
+pub(crate) struct Reviews {
+    next: AtomicU32,
+    pending: Mutex<Option<Plan>>,
+}
+
+fn prepare_review(
+    id: u32,
+    link: CourseLink,
+    title: String,
+    paths: &[PathBuf],
+    folder: bool,
+) -> Result<(Review, Plan), String> {
+    let root = if folder {
+        paths
+            .first()
+            .map(|path| library::authorized_path(path))
+            .transpose()?
+    } else {
+        None
+    };
+    let mut groups = BTreeMap::<PathBuf, ReviewGroup>::new();
+    let mut files = Vec::new();
+    for path in material_paths(paths)? {
+        let metadata = fs::metadata(&path).map_err(|error| error.to_string())?;
+        if !metadata.is_file() || metadata.len() == 0 {
+            continue;
+        }
+        let parent = path
+            .parent()
+            .ok_or("The selected file has no parent folder.")?;
+        let group = groups.entry(parent.to_owned()).or_insert_with(|| {
+            let relative = root
+                .as_ref()
+                .and_then(|root| parent.strip_prefix(root).ok());
+            let title = relative
+                .filter(|relative| !relative.as_os_str().is_empty())
+                .map(|relative| {
+                    relative
+                        .iter()
+                        .map(|part| part.to_string_lossy())
+                        .collect::<Vec<_>>()
+                        .join(" / ")
+                })
+                .unwrap_or_else(|| {
+                    parent
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .into_owned()
+                });
+            ReviewGroup {
+                title,
+                files: Vec::new(),
+            }
+        });
+        let size = metadata.len();
+        group.files.push(ReviewFile {
+            id: files.len(),
+            name: path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned(),
+            kind: library::extension_kind(&path).unwrap_or("file"),
+            size,
+        });
+        files.push(ReviewedFile {
+            path,
+            size,
+            modified: metadata.modified().map_err(|error| error.to_string())?,
+        });
+    }
+    if files.is_empty() {
+        return Err("No supported course files with content were found.".into());
+    }
+    let mut groups: Vec<_> = groups.into_values().collect();
+    groups.sort_by_cached_key(|group| natural_key(&group.title));
+    for group in &mut groups {
+        group
+            .files
+            .sort_by_cached_key(|file| natural_key(&file.name));
+    }
+    let review = Review {
+        id,
+        title: title.clone(),
+        provider: link.provider,
+        groups,
+    };
+    Ok((
+        review,
+        Plan {
+            id,
+            link,
+            title,
+            files,
+            created: Instant::now(),
+        },
+    ))
+}
+
+fn selected_files(plan: &Plan, ids: &[usize]) -> Result<Vec<library::LibraryItem>, String> {
+    if ids.is_empty() || ids.len() > plan.files.len() {
+        return Err("Select at least one reviewed course file.".into());
+    }
+    let mut seen = HashSet::new();
+    ids.iter()
+        .map(|id| {
+            let reviewed = plan
+                .files
+                .get(*id)
+                .filter(|_| seen.insert(*id))
+                .ok_or("Choose files from the current course review.")?;
+            let item = index_material(&reviewed.path, &plan.link)?;
+            if item.path != reviewed.path
+                || item.size != reviewed.size
+                || fs::metadata(&item.path)
+                    .and_then(|metadata| metadata.modified())
+                    .ok()
+                    != Some(reviewed.modified)
+            {
+                return Err(
+                    "A course file changed after review. Choose the folder or files again.".into(),
+                );
+            }
+            Ok(item)
+        })
+        .collect()
 }
 
 fn path_identity(path: &Path) -> String {
@@ -273,14 +447,14 @@ fn import_selected(
 }
 
 #[tauri::command]
-pub async fn import_course_materials(
+pub async fn preview_course_materials(
     app: AppHandle,
-    state: State<'_, Arc<AppState>>,
+    reviews: State<'_, Reviews>,
     provider: String,
     url: String,
     title: String,
-    folder: Option<bool>,
-) -> Result<Option<Course>, String> {
+    folder: bool,
+) -> Result<Option<Review>, String> {
     let link = CourseLink::selected(&provider, &url)?;
     let title = label(&title, 240);
     if title.is_empty() {
@@ -288,7 +462,7 @@ pub async fn import_course_materials(
     }
     let picked = tauri::async_runtime::spawn_blocking(move || {
         let dialog = app.dialog().file();
-        if folder.unwrap_or(false) {
+        if folder {
             dialog
                 .set_title("Choose an authorized course folder")
                 .blocking_pick_folder()
@@ -314,15 +488,49 @@ pub async fn import_course_materials(
                 .map_err(|_| "Choose files saved on this computer.")
         })
         .collect::<Result<Vec<PathBuf>, _>>()?;
-    let (link, selected) = tauri::async_runtime::spawn_blocking(move || {
-        let selected = index_materials(&paths, &link)?;
-        Ok::<_, String>((link, selected))
+    let id = reviews.next.fetch_add(1, Ordering::Relaxed);
+    let (review, plan) = tauri::async_runtime::spawn_blocking(move || {
+        prepare_review(id, link, title, &paths, folder)
+    })
+    .await
+    .map_err(|_| "Course file review failed.")??;
+    *reviews.pending.lock().unwrap() = Some(plan);
+    Ok(Some(review))
+}
+
+#[tauri::command]
+pub fn discard_course_materials(reviews: State<'_, Reviews>, review_id: u32) {
+    let mut pending = reviews.pending.lock().unwrap();
+    if pending.as_ref().is_some_and(|plan| plan.id == review_id) {
+        pending.take();
+    }
+}
+
+#[tauri::command]
+pub async fn import_course_materials(
+    state: State<'_, Arc<AppState>>,
+    reviews: State<'_, Reviews>,
+    review_id: u32,
+    ids: Vec<usize>,
+) -> Result<Course, String> {
+    let plan = {
+        let mut pending = reviews.pending.lock().unwrap();
+        if !pending.as_ref().is_some_and(|plan| {
+            plan.id == review_id && plan.created.elapsed() < Duration::from_secs(600)
+        }) {
+            return Err("The review expired. Choose the course files again.".into());
+        }
+        pending.take().ok_or("The course review is unavailable.")?
+    };
+    let (plan, selected) = tauri::async_runtime::spawn_blocking(move || {
+        let selected = selected_files(&plan, &ids)?;
+        Ok::<_, String>((plan, selected))
     })
     .await
     .map_err(|_| "Course file indexing failed.")??;
     let mut guard = state.repository.lock().unwrap();
     let repo = guard.as_mut().ok_or("Open nabnab first.")?;
-    import_selected(repo, link, title, selected).map(Some)
+    import_selected(repo, plan.link, plan.title, selected)
 }
 
 #[cfg(test)]
@@ -392,8 +600,16 @@ mod tests {
         let original =
             CourseLink::selected("domestika", "https://domestika.org/en/courses/24-drawing")
                 .unwrap();
-        let selected = index_materials(&[later.clone(), first.clone()], &original).unwrap();
-        let saved = import_selected(&mut repo, original, "Drawing".into(), selected).unwrap();
+        let (_, plan) = prepare_review(
+            1,
+            original,
+            "Drawing".into(),
+            &[later.clone(), first.clone()],
+            false,
+        )
+        .unwrap();
+        let selected = selected_files(&plan, &[0, 1]).unwrap();
+        let saved = import_selected(&mut repo, plan.link, plan.title, selected).unwrap();
         let lesson = &mut repo.data.courses[0].sections[0].lessons[0];
         assert_eq!(lesson.title, "2 Practice");
         let lesson_id = lesson.id.clone();
@@ -413,9 +629,39 @@ mod tests {
         std::fs::create_dir_all(&nested).unwrap();
         std::fs::write(nested.join("1 Notes.txt"), b"Course notes").unwrap();
         std::fs::write(nested.join("ignore.exe"), b"Unsupported").unwrap();
-        let selected = index_materials(&[folder], &updated).unwrap();
-        assert_eq!(selected.len(), 4);
-        let merged = import_selected(&mut repo, updated, "Dibujo".into(), selected).unwrap();
+        std::fs::write(nested.join("3 Optional.txt"), b"Optional reading").unwrap();
+        let (review, plan) = prepare_review(2, updated, "Dibujo".into(), &[folder], true).unwrap();
+        assert_eq!(plan.files.len(), 5);
+        assert_eq!(review.groups[1].title, "11 Extras");
+        assert!(repo
+            .data
+            .library
+            .iter()
+            .all(|item| item.name != "1 Notes.txt"));
+        let ids: Vec<_> = review
+            .groups
+            .iter()
+            .flat_map(|group| &group.files)
+            .filter(|file| file.name != "3 Optional.txt")
+            .map(|file| file.id)
+            .collect();
+        assert!(selected_files(&plan, &[99]).is_err());
+        assert!(selected_files(&plan, &[ids[0], ids[0]]).is_err());
+        let optional = review.groups[1]
+            .files
+            .iter()
+            .find(|file| file.name == "3 Optional.txt")
+            .unwrap();
+        std::fs::write(
+            nested.join("3 Optional.txt"),
+            b"Different material after review",
+        )
+        .unwrap();
+        assert!(selected_files(&plan, &[optional.id])
+            .unwrap_err()
+            .contains("changed after review"));
+        let selected = selected_files(&plan, &ids).unwrap();
+        let merged = import_selected(&mut repo, plan.link, plan.title, selected).unwrap();
         assert_eq!(merged.id, saved.id);
         assert_eq!(merged.title, "Drawing");
         assert_eq!(merged.sections[0].title, "01 Exercises");
@@ -428,6 +674,11 @@ mod tests {
         assert_eq!(merged.sections[1].title, "11 Extras");
         assert_eq!(merged.sections[1].lessons[0].title, "1 Notes");
         assert_eq!(repo.data.library.len(), 4);
+        assert!(repo
+            .data
+            .library
+            .iter()
+            .all(|item| item.name != "3 Optional.txt"));
         assert_eq!(repo.data.courses.len(), 1);
         drop(repo);
         let root = std::fs::canonicalize(&root).unwrap();
