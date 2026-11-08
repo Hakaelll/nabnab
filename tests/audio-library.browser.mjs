@@ -35,12 +35,18 @@ const setup = `
   const item=(id,name,audio,extra={})=>({id,path:"C:/fixture/"+name,name,kind:"audio",size:160044,duration:10,width:null,height:null,videoCodec:null,audioCodec:"pcm_s16le",container:"wav",addedAt:1,source:null,parentId:null,collections:[],tags:[],missing:false,
     details:{contentId:null,creator:null,platform:null,sourceIds:[],chapters:[],tracks:[],playbackPosition:0,favorite:false,bookmarks:[],clip:null,audio,...extra}});
   const chapters=(number)=>({audiobook:{bookId:"librivox:1",bookTitle:"Libro de prueba",chapter:number,reader:"Lector de prueba",language:"Spanish"}});
+  const collection=(title,album)=>({...tags(title,1,1,"Zeta"),albumArtist:"Zeta",album,embeddedCover:album!=="Nocturno"});
   const state={settings,jobs:[],library:[
     item("last","Third.wav",tags("Tercera pista",2,1)),
     item("second","Second.mp3",tags("Segunda pista",1,10,"Rafael")),
     item("first","First.mp3",tags("Primera pista",1,2)),
+    item("archive","Directo.wav",collection("En directo","Archivo")),
+    item("notebook","Improvisación.wav",collection("Improvisación","Cuaderno")),
+    item("night","Toma nocturna.wav",collection("Toma nocturna","Nocturno")),
+    item("chapter3","Capítulo 3.wav",null,chapters(3)),
     item("chapter2","Capítulo 2.wav",null,chapters(2)),
     item("chapter1","Capítulo 1.wav",null,chapters(1)),
+    item("other-book","Prólogo.wav",null,{audiobook:{...chapters(1).audiobook,bookId:"librivox:2",bookTitle:"Otro libro"},playbackPosition:9,lastPlayedAt:2}),
     item("episode","Episodio.wav",null,{platform:"Podcast RSS"}),
   ],collections:[],drafts:[],sources:[],rules:[],smartCollections:[],presets:[],audioPlaylists:[]};
   const calls=[];
@@ -51,6 +57,10 @@ const setup = `
     if(cmd==="startup")return {...copy(state),folder:settings.folder,enginesReady:true,engineError:null};
     if(cmd==="get_snapshot")return copy(state);
     if(cmd==="local_timezone")return "Romance Standard Time";
+    if(cmd==="thumbnail"){
+      const design=args.id==="archive"?'<circle cx="50" cy="50" r="34" fill="none" stroke="#e5e5e7" stroke-width="5"/><circle cx="50" cy="50" r="8" fill="#e5e5e7"/>':'<path d="M20 20h60v60H20zM20 46h60M48 20v60" stroke="#b2b5bd" stroke-width="4" fill="none"/>';
+      return "data:image/svg+xml,"+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><path fill="#25282e" d="M0 0h100v100H0z"/>'+design+'</svg>');
+    }
     if(cmd==="library_playback"){const details=state.library.find(item=>item.id===args.id).details;details.playbackPosition=args.position;details.lastPlayedAt=Date.now();return;}
     if(cmd==="audio_tags_edit"){for(const item of state.library.filter(item=>args.ids.includes(item.id)))Object.assign(item.details.audio,args.patch);return;}
     if(cmd==="audio_playlist_save"){const list={id:args.id??"fixture-playlist-"+state.audioPlaylists.length,name:args.name,entries:args.entries};state.audioPlaylists=state.audioPlaylists.filter(entry=>entry.id!==list.id).concat(list);return copy(state.audioPlaylists);}
@@ -82,7 +92,18 @@ try {
   await page.locator("[data-page='library']").click();
   await section("audio").click();
   await page.getByRole("heading", { name:"Audio", exact:true }).waitFor();
-  assert.deepEqual(await page.locator(".audio-track strong").allTextContents(), ["Primera pista", "Segunda pista", "Tercera pista"]);
+  const trackTitles = () => page.locator(".audio-track strong").allTextContents();
+  const shelfTitles = () => page.locator(".audio-shelf-item strong").allTextContents();
+  assert.deepEqual(await trackTitles(), ["Primera pista", "Segunda pista", "Tercera pista", "En directo", "Improvisación", "Toma nocturna"]);
+  assert.deepEqual(await shelfTitles(), ["Sesiones", "Archivo", "Cuaderno"]);
+  await page.getByRole("button", {name:"Grupos siguientes"}).press("Enter");
+  assert.deepEqual(await shelfTitles(), ["Nocturno"]);
+  await page.getByRole("button", {name:"Nocturno Zeta 1 pista",exact:true}).press("Enter");
+  assert.deepEqual(await trackTitles(), ["Toma nocturna"]);
+  assert.equal(await page.evaluate(() => document.activeElement?.dataset.action), "audio-shelf-clear");
+  await page.getByRole("button", {name:"Todos los álbumes"}).press("Enter");
+  assert.equal(await page.evaluate(() => document.activeElement?.querySelector("strong")?.textContent), "Nocturno");
+  await page.getByRole("button", {name:"Grupos anteriores"}).press("Enter");
   await page.locator("#audio-artist").selectOption(JSON.stringify("Rafael"));
   assert.deepEqual(await page.locator(".audio-track strong").allTextContents(), ["Segunda pista"]);
   await page.locator("#audio-artist").selectOption("");
@@ -95,10 +116,13 @@ try {
   await page.locator("[data-action='audio-open-lyrics']").click();
   for (const [width,height] of [[1180,780],[900,620]]) {
     await page.setViewportSize({width,height});
+    await page.locator("#main").evaluate(main => { main.scrollTop = 0; });
+    await page.locator(".audio-shelf-cover img").first().waitFor();
     const player = await page.locator("#audio-player").boundingBox();
     assert(player && player.y + player.height <= height + 1 && player.width + player.x <= width + 1);
     const overflow = await page.locator("#audio-transport").evaluate(element => element.scrollWidth > element.clientWidth + 1);
     assert.equal(overflow, false, `Player overflow at ${width}`);
+    assert.ok(await page.locator(".audio-shelf").evaluate(element => element.scrollWidth <= element.clientWidth + 1));
     await page.screenshot({path:`${directory}/audio-${width}x${height}.png`});
   }
   const audioEngine = await page.locator("#audio-engine").elementHandle();
@@ -169,7 +193,14 @@ try {
   await category("podcasts").click();
   assert.deepEqual(await page.locator(".audio-track strong").allTextContents(), ["Episodio"]);
   await category("books").click();
-  assert.deepEqual(await page.locator(".audio-track strong").allTextContents(), ["Capítulo 1", "Capítulo 2"]);
+  await page.getByRole("button", {name:"Quitar selección",exact:true}).click();
+  assert.deepEqual(await trackTitles(), ["Capítulo 1", "Capítulo 2", "Capítulo 3", "Prólogo"]);
+  assert.deepEqual(await shelfTitles(), ["Libro de prueba", "Otro libro"]);
+  const partial = page.getByRole("button", {name:/Continuar · Otro libro · Capítulo 1 · 0:09/});
+  await partial.press("Enter");
+  await page.waitForFunction(() => { const audio = document.getElementById("audio-engine"); return audio.src.endsWith("/other-book") && !audio.paused && audio.currentTime >= 9; });
+  await page.locator("#audio-toggle").click();
+  await page.getByRole("button", {name:"Todos los libros",exact:true}).press("Enter");
   await page.locator("[data-action='audio-play'][data-id='chapter1']").click();
   await page.waitForFunction(() => document.getElementById("audio-engine").readyState>=2);
   await page.locator("#audio-rate").selectOption("1.5");
@@ -179,7 +210,19 @@ try {
   await page.waitForFunction(() => document.getElementById("audio-engine").paused);
   assert.match(await page.locator("#audio-engine").getAttribute("src"), /\/chapter1$/);
   assert.equal(await page.locator("#audio-sleep").inputValue(),"off");
-  assert.equal(await page.evaluate(() => window.audioFixture.calls.some(call=>call.cmd==="library_playback" && call.args.id==="chapter1")), true);
+  assert.equal(await page.evaluate(() => window.audioFixture.state.library.find(item => item.id === "chapter1").details.playbackPosition), 10);
+  const resume = page.getByRole("button", {name:/Continuar · Libro de prueba · Capítulo 2/});
+  await resume.waitFor();
+  const notice = page.getByRole("button", {name:"Cerrar aviso",exact:true});
+  if (await notice.isVisible()) await notice.click();
+  await page.locator("#main").evaluate(main => { main.scrollTop = 0; });
+  await page.screenshot({path:`${directory}/audio-books.png`});
+  await page.locator("#audio-query").fill("Capítulo 2");
+  assert.deepEqual(await trackTitles(), ["Capítulo 2"]);
+  await resume.press("Enter");
+  await page.waitForFunction(() => document.getElementById("audio-engine").src.endsWith("/chapter2") && !document.getElementById("audio-engine").paused);
+  assert.deepEqual(await trackTitles(), ["Capítulo 1", "Capítulo 2", "Capítulo 3"]);
+  assert.deepEqual(await page.locator(".audio-next li > span").allTextContents(), ["Capítulo 3"]);
   assert.deepEqual(errors, []);
-  console.log("Audio grouping, persistent real browser playback, metadata preview, ordered playlists, local lyrics and audiobook sleep timer passed.");
+  console.log("Audio shelves, keyboard filtering, persistent playback, playlist review, and audiobook sleep and chapter resumption passed.");
 } finally { await browser.close(); }

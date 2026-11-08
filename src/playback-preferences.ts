@@ -33,6 +33,14 @@ export function isPlayable(item: LibraryItem | undefined): item is LibraryItem &
   return Boolean(item && !item.missing && (item.kind === "audio" || item.kind === "video"));
 }
 
+export function audiobookChapterComplete(position: number, duration?: number | null): boolean {
+  return Number.isFinite(position) && typeof duration === "number" && duration > 0 && position >= duration;
+}
+
+export function audiobookResumePosition(position: number, duration?: number | null): number {
+  return Number.isFinite(position) && position > 0 && !audiobookChapterComplete(position, duration) ? position : 0;
+}
+
 export function resumePosition(position: number, duration?: number | null): number {
   if (!Number.isFinite(position) || position < 3) return 0;
   if (duration && Number.isFinite(duration)) {

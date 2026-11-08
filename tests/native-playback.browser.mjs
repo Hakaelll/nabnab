@@ -193,7 +193,7 @@ async function verifyStyledCaptions(engine) {
   console.log("Native libass preserved overlapping colors and moving ASS text, rendered SSA and respected the subtitle offset without replacing the video engine.");
 }
 
-async function seedCourse(videoId, audioId, handoutId) {
+async function seedPlaybackFixtures(videoId, audioId, handoutId, bookIds) {
   const stateFile = path.join(data, "state-v1.json");
   const state = JSON.parse(await readFile(stateFile, "utf8"));
   const asset = id => {
@@ -208,7 +208,43 @@ async function seedCourse(videoId, audioId, handoutId) {
       { id: "lesson-audio", title: "Ejercicio de escucha", learned: false, assets: [asset(audioId)], notes: [] },
     ] }],
   });
+  for (const [index, id] of bookIds.entries()) {
+    state.library.find(item => item.id === id).details.audiobook = {
+      bookId: "fixture-audiobook", bookTitle: "Lectura de prueba", chapter: index + 1, reader: null, language: "Spanish",
+    };
+  }
   await writeFile(stateFile, JSON.stringify(state));
+}
+
+async function verifyBookContinuation(ids) {
+  const openBooks = async () => {
+    await page.locator('button[data-page="library"]').click();
+    await page.locator('[data-action="library-section"][data-section="audio"]').click();
+    await page.getByRole("button", { name: "Audiolibros", exact: true }).click();
+  };
+  await openBooks();
+  await page.locator(`[data-action="audio-play"][data-id="${ids[0]}"]`).click();
+  const chapter = await wait(async () => {
+    const sample = await playing();
+    return sample.id === ids[0] && !sample.paused && sample.duration > 0 && sample;
+  });
+  await page.locator("#audio-sleep").selectOption("chapter");
+  await page.locator("#audio-engine").evaluate(media => { media.currentTime = media.duration - 0.2; });
+  await wait(async () => (await playing()).paused);
+  const saved = await wait(async () => {
+    const { library } = await rpc("get_snapshot");
+    const item = library.find(item => item.id === ids[0]);
+    return item.details.playbackPosition >= chapter.duration - 0.05 && item;
+  });
+  assert.ok(saved.details.lastPlayedAt);
+  assert.equal((await playing()).id, ids[0]);
+  await shutdown();
+  await launch();
+  await openBooks();
+  await page.getByRole("button", { name: /Continuar · Lectura de prueba · Capítulo 2/ }).click();
+  await wait(async () => (await playing()).id === ids[1] && !(await playing()).paused);
+  assert.equal(await page.locator(".audio-next li").count(), 1);
+  console.log("Native audiobook continuation retained the completed chapter across restart and opened the next chapter.");
 }
 
 async function verifyCoursePlayback(videoId, musicId, audioId, handoutId) {
@@ -766,7 +802,8 @@ try {
   await shutdown();
   const audioLessonId = item(audioSamples[0].file).id;
   const handoutId = item(handout).id;
-  await seedCourse(videoId, audioLessonId, handoutId);
+  const bookIds = audioSamples.slice(1).map(sample => item(sample.file).id);
+  await seedPlaybackFixtures(videoId, audioLessonId, handoutId, bookIds);
   await launch();
   await page.locator("#audio-player").waitFor();
   await wait(async () => (await playing()).time >= 10);
@@ -777,6 +814,7 @@ try {
     fullscreen: true, restoredOnRestart: true, playlistAudioCover: true, viewports: [1180, 900], rapidSeek: true,
     replacedLoadingSource: true, compactRoundTrips: 3, externalWebViewRequests: unexpectedNetwork.length }));
   await verifyCoursePlayback(videoId, musicId, audioLessonId, handoutId);
+  await verifyBookContinuation(bookIds);
 } catch (error) {
   console.error(log);
   console.error(await page?.locator("#playback-stage").innerText().catch(() => ""));

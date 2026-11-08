@@ -2,7 +2,7 @@ import { escapeHtml as h, localMediaUrl, type Copy, type LibraryItem } from "./c
 import { detailsFor } from "./library-features";
 import type { AudioPlaylist, LocalTrack } from "./library-types";
 import type { createSceneControls } from "./music-scene-controls";
-import { isPlayable, playbackRates, readPlayback, resumePosition, savePlayback } from "./playback-preferences";
+import { audiobookResumePosition, isPlayable, playbackRates, readPlayback, resumePosition, savePlayback } from "./playback-preferences";
 import { connectPlaybackSignal } from "./playback-signal";
 import { createPlaybackStage, type StageState } from "./playback-stage";
 import { durationLabel } from "./presentation";
@@ -171,7 +171,8 @@ export function createAudioPlayer(hooks: Hooks) {
   function persist() {
     const item = current();
     if (!media || !item || !matchesSource() || media.readyState === 0 || resumeChoice || pendingSeek !== null || !Number.isFinite(media.currentTime)) return;
-    const position = media.ended ? 0 : media.currentTime;
+    const position = !media.ended ? media.currentTime
+      : isAudiobook(item) ? item.duration ?? media.currentTime : 0;
     const details = detailsFor(item);
     const playedAudio = item.kind === "audio" && media.currentTime > 0;
     if (details.playbackPosition === position && (!playedAudio || details.lastPlayedAt)) return;
@@ -421,9 +422,11 @@ export function createAudioPlayer(hooks: Hooks) {
     stoppedBySleep = false;
     issue = "";
     ++sourceRevision;
-    const longAudio = isAudiobook(item) || item.details?.platform === "Podcast RSS" || (item.duration ?? 0) >= 30 * 60;
+    const book = isAudiobook(item);
+    const resumeAt = book ? audiobookResumePosition : resumePosition;
+    const longAudio = book || item.details?.platform === "Podcast RSS" || (item.duration ?? 0) >= 30 * 60;
     const progress = resume && (item.kind === "video" || longAudio || item.id === resumeAudioId || preferences.resumeMusic)
-      ? resumePosition(detailsFor(item).playbackPosition, item.duration) : 0;
+      ? resumeAt(detailsFor(item).playbackPosition, item.duration) : 0;
     resumeChoice = item.kind === "video" && openVideo && autoplay ? progress : 0;
     pendingSeek = progress && !resumeChoice ? progress : null;
     mediaState = "loading";
@@ -631,11 +634,13 @@ export function createAudioPlayer(hooks: Hooks) {
     });
     element.addEventListener("ended", () => {
       if (!matchesSource() || !element.ended) return;
+      const item = current();
       mediaState = "ended";
       persist();
       updateTime();
       if (sleep === "chapter") sleepNow();
       else if (!stoppedBySleep) move(1, false);
+      if (item && isAudiobook(item) && currentId() === item.id) hooks.render();
     });
     element.addEventListener("error", () => {
       if (!expectedSource || element.src !== expectedSource || !element.error) return;
