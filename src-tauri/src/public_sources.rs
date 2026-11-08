@@ -77,6 +77,17 @@ pub struct Page {
     pub assets: Vec<Asset>,
     pub next_cursor: Option<String>,
     pub warnings: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zenodo: Option<ZenodoRecord>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ZenodoRecord {
+    pub record_id: String,
+    pub family_id: Option<String>,
+    pub version: Option<String>,
+    pub versions_url: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -235,9 +246,10 @@ pub fn supported(input: &str) -> bool {
 pub fn canonical_followed_search(input: &str) -> Result<String, String> {
     let target = target(input)?;
     if !matches!(target, Target::Arxiv(arxiv::ArxivTarget::Search { .. })
-        | Target::Librivox(librivox::LibrivoxTarget::Search { .. }))
+        | Target::Librivox(librivox::LibrivoxTarget::Search { .. })
+        | Target::Zenodo(zenodo::ZenodoTarget::Versions(_)))
     {
-        return Err("Choose an arXiv or LibriVox catalog search to follow.".into());
+        return Err("Choose an arXiv or LibriVox search or a Zenodo version history to follow.".into());
     }
     Ok(source_url(&target))
 }
@@ -254,6 +266,8 @@ pub fn valid_followed_search_entry(search: &str, entry_url: &str, entry_id: &str
             id.matches_search_entry(entry_id),
         (Ok(Target::Librivox(librivox::LibrivoxTarget::Search { .. })), Target::Librivox(librivox::LibrivoxTarget::Edition(id))) =>
             entry_id == format!("librivox:{id}"),
+        (Ok(Target::Zenodo(zenodo::ZenodoTarget::Versions(_))), Target::Zenodo(zenodo::ZenodoTarget::Record(id))) =>
+            entry_id == format!("zenodo:{id}"),
         _ => false,
     }
 }
@@ -428,6 +442,7 @@ fn page(target: &Target, provider: Provider, title: String) -> Page {
         assets: vec![],
         next_cursor: None,
         warnings: vec![],
+        zenodo: None,
     }
 }
 
@@ -468,6 +483,19 @@ async fn cancelled(mut cancel: watch::Receiver<bool>) {
 
 const PUBLIC_NOT_FOUND: &str = "The public source item was not found or is not publicly accessible.";
 
+fn zenodo_record_api(url: &url::Url) -> bool {
+    url.scheme() == "https"
+        && url.host_str() == Some("zenodo.org")
+        && url.port().is_none()
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.query().is_none()
+        && url.fragment().is_none()
+        && url.path().strip_prefix("/api/records/").is_some_and(|id| {
+            id.bytes().all(|byte| byte.is_ascii_digit()) && id.parse::<u64>().is_ok_and(|id| id > 0)
+        })
+}
+
 async fn api_json(input: &str) -> Result<Value, String> {
     let bytes = api_bytes(input, "application/json").await?;
     serde_json::from_slice(&bytes)
@@ -501,9 +529,20 @@ async fn api_bytes(input: &str, accept: &str) -> Result<Vec<u8>, String> {
     {
         return Err("Local or reserved public API destinations are not allowed.".into());
     }
+    let redirects = if zenodo_record_api(&parsed) {
+        reqwest::redirect::Policy::custom(|attempt| {
+            if attempt.previous().len() == 1 && zenodo_record_api(attempt.url()) {
+                attempt.follow()
+            } else {
+                attempt.stop()
+            }
+        })
+    } else {
+        reqwest::redirect::Policy::none()
+    };
     let client = reqwest::Client::builder()
         .no_proxy()
-        .redirect(reqwest::redirect::Policy::none())
+        .redirect(redirects)
         .resolve_to_addrs(host, &addresses)
         .connect_timeout(Duration::from_secs(10))
         .read_timeout(Duration::from_secs(20))

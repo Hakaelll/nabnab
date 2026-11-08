@@ -20,6 +20,7 @@ interface PublicPage {
   provider: keyof typeof publicNames; sourceUrl: string; title: string;
   description: string | null; rights: string | null; entries: PublicEntry[];
   assets: PublicAsset[]; nextCursor: string | null; warnings: string[];
+  zenodo?: { recordId: string; familyId: string | null; version: string | null; versionsUrl: string | null };
 }
 export interface CloudSelection { provider: CloudProvider; accountId: string; id: string; exportMime: string | null; version: string | null }
 interface CloudEntry {
@@ -42,8 +43,11 @@ interface FileSourceHooks {
 const providers: { id: CloudProvider; name: string }[] = [
   { id: "drive", name: "Google Drive" }, { id: "onedrive", name: "OneDrive" }, { id: "dropbox", name: "Dropbox" },
 ];
+function isZenodoHistory(page: PublicPage | null): boolean {
+  return page?.provider === "zenodo" && page.sourceUrl.startsWith("https://zenodo.org/api/records?");
+}
 function isCatalogSearch(page: PublicPage | null): boolean {
-  return Boolean(page && (page.provider === "arxiv" || page.provider === "librivox")
+  return isZenodoHistory(page) || Boolean(page && (page.provider === "arxiv" || page.provider === "librivox")
     && page.sourceUrl.startsWith(`https://${page.provider}.org/search/?`));
 }
 const publicNames = {
@@ -169,10 +173,19 @@ export function createFileSources(hooks: FileSourceHooks) {
     const paragraph = `<p class="file-source-description">${h(publicPage.description)}</p>`;
     if (isCatalogSearch(publicPage)) return paragraph;
     const summary = publicPage.provider === "arxiv" ? t("Resumen del artículo", "Article abstract")
-      : publicPage.provider === "librivox" ? t("Detalles de la edición", "Edition details") : "";
+      : publicPage.provider === "librivox" ? t("Detalles de la edición", "Edition details")
+      : publicPage.provider === "zenodo" ? t("Descripción del registro", "Record description") : "";
     return summary ? `<details class="file-source-abstract"><summary>${summary}</summary>${paragraph}</details>` : paragraph;
   }
+  function zenodoSummary(): string {
+    const record = publicPage?.zenodo;
+    if (!record) return "";
+    const metadata = [record.version && t(`Versión ${record.version}`, `Version ${record.version}`),
+      t(`Registro ${record.recordId}`, `Record ${record.recordId}`), record.familyId && t(`Familia ${record.familyId}`, `Family ${record.familyId}`)];
+    return `<p class="field-note">${h(metadata.filter(Boolean).join(" · "))}</p>`;
+  }
   function publicRows(): string {
+    if (isZenodoHistory(publicPage)) return publicPage?.entries.length ? "" : `<p class="file-source-empty">${t("Zenodo no devolvió versiones públicas para esta familia.", "Zenodo returned no public versions for this family.")}</p>`;
     if (!publicPage || !publicPage.assets.length && publicPage.entries.length) return "";
     const { provider, rights } = publicPage;
     const research = provider === "arxiv" || provider === "librivox";
@@ -228,13 +241,22 @@ export function createFileSources(hooks: FileSourceHooks) {
     if (tab === "personal") return `${header}${hooks.renderPersonal()}</section>`;
     const provider: CloudProvider = tab === "public" ? "drive" : tab;
     const isSearch = isCatalogSearch(publicPage);
+    const zenodoHistory = isZenodoHistory(publicPage);
+    const followLabel = zenodoHistory ? t("Seguir versiones", "Follow versions")
+      : isSearch ? t("Seguir búsqueda", "Follow search") : t("Seguir versiones", "Follow releases");
+    const returnLabel = isZenodoHistory(catalogReturn?.page ?? null) ? t("Volver a versiones", "Back to versions") : t("Volver a resultados", "Back to results");
     const hasPage = isPublic ? Boolean(publicPage) : Boolean(cloudPage);
     const cursor = isPublic ? publicPage?.nextCursor : cloudPage?.nextCursor;
     return `${header}
       ${isPublic ? catalogReturn ? "" : `<form id="file-source-form" class="file-source-form"><label for="file-source-url">${t("Enlace, identificador o DOI", "Link, identifier or DOI")}</label><div><input id="file-source-url" type="text" required value="${h(url)}" maxlength="8192" placeholder="https://… · arXiv:2401.00001 · 10.5281/zenodo.1234" autocomplete="off" spellcheck="false" ${busy ? "disabled" : ""}><button type="submit" class="button secondary" ${busy ? "disabled" : ""}>${icon("search")}${t("Explorar", "Browse")}</button></div><p class="field-note">GitHub Releases · Internet Archive · Wikimedia Commons · arXiv · Zenodo · LibriVox</p></form>${catalogSearch()}` : `<div class="file-source-cloud-toolbar"><div><strong>${h(cloudName(provider))}</strong><p class="field-note">${t("Solo los archivos a los que tu cuenta tiene acceso.", "Only files your account can access.")}</p></div>${action("file-source-cloud-root", t("Mis archivos", "My files"), "folder", "secondary", busy || !status(provider)?.connected ? "disabled" : "")}${action("cloud-configure-open", t("Conexión", "Connection"), "settings", "quiet", `data-provider="${tab}" ${busy ? "disabled" : ""}`)}</div><form id="cloud-shared-form" class="file-source-form"><label for="cloud-shared-url">${t("Enlace compartido, opcional", "Shared link, optional")}</label><div><input id="cloud-shared-url" type="url" value="${h(sharedUrl ?? "")}" maxlength="8192" placeholder="https://…" autocomplete="off" spellcheck="false" ${busy ? "disabled" : ""}><button class="button secondary" type="submit" ${busy || !status(provider)?.connected ? "disabled" : ""}>${t("Abrir enlace", "Open link")}</button></div></form>${connectionEditor === tab || !status(provider)?.connected ? connectionCard(provider) : ""}`}
-      ${isPublic && catalogReturn ? `<div class="file-source-return">${action("file-source-back-results", t("Volver a resultados", "Back to results"), "back", "quiet", busy ? "disabled" : "")}</div>` : ""}
+      ${isPublic && catalogReturn ? `<div class="file-source-return">${action("file-source-back-results", returnLabel, "back", "quiet", busy ? "disabled" : "")}</div>` : ""}
       ${error ? `<div class="file-source-error" role="alert">${icon("error")}<span>${h(error)}</span></div>` : ""}${busy === "inspect" || busy === "connect" ? `<div class="file-source-progress" role="status"><span>${busy === "connect" ? t("Esperando autorización en el navegador…", "Waiting for browser authorization…") : t("Consultando archivos del origen…", "Reading source files…")}</span>${action("file-source-cancel", t("Cancelar", "Cancel"), "close", "quiet")}</div>` : ""}
-      ${hasPage ? `<div class="file-source-results"><div class="file-source-result-heading"><div><span class="file-source-eyebrow">${isPublic ? h(publicPage ? publicNames[publicPage.provider] : "") : h(cloudName(provider))}</span><h2${isPublic && catalogReturn ? ' tabindex="-1"' : ""}>${h(isPublic ? publicPage?.title ?? "" : trail.at(-1)?.name ?? t("Mis archivos", "My files"))}</h2></div>${isPublic && (publicPage?.provider === "github" || isSearch) && hooks.followSource ? action("file-source-follow", isSearch ? t("Seguir búsqueda", "Follow search") : t("Seguir versiones", "Follow releases"), "add", "quiet", busy ? "disabled" : "") : ""}${!isPublic && trail.length ? action("file-source-parent", t("Volver", "Back"), undefined, "quiet", busy ? "disabled" : "") : ""}</div>${isPublic ? publicDescription() : ""}${isPublic && publicPage?.rights ? `<p class="field-note">${t("Derechos indicados por el origen", "Rights stated by the source")}: ${h(publicPage.rights)}</p>` : ""}${warningList(isPublic ? publicPage?.warnings ?? [] : cloudPage?.warnings ?? [])}
+      ${hasPage ? `<div class="file-source-results"><div class="file-source-result-heading"><div>
+        <span class="file-source-eyebrow">${isPublic ? zenodoHistory ? t("Zenodo · Historial de versiones", "Zenodo · Version history") : h(publicPage ? publicNames[publicPage.provider] : "") : h(cloudName(provider))}</span>
+        <h2${isPublic && (catalogReturn || zenodoHistory) ? ' tabindex="-1"' : ""}>${h(isPublic ? publicPage?.title ?? "" : trail.at(-1)?.name ?? t("Mis archivos", "My files"))}</h2>${isPublic ? zenodoSummary() : ""}</div>
+        ${isPublic && !catalogReturn && publicPage?.zenodo?.versionsUrl ? action("file-source-versions", t("Historial de versiones", "Version history"), "list", "quiet", busy ? "disabled" : "") : ""}
+        ${isPublic && (publicPage?.provider === "github" || isSearch) && hooks.followSource ? action("file-source-follow", followLabel, "add", "quiet", busy ? "disabled" : "") : ""}
+        ${!isPublic && trail.length ? action("file-source-parent", t("Volver", "Back"), undefined, "quiet", busy ? "disabled" : "") : ""}</div>${isPublic ? publicDescription() : ""}${isPublic && publicPage?.rights ? `<p class="field-note">${t("Derechos indicados por el origen", "Rights stated by the source")}: ${h(publicPage.rights)}</p>` : ""}${warningList(isPublic ? publicPage?.warnings ?? [] : cloudPage?.warnings ?? [])}
         ${isPublic && publicPage?.entries.length ? `<div class="file-source-entries">${publicPage.entries.map(entry => `<button type="button" class="file-source-entry" data-action="file-source-entry" data-id="${h(entry.id)}" ${busy ? "disabled" : ""}><span><strong>${h(entry.title)}</strong><small>${h(entry.publishedAt ?? "")}</small></span>${publicPage?.provider === "github" ? `<span class="file-source-status">${entry.prerelease ? "Prerelease" : t("Estable", "Stable")}</span>` : ""}${icon("arrow")}</button>`).join("")}</div>` : ""}
         ${(isPublic ? publicPage?.assets.length : cloudPage?.entries.length) ? `<div class="file-source-filter"><label>${icon("search")}<input id="file-source-query" type="search" value="${h(query)}" placeholder="${t("Filtrar archivos cargados", "Filter loaded files")}" aria-label="${t("Filtrar archivos cargados", "Filter loaded files")}"></label>${isPublic && publicPage?.provider === "archive" ? `<select id="file-source-kind" aria-label="${t("Tipo de archivo", "File type")}">${option("all", t("Originales y derivados", "Originals and derivatives"), filter)}${option("original", t("Solo originales", "Originals only"), filter)}${option("derivative", t("Solo derivados", "Derivatives only"), filter)}</select>` : ""}${isPublic && publicPage?.provider === "librivox" ? readerFilter(publicPage.assets) : ""}<span>${isPublic ? publicPage?.assets.length ?? 0 : cloudPage?.entries.length ?? 0} ${t("cargados", "loaded")}</span></div>` : ""}${isPublic ? publicRows() : cloudRows()}
         ${cursor ? `<div class="file-source-pagination"><p>${t("Solo se ha cargado una parte del origen. La selección incluye únicamente archivos revisados.", "Only part of this source has loaded. Selection includes reviewed files only.")}</p>${action("file-source-more", t("Cargar más", "Load more"), "add", "secondary", busy ? "disabled" : "")}</div>` : !isPublic && cloudPage?.partial ? `<p class="field-note">${t("El origen informa de resultados parciales. Revisa los avisos antes de descargar.", "The source reports partial results. Review warnings before downloading.")}</p>` : ""}</div>` : !busy && isPublic && !catalogReturn ? `<div class="file-source-intro">${icon("folder")}<h2>${t("Elige qué conservar", "Choose what to keep")}</h2><p>${t("Consulta versiones y archivos antes de descargar. No se selecciona ningún formato automáticamente.", "Review versions and files before downloading. No format is selected automatically.")}</p><div><span>GitHub</span><small>${t("Versiones y assets publicados", "Versions and published assets")}</small><span>Internet Archive</span><small>${t("Originales, derivados y procedencia", "Originals, derivatives and provenance")}</small><span>Commons</span><small>${t("Imágenes y atribución por archivo", "Images and attribution per file")}</small></div></div>` : ""}${selectionFooter()}<p class="file-source-footnote">${t("Descargar conserva una copia local. No ejecuta archivos, instala programas ni modifica el origen.", "Downloading keeps a local copy. It does not run files, install software or modify the source.")}</p></section>`;
@@ -311,6 +333,17 @@ export function createFileSources(hooks: FileSourceHooks) {
         if (busy || value !== "public" && (!value || !isCloud(value))) break;
         tab = value; error = ""; cloudPage = null; publicPage = null; catalogReturn = null; url = ""; folder = null; sharedUrl = null; trail = []; clearSelection(); hooks.render();
         if (value !== "public") { await loadConnections(); if (status(value)?.connected) await browseCloud(); }
+      } break;
+      case "file-source-versions": {
+        const versions = publicPage?.zenodo?.versionsUrl;
+        if (!versions || busy) break;
+        await perform("inspect", async requestId => {
+          const history = await hooks.command<PublicPage>("public_source_inspect", { url: versions, cursor: null, requestId });
+          if (activeRequest !== requestId) return;
+          publicPage = history; url = history.sourceUrl; searchMode = null;
+          publicSelected.clear(); query = ""; filter = "all"; reader = "";
+        });
+        document.querySelector<HTMLElement>(isZenodoHistory(publicPage) ? ".file-source-result-heading h2" : '[data-action="file-source-versions"]')?.focus();
       } break;
       case "file-source-entry": {
         const entry = publicPage?.entries.find(value => value.id === element.dataset.id);

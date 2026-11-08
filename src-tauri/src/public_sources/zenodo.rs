@@ -1,12 +1,15 @@
 use super::*;
-use std::{collections::VecDeque, sync::LazyLock, time::Instant};
+use std::{collections::{HashSet, VecDeque}, sync::LazyLock, time::Instant};
 
 const RECORDS: &str = "https://zenodo.org/api/records";
+const VERSION_PAGE_SIZE: usize = 20;
+const VERSION_PAGE_LIMIT: usize = 10;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum ZenodoTarget {
     Record(u64),
     Doi(String),
+    Versions(u64),
 }
 
 fn record_id(value: &str) -> Option<u64> {
@@ -41,6 +44,22 @@ pub(super) fn parse(url: &url::Url, parts: &[String]) -> Result<ZenodoTarget, St
             .map(ZenodoTarget::Doi)
             .ok_or_else(|| "Use a valid Zenodo record DOI.".into());
     }
+    if matches!(parts, [api, route] if api == "api" && route == "records") {
+        let mut family = None;
+        let mut all_versions = false;
+        for (name, value) in url.query_pairs() {
+            match name.as_ref() {
+                "q" if family.is_none() => {
+                    family = value.strip_prefix("conceptrecid:").and_then(record_id);
+                    if family.is_none() { break; }
+                }
+                "all_versions" if !all_versions && value == "true" => all_versions = true,
+                _ => return Err("Use a Zenodo history link for a single record family.".into()),
+            }
+        }
+        return family.filter(|_| all_versions).map(ZenodoTarget::Versions)
+            .ok_or_else(|| "Use a Zenodo history link for a single record family.".into());
+    }
     match parts {
         [route, id] if matches!(route.as_str(), "record" | "records") => record_id(id),
         [api, route, id] if api == "api" && route == "records" => record_id(id),
@@ -54,6 +73,7 @@ pub(super) fn canonical(target: &ZenodoTarget) -> String {
     match target {
         ZenodoTarget::Record(id) => format!("https://zenodo.org/records/{id}"),
         ZenodoTarget::Doi(doi) => url_path("https://doi.org", &doi.split('/').collect::<Vec<_>>()),
+        ZenodoTarget::Versions(family) => catalog_url(&format!("conceptrecid:{family}")).to_string(),
     }
 }
 
@@ -88,11 +108,25 @@ fn id_field(value: &Value) -> Option<u64> {
     value.as_u64().filter(|id| *id > 0).or_else(|| value.as_str().and_then(record_id))
 }
 
-fn search_url(query: &str, current: usize) -> String {
+fn family_id(raw: &Value) -> Option<u64> {
+    id_field(&raw["conceptrecid"]).or_else(|| id_field(&raw["parent"]["id"]))
+}
+
+fn record_matches(raw: &Value, requested: u64) -> bool {
+    id_field(&raw["id"]).is_some_and(|id| id == requested || family_id(raw) == Some(requested))
+}
+
+fn catalog_url(query: &str) -> url::Url {
     let mut url = url::Url::parse(RECORDS).expect("constant Zenodo endpoint");
     url.query_pairs_mut().append_pair("q", query)
-        .append_pair("all_versions", "true").append_pair("size", "20")
-        .append_pair("page", &current.to_string());
+        .append_pair("all_versions", "true");
+    url
+}
+
+fn search_url(query: &str, current: usize) -> String {
+    let mut url = catalog_url(query);
+    url.query_pairs_mut().append_pair("size", &VERSION_PAGE_SIZE.to_string())
+        .append_pair("page", &current.to_string()).append_pair("sort", "mostrecent");
     url.to_string()
 }
 
@@ -100,7 +134,7 @@ async fn record(target: &ZenodoTarget) -> Result<Value, String> {
     let (query, expected_doi, expected_concept) = match target {
         ZenodoTarget::Record(id) => {
             match metadata(format!("{RECORDS}/{id}")).await {
-                Ok(raw) if id_field(&raw["id"]) == Some(*id) => return Ok(raw),
+                Ok(raw) if record_matches(&raw, *id) => return Ok(raw),
                 Ok(_) => return Err("Zenodo returned a different record identifier.".into()),
                 Err(error) if error == PUBLIC_NOT_FOUND => (),
                 Err(error) => return Err(error),
@@ -110,7 +144,7 @@ async fn record(target: &ZenodoTarget) -> Result<Value, String> {
         ZenodoTarget::Doi(value) => {
             if let Some(id) = value.strip_prefix("10.5281/zenodo.").and_then(record_id) {
                 match metadata(format!("{RECORDS}/{id}")).await {
-                    Ok(raw) if id_field(&raw["id"]) == Some(id) && matches_doi(&raw, value) => return Ok(raw),
+                    Ok(raw) if record_matches(&raw, id) && matches_doi(&raw, value) => return Ok(raw),
                     Ok(_) => (),
                     Err(error) if error == PUBLIC_NOT_FOUND => (),
                     Err(error) => return Err(error),
@@ -119,18 +153,19 @@ async fn record(target: &ZenodoTarget) -> Result<Value, String> {
             let escaped = value.replace('/', "\\/");
             (format!("doi:\"{escaped}\" OR conceptdoi:\"{escaped}\""), Some(value.as_str()), None)
         }
+        ZenodoTarget::Versions(_) => return Err("Open a specific version to review its files.".into()),
     };
     let raw = metadata(search_url(&query, 1)).await?;
     let id = raw["hits"]["hits"].as_array().into_iter().flatten()
         .filter(|entry| expected_doi.is_none_or(|doi| matches_doi(entry, doi)))
-        .filter(|entry| expected_concept.is_none_or(|id| id_field(&entry["conceptrecid"]) == Some(id)))
+        .filter(|entry| expected_concept.is_none_or(|id| family_id(entry) == Some(id)))
         .filter_map(|entry| id_field(&entry["id"]))
         .max()
         .ok_or(PUBLIC_NOT_FOUND)?;
     let raw = metadata(format!("{RECORDS}/{id}")).await?;
     if id_field(&raw["id"]) != Some(id)
         || expected_doi.is_some_and(|doi| !matches_doi(&raw, doi))
-        || expected_concept.is_some_and(|id| id_field(&raw["conceptrecid"]) != Some(id))
+        || expected_concept.is_some_and(|id| family_id(&raw) != Some(id))
     {
         return Err("Zenodo returned a different record or record family.".into());
     }
@@ -181,7 +216,7 @@ fn asset(raw: &Value, id: u64, file: &Value) -> Option<Asset> {
             .filter_map(|right| field(right, "id", 100)).take(8).collect::<Vec<_>>().join(", "))
             .filter(|value| !value.is_empty())
     });
-    let concept = id_field(&raw["conceptrecid"]);
+    let concept = family_id(raw);
     Some(Asset {
         id: format!("zenodo:{id}:{key}"),
         source_url: canonical(&ZenodoTarget::Record(id)),
@@ -204,20 +239,55 @@ fn asset(raw: &Value, id: u64, file: &Value) -> Option<Asset> {
     })
 }
 
+fn version_page(raw: &Value, family: u64, current: usize) -> Result<Page, String> {
+    let hits = raw["hits"]["hits"].as_array().ok_or("Zenodo returned no version list.")?;
+    let total = raw["hits"]["total"].as_u64().or_else(|| raw["hits"]["total"]["value"].as_u64());
+    let mut seen = HashSet::new();
+    let mut title = None;
+    let mut entries = Vec::new();
+    for hit in hits.iter().take(VERSION_PAGE_SIZE) {
+        let Some(id) = id_field(&hit["id"]).filter(|id| family_id(hit) == Some(family) && seen.insert(*id)) else { continue; };
+        let meta = &hit["metadata"];
+        let name = field(meta, "title", 200).unwrap_or_else(|| format!("Zenodo {id}"));
+        let version = field(meta, "version", 36).unwrap_or_else(|| id.to_string());
+        if title.is_none() { title = Some(name.clone()); }
+        entries.push(Entry {
+            id: format!("zenodo:{id}"),
+            title: format!("{version} · {name}"),
+            url: canonical(&ZenodoTarget::Record(id)),
+            prerelease: false,
+            published_at: field(meta, "publication_date", 40),
+        });
+    }
+    let mut page = page(&Target::Zenodo(ZenodoTarget::Versions(family)), Provider::Zenodo,
+        title.unwrap_or_else(|| format!("Zenodo {family}")));
+    page.entries = entries;
+    let more = total.map_or(hits.len() == VERSION_PAGE_SIZE, |total| total > (current * VERSION_PAGE_SIZE) as u64);
+    if more && current < VERSION_PAGE_LIMIT {
+        page.next_cursor = Some((current + 1).to_string());
+    }
+    Ok(page)
+}
+
 pub(super) async fn inspect(target: &ZenodoTarget, cursor: Option<&str>) -> Result<Page, String> {
     let current = numeric_page(cursor)?;
+    if let ZenodoTarget::Versions(family) = target {
+        if current > VERSION_PAGE_LIMIT { return Err("Zenodo history is limited to 200 versions per exploration.".into()); }
+        let raw = metadata(search_url(&format!("conceptrecid:{family}"), current)).await?;
+        return version_page(&raw, *family, current);
+    }
     let raw = record(target).await?;
     let id = id_field(&raw["id"]).ok_or("Zenodo returned no record identifier.")?;
     let meta = &raw["metadata"];
     let mut page = page(&Target::Zenodo(target.clone()), Provider::Zenodo,
         field(meta, "title", 240).unwrap_or_else(|| format!("Zenodo record {id}")));
     page.description = field(meta, "description", 1800);
-    let identity = field(&raw, "doi", 200).unwrap_or_else(|| id.to_string());
-    let family = field(&raw, "conceptdoi", 200)
-        .or_else(|| id_field(&raw["conceptrecid"]).map(|id| id.to_string()));
-    page.warnings.push(match family {
-        Some(family) => format!("Record version {identity} · Record family {family}. Files are bound to this version."),
-        None => format!("Record version {identity}. Files are bound to this version."),
+    let family = family_id(&raw);
+    page.zenodo = Some(ZenodoRecord {
+        record_id: id.to_string(),
+        family_id: family.map(|id| id.to_string()),
+        version: field(meta, "version", 100),
+        versions_url: family.map(|id| canonical(&ZenodoTarget::Versions(id))),
     });
     if !files_open(&raw) {
         page.warnings.push("Zenodo did not declare public file access. Restricted or embargoed files cannot be selected.".into());
@@ -271,5 +341,40 @@ mod tests {
         assert_eq!(normalize("zenodo:123").as_deref(), Some("https://zenodo.org/records/123"));
         assert_eq!(normalize("doi:10.5281/ZENODO.123").as_deref(), Some("https://doi.org/10.5281/zenodo.123"));
         assert_eq!(normalize("10.5281/zenodo.123?q=x"), None);
+    }
+
+    #[test]
+    fn published_family_id_resolves_without_accepting_an_unrelated_record() {
+        let raw = json!({
+            "id": 8, "conceptrecid": "7", "doi": "10.5281/zenodo.8", "conceptdoi": "10.5281/zenodo.7"
+        });
+        assert!(record_matches(&raw, 7));
+        assert!(record_matches(&raw, 8));
+        assert!(!record_matches(&raw, 9));
+        assert!(matches_doi(&raw, "10.5281/zenodo.7"));
+        assert!(!matches_doi(&raw, "10.5281/zenodo.9"));
+        assert!(!record_matches(&json!({"conceptrecid": "7"}), 7));
+    }
+
+    #[test]
+    fn history_keeps_only_distinct_published_records_from_the_requested_family() {
+        let result = version_page(&json!({"hits": {"total": {"value": 22}, "hits": [
+            {"id": 9, "conceptrecid": "7", "metadata": {"title": "Data", "version": "v2"}},
+            {"id": 9, "conceptrecid": "7"},
+            {"id": 51, "conceptrecid": "50"},
+            {"id": 8, "parent": {"id": 7}, "metadata": {"title": "Data", "version": "v1"}}
+        ]}}), 7, 1).unwrap();
+        assert_eq!(result.source_url, "https://zenodo.org/api/records?q=conceptrecid%3A7&all_versions=true");
+        assert_eq!(result.next_cursor.as_deref(), Some("2"));
+        assert!(result.assets.is_empty());
+        assert_eq!(result.entries.iter().map(|entry| entry.url.as_str()).collect::<Vec<_>>(), [
+            "https://zenodo.org/records/9",
+            "https://zenodo.org/records/8",
+        ]);
+        let url = url::Url::parse(&result.source_url).unwrap();
+        let path = vec!["api".to_string(), "records".to_string()];
+        assert_eq!(parse(&url, &path).unwrap(), ZenodoTarget::Versions(7));
+        let unrelated = url::Url::parse("https://zenodo.org/api/records?q=conceptrecid%3A7+OR+*&all_versions=true").unwrap();
+        assert!(parse(&unrelated, &path).is_err());
     }
 }

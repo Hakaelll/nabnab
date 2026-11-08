@@ -24,6 +24,10 @@ const setup = `
   const connections=["drive","onedrive","dropbox"].map(provider=>({provider,configured:false,connected:false,accountId:null,scope:provider==="drive"?"drive.readonly":provider==="onedrive"?"Files.Read offline_access":"files.metadata.read files.content.read sharing.read account_info.read",redirectUri:"http://127.0.0.1:53687/callback"}));
   const asset=(id,filename,extra={})=>({id,sourceUrl:"https://github.com/example/nabnab-fixture/releases/tag/v1.0",downloadUrl:"https://example.org/"+filename,filename,mime:"application/zip",size:1048576,title:filename,version:"v1.0",original:true,author:null,license:null,attribution:null,sha256:null,platform:null,architecture:null,...extra});
   const sourcePage=(url,extra={})=>({provider:"github",sourceUrl:url,title:"nabnab-fixture",description:"Public source fixture. No remote provider access is represented.",rights:null,entries:[],assets:[],nextCursor:null,warnings:[],...extra});
+  const historyUrl="https://zenodo.org/api/records?q=conceptrecid%3A1234&all_versions=true";
+  const dataset=(url,id,version)=>sourcePage(url,{provider:"zenodo",title:"Fixture dataset",
+    zenodo:{recordId:String(id),familyId:"1234",version,versionsUrl:historyUrl},
+    assets:[asset("zenodo:"+id+":samples.csv","samples.csv",{sourceUrl:"https://zenodo.org/records/"+id,mime:"text/csv",size:2**31,version,checksum:"md5:"+"a".repeat(32)})]});
   const native=(id="doc",name="Project notes")=>({selection:{provider:"drive",accountId:"fixture-account",id,exportMime:null,version:"v1"},name,kind:"document",mime:"application/vnd.google-apps.document",size:null,location:"My Drive/Documents",exports:[{mime:"application/pdf",extension:"pdf",label:"PDF"},{mime:"application/vnd.openxmlformats-officedocument.wordprocessingml.document",extension:"docx",label:"Word (.docx)"}],downloadable:true});
   const binary=(id,name)=>({selection:{provider:"drive",accountId:"fixture-account",id,exportMime:null,version:"v1"},name,kind:"file",mime:"application/pdf",size:2048,location:"My Drive/Documents",exports:[],downloadable:true});
   mockIPC(async(cmd,args={})=>{
@@ -60,7 +64,10 @@ const setup = `
       }
       if(args.url.includes("/error"))throw "Fixture source permission denied. Choose another source or retry.";
       if(args.url.startsWith("https://arxiv.org/abs/"))return sourcePage(args.url,{provider:"arxiv",title:"A versioned paper",assets:[1,2].map(version=>asset("arxiv:2401.00001v"+version,"arxiv-2401.00001v"+version+".pdf",{mime:"application/pdf",size:null,version:"v"+version,publishedAt:"2024-01-02",author:"Fixture Author"}))});
-      if(args.url==="10.5281/zenodo.1234")return sourcePage("https://doi.org/10.5281/zenodo.1234",{provider:"zenodo",title:"Fixture dataset",assets:[asset("zenodo:1235:samples.csv","samples.csv",{mime:"text/csv",size:2**31,version:"Version 2",checksum:"md5:"+"a".repeat(32)})],warnings:["Record version 1235 · Record family 1234"]});
+      if(args.url==="10.5281/zenodo.1234")return dataset("https://doi.org/10.5281/zenodo.1234",1236,"v2");
+      if(args.url===historyUrl)return sourcePage(historyUrl,{provider:"zenodo",title:"Fixture dataset",
+        entries:[{id:"zenodo:1236",title:"v2 · Fixture dataset",url:"https://zenodo.org/records/1236",prerelease:false,publishedAt:"2024-02-02"},{id:"zenodo:1235",title:"v1 · Fixture dataset",url:"https://zenodo.org/records/1235",prerelease:false,publishedAt:"2024-01-02"}]});
+      if(args.url==="https://zenodo.org/records/1235")return dataset(args.url,1235,"v1");
       if(args.url.includes("librivox.org/api/feed/audiobooks/id/"))return sourcePage(args.url,{provider:"librivox",title:"Fixture audiobook",assets:[1,2,3].map(chapter=>asset("librivox:52:"+chapter,"chapter-"+chapter+".mp3",{mime:"audio/mpeg",title:"Chapter title",audiobook:{bookId:"librivox:52",bookTitle:"Fixture audiobook",chapter,reader:chapter===2?"Second Reader":"Fixture Reader",language:"English"}}))});
       if(args.url.includes("/slow"))return await new Promise(resolve=>{fixture.pending=()=>resolve(sourcePage(args.url,{title:"Stale result must not appear"}));});
       if(args.url.includes("/empty"))return sourcePage(args.url,{title:"Empty release"});
@@ -191,7 +198,8 @@ try {
     assert.equal(await secondPaper.evaluate(node => node === document.activeElement), true);
 
     await inspect("10.5281/zenodo.1234");
-    await page.locator("[data-file-source-select='zenodo:1235:samples.csv']").check();
+    await page.getByText("Versión v2 · Registro 1236 · Familia 1234", { exact: true }).waitFor();
+    await page.locator("[data-file-source-select='zenodo:1236:samples.csv']").check();
     assert.match(await page.locator(".file-source-selection").innerText(), /2\.00 GiB/);
     assert.match(await page.locator(".file-source-list").innerText(), /md5:[a-f0-9]{32}/);
     for (const [width, height] of [[1180, 780], [900, 620]]) {
@@ -199,6 +207,17 @@ try {
       await checkNoHorizontalOverflow(`Zenodo ${width}`);
       await page.screenshot({ path: `${directory}/zenodo-${width}x${height}-fixture.png` });
     }
+    await page.getByRole("button", { name: "Historial de versiones" }).click();
+    const oldVersion = page.locator("[data-action='file-source-entry'][data-id='zenodo:1235']");
+    await oldVersion.click();
+    await page.getByText("Versión v1 · Registro 1235 · Familia 1234", { exact: true }).waitFor();
+    const exactFile = page.locator("[data-file-source-select='zenodo:1235:samples.csv']");
+    assert.equal(await exactFile.isChecked(), false);
+    await exactFile.check();
+    await page.locator("[data-action='file-source-queue']").click();
+    await page.waitForFunction(() => window.fileSourceFixture.calls.some(call => call.cmd === "queue_public_files" && call.args.sourceUrl === "https://zenodo.org/records/1235" && call.args.assetIds.join() === "zenodo:1235:samples.csv"));
+    await page.getByRole("button", { name: "Volver a versiones" }).click();
+    assert.equal(await oldVersion.evaluate(node => node === document.activeElement), true);
 
     await inspect("https://librivox.org/api/feed/audiobooks/id/52");
     await page.locator("[data-file-source-select='librivox:52:2']").waitFor();

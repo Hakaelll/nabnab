@@ -853,6 +853,7 @@ fn public_search_page(
     let provider = match result.provider {
         crate::public_sources::Provider::Arxiv => "arXiv",
         crate::public_sources::Provider::Librivox => "LibriVox",
+        crate::public_sources::Provider::Zenodo => "Zenodo",
         _ => return Err("The result is not from a supported public catalog.".into()),
     };
     if result.source_url != url || result.entries.len() > page_size {
@@ -2076,6 +2077,7 @@ mod tests {
                     assets: vec![],
                     next_cursor: None,
                     warnings: vec![],
+                    zenodo: None,
                 },
                 20,
             )
@@ -2121,6 +2123,7 @@ mod tests {
                 assets: vec![],
                 next_cursor: Some("2".into()),
                 warnings: vec![],
+                zenodo: None,
             },
             20,
         )

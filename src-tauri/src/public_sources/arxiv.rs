@@ -538,6 +538,7 @@ fn page(target: &ArxivTarget, title: String) -> Page {
         assets: vec![],
         next_cursor: None,
         warnings: vec![],
+        zenodo: None,
     }
 }
 

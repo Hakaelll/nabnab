@@ -114,13 +114,22 @@ try {
   });
 
   await verify("Zenodo", async () => {
-    const source = await inspect("10.5281/zenodo.14634897");
+    const family = await inspect("14634896");
+    assert.equal(family.zenodo.recordId, "14634897");
+    assert.equal(family.zenodo.familyId, "14634896");
+    const concept = await inspect("10.5281/zenodo.14634896");
+    assert.equal(concept.zenodo.recordId, family.zenodo.recordId);
+    const history = await inspect(family.zenodo.versionsUrl);
+    assert.deepEqual(history.assets, []);
+    const record = history.entries.find(entry => entry.id === "zenodo:14634897");
+    assert.ok(record);
+    const source = await inspect(record.url);
     const asset = source.assets.find(value => value.filename === "Fig_3b_left.csv");
     assert.equal(asset.size, 450);
     assert.equal(asset.checksum, "md5:e9cdc5528564d20d0516ef90a9e3a980");
     const { item } = await queue(source, asset, asset.size, "document");
     assert.equal(item.name, "Fig_3b_left.csv");
-    return { filename: item.name, bytes: item.size, checksum: asset.checksum };
+    return { family: family.zenodo.familyId, record: source.zenodo.recordId, filename: item.name, bytes: item.size, checksum: asset.checksum };
   });
 
   await verify("LibriVox", async () => {
