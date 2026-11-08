@@ -1,16 +1,19 @@
-export const fieldScenes = { current: 0, dunes: 1, orbit: 2, interference: 3, weave: 4, prism: 5, tide: 6 } as const;
+export const fieldScenes = {
+  current: 0, aurora: 1, weave: 2, rain: 3, dunes: 4, contours: 5,
+  orbit: 6, constellation: 7, tide: 8, prism: 9, interference: 10,
+} as const;
 type FieldScene = typeof fieldScenes[keyof typeof fieldScenes];
 export type FieldMix = readonly [from: FieldScene, to: FieldScene, blend: number];
 
 const scenes = Object.values(fieldScenes);
 const hold = 6;
-const transition = 6;
+const transition = 8;
 
 export function fieldMix(seconds: number): FieldMix {
   const period = hold + transition;
   const index = Math.floor(seconds / period) % scenes.length;
   const position = Math.max(0, (seconds % period - hold) / transition);
-  const blend = position * position * (3 - 2 * position);
+  const blend = position ** 3 * (position * (position * 6 - 15) + 10);
   return [scenes[index], scenes[(index + 1) % scenes.length], blend];
 }
 
@@ -19,6 +22,37 @@ function fieldProfile(scene: FieldScene, u: number, v: number, time: number): nu
   switch (scene) {
     case fieldScenes.current:
       return 0;
+    case fieldScenes.aurora: {
+      const upper = v + .32 + .11 * Math.sin(u * 4.2 + time * .24) + .04 * Math.cos(u * 9 - time * .38);
+      const lower = v - .40 + .10 * Math.sin(u * 3.5 - time * .21);
+      const drapes = Math.exp(-upper * upper * 61) + .76 * Math.exp(-lower * lower * 82);
+      const fold = .5 + .5 * Math.cos(u * 30 + v * 6 + 1.6 * Math.sin(u * 5 - time * .32));
+      const glow = .68 + .32 * Math.sin(u * 4.6 - v * 2.1 + time * .51);
+      return drapes * (.43 + .89 * fold ** 2) * glow;
+    }
+    case fieldScenes.rain: {
+      const x = u - v * .42 + .04 * Math.sin(v * 5 - time * .21);
+      const lane = (.5 + .5 * Math.cos(x * 48)) ** 4;
+      const drop = .5 + .5 * Math.cos(v * 19 - time * 1.28 + 2.3 * Math.sin(x * 22));
+      const streams = .49 + .51 * Math.cos(x * 8 + time * .28) ** 2;
+      return lane * (.24 + 1.13 * drop ** 3) * streams;
+    }
+    case fieldScenes.contours: {
+      const x = u + .09 * Math.sin(v * 5 + time * .21);
+      const upper = Math.exp(-((x + .53) ** 2 * 3.3 + (v + .35) ** 2 * 7));
+      const lower = Math.exp(-((x - .58) ** 2 * 3.1 + (v - .34) ** 2 * 9));
+      const relief = Math.max(upper, lower * .92);
+      const contour = (.5 + .5 * Math.cos(relief * 32 - time * .53)) ** 4;
+      return 1.62 * relief * (1 - .36 * relief) * (.07 + contour);
+    }
+    case fieldScenes.constellation: {
+      const x = u + .10 * Math.sin(v * 4.8 - time * .24);
+      const y = v + .08 * Math.cos(u * 4.3 + time * .21);
+      const a = (.5 + .5 * Math.cos(x * 18 + y * 27 + time * .49)) ** 5;
+      const b = (.5 + .5 * Math.cos(x * 18 - y * 27 - time * .38)) ** 5;
+      const glimmer = .43 + .57 * (.5 + .5 * Math.sin(x * 8 - y * 5 + time * .63));
+      return (.43 * Math.max(a, b) + .90 * a * b) * glimmer;
+    }
     case fieldScenes.dunes: {
       const ridge = v + .15 * Math.sin(u * 3.4 - time * .26) + .064 * Math.sin(u * 7 + v * 1.8 + time * .17);
       const crest = (.5 + .5 * Math.cos(ridge * 31 + u * 3.2 + v * v * 2.1 - time * .58)) ** 4;

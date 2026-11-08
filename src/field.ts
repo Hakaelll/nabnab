@@ -27,6 +27,35 @@ export function createFieldRenderer(canvas: HTMLCanvasElement) {
     // Keep the spatial profiles in sync with field-motion.ts.
     float fieldProfile(int scene, float u, float v) {
       switch (scene) {
+        case ${fieldScenes.aurora}: {
+          float upper=v+.32+.11*sin(u*4.2+time*.24)+.04*cos(u*9.-time*.38);
+          float lower=v-.40+.10*sin(u*3.5-time*.21);
+          float drapes=exp(-upper*upper*61.)+.76*exp(-lower*lower*82.);
+          float fold=.5+.5*cos(u*30.+v*6.+1.6*sin(u*5.-time*.32));
+          float glow=.68+.32*sin(u*4.6-v*2.1+time*.51);
+          return drapes*(.43+.89*fold*fold)*glow;
+        }
+        case ${fieldScenes.rain}: {
+          float x=u-v*.42+.04*sin(v*5.-time*.21);
+          float lane=pow(.5+.5*cos(x*48.),4.);
+          float drop=.5+.5*cos(v*19.-time*1.28+2.3*sin(x*22.));
+          float stream=cos(x*8.+time*.28);
+          return lane*(.24+1.13*drop*drop*drop)*(.49+.51*stream*stream);
+        }
+        case ${fieldScenes.contours}: {
+          float x=u+.09*sin(v*5.+time*.21);
+          vec2 upper=vec2(x+.53,v+.35), lower=vec2(x-.58,v-.34);
+          float relief=max(exp(-dot(upper*upper,vec2(3.3,7.))),.92*exp(-dot(lower*lower,vec2(3.1,9.))));
+          float contour=pow(.5+.5*cos(relief*32.-time*.53),4.);
+          return 1.62*relief*(1.-.36*relief)*(.07+contour);
+        }
+        case ${fieldScenes.constellation}: {
+          float x=u+.10*sin(v*4.8-time*.24), y=v+.08*cos(u*4.3+time*.21);
+          float a=pow(.5+.5*cos(x*18.+y*27.+time*.49),5.);
+          float b=pow(.5+.5*cos(x*18.-y*27.-time*.38),5.);
+          float glimmer=.43+.57*(.5+.5*sin(x*8.-y*5.+time*.63));
+          return (.43*max(a,b)+.90*a*b)*glimmer;
+        }
         case ${fieldScenes.dunes}: {
           float ridge=v+.15*sin(u*3.4-time*.26)+.064*sin(u*7.+v*1.8+time*.17);
           float crest=pow(.5+.5*cos(ridge*31.+u*3.2+v*v*2.1-time*.58),4.);

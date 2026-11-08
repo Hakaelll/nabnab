@@ -61,7 +61,11 @@ try{
     await page.screenshot({path:`${directory}/home-${label}-moving-${width}x${height}.png`,animations:"disabled"});
     if(patterns){
       assert.equal(await page.locator("#field").evaluate(canvas=>Boolean(canvas.getContext("webgl2"))),!cpu);
-      const samples = [["blend",60],["dunes",60],["orbit",120],["interference",120],["weave",120],["prism",120],["tide",120]];
+      const samples = [
+        ["blend", 70], ["aurora", 60], ["weave", 140], ["rain", 140], ["dunes", 140],
+        ["contours", 140], ["orbit", 140], ["constellation", 140], ["tide", 140], ["prism", 140],
+        ["interference", 140], ["loop", 140],
+      ];
       for(const [name,frames] of samples){
         await page.evaluate(frames=>window.stepMotion(frames,100),frames);
         const next=await page.locator('#field').evaluate(canvas=>canvas.toDataURL());
