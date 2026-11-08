@@ -26,6 +26,11 @@ const setup = `
   ];
   const rows={
     posts:threadPosts.map(item=>item.row),
+    media:[
+      row("photo","Lago de prueba.jpg","",null,{media:"media/Lago de prueba.jpg"}),
+      row("broken","Vídeo dañado.mp4","",null,{media:"media/Vídeo dañado.mp4"}),
+      row("sound","Audio de prueba.mp3","",null,{media:"media/Audio de prueba.mp3"}),
+    ],
     messages:[row("m","Conversación de prueba","Texto privado sintético","Persona de prueba")],
     listening:[
       row("l","Canción de prueba","","Artista de prueba",{playedMs:132000}),
@@ -54,13 +59,14 @@ const setup = `
     if(cmd==="get_snapshot")return structuredClone(state);
     if(cmd==="plugin:window|is_maximized")return false;
     if(cmd==="personal_archive_list")return structuredClone(summaries);
-    if(cmd==="personal_archive_choose")return {fingerprint,source:args.provider+"-export.zip",bytes:10234,categories:args.provider==="spotify"?
+    if(cmd==="personal_archive_choose")return {fingerprint,source:args.provider+"-export.zip",bytes:10234,categories:args.provider==="instagram"?
+      [preview("media",3,"available",false,["media"])] : args.provider==="spotify"?
       [preview("listening",3,"available"),preview("playlists",1,"available")]:
       [preview("posts",threadPosts.length,"available"),preview("likes",null,"absent",false,[]),preview("bookmarks",null,"unsupported",false,["unsupported"]),preview("media",0,"empty"),preview("messages",null,"requiresSelection",true)]};
     if(cmd==="personal_archive_import"){
       const selected=args.selection;
       const all=[...selected.categories,...selected.sensitive];
-      const provider=all.includes("listening")?"spotify":"x";
+      const provider=all.includes("listening")?"spotify":all.includes("media")?"instagram":"x";
       const archive={id:String(++imports),provider,source:provider+"-export.zip",fingerprint,mediaBytes:0,account:selected.account,destination:selected.destination,
         categories:Object.fromEntries(all.map(key=>[key,rows[key].length])),formats:Object.fromEntries(all.map(key=>[key,["json"]])),pendingRemoval:false};
       summaries.push(archive);
@@ -84,6 +90,20 @@ const setup = `
       const offset=args.offset??0;
       return {posts:threadPosts.slice(offset,offset+50),offset,total:threadPosts.length,incomplete:true};
     }
+    if(cmd==="personal_archive_preview_media"){
+      if(args.record==="broken")throw "This file could not be previewed.";
+      if(args.record!=="photo"||args.category!=="media")throw "Unexpected preview request";
+      await new Promise(resolve=>setTimeout(resolve,350));
+      const canvas=document.createElement("canvas"); canvas.width=560; canvas.height=320;
+      const drawing=canvas.getContext("2d");
+      const horizon=drawing.createLinearGradient(0,0,0,320);
+      horizon.addColorStop(0,"#5b7893"); horizon.addColorStop(.52,"#cfad92"); horizon.addColorStop(.53,"#496576"); horizon.addColorStop(1,"#1a3545");
+      drawing.fillStyle=horizon; drawing.fillRect(0,0,560,320);
+      drawing.fillStyle="#394d57"; drawing.beginPath(); drawing.moveTo(0,170); drawing.lineTo(130,70); drawing.lineTo(255,170); drawing.lineTo(330,103); drawing.lineTo(460,170); drawing.fill();
+      return await new Promise(resolve=>canvas.toBlob(blob=>resolve(blob.arrayBuffer()),"image/jpeg"));
+    }
+    if(cmd==="personal_archive_preview_cancel")return;
+    if(cmd==="personal_archive_copy_media")return true;
     if(cmd==="personal_archive_match")return {kind:"list",name:"Lista de prueba",rows:[{entry:{kind:"missing",title:"Canción de prueba",locator:""},artist:"Artista de prueba",duration:null,version:null,candidates:[]}]};
     if(cmd==="personal_archive_export")return true;
     if(cmd==="personal_archive_links")return ["https://example.org/post"];
@@ -276,8 +296,54 @@ try {
   await action("match").click();
   await page.getByRole("heading", { name: "Audio", exact: true }).waitFor();
   await page.getByText("Canción de prueba", { exact: true }).waitFor();
+
+  await archivesTab.click();
+  await action("new").click();
+  await page.locator("#archive-provider").selectOption("instagram");
+  await action("choose").click();
+  await page.locator("#archive-account").fill("Cuenta de fotos");
+  await page.locator("#archive-destination").fill("Álbum de prueba");
+  await page.getByRole("button", { name: "Importar selección" }).click();
+  const photo = action("media-preview").and(page.locator('[data-id="photo"]'));
+  await photo.waitFor();
+  const sound = page.locator(".archive-record").filter({ hasText: "Audio de prueba.mp3" });
+  assert.equal(await sound.getByRole("button", { name: "Vista previa" }).count(), 0);
+  assert.equal(await sound.getByRole("button", { name: "Guardar copia" }).count(), 1);
+  await page.locator("#archive-query").fill("Lago");
+  await page.getByRole("button", { name: "Buscar", exact: true }).click();
+  await page.getByRole("checkbox", { name: "Lago de prueba.jpg" }).check();
+  await photo.press("Enter");
+  await page.getByText("Preparando vista previa…", { exact: true }).waitFor();
+  await page.keyboard.press("Escape");
+  assert.ok(await photo.evaluate(element => element === document.activeElement));
+  await photo.press("Enter");
+  const image = page.getByRole("img", { name: "Lago de prueba.jpg" });
+  await image.waitFor();
+  await page.waitForFunction(() => document.querySelector(".archive-media-stage img")?.naturalWidth === 560);
+  for (const [width, height] of [[1180, 890], [900, 620]]) {
+    await page.setViewportSize({ width, height });
+    await page.keyboard.press("Escape");
+    await photo.press("Enter");
+    await page.waitForFunction(() => document.querySelector(".archive-media-stage img")?.naturalWidth === 560);
+    assert.ok(await page.locator(".archive-media-preview").evaluate(node => node.scrollWidth <= node.clientWidth + 1));
+    const bounds = await image.boundingBox();
+    assert.ok(bounds.y >= 0 && bounds.y + bounds.height <= height);
+    await page.screenshot({ path: `${directory}/media-${width}.png` });
+  }
+  await action("copy").click();
+  await page.getByText("Copia guardada.", { exact: true }).waitFor();
+  await action("media-back").click();
+  assert.equal(await page.locator("#archive-query").inputValue(), "Lago");
+  assert.equal(await page.getByRole("checkbox", { name: "Lago de prueba.jpg" }).isChecked(), true);
+  await page.locator("#archive-query").fill("Vídeo");
+  await page.getByRole("button", { name: "Buscar", exact: true }).click();
+  await action("media-preview").and(page.locator('[data-id="broken"]')).click();
+  await page.getByText("Primer fotograma", { exact: true }).waitFor();
+  await page.getByRole("alert").getByText("No se pudo mostrar la vista previa.", { exact: false }).waitFor();
+  assert.equal(await page.locator(".archive-media-stage img").count(), 0);
+  assert.ok((await calls()).some(call => call.cmd === "personal_archive_preview_cancel"));
   assert.deepEqual(errors, []);
-  console.log("Verified archived X threads, privacy, Spotify history by creator and recording, return focus and local playlist matching in Edge.");
+  console.log("Verified archived X threads, privacy, Spotify history, local playlist matching and cancellable archive media previews at 900 and 1180 px in Edge.");
 } finally {
   await browser.close();
 }

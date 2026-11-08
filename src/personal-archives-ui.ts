@@ -85,6 +85,9 @@ interface ThreadPage {
   total: number;
   incomplete: boolean;
 }
+type MediaPreview = { row: Row } & (
+  { kind: "loading"; request: string } | { kind: "ready"; src: string } | { kind: "unavailable" }
+);
 interface Hooks {
   command<T>(name: string, args?: Record<string, unknown>): Promise<T>;
   render(): void;
@@ -99,6 +102,7 @@ const PAGE = 50;
 const privateCategory = (category: Category) => category === "contacts" || category === "messages";
 const selectable = (item: CategoryPreview) => item.availability === "available" || item.availability === "requiresSelection";
 const formatName = (format: Format) => format === "xAssignment" ? "X · JS/JSON" : format.toUpperCase();
+const visualMedia = /\.(?:jpe?g|png|webp|gif|mp4|mov|webm)$/i;
 
 export function createPersonalArchives(hooks: Hooks) {
   const { t } = hooks;
@@ -109,6 +113,7 @@ export function createPersonalArchives(hooks: Hooks) {
   let category: Category | null = null;
   let result: RecordPage | null = null;
   let thread: { anchor: string; page: ThreadPage } | null = null;
+  let mediaPreview: MediaPreview | null = null;
   let listeningView: ListeningView = "events";
   let listeningSelection: { group: ListeningGroup; offset: number; query: string } | null = null;
   let query = "", offset = 0, requestId = 0;
@@ -135,6 +140,7 @@ export function createPersonalArchives(hooks: Hooks) {
   const dates = (start: number | null, end: number | null) => start === null || end === null ? "" : start === end ? day(start) : `${day(start)} – ${day(end)}`;
 
   function resetRecords(next: Category | null) {
+    discardMediaPreview();
     category = next;
     query = "";
     offset = 0;
@@ -169,6 +175,7 @@ export function createPersonalArchives(hooks: Hooks) {
 
   function leave() {
     visible = false;
+    discardMediaPreview();
     if (category && privateCategory(category)) resetRecords(category);
   }
 
@@ -307,6 +314,7 @@ export function createPersonalArchives(hooks: Hooks) {
       <label class="archive-record-name"><input type="checkbox" name="archive-record" value="${h(row.id)}" ${selected.has(row.id) ? "checked" : ""} ${disabled()}>
         <span><strong>${h(row.title)}</strong>${metadata ? `<small>${h(metadata)}</small>` : ""}</span>
       </label>
+      ${row.media && visualMedia.test(row.media) ? action("archive-media-preview", t("Vista previa", "Preview"), "image", "secondary", id) : ""}
       ${row.media ? action("archive-copy", t("Guardar copia", "Save copy"), undefined, "secondary", id) : ""}
       ${row.trackCount ? action("archive-match", t("Buscar en Audio", "Match in Audio"), undefined, "secondary", id) : ""}
       ${row.hasThread ? action("archive-thread", t("Ver hilo", "View thread"), "list", "quiet", id) : ""}
@@ -317,6 +325,74 @@ export function createPersonalArchives(hooks: Hooks) {
         <small>${t("Archivo de origen", "Source file")} · ${h(row.source)}</small>
       </details>
     </li>`;
+  }
+
+  function discardMediaPreview() {
+    if (mediaPreview?.kind === "loading") {
+      void hooks.command("personal_archive_preview_cancel", { request: mediaPreview.request }).catch(() => {});
+    }
+    mediaPreview = null;
+  }
+
+  function backFromMedia() {
+    const id = mediaPreview?.row.id;
+    discardMediaPreview();
+    hooks.render();
+    if (id) document.querySelector<HTMLElement>(`[data-action="archive-media-preview"][data-id="${CSS.escape(id)}"]`)?.focus();
+  }
+
+  function focusMediaTitle() {
+    const title = document.getElementById("archive-media-title");
+    title?.focus({ preventScroll: true });
+    title?.closest(".archive-media-preview")?.scrollIntoView({ block: "start" });
+  }
+
+  async function openMedia(row: Row) {
+    const pending: MediaPreview = { row, kind: "loading", request: crypto.randomUUID() };
+    mediaPreview = pending;
+    hooks.render();
+    focusMediaTitle();
+    try {
+      const bytes = await hooks.command<ArrayBuffer>("personal_archive_preview_media", {
+        id: archiveId, category, record: row.id, consent: privateOpen, request: pending.request,
+      });
+      if (mediaPreview !== pending) return;
+      if (!(bytes instanceof ArrayBuffer) || bytes.byteLength === 0 || bytes.byteLength > 256 * 1024) throw Error("Invalid preview response.");
+      const data = new Uint8Array(bytes);
+      let binary = "";
+      for (let index = 0; index < data.length; index += 8192) binary += String.fromCharCode(...data.subarray(index, index + 8192));
+      mediaPreview = { row, kind: "ready", src: `data:image/jpeg;base64,${btoa(binary)}` };
+    } catch {
+      if (mediaPreview !== pending) return;
+      mediaPreview = { row, kind: "unavailable" };
+    }
+    const restoreHeading = document.activeElement?.id === "archive-media-title";
+    const displayed = mediaPreview;
+    hooks.render();
+    if (!restoreHeading) return;
+    document.getElementById("archive-media-title")?.focus({ preventScroll: true });
+    const image = document.querySelector<HTMLImageElement>(".archive-media-stage img");
+    await image?.decode().catch(() => {});
+    if (mediaPreview === displayed && document.activeElement?.id === "archive-media-title") focusMediaTitle();
+  }
+
+  function mediaView(preview: MediaPreview) {
+    const { row } = preview;
+    const label = /\.(?:mp4|mov|webm)$/i.test(row.media ?? "")
+      ? t("Primer fotograma", "First frame") : t("Imagen del archivo", "Archived image");
+    return `<section class="archive-media-preview" aria-labelledby="archive-media-title">
+      <header class="archive-heading">
+        ${action("archive-media-back", t("Volver a los registros", "Back to records"), "back", "quiet", disabled())}
+        ${action("archive-copy", t("Guardar copia", "Save copy"), undefined, "secondary", `data-id="${h(row.id)}" ${disabled()}`)}
+      </header>
+      <div><p class="archive-media-caption">${h(label)}</p><h3 id="archive-media-title" tabindex="-1">${h(row.title)}</h3></div>
+      ${preview.kind === "ready" ? `<figure class="archive-media-stage"><img alt="${h(row.title)}" src="${h(preview.src)}"></figure>` :
+        `<div class="archive-media-stage archive-media-status" role="${preview.kind === "loading" ? "status" : "alert"}">
+          ${icon("image")}<p>${preview.kind === "loading" ? t("Preparando vista previa…", "Preparing preview…") :
+            t("No se pudo mostrar la vista previa. Puedes guardar una copia del archivo.", "The preview could not be shown. You can save a copy of the file.")}</p>
+        </div>`}
+      <details class="archive-details"><summary>${t("Archivo de origen", "Source file")}</summary><p>${h(row.source)}</p></details>
+    </section>`;
   }
 
   function threadView(anchor: string, page: ThreadPage) {
@@ -432,7 +508,7 @@ export function createPersonalArchives(hooks: Hooks) {
       ${archive.pendingRemoval ? "" : `<nav class="archive-tabs" aria-label="${t("Categorías del archivo", "Archive categories")}">
         ${categories.map(key => `<button type="button" data-action="archive-category" data-id="${key}" aria-pressed="${category === key}" aria-disabled="${busy}">
           ${icon(categoryIcons[key])}<span>${name(key)}</span><small>${number(archive.categories[key] ?? 0)}</small></button>`).join("")}
-      </nav>${thread ? threadView(thread.anchor, thread.page) : recordList()}`}
+      </nav>${mediaPreview ? mediaView(mediaPreview) : thread ? threadView(thread.anchor, thread.page) : recordList()}`}
     </section>`;
   }
 
@@ -489,7 +565,7 @@ export function createPersonalArchives(hooks: Hooks) {
     if (!kind.startsWith("archive-")) return false;
     switch (kind) {
       case "archive-new":
-        adding = true; error = ""; hooks.render(); document.getElementById("archive-provider")?.focus(); break;
+        discardMediaPreview(); adding = true; error = ""; hooks.render(); document.getElementById("archive-provider")?.focus(); break;
       case "archive-choose": await choose(); break;
       case "archive-close-form":
         adding = false; preview = null; error = ""; hooks.render();
@@ -578,6 +654,12 @@ export function createPersonalArchives(hooks: Hooks) {
         const links = await hooks.command<string[]>("personal_archive_links", { id: archiveId, category, records });
         if (links.length) await hooks.prepareLinks(links);
       }); break;
+      case "archive-media-preview": {
+        const row = result?.rows.find(item => item.id === button.dataset.id);
+        if (!busy && row?.media && visualMedia.test(row.media)) await openMedia(row);
+        break;
+      }
+      case "archive-media-back": backFromMedia(); break;
       case "archive-copy": await run(async () => {
         if (await hooks.command<boolean>("personal_archive_copy_media", {
           id: archiveId, category, record: button.dataset.id, consent: privateOpen,
@@ -652,5 +734,12 @@ export function createPersonalArchives(hooks: Hooks) {
     return true;
   }
 
-  return { render, load, leave, click, input, change, submit };
+  function key(event: KeyboardEvent) {
+    if (event.key !== "Escape" || !mediaPreview || busy || !(event.target instanceof HTMLElement)
+      || !event.target.closest(".archive-media-preview")) return false;
+    backFromMedia();
+    return true;
+  }
+
+  return { render, load, leave, click, input, change, submit, key };
 }

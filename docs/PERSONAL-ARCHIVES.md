@@ -13,6 +13,10 @@ Open **Library → Personal archives → Add export**, choose the provider, and 
 
 The account index groups exports by provider and account and lists each package with its archive group. Open a package and select a category in the workspace. Search applies to that category. Use the row checkboxes to export a selection to CSV or open its public links in the batch preparer. Selecting **Prepare links** starts metadata preparation. Downloading from that batch requires a separate action.
 
+Select **Preview** on an image or video in **Media**. The preview shows the image or the first frame of a video and keeps the source and **Save copy** action within reach. **Back to records** or **Esc** restores the search, selection, and keyboard focus. Audio remains available through **Save copy**. Media in a private category requires opening that category first.
+
+The preview uses the installed FFmpeg engine. It decodes only the selected local file through an inherited file descriptor and keeps the resulting JPEG in memory while the preview is open. [FFmpeg input protocols](https://raw.githubusercontent.com/FFmpeg/FFmpeg/master/doc/protocols.texi)
+
 For an X post with a recorded reply relationship, open **View thread**. Nabnab follows the reply identifiers within that export and shows the related posts in pages of up to 50, with the chosen post marked. A missing parent is indicated as an incomplete chain. **Back to posts** restores the search, selection, and focus. This also works with previously imported exports that contain reply identifiers.
 
 ![Archived X thread opened in Windows with synthetic data](personal-archive-thread.png)

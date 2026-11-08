@@ -882,6 +882,7 @@ document.addEventListener('keydown',event=>{
   if(event.ctrlKey&&!event.altKey&&!event.shiftKey&&event.key.toLowerCase()==='k'){event.preventDefault();palette.open();return;}
   if(palette.isOpen)return;
   if(event.key==='Escape'&&document.querySelector('dialog[open]:not(#detail-dialog)'))return;
+  if(personalArchives.key(event)){event.preventDefault();return;}
   if(event.target instanceof HTMLTextAreaElement&&event.target.id==='url'&&event.key==='Enter'&&!event.shiftKey){event.preventDefault();void inspect().catch(showError);return;}
   if(event.key==='Escape'&&!required<HTMLDialogElement>('#detail-dialog').open){closeInspector();return;}
   if(!desktop||!event.ctrlKey||event.altKey||event.shiftKey)return;

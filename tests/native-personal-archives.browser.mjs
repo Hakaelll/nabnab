@@ -1,0 +1,126 @@
+import assert from "node:assert/strict";
+import { execFileSync, spawn } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdir, mkdtemp, readdir, stat, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
+import path from "node:path";
+
+const { chromium } = createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODULE || "playwright");
+const root = path.resolve(import.meta.dirname, "..");
+const artifacts = path.join(root, "artifacts/native-personal-archives");
+await mkdir(artifacts, { recursive: true });
+const data = await mkdtemp(path.join(artifacts, "run-"));
+const id = "a".repeat(64), generation = `${id}-00000001`;
+const managed = path.join(data, "personal-archive-media", id);
+const secrets = path.join(data, "module-secrets");
+const records = path.join(data, "personal-archive-data");
+await Promise.all([mkdir(managed, { recursive: true }), mkdir(secrets), mkdir(records)]);
+const digest = value => createHash("sha256").update(value).digest("hex");
+const row = (source) => ({
+  id: digest(source), source, title: path.posix.basename(source), text: "", time: null, link: null,
+  author: null, threadParent: null, playedMs: null, reachedEnd: null, completed: null, tracks: [], media: source,
+});
+const [photo, video, invalid, privatePhoto] = ["media/Paisaje.png", "media/Escena.mp4", "media/Lista.mp4", "messages/attachments/Foto privada.png"].map(row);
+const file = item => path.join(managed, digest(item.source) + path.extname(item.source));
+const ffmpeg = path.join(root, "src-tauri/engines/ffmpeg.exe");
+function encode(args) {
+  execFileSync(ffmpeg, ["-hide_banner", "-v", "error", ...args], { windowsHide: true });
+}
+encode(["-f", "lavfi", "-i", "smptebars=size=1080x720", "-frames:v", "1", file(photo)]);
+encode(["-f", "lavfi", "-i", "testsrc2=size=360x640:duration=1", "-c:v", "libopenh264", file(video)]);
+encode(["-f", "lavfi", "-i", "color=orange:size=120x80", "-frames:v", "1", file(privatePhoto)]);
+await writeFile(file(invalid), "#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4,\nhttps://example.invalid/private.ts\n#EXT-X-ENDLIST\n");
+const bytes = await Promise.all([photo, video, invalid, privatePhoto].map(async item => (await stat(file(item))).size));
+async function protect(directory, name, header, purpose, value) {
+  const sealed = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `
+    Add-Type -AssemblyName System.Security
+    $bytes = [Convert]::FromBase64String($env:NABNAB_ARCHIVE_FIXTURE)
+    $entropy = [Text.Encoding]::UTF8.GetBytes('nabnab-cookie-v1:${purpose}')
+    $sealed = [Security.Cryptography.ProtectedData]::Protect($bytes, $entropy, [Security.Cryptography.DataProtectionScope]::CurrentUser)
+    [Console]::OpenStandardOutput().Write($sealed, 0, $sealed.Length)
+  `], { windowsHide: true, env: { ...process.env, NABNAB_ARCHIVE_FIXTURE: Buffer.from(JSON.stringify(value)).toString("base64") } });
+  await writeFile(path.join(directory, `${name}.bin`), Buffer.concat([Buffer.from(`${header}\n`), sealed]));
+}
+await protect(secrets, "personal-archive-index", "nabnab-module-secret-v1", "nabnab-module:personal-archive-index", [{
+  id, generation: 1, provider: "instagram", account: "Cuenta de prueba", destination: "Álbum de 2025", source: "instagram.zip",
+  fingerprint: "b".repeat(64), categories: { media: 3, messages: 1 }, formats: { media: ["media"], messages: ["media"] },
+  mediaBytes: bytes.reduce((total, size) => total + size), pendingRemoval: false,
+}]);
+await protect(records, generation, "nabnab-personal-archive-v1", `nabnab-personal-archive:${generation}`, {
+  media: [photo, video, invalid], messages: [privatePhoto],
+});
+
+const port = process.env.NABNAB_ARCHIVE_DEBUG_PORT || 9269;
+const endpoint = `http://127.0.0.1:${port}`;
+const child = spawn(process.env.NABNAB_ARCHIVE_TEST_EXE || path.join(root, "src-tauri/target/debug/nabnab.exe"), [], {
+  cwd: root, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
+  env: { ...process.env, NABNAB_TEST_DATA_DIR: data, WEBVIEW2_USER_DATA_FOLDER: path.join(data, "webview"),
+    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}` },
+});
+let browser, log = "";
+for (const stream of [child.stdout, child.stderr]) stream.on("data", chunk => { log = (log + chunk).slice(-4000); });
+async function wait(check) {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    if (child.exitCode !== null) throw Error(`nabnab exited ${child.exitCode}.`);
+    try { const result = await check(); if (result) return result; } catch { /* Startup may still be in progress. */ }
+    await new Promise(resolve => setTimeout(resolve, 200));
+  }
+  throw Error("Timed out waiting for the native archive fixture.");
+}
+
+try {
+  browser = await wait(async () => (await fetch(`${endpoint}/json/version`, { signal: AbortSignal.timeout(400) })).ok
+    && await chromium.connectOverCDP(endpoint, { timeout: 2000 }));
+  const page = await wait(() => browser.contexts()[0]?.pages().find(tab => /:1420\/$/.test(tab.url())));
+  const rpc = (command, args) => page.evaluate(async ({ command, args }) => {
+    const { invoke } = await import("/node_modules/@tauri-apps/api/core.js");
+    return invoke(command, args);
+  }, { command, args });
+  const errors = [];
+  page.on("pageerror", error => errors.push(error.message));
+  await page.locator("[data-page='library']").click();
+  await page.locator("[data-section='archives']").click();
+  await page.getByRole("button", { name: /instagram.zip/ }).click();
+  const preview = item => page.locator(`[data-action="archive-media-preview"][data-id="${item.id}"]`);
+  for (const [item, dimensions] of [[photo, [900, 600]], [video, [338, 600]]]) {
+    await preview(item).click();
+    const image = page.getByRole("img", { name: item.title });
+    await image.waitFor();
+    await page.waitForFunction(() => {
+      const image = document.querySelector(".archive-media-stage img");
+      const bounds = image?.getBoundingClientRect();
+      return image?.naturalWidth > 0 && bounds.top >= 0 && bounds.bottom <= innerHeight;
+    });
+    assert.deepEqual(await image.evaluate(node => [node.naturalWidth, node.naturalHeight]), dimensions);
+    await page.screenshot({ path: path.join(data, `${path.parse(item.title).name}-preview.png`) });
+    await page.keyboard.press("Escape");
+    assert.ok(await preview(item).evaluate(button => button === document.activeElement));
+  }
+  await preview(invalid).click();
+  await page.getByRole("alert").filter({ hasText: "No se pudo mostrar la vista previa" }).waitFor();
+  await page.getByRole("button", { name: "Volver a los registros" }).click();
+  const request = (item, category) => ({ id, category, record: item.id, consent: false, request: randomUUID() });
+  await assert.rejects(rpc("personal_archive_preview_media", request(privatePhoto, "messages")), /private category explicitly/);
+  await assert.rejects(rpc("personal_archive_preview_media", request(privatePhoto, "media")), /included in this archive/);
+  await page.locator('[data-action="archive-category"][data-id="messages"]').click();
+  await page.getByRole("button", { name: "Mostrar categoría privada" }).click();
+  await preview(privatePhoto).click();
+  await page.getByRole("img", { name: privatePhoto.title }).waitFor();
+  await page.locator("[data-section='files']").click();
+  await page.locator("[data-section='archives']").click();
+  await page.getByRole("button", { name: "Mostrar categoría privada" }).waitFor();
+  assert.equal(await page.locator(".archive-media-stage img").count(), 0);
+  assert.equal((await readdir(managed)).length, 4);
+  assert.deepEqual(errors, []);
+  console.log(`Verified native previews for a PNG and a seekable MP4, malformed media rejection, private reveal and cleanup in ${data}`);
+} catch (error) {
+  console.error(log);
+  throw error;
+} finally {
+  await browser?.close().catch(() => {});
+  if (child.exitCode === null) {
+    const exited = new Promise(resolve => child.once("exit", resolve));
+    child.kill();
+    await exited;
+  }
+}

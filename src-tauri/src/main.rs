@@ -1345,6 +1345,7 @@ fn main() {
             personal_archive::personal_archive_thread,
             personal_archive::personal_archive_links, personal_archive::personal_archive_export,
             personal_archive::personal_archive_copy_media, personal_archive::personal_archive_remove,
+            personal_archive::preview::personal_archive_preview_media, personal_archive::preview::personal_archive_preview_cancel,
             personal_archive::personal_archive_match,
             library_features::library_favorite,
             library_features::library_bookmark,

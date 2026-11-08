@@ -1,5 +1,6 @@
 mod listening;
 pub(crate) mod parse;
+pub(crate) mod preview;
 
 use crate::{file_sources, library, portable_collections::package, queue, sessions, AppState};
 use parse::{Category, Classification, Format, Provider, Record};
@@ -46,6 +47,7 @@ struct Plan {
 pub struct ArchiveState {
     plan: Mutex<Option<Arc<Plan>>>,
     storage: Mutex<()>,
+    preview: crate::playback_preview::PlaybackRequest,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -432,6 +434,25 @@ fn media_name(source: &str) -> Result<String, String> {
         .filter(|ext| ext.len() <= 5 && ext.bytes().all(|byte| byte.is_ascii_alphanumeric()))
         .ok_or("Unsupported media extension.")?;
     Ok(format!("{:x}.{extension}", Sha256::digest(source)))
+}
+
+fn media_source(
+    state: &AppState,
+    id: &str,
+    category: Category,
+    record: &str,
+    consent: bool,
+) -> Result<String, String> {
+    let (_, rows) = records_for(state, id, category, consent)?;
+    rows.into_iter()
+        .find(|row| row.id == record)
+        .and_then(|row| row.media)
+        .ok_or_else(|| "Choose a media file included in this archive.".into())
+}
+
+fn managed_media(state: &AppState, id: &str, source: &str) -> Result<PathBuf, String> {
+    let root = crate::config_root(state)?;
+    library::authorized_path(&media_dir(&root, id)?.join(media_name(source)?))
 }
 
 #[derive(Deserialize)]
@@ -1180,12 +1201,7 @@ pub async fn personal_archive_copy_media(
     record: String,
     consent: bool,
 ) -> Result<bool, String> {
-    let (_, rows) = records_for(&state, &id, category, consent)?;
-    let source = rows
-        .into_iter()
-        .find(|row| row.id == record)
-        .and_then(|row| row.media)
-        .ok_or("Choose a media file included in this archive.")?;
+    let source = media_source(&state, &id, category, &record, consent)?;
     let filename = source.rsplit('/').next().unwrap_or(&source).to_owned();
     let extension = Path::new(&filename)
         .extension()
@@ -1195,8 +1211,7 @@ pub async fn personal_archive_copy_media(
     let Some(path) = save_as(app, filename, extension).await? else {
         return Ok(false);
     };
-    let root = crate::config_root(&state)?;
-    let input = library::authorized_path(&media_dir(&root, &id)?.join(media_name(&source)?))?;
+    let input = managed_media(&state, &id, &source)?;
     tauri::async_runtime::spawn_blocking(move || {
         let mut input = File::open(input).map_err(|e| e.to_string())?;
         let mut output = new_output(&path)?;

@@ -148,6 +148,17 @@
 .archive-details[open] > :not(summary) { margin-top: 6px; }
 .archive-details summary { width: fit-content; cursor: pointer; color: var(--muted); }
 .archive-text { white-space: pre-wrap; }
+.archive-media-preview { display: grid; gap: 12px; min-width: 0; scroll-margin-block-start: 12px; }
+.archive-media-preview .archive-heading { align-items: center; }
+.archive-media-preview h3 { width: fit-content; max-width: 100%; font-size: 21px; line-height: 1.2; }
+.personal-archives p.archive-media-caption { margin-bottom: 4px; color: var(--muted); font-size: 12px; }
+.archive-media-stage {
+  display: grid; place-items: center; min-width: 0; margin: 0; padding: 8px;
+  border: 1px solid var(--border); border-radius: 14px; background: var(--secondary);
+}
+.archive-media-stage img { display: block; max-width: 100%; max-height: min(55vh, 540px); object-fit: contain; border-radius: 7px; }
+.archive-media-status { min-height: 160px; align-content: center; gap: 10px; padding: 16px; text-align: center; color: var(--muted); }
+.archive-media-status svg { width: 25px; height: 25px; }
 .archive-thread { display: grid; gap: 16px; min-width: 0; }
 .archive-thread-heading { display: grid; gap: 4px; justify-items: start; }
 .archive-thread-heading h3 { font-size: 21px; letter-spacing: -.02em; }
