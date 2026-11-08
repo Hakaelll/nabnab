@@ -612,7 +612,11 @@ fn move_noreplace(verified: &VerifiedFile, to: &Path) -> Result<(), String> {
         use windows_sys::Win32::Storage::FileSystem::{
             FileRenameInfo, SetFileInformationByHandle, FILE_RENAME_INFO,
         };
-        let name: Vec<u16> = to.as_os_str().encode_wide().collect();
+        let name: Vec<u16> = to
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
         let length = offset_of!(FILE_RENAME_INFO, FileName) + name.len() * 2;
         let mut buffer = vec![0u64; (length.max(size_of::<FILE_RENAME_INFO>()) + 7) / 8];
         let info = buffer.as_mut_ptr().cast::<FILE_RENAME_INFO>();
@@ -620,7 +624,7 @@ fn move_noreplace(verified: &VerifiedFile, to: &Path) -> Result<(), String> {
         unsafe {
             (*info).Anonymous.ReplaceIfExists = false;
             (*info).RootDirectory = std::ptr::null_mut();
-            (*info).FileNameLength = (name.len() * 2) as u32;
+            (*info).FileNameLength = ((name.len() - 1) * 2) as u32;
             std::ptr::copy_nonoverlapping(name.as_ptr(), (*info).FileName.as_mut_ptr(), name.len());
             if SetFileInformationByHandle(
                 verified.file.as_raw_handle(),
@@ -951,10 +955,8 @@ mod tests {
         fs::remove_file(&old).unwrap();
         let verified = verify(&repo, &plan.id, true);
         let (_sender, cancel) = watch::channel(false);
-        assert_eq!(
-            undo_rename(&mut repo, verified, cancel).unwrap().state,
-            OperationState::Undone
-        );
+        let undone = undo_rename(&mut repo, verified, cancel).unwrap();
+        assert_eq!(undone.state, OperationState::Undone, "{:?}", undone.error);
         assert_eq!(repo.data.library[0].path, old);
         assert_eq!(repo.data.jobs[0].outputs, vec![old.clone()]);
         assert_eq!(fs::read(&old).unwrap(), b"first contents");
