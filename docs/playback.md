@@ -59,6 +59,8 @@ Con `NABNAB_PLAYBACK_DESKTOP_TRAY=1`, abre el menú nativo de bandeja con audio 
 
 Con `NABNAB_PLAYBACK_DESKTOP_MINI_KEY=1` y la bandeja desactivada, envía **Ctrl + Mayús + M** desde Windows y comprueba el mismo recorrido para audio y vídeo.
 
+Con `NABNAB_PLAYBACK_WINDOWS_MEDIA=1`, la prueba busca la sesión multimedia de los archivos de prueba y verifica la carátula, la pausa, la reanudación, la búsqueda y los saltos de pista con la ventana minimizada. [Controles multimedia de Windows](https://learn.microsoft.com/en-us/uwp/api/windows.media.control.globalsystemmediatransportcontrolssession)
+
 En Windows, compilación 26200, con Intel Iris Xe y ANGLE/D3D11, se observaron 60 FPS en Automática y 30 FPS en Ahorro, en la escena Órbita a 900 × 620 px CSS. Se midieron los fotogramas dibujados durante 2,3 segundos en cada modo, con la música activa y el selector de escenas abierto. Ahorro usó un lienzo interno de 610 × 420 px. Las cifras corresponden a ese equipo y esas condiciones.
 
 El frontend de producción ocupa 2.221.082 bytes, 7.602 menos que `e191ff3` con el mismo compilador. Las 16 vistas previas bajaron de 65.850 a 55.240 bytes. El código de escenas se carga al abrir la vista musical. Se mantuvieron WebView2 y FFmpeg como motores existentes. La medida corresponde al frontend compilado. El instalador requiere su propia medición.

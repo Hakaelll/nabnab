@@ -2,7 +2,7 @@
 
 En **Biblioteca → Audio** puedes alternar entre Música, Podcasts, Audiolibros y Listas. En Música, elige una tarjeta de **Álbumes** para ver sus pistas, ordenadas por disco y número. La estantería usa portadas locales o incrustadas cuando están disponibles. También puedes filtrar por artista, álbum o género. Si un archivo antiguo aparece sin etiquetas, selecciónalo y usa **Leer etiquetas pendientes**.
 
-El minirreproductor permanece visible al cambiar de sección. La cola **A continuación** es independiente de Descargas. En música, puedes activar el modo aleatorio y alternar entre repetir toda la cola o repetir una pista. Las teclas multimedia usan los controles que expone Media Session en el WebView. Las carátulas incrustadas utilizan la caché de miniaturas de nabnab.
+El minirreproductor permanece visible al cambiar de sección. La cola **A continuación** es independiente de Descargas. En música, puedes activar el modo aleatorio y alternar entre repetir toda la cola o repetir una pista. Los controles multimedia de Windows muestran el título, el artista y la carátula disponible. Utilizan la misma cola aunque la ventana principal esté minimizada.
 
 En **Ajustes → Sesiones y privacidad → Caché de miniaturas** puedes ver cuánto ocupan las carátulas y otras miniaturas generadas. nabnab retira las más antiguas al superar 512 imágenes o 128 MiB. **Vaciar miniaturas…** pide confirmación. Las imágenes se generan de nuevo al necesitarlas.
 
@@ -16,7 +16,7 @@ Desde la pista actual, **Elegir portada** permite asociar un JPEG, PNG o WebP lo
 
 En **Listas → Importar lista** puedes abrir M3U, M3U8, PLS o CSV en UTF-8. En CSV, confirma las columnas y la unidad de duración. nabnab reconoce identificadores y rutas de archivos que ya están en Biblioteca. Las coincidencias por título, artista, duración o versión son sugerencias. Puedes escoger la grabación o conservar la referencia remota o ausente. La lista conserva el orden y las URLs importadas permanecen como referencias.
 
-La prueba de interfaz reproduce un WAV silencioso en Edge con almacenamiento de escritorio simulado. Comprueba el orden por disco y pista, la estantería con teclado, la continuidad del reproductor, el descanso de audiolibros, las letras y la edición de listas y etiquetas. La prueba nativa usa audio sintético y verifica que, después de reiniciar nabnab, **Continuar** abre el capítulo siguiente de un libro cuyo capítulo anterior terminó. Las teclas físicas del sistema requieren una prueba en el WebView de escritorio.
+La prueba de interfaz reproduce un WAV silencioso en Edge con almacenamiento de escritorio simulado. Comprueba el orden por disco y pista, la estantería con teclado, la continuidad del reproductor, el descanso de audiolibros, las letras y la edición de listas y etiquetas. La prueba nativa usa audio sintético y verifica que, después de reiniciar nabnab, **Continuar** abre el capítulo siguiente de un libro cuyo capítulo anterior terminó. La integración con Windows se comprueba mediante solicitudes del sistema a la sesión multimedia de prueba.
 
 ![Biblioteca de audio y minirreproductor persistente con datos de prueba](audio-library-preview.png)
 

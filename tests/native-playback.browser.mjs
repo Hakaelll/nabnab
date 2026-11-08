@@ -13,6 +13,8 @@ await mkdir(output);
 const desktopGesture = process.env.NABNAB_PLAYBACK_DESKTOP_GESTURE === "1";
 const desktopTray = process.env.NABNAB_PLAYBACK_DESKTOP_TRAY === "1";
 const desktopMiniKey = process.env.NABNAB_PLAYBACK_DESKTOP_MINI_KEY === "1";
+const windowsMedia = process.env.NABNAB_PLAYBACK_WINDOWS_MEDIA === "1";
+const fixtureArtist = windowsMedia ? `Laboratorio nabnab · ${path.basename(data)}` : "Laboratorio nabnab";
 const { chromium } = createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODULE || "playwright");
 const port = process.env.NABNAB_PLAYBACK_DEBUG_PORT || 9254;
 const endpoint = `http://127.0.0.1:${port}`;
@@ -45,10 +47,11 @@ encode("-i", video, "-t", "2", "-c", "copy", missing);
 encode("-f", "lavfi", "-i", "color=c=#354551:s=100x100", "-frames:v", "1", picture);
 encode("-f", "lavfi", "-i", "aevalsrc=if(between(t\\,4\\,10)\\,0\\,sin(2*PI*82*t)*(0.14+0.30*pow(0.5+0.5*cos(2*PI*2*t)\\,8))+0.13*sin(2*PI*540*t)+0.08*sin(2*PI*4800*t)*(0.5+0.5*sin(2*PI*1.7*t))):d=50", "-i", picture,
   "-map", "0:a", "-map", "1:v", "-c:a", "libmp3lame", "-c:v", "copy", "-disposition:v", "attached_pic",
-  "-metadata", "title=Señal para la cola", "-metadata", "artist=Laboratorio nabnab", music);
+  "-metadata", "title=Señal para la cola", "-metadata", `artist=${fixtureArtist}`, music);
 encode("-f", "lavfi", "-i", "testsrc2=size=720x248:rate=20:duration=6", "-f", "lavfi",
   "-i", "sine=frequency=550:duration=6", "-c:v", "libvpx-vp9", "-deadline", "realtime", "-c:a", "libopus", "-shortest", webm);
-for (const { file, codec } of audioSamples) encode("-f", "lavfi", "-i", "aevalsrc=(0.1+0.5*pow(0.5+0.5*cos(2*PI*3.5*t)\\,6))*sin(2*PI*550*t):d=10", "-c:a", codec, file);
+for (const { file, codec } of audioSamples) encode("-f", "lavfi", "-i", "aevalsrc=(0.1+0.5*pow(0.5+0.5*cos(2*PI*3.5*t)\\,6))*sin(2*PI*550*t):d=10", "-c:a", codec,
+  ...(windowsMedia && file === audioSamples[1].file ? ["-metadata", `artist=${fixtureArtist}`] : []), file);
 await writeFile(broken, "Archivo de prueba sin contenedor de vídeo.");
 await writeFile(captions, "WEBVTT\n\n00:00:04.000 --> 00:00:09.000\nTexto local &lt;b&gt;seguro&lt;/b&gt;\n");
 await writeFile(subtitles, "1\n00:00:04,000 --> 00:00:09,000\nSecond local track\n");
@@ -581,6 +584,81 @@ async function openMiniFromDesktop(kind, original, trigger) {
   console.log(`Opened the ${kind} mini player using ${trigger} while the main window stayed minimized.`);
 }
 
+function windowsMediaControl(title, operation = "status") {
+  const output = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `
+    $ErrorActionPreference = 'Stop'
+    [Console]::OutputEncoding = [Text.UTF8Encoding]::new()
+    Add-Type -AssemblyName System.Runtime.WindowsRuntime
+    $managerType = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager,Windows.Media.Control,ContentType=WindowsRuntime]
+    $mediaType = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionMediaProperties,Windows.Media.Control,ContentType=WindowsRuntime]
+    $asTask = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
+      $_.Name -eq 'AsTask' -and $_.IsGenericMethod -and $_.GetParameters().Count -eq 1
+    } | Where-Object { $_.GetParameters()[0].ParameterType.Name -like 'IAsyncOperation?1' } | Select-Object -First 1
+    function Wait-Operation($operation, [type]$resultType) {
+      $asTask.MakeGenericMethod($resultType).Invoke($null,@($operation)).GetAwaiter().GetResult()
+    }
+    $manager = Wait-Operation ($managerType::RequestAsync()) $managerType
+    foreach ($session in $manager.GetSessions()) {
+      if ($session.SourceAppUserModelId -ne 'msedgewebview2.exe') { continue }
+      $media = Wait-Operation ($session.TryGetMediaPropertiesAsync()) $mediaType
+      if ($media.Title -ne $env:NABNAB_TEST_MEDIA_TITLE -or $media.Artist -ne $env:NABNAB_TEST_MEDIA_ARTIST) { continue }
+      $accepted = switch ($env:NABNAB_TEST_MEDIA_OPERATION) {
+        'pause' { Wait-Operation ($session.TryPauseAsync()) ([bool]) }
+        'play' { Wait-Operation ($session.TryPlayAsync()) ([bool]) }
+        'next' { Wait-Operation ($session.TrySkipNextAsync()) ([bool]) }
+        'previous' { Wait-Operation ($session.TrySkipPreviousAsync()) ([bool]) }
+        'seek' { Wait-Operation ($session.TryChangePlaybackPositionAsync(0)) ([bool]) }
+      }
+      [pscustomobject]@{ artist=$media.Artist; cover=$null -ne $media.Thumbnail; accepted=$accepted } | ConvertTo-Json -Compress
+      break
+    }
+  `], {
+    encoding: "utf8", windowsHide: true, timeout: 8000,
+    env: { ...process.env, NABNAB_TEST_MEDIA_TITLE: title, NABNAB_TEST_MEDIA_ARTIST: fixtureArtist, NABNAB_TEST_MEDIA_OPERATION: operation },
+  }).trim();
+  return output ? JSON.parse(output) : null;
+}
+
+async function verifyWindowsMedia(covered, plain) {
+  const title = track => track.details?.audio?.title || path.parse(track.name).name;
+  for (const item of [covered, plain]) await page.locator(`[data-select-media="${item.id}"]`).check();
+  await play(covered.id);
+  const engine = await page.locator("#audio-engine").elementHandle();
+  await wait(async () => (await playing()).id === covered.id && !(await playing()).paused);
+  await wait(() => windowsMediaControl(title(covered))?.cover);
+  assert.equal(windowsMediaControl(title(covered)).artist, covered.details.audio.artist);
+  const cursor = await page.evaluate(() => JSON.parse(localStorage.getItem("nabnab.playback.v1")).queue.cursor);
+  const forward = cursor === 0 ? "next" : "previous";
+  const backward = cursor === 0 ? "previous" : "next";
+  windowCommand("minimize");
+  await wait(mainMinimized);
+  try {
+    assert.equal(windowsMediaControl(title(covered), "pause")?.accepted, true);
+    await wait(async () => (await playing()).paused);
+    assert.equal(windowsMediaControl(title(covered), "play")?.accepted, true);
+    await wait(async () => !(await playing()).paused);
+    assert.equal(windowsMediaControl(title(covered), "seek")?.accepted, true);
+    await wait(async () => (await playing()).time < 1);
+    assert.equal(windowsMediaControl(title(covered), forward)?.accepted, true);
+    await wait(async () => (await playing()).id === plain.id && !(await playing()).paused);
+    const withoutCover = await wait(() => windowsMediaControl(title(plain)));
+    assert.equal(withoutCover.cover, false);
+    assert.equal(windowsMediaControl(title(plain), "seek")?.accepted, true);
+    await wait(async () => (await playing()).time < 1);
+    assert.equal(windowsMediaControl(title(plain), backward)?.accepted, true);
+    await wait(async () => (await playing()).id === covered.id && !(await playing()).paused);
+    assert.equal(await engine.evaluate(element => element === document.getElementById("audio-engine")), true);
+    assert.equal(await mainMinimized(), true);
+    await page.locator("#audio-close").evaluate(button => button.click());
+    await wait(() => windowsMediaControl(title(covered)) === null);
+  } finally {
+    windowCommand("restore");
+    await wait(async () => !await mainMinimized());
+  }
+  await page.locator('[data-action="clear-library-selection"]').click();
+  console.log("Windows published local artwork and controlled pause, resume, seek and both queue directions while minimized.");
+}
+
 async function verifyDesktopWheel(original, selectedTracks) {
   const overlay = await wait(() => browser.contexts()[0]?.pages().find(tab => tab.url().includes("/quick-skip.html")));
   overlay.on("pageerror", error => { log += `\nQuick Skip: ${error.message}`; });
@@ -880,6 +958,7 @@ try {
     await page.screenshot({ path: path.join(output, "desktop-mini-settings.png"), animations: "disabled" });
   }
   await page.locator('[data-page="library"]').click();
+  if (windowsMedia) await verifyWindowsMedia(item(music), item(audioSamples[1].file));
   await page.locator(`.media-details[data-id="${videoId}"]`).click();
   await page.locator('[data-action="close-inspector"]:visible').click();
   await page.locator(`.media-open[data-id="${videoId}"]`).dblclick();
@@ -1055,7 +1134,7 @@ try {
   const graphics = () => page.evaluate(() => window.sceneProbe);
   await wait(async () => (await graphics()).signal[3] > 0.25);
   await wait(async () => page.locator(".music-identity .audio-cover img").count());
-  assert.deepEqual(await page.locator(".music-identity p").allTextContents(), ["Laboratorio nabnab"]);
+  assert.deepEqual(await page.locator(".music-identity p").allTextContents(), [fixtureArtist]);
   await page.mouse.move(220, 150);
   assert.ok(await stage().locator(".stage-toolbar").evaluate(bar => {
     const toggle = bar.querySelector("#stage-toggle").getBoundingClientRect();

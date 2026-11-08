@@ -1,7 +1,7 @@
 import { escapeHtml as h, localMediaUrl, type Copy, type LibraryItem } from "./contracts";
 import { detailsFor } from "./library-features";
 import type { AudioPlaylist, LocalTrack } from "./library-types";
-import { createMiniPlayer, playerArtist } from "./mini-player";
+import { createMiniPlayer, hasPlayerArtwork, playerArtist } from "./mini-player";
 import type { createSceneControls } from "./music-scene-controls";
 import { audiobookResumePosition, isPlayable, playbackRates, readPlayback, resumePosition, savePlayback } from "./playback-preferences";
 import { connectPlaybackSignal } from "./playback-signal";
@@ -89,7 +89,7 @@ export function createAudioPlayer(hooks: Hooks) {
       if (!isPlayable(item)) return [];
       return [{
         position, id: item.id, title: audioTitle(item), artist: playerArtist(item),
-        artwork: Boolean(item.kind === "video" || item.details?.audioCover || item.details?.audio?.embeddedCover),
+        artwork: hasPlayerArtwork(item),
       }];
     });
   }
@@ -442,7 +442,7 @@ export function createAudioPlayer(hooks: Hooks) {
       `<button id="audio-${id}" class="${symbol ? "icon-button" : "button quiet"}" type="button" data-action="audio-player-${id}" aria-label="${h(text)}" title="${h(text)}" ${attributes}>${symbol ? icon(symbol) : h(text)}</button>`;
     transport.innerHTML = `
       <button id="audio-open" class="audio-open" type="button" data-action="audio-player-open" title="${h(item.kind === "video" ? t("Abrir vídeo", "Open video") : t("Abrir visualización", "Open visualization"))}">
-        <span class="audio-cover" aria-hidden="true"${item.details?.audioCover || item.details?.audio?.embeddedCover || item.kind === "video" ? ` data-thumbnail-id="${h(item.id)}"` : ""}>${icon(item.kind === "video" ? "video" : "audio")}</span>
+        <span class="audio-cover" aria-hidden="true"${hasPlayerArtwork(item) ? ` data-thumbnail-id="${h(item.id)}"` : ""}>${icon(item.kind === "video" ? "video" : "audio")}</span>
         <span class="audio-playing-label"><strong>${h(title)}</strong>${subtitle ? `<small>${h(subtitle)}</small>` : ""}</span>
       </button>
       <div class="audio-timeline"><div class="audio-transport-controls">
@@ -477,10 +477,17 @@ export function createAudioPlayer(hooks: Hooks) {
   function mediaSession(item: LibraryItem) {
     if (!("mediaSession" in navigator)) return;
     if (typeof MediaMetadata !== "undefined") {
-      navigator.mediaSession.metadata = new MediaMetadata({
+      const metadata = new MediaMetadata({
         title: audioTitle(item), artist: item.details?.audio?.artist ?? item.details?.creator ?? "",
         album: item.details?.audio?.album ?? item.details?.audiobook?.bookTitle ?? "",
       });
+      navigator.mediaSession.metadata = metadata;
+      if (hasPlayerArtwork(item)) {
+        void hooks.command<string>("thumbnail", { id: item.id }).then(src => {
+          if (navigator.mediaSession.metadata !== metadata) return;
+          metadata.artwork = [{ src, type: "image/jpeg" }];
+        }).catch(() => { /* Playback remains available without an image. */ });
+      }
     }
     const actions: [MediaSessionAction, MediaSessionActionHandler][] = [
       ["play", () => { void playMedia(); }], ["pause", () => media?.pause()],

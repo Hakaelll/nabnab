@@ -8,10 +8,12 @@ export function playerButton(id: string, label: string, symbol: Parameters<typeo
   return `<button id="${id}" type="button" class="stage-button" aria-label="${h(label)}" title="${h(label)}" ${extra}>${icon(symbol)}${caption ? `<span>${h(caption)}</span>` : ""}</button>`;
 }
 
+export function hasPlayerArtwork(item: LibraryItem): boolean {
+  return Boolean(item.kind === "video" || item.details?.audioCover || item.details?.audio?.embeddedCover);
+}
+
 export function playerArtwork(item: LibraryItem) {
-  const video = item.kind === "video";
-  const thumbnail = video || item.details?.audioCover || item.details?.audio?.embeddedCover;
-  return `<span class="audio-cover" aria-hidden="true"${thumbnail ? ` data-thumbnail-id="${h(item.id)}"` : ""}>${icon(video ? "video" : "record")}</span>`;
+  return `<span class="audio-cover" aria-hidden="true"${hasPlayerArtwork(item) ? ` data-thumbnail-id="${h(item.id)}"` : ""}>${icon(item.kind === "video" ? "video" : "record")}</span>`;
 }
 
 export function playerArtist(item: LibraryItem) {
