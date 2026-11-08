@@ -4,6 +4,8 @@ Biblioteca, descargas y marcadores usan una sesión con un elemento multimedia e
 
 El vídeo abre una vista de borde a borde con ajuste de proporción, subtítulos locales, velocidad, volumen y pantalla completa. Los controles se ocultan durante la reproducción y vuelven con el puntero o el teclado. La barra distingue la preparación indeterminada del progreso temporal. Volver de esta vista pausa el vídeo y conserva su posición en la barra compacta. La cola y las preferencias se restauran en pausa al reiniciar. Las posiciones inferiores a tres segundos o dentro del tramo final del archivo no se ofrecen para reanudar.
 
+Usa **↑** y **↓** para subir o bajar el volumen cinco puntos en vídeo o música. En el reproductor compacto, el atajo funciona cuando el foco está en la barra. Los controles de formulario mantienen su manejo habitual con las flechas.
+
 | Muestra verificada en Windows | Resultado |
 | --- | --- |
 | MP4 vertical, H.264 y AAC, 360 × 640 | Vídeo, búsqueda temporal y reanudación |
@@ -15,7 +17,9 @@ El vídeo abre una vista de borde a borde con ajuste de proporción, subtítulos
 | MP4 dañado | Error recuperable con conversión explícita o apertura en Windows |
 | MP4 movido tras importarlo | Aviso de archivo no disponible |
 
-La matriz corresponde a archivos reales. El MP4 de prueba incluía dos pistas AAC, en español e inglés. El WebView2 probado no expuso `audioTracks`, por lo que en ese equipo no apareció el selector de pistas integradas. Los subtítulos SRT y VTT locales se renderizan como texto, con ajuste de tamaño, contraste y desfase.
+En **Opciones de reproducción → Pista de audio** aparecen el nombre y el idioma declarados por el archivo. Se usa el selector del motor cuando está disponible. En MP4 y M4V locales no fragmentados, nabnab también puede seleccionar audio cuando WebView2 no ofrece ese selector. La reproducción usa el mismo elemento y los datos del original. Al cambiar de pista hay una breve recarga y se recuperan la posición, la velocidad, el volumen y el estado de pausa. Los códecs disponibles dependen de WebView2. [Estructura de las pistas de un archivo MP4](https://developer.apple.com/documentation/quicktime-file-format/track_atom)
+
+Los subtítulos SRT y VTT locales se renderizan como texto, con ajuste de tamaño, contraste y desfase.
 
 En Windows, **Subtítulos → Cargar ASS o SSA con estilos** abre un archivo local en UTF-8 de hasta 2 MiB. Al abrir el panel en un MKV, el grupo **Integradas · con estilos** muestra las pistas ASS/SSA con el título e idioma que declare el archivo. Al elegir una, FFmpeg copia el subtítulo a memoria con el mismo límite de 2 MiB. Las otras pistas integradas dependen de lo que exponga WebView2. [Selección de pistas en FFmpeg](https://github.com/FFmpeg/FFmpeg/blob/master/doc/ffmpeg.texi)
 
@@ -47,4 +51,4 @@ El frontend de producción ocupa 2.221.082 bytes, 7.602 menos que `e191ff3` con 
 
 Las pruebas de navegador de audio y biblioteca cubren las listas, los capítulos, los marcadores y la búsqueda de subtítulos.
 
-[Vídeo con controles](playback/video-controls.png) · [Vídeo con los controles ocultos](playback/video-clean.png) · [Subtítulos ASS externos](playback/video-ass.png) · [Subtítulos integrados en MKV](playback/video-embedded.png) · [Previsualización al buscar](playback/video-seek.png) · [Música a 900 px](playback/music.png) · [Selector de escenas](playback/scenes.png) · [Barra compacta a 900 px](playback/compact.png)
+[Vídeo con controles](playback/video-controls.png) · [Pistas de audio](playback/video-audio-tracks.png) · [Vídeo con los controles ocultos](playback/video-clean.png) · [Subtítulos ASS externos](playback/video-ass.png) · [Subtítulos integrados en MKV](playback/video-embedded.png) · [Previsualización al buscar](playback/video-seek.png) · [Música a 900 px](playback/music.png) · [Selector de escenas](playback/scenes.png) · [Barra compacta a 900 px](playback/compact.png)

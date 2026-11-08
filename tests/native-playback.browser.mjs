@@ -36,7 +36,8 @@ function encode(...args) {
 encode("-f", "lavfi", "-i", "testsrc2=size=360x640:rate=24:duration=22",
   "-f", "lavfi", "-i", "sine=frequency=440:duration=22", "-f", "lavfi", "-i", "sine=frequency=660:duration=22",
   "-map", "0:v:0", "-map", "1:a:0", "-map", "2:a:0", "-c:v", "libopenh264", "-c:a", "aac",
-  "-metadata:s:a:0", "language=spa", "-metadata:s:a:1", "language=eng", "-shortest", video);
+  "-metadata:s:a:0", "language=spa", "-metadata:s:a:0", "handler_name=Castellano",
+  "-metadata:s:a:1", "language=eng", "-metadata:s:a:1", "handler_name=Original", "-shortest", video);
 encode("-i", video, "-t", "2", "-c", "copy", missing);
 encode("-f", "lavfi", "-i", "color=c=#354551:s=100x100", "-frames:v", "1", picture);
 encode("-f", "lavfi", "-i", "aevalsrc=if(between(t\\,4\\,10)\\,0\\,sin(2*PI*82*t)*(0.14+0.30*pow(0.5+0.5*cos(2*PI*2*t)\\,8))+0.13*sin(2*PI*540*t)+0.08*sin(2*PI*4800*t)*(0.5+0.5*sin(2*PI*1.7*t))):d=50", "-i", picture,
@@ -240,6 +241,57 @@ async function verifyEmbeddedCaptions(engine, video) {
   await select.selectOption("");
   await canvas.waitFor({ state: "hidden" });
   console.log("Native Matroska captions retained language, colors, layers and motion while switching styles in the same paused video.");
+}
+
+async function verifyAudioTracks(engine, videoId) {
+  const source = await readFile(video);
+  const before = await playing();
+  await play(videoId);
+  await clickStage("resume");
+  await wait(async () => {
+    const current = await playing();
+    return current.id === videoId && !current.paused && current.time > 10;
+  });
+  await clickStage("toggle");
+  await clickStage("options");
+  const select = stage().locator("#stage-audio-track");
+  await select.locator("option").filter({ hasText: "Original · inglés" }).waitFor({ state: "attached" });
+  const time = (await playing()).time;
+  const frequency = async expected => {
+    let actual;
+    try {
+      await wait(async () => {
+        actual = await page.evaluate(() => ({
+          hz: window.playbackFrequency?.(),
+          decoded: document.querySelector("video").webkitAudioDecodedByteCount,
+          audio: document.querySelector("video").audioTracks?.length,
+        }));
+        return Math.abs(actual.hz - expected) < 12;
+      }, 4500);
+    } catch (cause) {
+      throw Error(`Expected audio at ${expected} Hz, observed ${JSON.stringify(actual)}`, { cause });
+    }
+  };
+  await select.focus();
+  await select.selectOption({ label: "Original · inglés" });
+  await wait(async () => await select.isEnabled() && /\?audio=3$/.test((await playing()).src));
+  assert.ok(Math.abs((await playing()).time - time) < 0.08);
+  assert.equal((await playing()).paused, true);
+  assert.equal(await select.evaluate(element => element === document.activeElement), true);
+  await page.screenshot({ path: path.join(base, "video-audio-tracks.png"), animations: "disabled" });
+  await clickStage("toggle");
+  await frequency(660);
+  await select.selectOption({ label: "Predeterminada del archivo" });
+  await wait(async () => await select.isEnabled() && !/\?audio=/.test((await playing()).src) && !(await playing()).paused);
+  await frequency(440);
+  const after = await playing();
+  assert.equal(after.rate, before.rate);
+  assert.equal(after.volume, before.volume);
+  assert.equal(after.width, 360);
+  assert.equal(await engine.evaluate(element => element === document.getElementById("audio-engine")), true);
+  assert.deepEqual(await readFile(video), source);
+  await clickStage("back");
+  console.log("WebView2 decoded both audio tracks at their original frequencies and restored the same position and player.");
 }
 
 async function seedPlaybackFixtures(videoId, audioId, handoutId, bookIds) {
@@ -513,6 +565,23 @@ try {
   page.on("pageerror", error => errors.push(error.message));
   const av1 = await av1Fixture();
   await page.addInitScript(() => {
+    const createSource = AudioContext.prototype.createMediaElementSource;
+    AudioContext.prototype.createMediaElementSource = function (element) {
+      const source = createSource.call(this, element);
+      const analyser = this.createAnalyser();
+      analyser.fftSize = 8192;
+      analyser.smoothingTimeConstant = 0;
+      const silence = new GainNode(this, { gain: 0 });
+      source.connect(analyser).connect(silence).connect(this.destination);
+      const levels = new Float32Array(analyser.frequencyBinCount);
+      window.playbackFrequency = () => {
+        analyser.getFloatFrequencyData(levels);
+        let peak = 1;
+        for (let index = 2; index < levels.length; index++) if (levels[index] > levels[peak]) peak = index;
+        return levels[peak] > -85 ? peak * analyser.context.sampleRate / analyser.fftSize : 0;
+      };
+      return source;
+    };
     const locations = new WeakMap();
     const proto = WebGL2RenderingContext.prototype;
     const location = proto.getUniformLocation, uniform4 = proto.uniform4f, uniform1 = proto.uniform1f, draw = proto.drawArrays;
@@ -614,6 +683,17 @@ try {
   assert.equal((await playing()).muted, true);
   await clickStage("mute");
   assert.equal((await playing()).volume, 0.36);
+  await stage().focus();
+  await page.keyboard.press("ArrowUp");
+  assert.equal((await playing()).volume, 0.41);
+  assert.equal(await stage().locator(".stage-feedback").innerText(), "41%");
+  await page.keyboard.press("ArrowDown");
+  assert.equal((await playing()).volume, 0.36);
+  const volume = stage().locator("#stage-volume");
+  await volume.press("ArrowUp");
+  assert.equal((await playing()).volume, 0.37);
+  await volume.press("ArrowDown");
+  assert.equal((await playing()).volume, 0.36);
   const geometry = await page.evaluate(() => [innerWidth, innerHeight]);
   const fullscreen = () => page.evaluate(async () => {
     const { getCurrentWindow } = await import("/node_modules/@tauri-apps/api/window.js");
@@ -628,6 +708,10 @@ try {
   const before = await playing();
   await clickStage("back");
   await stage().waitFor({ state: "hidden" });
+  await page.locator("#audio-toggle").press("ArrowDown");
+  assert.equal((await playing()).volume, 0.31);
+  await page.locator("#audio-toggle").press("ArrowUp");
+  assert.equal((await playing()).volume, 0.36);
   await page.locator("#audio-open").click();
   await stage().waitFor();
   assert.equal(await original.evaluate(element => element === document.getElementById("audio-engine")), true);
@@ -801,6 +885,7 @@ try {
     assert.ok(current.time >= continuous.time);
   }
   if (process.env.NABNAB_PLAYBACK_LIVE_DOWNLOAD === "1") await downloadDuringPlayback(musicId);
+  await verifyAudioTracks(original, videoId);
 
   for (const file of [webm, mkv, ...(av1 ? [av1] : [])]) {
     await play(item(file).id);

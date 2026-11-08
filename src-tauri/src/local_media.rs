@@ -1,4 +1,4 @@
-use crate::{library, AppState};
+use crate::{library, playback_audio, AppState};
 use std::{
     fs::File,
     io::{Read, Seek, SeekFrom},
@@ -71,6 +71,18 @@ pub fn serve(app: &AppHandle, request: Request<Vec<u8>>) -> Response<Vec<u8>> {
     }
     let raw_path = request.uri().path().trim_start_matches('/');
     let thumbnail = raw_path.starts_with("thumbnail/");
+    let audio = match request.uri().query() {
+        Some(query) if !thumbnail => {
+            let Some(id) = query
+                .strip_prefix("audio=")
+                .and_then(|value| value.parse::<u32>().ok())
+            else {
+                return response(404, vec![]);
+            };
+            Some(id)
+        }
+        _ => None,
+    };
     let id = if thumbnail {
         raw_path.trim_start_matches("thumbnail/")
     } else {
@@ -92,7 +104,7 @@ pub fn serve(app: &AppHandle, request: Request<Vec<u8>>) -> Response<Vec<u8>> {
                     if thumbnail {
                         crate::support::thumbnail_path(&r.root().join("thumbnail-cache"), item).ok()
                     } else {
-                        Some(item.path.clone())
+                        (audio.is_none() || item.kind == "video").then(|| item.path.clone())
                     }
                 })
             })
@@ -111,6 +123,17 @@ pub fn serve(app: &AppHandle, request: Request<Vec<u8>>) -> Response<Vec<u8>> {
     if size == 0 {
         return response(404, vec![]);
     }
+    let patch = if let Some(track) = audio {
+        if !playback_audio::supported(&path) {
+            return response(404, vec![]);
+        }
+        let Ok(offsets) = playback_audio::audio_patch(&mut file, size, track) else {
+            return response(404, vec![]);
+        };
+        offsets
+    } else {
+        Vec::new()
+    };
     let Ok((start, end)) = range(
         request.headers().get("Range").and_then(|v| v.to_str().ok()),
         size,
@@ -150,6 +173,7 @@ pub fn serve(app: &AppHandle, request: Request<Vec<u8>>) -> Response<Vec<u8>> {
         {
             return response(500, vec![]);
         }
+        playback_audio::apply_audio_patch(&mut data, start, patch);
     }
     let mut builder = Response::builder()
         .status(

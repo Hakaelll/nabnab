@@ -7,6 +7,7 @@ import { createStyledCaptions } from "./styled-captions";
 import { icon, option, type Icon } from "./views-common";
 
 interface AudioTrack { label: string; language: string; enabled: boolean }
+interface Mp4AudioTrack { id: number; language: string | null; title: string | null; codec: string | null }
 interface EmbeddedCaption { index: number; codec: "ASS" | "SSA"; title: string | null; language: string | null }
 type MediaTracks = HTMLVideoElement & { audioTracks?: EventTarget & ArrayLike<AudioTrack> };
 type Panel = "options" | "captions" | "scenes" | "queue" | "track" | null;
@@ -19,6 +20,7 @@ interface Hooks {
   resume(fromStart: boolean): void;
   mute(): void;
   volume(value: number): void;
+  stepVolume(direction: 1 | -1): void;
   sound(): { muted: boolean; volume: number };
   rate(value: number): void;
   preference(key: "fill" | "captionContrast" | "autoplay", value: boolean): void;
@@ -33,6 +35,8 @@ interface Hooks {
   trackInfo(item: LibraryItem): string;
   sceneControls(): void;
   command<T>(name: string, args: Record<string, unknown>): Promise<T>;
+  audioSelection(): number | null;
+  switchAudio(track: number | null): Promise<boolean | undefined>;
   t: Copy;
 }
 
@@ -89,6 +93,10 @@ export function createPlaybackStage(host: HTMLElement, media: HTMLVideoElement, 
   let embeddedCaptions: EmbeddedCaption[] | undefined;
   let embeddedRequest = "";
   let embeddedStatus = "";
+  let alternateAudio: Mp4AudioTrack[] | undefined;
+  let audioInspection: symbol | undefined;
+  let audioChanging: symbol | undefined;
+  let audioNotice = "";
   let captionSize: PlaybackPreferences["captionSize"] = "normal";
   let language = "und";
 
@@ -104,6 +112,72 @@ export function createPlaybackStage(host: HTMLElement, media: HTMLVideoElement, 
     styledStatus = message;
     const status = find("#stage-styled-status");
     if (status) { status.textContent = message; status.hidden = !message; }
+  }
+
+  function syncAudioOptions() {
+    const section = find("#stage-audio-options");
+    if (!section) return;
+    const native = audioTracks();
+    const tracks = native.length > 1 ? native : alternateAudio ?? [];
+    const focused = document.activeElement?.id === "stage-audio-track";
+    section.hidden = !tracks.length && !audioNotice && !audioInspection;
+    if (section.hidden) return;
+    const languages = new Intl.DisplayNames([t("es", "en")], { type: "language" });
+    const name = (index: number) => `${t("Pista", "Track")} ${index + 1}`;
+    const selected = hooks.audioSelection();
+    const choices = native.length > 1
+      ? native.map((track, index) => option(String(index), [track.label, track.language].filter(Boolean).join(" · ") || name(index), String(native.findIndex(track => track.enabled))))
+      : [option("", t("Predeterminada del archivo", "File default"), String(selected ?? "")),
+        ...(alternateAudio ?? []).map((track, index) => {
+          const language = track.language ? languages.of(track.language) : null;
+          const title = [track.title, language].filter(Boolean).join(" · ") || name(index);
+          const supported = track.codec && media.canPlayType(`audio/mp4; codecs="${track.codec}"`);
+          return supported ? option(String(track.id), title, String(selected ?? ""))
+            : `<option disabled>${h(`${title} · ${t("No compatible", "Unsupported")}`)}</option>`;
+        })];
+    section.innerHTML = `<label for="stage-audio-track"><span class="stage-audio-heading">${icon("audio")}<strong>${t("Pista de audio", "Audio track")}</strong>
+      ${tracks.length > 1 ? `<small aria-hidden="true">${tracks.length}</small>` : ""}</span>
+      ${tracks.length > 1 ? `<select id="stage-audio-track" ${audioChanging ? "disabled" : ""}>${choices.join("")}</select>` : ""}</label>
+      <p role="status" class="stage-caption-status" ${audioNotice || audioInspection ? "" : "hidden"}>${h(audioNotice || t("Buscando pistas de audio…", "Looking for audio tracks…"))}</p>`;
+    if (focused) find("#stage-audio-track")?.focus({ preventScroll: true });
+  }
+
+  async function inspectAudio() {
+    if (item?.kind !== "video" || !/\.(?:mp4|m4v)$/i.test(item.path) || audioTracks().length > 1 || alternateAudio || audioInspection) return;
+    const request = Symbol();
+    audioInspection = request;
+    audioNotice = "";
+    syncAudioOptions();
+    try {
+      const result = await hooks.command<Mp4AudioTrack[]>("playback_audio_tracks", { id: item.id });
+      if (audioInspection === request) alternateAudio = result;
+    } catch {
+      if (audioInspection === request) audioNotice = t("No se pudieron leer las pistas de audio.", "Could not read audio tracks.");
+    } finally {
+      if (audioInspection === request) { audioInspection = undefined; syncAudioOptions(); }
+    }
+  }
+
+  async function chooseAudio(value: string) {
+    const native = audioTracks();
+    if (native.length > 1) {
+      native.forEach((track, index) => { track.enabled = index === Number(value); });
+      return;
+    }
+    const track = value ? alternateAudio?.find(candidate => String(candidate.id) === value) : null;
+    if (audioChanging || track === undefined) return;
+    const request = Symbol();
+    const focused = document.activeElement?.id === "stage-audio-track";
+    audioChanging = request;
+    audioNotice = t("Cambiando pista de audio…", "Switching audio track…");
+    syncAudioOptions();
+    const changed = await hooks.switchAudio(track?.id ?? null);
+    if (audioChanging !== request) return;
+    audioChanging = undefined;
+    audioNotice = changed === false ? t("No se pudo cambiar la pista de audio.", "Could not switch the audio track.") : "";
+    if (!active) return;
+    syncAudioOptions();
+    if (focused && panel === "options" && document.activeElement === document.body) find("#stage-audio-track")?.focus({ preventScroll: true });
   }
 
   function closeStyled() {
@@ -315,18 +389,20 @@ export function createPlaybackStage(host: HTMLElement, media: HTMLVideoElement, 
     const title = music ? hooks.musicTitle(current) : current.name.replace(/\.[^.]+$/, "");
     host.dataset.kind = music ? "music" : "video";
     resumeAt = progress;
-    if (fresh) { closeStyled(); caption = ""; lastCaption = ""; offset = 0; language = "und"; panel = null; }
+    if (fresh) {
+      closeStyled(); caption = ""; lastCaption = ""; offset = 0; language = "und"; panel = null;
+      alternateAudio = undefined; audioInspection = undefined; audioChanging = undefined; audioNotice = "";
+    }
     const chapterOptions = (item.details?.chapters ?? []).map(chapter => option(String(chapter.start),
       `${durationLabel(chapter.start)} · ${chapter.title}`, ""));
     const captionOptions = localCaptions().map(track => option(track.id,
       `${track.language} · ${track.origin === "machineTranslation" ? t("Traducción automática", "Machine translation") : t("Local", "Local")}`, caption));
     const styledTitle = styledSelection === "styled" ? styled.title() : undefined;
-    const audio = audioTracks();
     const chosen = document.activeElement instanceof HTMLElement ? document.activeElement.id : "";
     const elapsed = '<span data-stage-elapsed>0:00</span>';
     const duration = button("remaining", t("Alternar duración y tiempo restante", "Toggle duration and remaining time"));
     const volume = `<div class="stage-volume">${button("mute", t("Silenciar", "Mute"), "volume", 'id="stage-mute"')}
-      <input id="stage-volume" type="range" min="0" max="1" step="0.02" aria-label="${t("Volumen", "Volume")}" value="${preferences.volume}"></div>`;
+      <input id="stage-volume" type="range" min="0" max="1" step="0.01" aria-label="${t("Volumen", "Volume")}" value="${preferences.volume}"></div>`;
     const toggle = button("toggle", t("Reproducir", "Play"), "play", 'id="stage-toggle"');
     const fullscreenButton = button("fullscreen", t("Pantalla completa", "Full screen"), "fullscreen", 'id="stage-fullscreen"');
     controls.innerHTML = `
@@ -343,7 +419,7 @@ export function createPlaybackStage(host: HTMLElement, media: HTMLVideoElement, 
       <div class="stage-panel stage-options" id="stage-panel-options" data-stage-panel="options" hidden>
         <label for="stage-rate">${t("Velocidad", "Speed")}<select id="stage-rate">${playbackRates.map(rate => option(String(rate), `${rate}×`, String(preferences.rate))).join("")}</select></label>
         ${music ? `<label class="toggle"><input type="checkbox" id="audio-resume-music" ${preferences.resumeMusic ? "checked" : ""}>${t("Reanudar pistas de música", "Resume music tracks")}</label>` : `<label for="stage-fit">${t("Imagen", "Picture")}<select id="stage-fit">${option("contain", t("Ajustar", "Fit"), preferences.fill ? "cover" : "contain")}${option("cover", t("Rellenar · recorta la imagen", "Fill · crops the image"), preferences.fill ? "cover" : "contain")}</select></label>`}
-        ${audio.length > 1 ? `<label for="stage-audio-track">${t("Pista de audio", "Audio track")}<select id="stage-audio-track">${audio.map((track, index) => option(String(index), [track.label, track.language].filter(Boolean).join(" · ") || `${t("Pista", "Track")} ${index + 1}`, String(audio.findIndex(track => track.enabled)))).join("")}</select></label>` : ""}
+        ${music ? "" : '<div id="stage-audio-options" hidden></div>'}
         ${chapterOptions.length ? `<label for="stage-chapter">${t("Capítulos", "Chapters")}<select id="stage-chapter">${option("", t("Ir a un capítulo", "Go to a chapter"), "")}${chapterOptions.join("")}</select></label>` : ""}
         <label class="toggle"><input type="checkbox" id="stage-autoplay" ${preferences.autoplay ? "checked" : ""}>${t("Reproducir el siguiente archivo", "Play next file")}</label>
       </div>
@@ -398,6 +474,7 @@ export function createPlaybackStage(host: HTMLElement, media: HTMLVideoElement, 
     host.dataset.captionSize = preferences.captionSize;
     host.dataset.captionContrast = String(preferences.captionContrast);
     syncEmbedded();
+    syncAudioOptions();
     selectCaption(caption);
     if (music) { syncMusic(); hooks.sceneControls(); }
     setFullscreen(fullscreen);
@@ -412,6 +489,7 @@ export function createPlaybackStage(host: HTMLElement, media: HTMLVideoElement, 
     for (const node of controls.querySelectorAll<HTMLElement>("[aria-controls^='stage-panel']")) node.setAttribute("aria-expanded", String(node.dataset.stageAction === panel));
     if (focus) find(`[data-stage-panel="${panel}"] :is(select, button:not(:disabled), input:not(:disabled))`)?.focus({ preventScroll: true });
     if (next === "captions") void inspectEmbedded();
+    if (next === "options") void inspectAudio();
     reveal();
   }
 
@@ -447,10 +525,15 @@ export function createPlaybackStage(host: HTMLElement, media: HTMLVideoElement, 
     if (resumeAt || state === "error") return;
     const playing = media.paused;
     hooks.toggle();
-    feedback.innerHTML = icon(playing ? "play" : "pause");
+    showFeedback(icon(playing ? "play" : "pause"), "playback");
+  }
+
+  function showFeedback(markup: string, kind: "playback" | "volume") {
+    feedback.dataset.kind = kind;
+    feedback.innerHTML = markup;
     feedback.hidden = false;
     clearTimeout(feedbackTimer);
-    feedbackTimer = setTimeout(() => { feedback.hidden = true; }, 420);
+    feedbackTimer = setTimeout(() => { feedback.hidden = true; }, kind === "volume" ? 680 : 420);
     reveal();
   }
 
@@ -481,7 +564,7 @@ export function createPlaybackStage(host: HTMLElement, media: HTMLVideoElement, 
       else hooks.back();
       return true;
     }
-    if (event.target instanceof HTMLElement && event.target.closest("input, select, textarea, [contenteditable='true']")) return false;
+    if (event.target instanceof HTMLElement && event.target.closest("input, select, textarea, [contenteditable]:not([contenteditable='false'])")) return false;
     const lower = event.key.toLowerCase();
     if (event.altKey || event.metaKey || event.shiftKey) return false;
     if (event.ctrlKey) {
@@ -493,6 +576,12 @@ export function createPlaybackStage(host: HTMLElement, media: HTMLVideoElement, 
       case " ": case "k": toggleOnSurface(); break;
       case "arrowleft": case "j": hooks.seek(media.currentTime - (lower === "j" ? 10 : 5)); break;
       case "arrowright": case "l": hooks.seek(media.currentTime + (lower === "l" ? 10 : 5)); break;
+      case "arrowup": case "arrowdown": {
+        hooks.stepVolume(lower === "arrowup" ? 1 : -1);
+        const sound = hooks.sound();
+        showFeedback(`${icon(sound.muted || sound.volume === 0 ? "muted" : "volume")}<span>${Math.round(sound.volume * 100)}%</span>`, "volume");
+        break;
+      }
       case "m": hooks.mute(); break;
       case "f": hooks.fullscreen(); break;
       case "c": if (item?.kind !== "video") return false; toggleCaptions(); break;
@@ -600,7 +689,7 @@ export function createPlaybackStage(host: HTMLElement, media: HTMLVideoElement, 
       case "stage-caption-contrast":
         hooks.preference("captionContrast", target instanceof HTMLInputElement && target.checked);
         host.dataset.captionContrast = String(target instanceof HTMLInputElement && target.checked); break;
-      case "stage-audio-track": audioTracks().forEach((track, index) => { track.enabled = index === Number(target.value); }); break;
+      case "stage-audio-track": void chooseAudio(target.value); break;
       case "stage-chapter": if (target.value) { hooks.seek(Number(target.value)); closePanel(); } break;
       case "stage-autoplay": hooks.preference("autoplay", target instanceof HTMLInputElement && target.checked); break;
     }

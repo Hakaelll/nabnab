@@ -53,6 +53,8 @@ export function createAudioPlayer(hooks: Hooks) {
   let cursor = -1;
   let resumeAudioId: string | undefined;
   let expectedSource = "";
+  let audioSelection: number | null = null;
+  let audioChange: { controller: AbortController; play: boolean } | undefined;
   let pendingSeek: number | null = null;
   let resumeChoice = 0;
   let mediaState: StageState = "loading";
@@ -122,6 +124,7 @@ export function createAudioPlayer(hooks: Hooks) {
   }
 
   function backFromStage() {
+    if (audioChange) audioChange.play = false;
     if (current()?.kind === "video") media?.pause();
     persist();
     hideStage();
@@ -152,6 +155,10 @@ export function createAudioPlayer(hooks: Hooks) {
     applyVolume();
     saveSession();
     updatePlaying();
+  }
+
+  function stepVolume(direction: 1 | -1) {
+    volume((Math.round(preferences.volume * 100) + direction * 5) / 100);
   }
 
   function mute() {
@@ -328,7 +335,7 @@ export function createAudioPlayer(hooks: Hooks) {
         <select id="audio-rate" aria-label="${t("Velocidad", "Playback speed")}">${playbackRates.map(speed => `<option value="${speed}" ${speed === preferences.rate ? "selected" : ""}>${speed}×</option>`).join("")}</select>
         <select id="audio-sleep" aria-label="${t("Temporizador de descanso", "Sleep timer")}">${[["off", t("Descanso", "Sleep timer")], ["10", "10 min"], ["20", "20 min"], ["30", "30 min"], ["45", "45 min"], ["60", "60 min"], ["chapter", t("Fin del capítulo", "End of chapter")]].map(([value, name]) => `<option value="${value}" ${value === sleep ? "selected" : ""}>${name}</option>`).join("")}</select>
       ` : ""}
-      <div class="audio-volume">${button("mute", t("Silenciar", "Mute"), "volume")}<input id="audio-volume" type="range" min="0" max="1" step="0.02" value="${preferences.volume}" aria-label="${t("Volumen", "Volume")}"></div>
+      <div class="audio-volume">${button("mute", t("Silenciar", "Mute"), "volume")}<input id="audio-volume" type="range" min="0" max="1" step="0.01" value="${preferences.volume}" aria-label="${t("Volumen", "Volume")}"></div>
       ${item.kind === "audio" ? `<button type="button" class="icon-button audio-visualize" data-action="audio-player-open" aria-label="${t("Abrir visualización", "Open visualization")}" title="${t("Abrir visualización", "Open visualization")}">${icon("wave")}</button>` : ""}
       ${button("queue", t("Cola de reproducción", "Playback queue"), "list", `aria-expanded="${queueOpen}" aria-controls="audio-queue-panel"`)}
       ${button("close", t("Detener y cerrar", "Stop and close"), "close")}</div>
@@ -369,7 +376,7 @@ export function createAudioPlayer(hooks: Hooks) {
   }
 
   async function playMedia() {
-    if (!media) return;
+    if (!media || audioChange) return;
     if (signal) void signal.resume().catch(() => scenes?.unavailable());
     const revision = sourceRevision;
     try {
@@ -408,10 +415,69 @@ export function createAudioPlayer(hooks: Hooks) {
     void playMedia();
   }
 
+  function cancelAudioChange() {
+    if (!audioChange) return;
+    audioChange.controller.abort();
+    audioChange = undefined;
+    if (media) media.preload = "metadata";
+  }
+
+  async function switchAudio(track: number | null) {
+    const element = media;
+    const item = current();
+    if (!element || item?.kind !== "video" || audioChange || !matchesSource()) return false;
+    if (track === audioSelection) return true;
+    persist();
+    const change = { controller: new AbortController(), play: !element.paused && !resumeChoice };
+    audioChange = change;
+    const previous = expectedSource;
+    const position = resumeChoice ? 0 : pendingSeek ?? element.currentTime;
+    const original = localMediaUrl(item.id);
+    const next = track === null ? original : `${original}?audio=${track}`;
+
+    const load = (url: string) => new Promise<boolean>(resolve => {
+      const listeners = new AbortController();
+      const finish = (ready: boolean) => { listeners.abort(); clearTimeout(timeout); resolve(ready); };
+      const timeout = setTimeout(() => finish(false), 8000);
+      const check = () => {
+        if (matchesSource() && element.readyState >= 2 && !element.seeking && pendingSeek === null) finish(true);
+      };
+      for (const event of ["loadeddata", "seeked", "canplay"]) {
+        element.addEventListener(event, check, { signal: listeners.signal });
+      }
+      element.addEventListener("error", () => { if (element.error && element.src === url) finish(false); }, { signal: listeners.signal });
+      change.controller.signal.addEventListener("abort", () => finish(false), { signal: listeners.signal });
+      ++sourceRevision;
+      element.pause();
+      pendingSeek = position || null;
+      expectedSource = url;
+      issue = "";
+      mediaState = "loading";
+      element.preload = "auto";
+      element.src = url;
+      updateTime();
+    });
+    const switched = await load(next);
+    if (audioChange !== change) return;
+    if (switched) audioSelection = track;
+    else if (!await load(previous) && audioChange === change) {
+      issue = playbackIssue(element.error);
+      mediaState = "error";
+    }
+    if (audioChange !== change) return;
+    cancelAudioChange();
+    element.playbackRate = preferences.rate;
+    applyVolume();
+    updateTime();
+    if (change.play && expanded && !issue) void playMedia();
+    return switched;
+  }
+
   function activate(position: number, autoplay: boolean, resume: boolean, openVideo = true) {
     const id = tracks[order[position] ?? -1];
     const item = id ? hooks.item(id) : undefined;
     if (!media || !isPlayable(item)) return;
+    cancelAudioChange();
     persist();
     media.pause();
     if (sleep === "chapter" || !isAudiobook(item) && sleep !== "off") {
@@ -431,6 +497,7 @@ export function createAudioPlayer(hooks: Hooks) {
     pendingSeek = progress && !resumeChoice ? progress : null;
     mediaState = "loading";
     expectedSource = localMediaUrl(item.id);
+    audioSelection = null;
     media.dataset.localPlayer = item.id;
     media.src = expectedSource;
     media.playbackRate = preferences.rate;
@@ -517,10 +584,12 @@ export function createAudioPlayer(hooks: Hooks) {
   }
 
   function close() {
+    cancelAudioChange();
     persist();
     media?.pause();
     ++sourceRevision;
     expectedSource = "";
+    audioSelection = null;
     pendingSeek = null;
     resumeChoice = 0;
     queueOpen = false;
@@ -558,7 +627,8 @@ export function createAudioPlayer(hooks: Hooks) {
     element.muted = preferences.muted;
     transport = document.getElementById("audio-transport");
     stage = createPlaybackStage(stageHost, element, {
-      t, seek, mute, volume, sound: () => preferences, back: backFromStage, resume: resumeVideo, command: hooks.command,
+      t, seek, mute, volume, stepVolume, sound: () => preferences, back: backFromStage, resume: resumeVideo, command: hooks.command,
+      audioSelection: () => audioSelection, switchAudio,
       musicTitle: audioTitle, queue: () => queueMarkup(true), trackInfo, sceneControls: () => scenes?.render(),
       toggle: () => { if (element.paused) void playMedia(); else element.pause(); },
       rate: value => { preferences.rate = value; element.playbackRate = value; saveSession(); },
@@ -644,6 +714,7 @@ export function createAudioPlayer(hooks: Hooks) {
     });
     element.addEventListener("error", () => {
       if (!expectedSource || element.src !== expectedSource || !element.error) return;
+      if (audioChange) return;
       issue = playbackIssue(element.error);
       mediaState = "error";
       render(); updateTime();
@@ -732,6 +803,13 @@ export function createAudioPlayer(hooks: Hooks) {
     if (expanded) return stage?.key(event) ?? false;
     if (queueOpen && event.key === "Escape") {
       queueOpen = false; render(); document.getElementById("audio-queue")?.focus(); return true;
+    }
+    if ((event.key === "ArrowUp" || event.key === "ArrowDown")
+      && !event.altKey && !event.metaKey && !event.shiftKey && !event.ctrlKey
+      && host && !host.hidden && event.target instanceof HTMLElement && host.contains(event.target)
+      && !event.target.closest("input, select, textarea, [contenteditable]:not([contenteditable='false'])")) {
+      stepVolume(event.key === "ArrowUp" ? 1 : -1);
+      return true;
     }
     return false;
   }

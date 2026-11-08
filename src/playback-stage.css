@@ -77,6 +77,14 @@
 .stage-panel, .stage-prompt, .stage-error { position: absolute; padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--secondary); pointer-events: auto; }
 .stage-panel { display: grid; gap: 10px; width: min(330px, calc(100vw - 32px)); max-height: calc(100vh - 140px); overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .stage-options { top: 62px; right: var(--stage-gutter); }
+.stage-options label.toggle { flex-direction: row; align-items: center; gap: 8px; min-height: 36px; }
+.stage-options .toggle input { margin: 0; }
+#stage-audio-options { display: grid; gap: 6px; padding-block: 10px; border-block: 1px solid var(--edge-quiet); }
+#stage-audio-options[hidden] { display: none; }
+.stage-audio-heading { display: flex; gap: 7px; align-items: center; }
+.stage-audio-heading svg { width: 15px; height: 15px; }
+.stage-audio-heading strong { font-weight: 600; }
+.stage-audio-heading small { margin-inline-start: auto; border-radius: 6px; padding: 2px 6px; color: var(--muted); background: var(--hover); font-variant-numeric: tabular-nums; }
 .stage-caption-panel { bottom: 88px; right: var(--stage-gutter); width: min(342px, calc(100vw - 2 * var(--stage-gutter))); border-radius: 16px; }
 .stage-caption-heading { display: flex; align-items: center; gap: 9px; font-size: 15px; }
 .stage-caption-heading > span { display: grid; place-items: center; width: 32px; height: 32px; border: 1px solid var(--edge-quiet); border-radius: 9px; background: var(--surface); }
@@ -123,6 +131,12 @@
 .stage-hud { z-index: 2; }
 .stage-feedback { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); display: grid; place-items: center; width: 62px; height: 62px; border-radius: 50%; background: rgb(0 0 0 / 58%); pointer-events: none; }
 .stage-feedback svg { width: 24px; height: 24px; }
+.stage-feedback[data-kind="volume"] {
+  display: flex; align-items: center; justify-content: center; gap: 8px; width: auto; height: 44px;
+  padding-inline: 14px; border: 1px solid var(--edge-quiet); border-radius: 24px;
+  font-size: 14px; font-variant-numeric: tabular-nums;
+}
+.stage-feedback[data-kind="volume"] svg { width: 18px; height: 18px; }
 .playback-stage [hidden] { display: none; }
 @media (max-width: 480px) {
   .stage-volume input { display: none; }

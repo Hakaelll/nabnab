@@ -65,6 +65,7 @@ mod personal_archive;
 mod delimited;
 mod local_media;
 mod playback_preview;
+mod playback_audio;
 mod styled_captions;
 mod media;
 mod model;
@@ -1277,6 +1278,7 @@ fn main() {
             thumbnail,
             playback_preview::playback_preview_frame,
             playback_preview::playback_preview_cancel,
+            playback_audio::playback_audio_tracks,
             styled_captions::styled_caption_open,
             styled_captions::styled_caption_tracks,
             styled_captions::styled_caption_embedded,
