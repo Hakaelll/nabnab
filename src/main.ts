@@ -721,7 +721,11 @@ async function handleAction(action: string, button: HTMLButtonElement): Promise<
     case 'choose-folder':await chooseFolder();break;
     case 'prepare-engines':preferences.section='engines';navigate('settings');break;
     case 'job-filter':{const value=button.dataset.filter;if(value==='all'||value==='activity'||value==='pending'||value==='completed'||value==='error'){downloads.filter=value;renderCurrent();}break;}
-    case 'inspect-job':downloads.detailId=id;renderCurrent();break;
+    case 'inspect-job':
+      downloads.detailId=id;
+      if(page==='downloads')renderCurrent();
+      else {downloads.filter='all';downloads.query='';navigate('downloads');}
+      break;
     case 'cancel-job':await actOnJobs([id],'cancel');break;
     case 'pause-job':await actOnJobs([id],'pause');break;
     case 'retry-job':await actOnJobs([id],'retry');break;
@@ -906,7 +910,14 @@ if(desktop){
     await listen<CaptureStatus>('capture-update',({payload})=>{const previous=captureStatus?.phase;screenCapture.acceptStatus(payload);if(page==='tools'&&localToolModule==='screenCapture'&&(captureIsActive(payload)||previous!==payload.phase))renderCurrent();if(previous!==payload.phase&&(payload.phase==='interrupted'||payload.phase==='error')){notify(payload.readyCapture?t('La captura se interrumpió. Revisa el archivo parcial en Captura.','Capture was interrupted. Review the partial file in Capture.'):t('No se pudo continuar la captura. Revisa Captura.','Capture could not continue. Review Capture.'),'error',payload.reason??'');if(page==='tools'&&localToolModule==='screenCapture')void screenCapture.open().catch(showError);}});
     await listen('capture-saved',()=>{notify(t('Repetición enviada a Descargas.','Replay sent to Downloads.'),'success');void refresh().catch(showError);});
     await listen<string>('capture-error',({payload})=>showError(payload));
-    await listen<Job>('job-update',({payload})=>{const current=snapshot.jobs.find(job=>job.id===payload.id);if(current&&(current.runId>payload.runId||(current.runId===payload.runId&&current.updatedAt>payload.updatedAt)))return;snapshot.jobs=current?snapshot.jobs.map(job=>job.id===payload.id?payload:job):[...snapshot.jobs,payload];if(page==="tools"&&localToolModule==="translation")translationTool.observe(payload);scheduleJobsRender();});
+    await listen<Job>('job-update',({payload})=>{
+      const current=snapshot.jobs.find(job=>job.id===payload.id);
+      if(current&&(current.runId>payload.runId||(current.runId===payload.runId&&current.updatedAt>payload.updatedAt)))return;
+      snapshot.jobs=current?snapshot.jobs.map(job=>job.id===payload.id?payload:job):[...snapshot.jobs,payload];
+      if(page==="tools"&&localToolModule==="translation")translationTool.observe(payload);
+      if(page==="tools"&&localToolModule==="portable"&&current?.state!==payload.state&&portable.isExportJob(payload.id))renderCurrent();
+      scheduleJobsRender();
+    });
     await listen('library-update',()=>void refresh().catch(showError));
     await listen('sources-changed',()=>void refresh().catch(showError));
     await listen('automation-update',()=>void automation.onUpdate().then(pending=>{if(pending)required('#notification-text').insertAdjacentHTML('afterend',`<button type="button" class="button quiet automation-pending-notice" data-action="automation-open-settings">${t('Revisar solicitud','Review request')}</button>`);}).catch(showError));

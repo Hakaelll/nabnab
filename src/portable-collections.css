@@ -45,9 +45,11 @@
 .portable-warnings li + li { margin-top: 8px; }
 .portable-confirm { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; background: var(--secondary); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-top: 20px; }
 .portable-confirm > div { min-width: 0; flex: 1; }
-.portable-confirm span, .portable-confirm small { display: block; font-size: 12px; color: var(--muted); }
+.portable-confirm > div > :is(span, small) { display: block; font-size: 12px; color: var(--muted); }
 .portable-confirm strong { display: block; font-size: 12px; font-weight: 500; overflow-wrap: anywhere; margin-top: 6px; }
 .portable-confirm small { margin-top: 6px; }
+.portable-export-result { margin: 0 0 24px; }
+.portable-export-result h3 { font-size: 14px; margin: 0 0 6px; }
 .portable-import-source { max-width: 760px; }
 .portable-import-source h3 { font-size: 16px; font-weight: 500; margin-bottom: 8px; }
 .portable-source-path { font-size: 12px; color: var(--muted); padding: 12px; border: 1px solid var(--edge-quiet); border-radius: 8px; overflow-wrap: anywhere; margin-block: 16px; }

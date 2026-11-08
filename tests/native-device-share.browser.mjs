@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, unlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 
@@ -155,7 +155,7 @@ try {
   const portable = page.locator("#portable-export-form");
   await portable.waitFor();
   assert.equal(await portable.locator("[data-portable-item]:checked").count(), 2);
-  assert.equal(await portable.locator("#portable-notes").isChecked(), false);
+  for (const option of ["metadata", "notes", "ocr"]) assert.equal(await portable.locator(`#portable-${option}`).isChecked(), false);
   await portable.getByRole("button", { name: "Revisar tamaño y duplicados" }).click();
   await page.locator('[data-action="portable-export-queue"]').click();
   const zip = await wait(async () => {
@@ -163,19 +163,34 @@ try {
     if (job?.state === "error") throw Error(JSON.stringify(job.error));
     return job?.state === "completed" && job;
   });
-  await page.locator('[data-page="downloads"]').click();
-  await page.locator(`[data-action="inspect-job"][data-id="${zip.id}"]`).click();
-  await page.locator(`[data-action="share-job"][data-id="${zip.id}"]`).click();
+  const result = page.getByRole("region", { name: "Último ZIP de esta sesión" });
+  const zipName = path.basename(zip.outputs[0]);
+  const zipInfo = await stat(zip.outputs[0]);
+  assert.ok(zipInfo.size > 0);
+  const reviewZip = result.getByRole("button", { name: "Revisar envío del ZIP" });
+  await reviewZip.waitFor();
+  assert.match(await result.innerText(), /ZIP disponible para revisar/);
+  await page.locator("#main").evaluate(main => { main.scrollTop = 0; });
+  await page.screenshot({ path: path.join(base, "portable-share-900.png"), animations: "disabled" });
+  const beforeZip = await calls();
+  await reviewZip.click();
   await choose();
   await inShare("review").click();
   await inShare("send").waitFor();
-  assert.match(await modal().innerText(), /\.zip/);
+  const review = modal().locator(".device-share-review");
+  assert.deepEqual(await review.locator("li > span").allTextContents(), [zipName]);
+  const sizeLabel = zipInfo.size < 1024 ? `${zipInfo.size} B` : `${(zipInfo.size / 1024).toFixed(0)} KB`;
+  assert.equal(await review.locator("li > small").innerText(), sizeLabel);
+  assert.deepEqual(await calls(), beforeZip);
   await inShare("send").click();
   await modal().getByText("Entregado a KDE Connect", { exact: true }).waitFor();
-  assert.match((await calls()).at(-1)[1], /\.zip$/);
+  const final = await calls();
+  assert.equal(final.length, beforeZip.length + 1);
+  assert.equal(final.at(-1)[0], `--device=${device}`);
+  assert.ok(decodeURIComponent(final.at(-1)[1]).endsWith(`/${zipName}`));
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ nativeCliFixture: true, unicodeFile: true, staleFileRejected: true, signedLinkRejected: true,
-    publicLink: true, textOneArgument: true, ambiguousHandoff: true, replayRejected: true, offlineDeviceRejected: true, collection: true, realPortableZip: true }));
+    publicLink: true, textOneArgument: true, ambiguousHandoff: true, replayRejected: true, offlineDeviceRejected: true, collection: true, realPortableZip: true, shareFromExportResult: true }));
 } catch (error) {
   console.error(log);
   await page?.screenshot({ path: path.join(base, "failure.png"), animations: "disabled" }).catch(() => {});
