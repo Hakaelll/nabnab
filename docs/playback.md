@@ -10,7 +10,7 @@ Pulsa **Sacar a una ventana** o minimiza nabnab con el mini abierto. La ventana 
 
 En Windows, pulsa **Ctrl + Mayús + M** para abrir el mini de audio o vídeo con un archivo cargado, aunque nabnab esté minimizado. Si el mini ya está flotando, el atajo le da el foco. Con **Ajustes → General → Mostrar icono en la bandeja** activado, también puedes elegir **Abrir minirreproductor** en el menú del icono junto al reloj.
 
-Con una pista de audio en la sesión, mantén **Alt** y gira la rueda. En Windows funciona también con nabnab minimizado y otra aplicación en primer plano. Las portadas aparecen junto al puntero y giran en profundidad. Suelta **Alt** para reproducir la tarjeta central o pulsa **Esc** para cancelar. Puedes pulsar una tarjeta, usar **↑**, **↓** e **Intro**, o abrir **Salto rápido** desde el mini de audio. **Volver a la pista** deshace el último salto dentro de la misma cola. [Referencia de la rueda](https://github.com/ffoouuaadd/skip-dat)
+Con una pista de audio en la sesión, mantén **Alt** y gira la rueda. En Windows, las portadas aparecen junto al puntero tanto con el mini flotante enfocado como con otra aplicación en primer plano. El escritorio se ve entre las tarjetas y los controles. Suelta **Alt** para reproducir la tarjeta central o pulsa **Esc** para cancelar. Puedes pulsar una tarjeta, usar **↑**, **↓** e **Intro**, o abrir **Salto rápido** desde el mini de audio. **Volver a la pista** deshace el último salto dentro de la misma cola. Los dos atajos están en **Ajustes → General → Reproducción desde el escritorio**. [Referencia de la rueda](https://github.com/ffoouuaadd/skip-dat)
 
 Usa **↑** y **↓** para subir o bajar el volumen cinco puntos en vídeo o música. En la barra y el mini, el atajo funciona cuando el foco está en el reproductor. Los controles de formulario mantienen su manejo habitual con las flechas.
 
@@ -53,7 +53,7 @@ La prueba `tests/native-playback.browser.mjs` genera las muestras con FFmpeg y, 
 
 Con `NABNAB_PLAYBACK_LIVE_DOWNLOAD=1`, la misma prueba descarga una muestra pública a través de la cola nativa mientras suena un archivo local. Con la pila normal de Windows se guardaron 1.128.375 bytes y la pista avanzó 1,74 segundos entre el inicio de la transferencia y su final, sin cambiar de archivo ni pasar a pausa. [Muestra de vídeo de MDN](https://developer.mozilla.org/shared-assets/videos/flower.mp4)
 
-Con `NABNAB_PLAYBACK_DESKTOP_GESTURE=1`, la prueba usa la rueda y el teclado de Windows en una ventana de prueba independiente. Comprueba el foco, la selección al soltar Alt, la cancelación con Esc y que el gesto deja de abrir la rueda al detener la sesión.
+Con `NABNAB_PLAYBACK_DESKTOP_GESTURE=1`, la prueba usa la rueda y el teclado de Windows con el mini flotante enfocado y con una ventana de prueba independiente. Comprueba el foco, la selección al soltar Alt, la cancelación con Esc y que el gesto deja de abrir la rueda al detener la sesión.
 
 Con `NABNAB_PLAYBACK_DESKTOP_TRAY=1`, abre el menú nativo de bandeja con audio y vídeo en reproducción. Comprueba que el mini aparece con la ventana principal minimizada, que conserva el mismo elemento multimedia y que el menú desactiva la acción cuando se cierra la sesión.
 

@@ -145,13 +145,6 @@
 .track-wheel[hidden] { display: none; }
 .quick-skip-window, .quick-skip-window body { background: transparent; }
 .quick-skip-window .track-wheel { --cover: clamp(76px, min(23dvh, 29vw), 124px); }
-.track-wheel::before {
-  content: "";
-  position: absolute;
-  inset: -2% -9%;
-  background: radial-gradient(ellipse at center, #090a0cdb 0%, #090a0cb0 37%, transparent 71%);
-  pointer-events: none;
-}
 .track-wheel[data-side="left"] { grid-template-columns: 112px var(--card-width); }
 .track-wheel[data-side="left"] .track-wheel-drum { grid-column: 2; grid-row: 1; }
 .track-wheel[data-side="left"] .track-wheel-tools { grid-column: 1; grid-row: 1; }
@@ -276,10 +269,8 @@
 .track-wheel-back { cursor: pointer; pointer-events: auto; }
 .track-wheel-back[hidden] { display: none; }
 .reduced-transparency .track-wheel, .track-wheel:focus-within { --card-glass: var(--secondary); }
-.reduced-transparency .track-wheel::before { display: none; }
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
   .track-wheel { --card-glass: var(--secondary); }
-  .track-wheel::before { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   .track-wheel-card { transition: none; }

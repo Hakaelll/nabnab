@@ -6,7 +6,7 @@ use std::{
 };
 use tauri::{AppHandle, Emitter, EventTarget, Manager, WebviewUrl, WebviewWindowBuilder};
 use windows_sys::Win32::{
-    Foundation::{LPARAM, LRESULT, POINT, WPARAM},
+    Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM},
     System::{LibraryLoader::GetModuleHandleW, Threading::GetCurrentThreadId},
     UI::{
         Input::KeyboardAndMouse::{
@@ -67,9 +67,7 @@ impl DesktopWheel {
             if state.open.take().is_some() {
                 if let Some(window) = app.get_webview_window(OVERLAY) {
                     if let Ok(handle) = window.hwnd() {
-                        unsafe {
-                            ShowWindow(handle.0 as _, SW_HIDE);
-                        }
+                        hide_overlay(handle.0 as _);
                     }
                 }
             }
@@ -77,6 +75,7 @@ impl DesktopWheel {
             WebviewWindowBuilder::new(app, OVERLAY, WebviewUrl::App("quick-skip.html".into()))
                 .title("nabnab · Quick Skip")
                 .decorations(false)
+                .shadow(false)
                 .resizable(false)
                 .inner_size(WIDTH, HEIGHT)
                 .transparent(true)
@@ -121,9 +120,7 @@ impl DesktopWheel {
                 state.open = None;
                 if let Some(window) = app.get_webview_window(OVERLAY) {
                     let handle = window.hwnd().map_err(|error| error.to_string())?;
-                    unsafe {
-                        ShowWindow(handle.0 as _, SW_HIDE);
-                    }
+                    hide_overlay(handle.0 as _);
                 }
             }
             Action::Transport { gesture, action } if state.open == Some(gesture) => {
@@ -212,6 +209,20 @@ impl DesktopWheel {
     }
 }
 
+fn hide_overlay(window: HWND) {
+    unsafe {
+        SetWindowPos(
+            window,
+            null_mut(),
+            0,
+            0,
+            0,
+            0,
+            SWP_HIDEWINDOW | SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER,
+        );
+    }
+}
+
 pub fn shutdown(app: &AppHandle) {
     app.state::<DesktopWheel>()
         .0
@@ -238,7 +249,9 @@ struct Shortcut {
 
 struct InputHandler {
     app: AppHandle,
+    main_window: isize,
     active: Cell<bool>,
+    release_timer: Cell<usize>,
     wheel_delta: Cell<i32>,
 }
 
@@ -249,6 +262,17 @@ impl InputHandler {
             let _ = app.state::<DesktopWheel>().input(&app, input);
         });
     }
+
+    fn finish(&self, key: &'static str) {
+        if !self.active.replace(false) {
+            return;
+        }
+        let timer = self.release_timer.replace(0);
+        if timer != 0 {
+            unsafe { KillTimer(null_mut(), timer) };
+        }
+        self.send(Input::Key(key));
+    }
 }
 
 thread_local! {
@@ -257,6 +281,12 @@ thread_local! {
 
 impl Shortcut {
     fn start(app: AppHandle) -> Result<Self, String> {
+        let main_window = app
+            .get_window("main")
+            .ok_or("The nabnab window is unavailable.")?
+            .hwnd()
+            .map_err(|error| error.to_string())?
+            .0 as isize;
         let (send, receive) = mpsc::sync_channel(1);
         let worker = thread::spawn(move || unsafe {
             let mut message = MSG::default();
@@ -267,11 +297,26 @@ impl Shortcut {
             if !mouse.is_null() && !keyboard.is_null() {
                 HANDLER.set(Some(InputHandler {
                     app,
+                    main_window,
                     active: Cell::new(false),
+                    release_timer: Cell::new(0),
                     wheel_delta: Cell::new(0),
                 }));
                 if send.send(Some(GetCurrentThreadId())).is_ok() {
-                    while GetMessageW(&mut message, null_mut(), 0, 0) > 0 {}
+                    while GetMessageW(&mut message, null_mut(), 0, 0) > 0 {
+                        if message.message == WM_TIMER {
+                            HANDLER.with_borrow(|handler| {
+                                if let Some(handler) = handler.as_ref() {
+                                    if message.wParam == handler.release_timer.get()
+                                        && !down(VK_MENU)
+                                    {
+                                        handler.wheel_delta.set(0);
+                                        handler.finish("commit");
+                                    }
+                                }
+                            });
+                        }
+                    }
                 }
             } else {
                 let _ = send.send(None);
@@ -310,14 +355,6 @@ fn down(key: u16) -> bool {
     unsafe { GetAsyncKeyState(i32::from(key)) < 0 }
 }
 
-fn own_foreground() -> bool {
-    let mut process = 0;
-    unsafe {
-        GetWindowThreadProcessId(GetForegroundWindow(), &mut process);
-    }
-    process == std::process::id()
-}
-
 unsafe extern "system" fn mouse_input(code: i32, message: WPARAM, value: LPARAM) -> LRESULT {
     let message = message as u32;
     if code >= 0
@@ -342,7 +379,8 @@ unsafe extern "system" fn mouse_input(code: i32, message: WPARAM, value: LPARAM)
                 || down(VK_CONTROL)
                 || down(VK_LWIN)
                 || down(VK_RWIN)
-                || (!handler.active.get() && own_foreground())
+                // The full app can display the wheel inline. The floating mini uses the desktop overlay.
+                || (!handler.active.get() && unsafe { GetForegroundWindow() } as isize == handler.main_window)
             {
                 return false;
             }
@@ -353,6 +391,8 @@ unsafe extern "system" fn mouse_input(code: i32, message: WPARAM, value: LPARAM)
                 if handler.active.replace(true) {
                     handler.send(Input::Move(step));
                 } else {
+                    // Reconcile the gesture with Alt's state if Windows omits the key-up notification.
+                    handler.release_timer.set(unsafe { SetTimer(null_mut(), 0, 40, None) });
                     handler.send(Input::Open(x, y, step));
                 }
             }
@@ -379,9 +419,7 @@ unsafe extern "system" fn key_input(code: i32, message: WPARAM, value: LPARAM) -
                     && !(key == VK_LMENU && down(VK_RMENU) || key == VK_RMENU && down(VK_LMENU))
                 {
                     handler.wheel_delta.set(0);
-                    if handler.active.replace(false) {
-                        handler.send(Input::Key("commit"));
-                    }
+                    handler.finish("commit");
                 }
                 return false;
             }
@@ -395,17 +433,10 @@ unsafe extern "system" fn key_input(code: i32, message: WPARAM, value: LPARAM) -
                 VK_UP => handler.send(Input::Move(-1)),
                 VK_DOWN => handler.send(Input::Move(1)),
                 VK_SPACE => handler.send(Input::Key("toggle")),
-                VK_RETURN => {
-                    handler.active.set(false);
-                    handler.send(Input::Key("commit"));
-                }
-                VK_ESCAPE => {
-                    handler.active.set(false);
-                    handler.send(Input::Key("cancel"));
-                }
+                VK_RETURN => handler.finish("commit"),
+                VK_ESCAPE => handler.finish("cancel"),
                 _ => {
-                    handler.active.set(false);
-                    handler.send(Input::Key("cancel"));
+                    handler.finish("cancel");
                     return false;
                 }
             }

@@ -659,10 +659,10 @@ async function verifyWindowsMedia(covered, plain) {
   console.log("Windows published local artwork and controlled pause, resume, seek and both queue directions while minimized.");
 }
 
-async function verifyDesktopWheel(original, selectedTracks) {
+async function verifyDesktopWheel(original, selectedTracks, fromMini = false) {
   const overlay = await wait(() => browser.contexts()[0]?.pages().find(tab => tab.url().includes("/quick-skip.html")));
   overlay.on("pageerror", error => { log += `\nQuick Skip: ${error.message}`; });
-  const other = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-STA", "-Command", `
+  const other = fromMini ? null : spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-STA", "-Command", `
     Add-Type -AssemblyName System.Windows.Forms
     $work = [Windows.Forms.Screen]::PrimaryScreen.WorkingArea
     $form = [Windows.Forms.Form]::new()
@@ -674,8 +674,9 @@ async function verifyDesktopWheel(original, selectedTracks) {
     [Windows.Forms.Application]::Run($form)
   `], { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
   let readyOutput = "";
-  other.stdout.on("data", bytes => { readyOutput += String(bytes); });
-  other.stderr.on("data", bytes => { log += String(bytes); });
+  other?.stdout.on("data", bytes => { readyOutput += String(bytes); });
+  other?.stderr.on("data", bytes => { log += String(bytes); });
+  const owner = other?.pid ?? child.pid;
   const fixtureHandle = () => Number(/ready:(\d+)\r?\n/.exec(readyOutput)?.[1] ?? 0);
   function desktop(operation, delta = 0) {
     return execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `
@@ -707,13 +708,13 @@ async function verifyDesktopWheel(original, selectedTracks) {
         $point.X = ($rect.Left + $rect.Right) / 2
         $point.Y = ($rect.Top + $rect.Bottom) / 2
         [void]$api::GetWindowThreadProcessId($api::WindowFromPoint($point), [ref]$owner)
-        if ($owner -ne ${other.pid}) { throw 'The fixture window is not under the pointer.' }
+        if ($owner -ne ${owner}) { throw 'The fixture window is not under the pointer.' }
         [void]$api::SetCursorPos($point.X, $point.Y)
         $api::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero)
         $api::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero)
         exit
       }
-      if ($owner -ne ${other.pid}) { exit }
+      if ($owner -ne ${owner}) { exit }
       if ('${operation}' -eq 'open') {
         [void]$api::SetThreadDpiAwarenessContext([IntPtr](-4))
         Add-Type -AssemblyName System.Windows.Forms
@@ -737,50 +738,74 @@ async function verifyDesktopWheel(original, selectedTracks) {
     return new Window("quick-skip", { skip: true }).isVisible();
   });
   try {
-    await wait(fixtureHandle);
-    desktop("focus");
-    await wait(() => desktop("status") === String(other.pid), 7000);
+    if (other) {
+      await wait(fixtureHandle);
+      desktop("focus");
+    }
+    await wait(() => desktop("status") === String(owner), 7000);
     const before = (await playing()).id;
     const expected = selectedTracks.find(item => item.name === path.basename(music)).id;
     const queue = await page.evaluate(() => JSON.parse(localStorage.getItem("nabnab.playback.v1")).queue);
     const coverPosition = queue.order.findIndex(index => queue.tracks[index] === expected);
     const distance = coverPosition - queue.cursor;
     assert.ok(coverPosition >= 0 && distance !== 0);
-    assert.equal(desktop("open", -120 * Math.sign(distance)), String(other.pid));
-    await central.waitFor();
+    assert.equal(desktop("open", -120 * Math.sign(distance)), String(owner));
+    await central.waitFor({ timeout: 8000 });
     assert.equal(await wheel.getAttribute("data-side"), "left");
-    if (Math.abs(distance) > 1) assert.equal(desktop("step", -120 * (distance - Math.sign(distance))), String(other.pid));
+    if (Math.abs(distance) > 1) assert.equal(desktop("step", -120 * (distance - Math.sign(distance))), String(owner));
     await wait(async () => (await central.getAttribute("data-position")) === String(coverPosition));
     assert.equal((await playing()).id, before);
     assert.equal(await mainMinimized(), true);
     assert.equal(await visible(), true);
     await central.locator(".audio-cover img").waitFor();
-    await overlay.screenshot({ path: path.join(output, "quick-skip-desktop.png"), omitBackground: true });
-    assert.equal(desktop("release"), String(other.pid));
+    const screenshot = await overlay.screenshot({
+      path: path.join(output, fromMini ? "quick-skip-with-mini.png" : "quick-skip-desktop.png"),
+      omitBackground: true,
+    });
+    if (fromMini) {
+      const alpha = await overlay.evaluate(async png => {
+        const image = await createImageBitmap(new Blob([Uint8Array.from(atob(png), byte => byte.charCodeAt(0))], { type: "image/png" }));
+        const context = new OffscreenCanvas(image.width, image.height).getContext("2d");
+        context.drawImage(image, 0, 0);
+        return context.getImageData(Math.floor(image.width / 2), Math.floor(image.height / 10), 1, 1).data[3];
+      }, screenshot.toString("base64"));
+      assert.equal(alpha, 0, "The desktop behind the wheel must remain visible outside the controls.");
+      assert.equal(desktop("step", 120 * distance), String(owner));
+      await wait(async () => (await central.getAttribute("data-position")) === String(queue.cursor));
+      assert.equal(desktop("release"), String(owner));
+      await wait(async () => !await visible());
+      assert.equal(desktop("status"), String(owner));
+      assert.equal(await stage().getAttribute("data-mini"), "audio");
+      assert.equal((await playing()).id, before);
+      console.log("The native wheel opened at the desktop pointer and preserved focus on the floating audio mini player.");
+      return;
+    }
+    assert.equal(desktop("release"), String(owner));
     await wheel.waitFor({ state: "hidden" });
     await wait(async () => !await visible());
+    assert.equal(desktop("status"), String(owner));
     await wait(async () => {
       const current = await playing();
       return current.id === expected && !current.paused && current.time > 0.15;
     });
     assert.equal(await mainMinimized(), true);
     assert.equal(await original.evaluate(element => element === document.getElementById("audio-engine")), true);
-    assert.equal(desktop("open", 120 * Math.sign(distance)), String(other.pid));
+    assert.equal(desktop("open", 120 * Math.sign(distance)), String(owner));
     await central.waitFor();
-    assert.equal(desktop("cancel"), String(other.pid));
+    assert.equal(desktop("cancel"), String(owner));
     await wheel.waitFor({ state: "hidden" });
     desktop("release");
     assert.equal((await playing()).id, expected);
     await page.locator("#audio-close").evaluate(button => button.click());
     await wait(() => page.evaluate(() => JSON.parse(localStorage.getItem("nabnab.playback.v1")).queue === null));
-    assert.equal(desktop("open", -120), String(other.pid));
-    assert.equal(desktop("release"), String(other.pid));
+    assert.equal(desktop("open", -120), String(owner));
+    assert.equal(desktop("release"), String(owner));
     assert.equal(await visible(), false);
     assert.equal(await mainMinimized(), true);
     console.log("Desktop Alt + wheel committed and canceled while minimized and stayed closed after stopping playback.");
   } finally {
     desktop("release");
-    other.kill();
+    other?.kill();
   }
 }
 
@@ -1339,6 +1364,11 @@ try {
   await miniVolume.fill("0.65");
   await wait(() => page.evaluate(() => JSON.parse(localStorage.getItem("nabnab.playback.v1")).preferences.volume === .65));
   await stage().screenshot({ path: path.join(output, "mini-audio-detached.png"), animations: "disabled" });
+  if (desktopGesture) {
+    if (!(await playing()).paused) await page.locator("#mini-toggle").click();
+    await wait(async () => (await playing()).paused);
+    await verifyDesktopWheel(original, selectedTracks, true);
+  }
   await page.locator("#mini-dock").click();
   await wait(async () => !await mainMinimized());
   await stage().waitFor({ state: "hidden" });
