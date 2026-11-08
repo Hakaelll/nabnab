@@ -27,8 +27,8 @@ interface Hooks {
   windowVisible(): Promise<boolean>;
   refresh(): Promise<void>;
   fullscreen(enabled: boolean): Promise<void>;
-  miniWindow?(action: "detach-audio" | "detach-video" | "restore" | "drag" | "resize-audio" | "resize-video"): Promise<void>;
-  trayPlayback?(available: boolean): void;
+  miniWindow?(action: "detach-audio" | "detach-video" | "restore" | "focus" | "drag" | "resize-audio" | "resize-video"): Promise<void>;
+  desktopPlayback?(available: boolean): void;
   desktopWheel?(session: WheelSession | null): void;
   convert(id: string): void;
   timeChanged(id: string, time: number): void;
@@ -225,7 +225,11 @@ export function createAudioPlayer(hooks: Hooks) {
   }
 
   function openFloatingMini() {
-    if (detached || changingWindow || !isPlayable(current())) return;
+    if (changingWindow || !isPlayable(current())) return;
+    if (detached) {
+      void hooks.miniWindow?.("focus").catch(hooks.showError);
+      return;
+    }
     if (!mini?.active()) showMini();
     detachMini();
   }
@@ -424,7 +428,7 @@ export function createAudioPlayer(hooks: Hooks) {
     if (!host || !transport || !media) return;
     const item = current();
     const floating = mini?.active();
-    hooks.trayPlayback?.(isPlayable(item));
+    hooks.desktopPlayback?.(isPlayable(item));
     host.hidden = !item || expanded || Boolean(floating);
     document.documentElement.classList.toggle("has-audio-player", !host.hidden);
     if (!item) { transport.replaceChildren(); syncDesktopWheel(); return; }

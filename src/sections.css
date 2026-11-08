@@ -233,6 +233,7 @@ body[data-page="settings"] .setting-control-row select { width: 170px; }
 body[data-page="settings"] .setting-row { margin-top: 22px; align-items: center; }
 body[data-page="settings"] .setting-row strong { font-weight: 500; font-size: 13px; }
 body[data-page="settings"] .setting-row p { margin-top: 6px; font-size: 12px; }
+body[data-page="settings"] .setting-row kbd { padding: 4px 7px; border-radius: 6px; background: var(--hover); color: var(--text); font: inherit; font-size: 12px; white-space: nowrap; }
 body[data-page="settings"] .settings-form .check-label { min-height: 42px; display: flex; gap: 14px; align-items: center; flex-direction: row-reverse; justify-content: space-between; padding: 6px 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
 body[data-page="settings"] .settings-form .check-label input[type="checkbox"] { appearance: none; width: 34px; height: 20px; min-height: 20px; flex: 0 0 34px; margin: 0; padding: 0; position: relative; border: 1px solid #858a9580; border-radius: 11px; background: #ffffff08; box-shadow: none; cursor: pointer; }
 body[data-page="settings"] .settings-form .check-label input[type="checkbox"]::after { content: ""; position: absolute; width: 12px; height: 12px; border-radius: 50%; background: var(--muted); top: 3px; left: 3px; }

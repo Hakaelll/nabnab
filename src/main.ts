@@ -154,15 +154,15 @@ const libraryFeatures=createLibraryFeatures({
 });
 let desktopWheelConfig = "";
 let desktopWheelRevision = 0;
-let trayPlaybackAvailable: boolean | undefined;
+let desktopPlaybackAvailable: boolean | undefined;
 const audioPlayer=createAudioPlayer({
   item: id => snapshot.library.find(item => item.id === id),
   command, render: renderCurrent, refresh, showError, t,
   fullscreen: enabled => getCurrentWindow().setFullscreen(enabled),
   miniWindow: desktop ? action => command("playback_mini_window", {action}) : undefined,
-  trayPlayback: desktop ? available => {
-    if (available === trayPlaybackAvailable) return;
-    trayPlaybackAvailable = available;
+  desktopPlayback: desktop ? available => {
+    if (available === desktopPlaybackAvailable) return;
+    desktopPlaybackAvailable = available;
     void command("playback_tray_available", {available}).catch(showError);
   } : undefined,
   desktopWheel: desktop ? session => {

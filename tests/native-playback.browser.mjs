@@ -12,6 +12,7 @@ const output = path.join(data, "output");
 await mkdir(output);
 const desktopGesture = process.env.NABNAB_PLAYBACK_DESKTOP_GESTURE === "1";
 const desktopTray = process.env.NABNAB_PLAYBACK_DESKTOP_TRAY === "1";
+const desktopMiniKey = process.env.NABNAB_PLAYBACK_DESKTOP_MINI_KEY === "1";
 const { chromium } = createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODULE || "playwright");
 const port = process.env.NABNAB_PLAYBACK_DEBUG_PORT || 9254;
 const endpoint = `http://127.0.0.1:${port}`;
@@ -538,12 +539,34 @@ function trayMini(select) {
   `], { windowsHide: true, encoding: "utf8", timeout: 8000 }).trim();
 }
 
-async function openMiniFromTray(kind, original) {
+function desktopMiniShortcut(press) {
+  return execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `
+    Add-Type -Name PlaybackMiniKey -Namespace Nabnab -MemberDefinition @'
+    [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern void keybd_event(byte key, byte scan, uint flags, System.UIntPtr extra);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool RegisterHotKey(System.IntPtr window, int id, uint modifiers, uint key);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool UnregisterHotKey(System.IntPtr window, int id);
+'@
+    if ('${press}' -eq 'false') {
+      $available = [Nabnab.PlaybackMiniKey]::RegisterHotKey([IntPtr]::Zero, 1, 6, 0x4d)
+      if ($available) { [void][Nabnab.PlaybackMiniKey]::UnregisterHotKey([IntPtr]::Zero, 1) }
+      $available
+      exit
+    }
+    foreach ($key in @(0x11, 0x10, 0x4d)) { [Nabnab.PlaybackMiniKey]::keybd_event($key, 0, 0, [UIntPtr]::Zero) }
+    foreach ($key in @(0x4d, 0x10, 0x11)) { [Nabnab.PlaybackMiniKey]::keybd_event($key, 0, 2, [UIntPtr]::Zero) }
+  `], { windowsHide: true, encoding: "utf8", timeout: 8000 }).trim();
+}
+
+async function openMiniFromDesktop(kind, original, trigger) {
   const before = await playing();
   assert.equal(await stage().getAttribute("data-mini"), null);
   windowCommand("minimize");
   await wait(mainMinimized);
-  assert.equal(trayMini(true), "enabled");
+  if (trigger === "tray") assert.equal(trayMini(true), "enabled");
+  else {
+    assert.equal(desktopMiniShortcut(false), "False");
+    desktopMiniShortcut(true);
+  }
   await wait(async () => await mainMinimized() && await page.evaluate(() => innerWidth <= 400));
   assert.equal(await stage().getAttribute("data-mini"), kind);
   assert.equal(await original.evaluate(element => element === document.getElementById("audio-engine")), true);
@@ -555,7 +578,7 @@ async function openMiniFromTray(kind, original) {
   await page.locator("#mini-toggle").click();
   await wait(async () => (await playing()).paused === before.paused);
   assert.equal(await mainMinimized(), true);
-  console.log(`Opened the ${kind} mini player from the Windows tray while the main window stayed minimized.`);
+  console.log(`Opened the ${kind} mini player using ${trigger} while the main window stayed minimized.`);
 }
 
 async function verifyDesktopWheel(original, selectedTracks) {
@@ -849,6 +872,13 @@ try {
   await rpc("subtitle_import", { id: videoId, language: "en", path: subtitles });
   await rpc("library_playback", { id: videoId, position: 5.25 });
   await page.reload();
+  if (desktopMiniKey) {
+    assert.equal(desktopMiniShortcut(false), "True");
+    await page.locator('[data-page="settings"]').click();
+    const shortcutNote = page.getByText("Ctrl + Mayús + M", { exact: false });
+    await shortcutNote.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: path.join(output, "desktop-mini-settings.png"), animations: "disabled" });
+  }
   await page.locator('[data-page="library"]').click();
   await page.locator(`.media-details[data-id="${videoId}"]`).click();
   await page.locator('[data-action="close-inspector"]:visible').click();
@@ -860,8 +890,8 @@ try {
   await wait(async () => { const current = await playing(); return !current.paused && current.time >= 5.25; });
   assert.deepEqual([(await playing()).width, (await playing()).height], [360, 640]);
   assert.equal(await page.locator("audio, video").count(), 1);
-  if (desktopTray) {
-    await openMiniFromTray("video", original);
+  if (desktopTray || desktopMiniKey) {
+    await openMiniFromDesktop("video", original, desktopTray ? "tray" : "Ctrl+Shift+M");
     await page.locator("#mini-expand").click();
     await wait(async () => !await mainMinimized() && await page.evaluate(() => innerWidth >= 900));
   }
@@ -1247,13 +1277,14 @@ try {
 
   await play(musicId);
   await wait(async () => { const current = await playing(); return current.id === musicId && !current.paused && current.time > 0.15; });
-  if (desktopTray) {
-    await openMiniFromTray("audio", original);
+  if (desktopTray || desktopMiniKey) {
+    await openMiniFromDesktop("audio", original, desktopTray ? "tray" : "Ctrl+Shift+M");
     await page.locator("#mini-dock").click();
     await wait(async () => !await mainMinimized());
     await stage().waitFor({ state: "hidden" });
     await page.locator("#audio-close").click();
-    assert.equal(trayMini(false), "disabled");
+    if (desktopTray) assert.equal(trayMini(false), "disabled");
+    if (desktopMiniKey) await wait(() => desktopMiniShortcut(false) === "True", 8000);
     await play(musicId);
     await wait(async () => !(await playing()).paused && (await playing()).time > 0.15);
   }

@@ -13,7 +13,7 @@ mod automation_wire;
 mod automation_credentials;
 mod automation_pipe;
 mod capture_operations;
-mod capture_shortcut;
+mod desktop_shortcut;
 mod voice;
 mod voice_sources;
 mod voice_operations;
@@ -1214,7 +1214,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .manage(state)
         .manage(quick_skip::DesktopWheel::default())
-        .manage(preferences::PlaybackTray::default())
+        .manage(preferences::DesktopPlayback::default())
         .manage(courses::browser::Reviews::default())
         .register_uri_scheme_protocol("nabmedia", |context, request| {
             local_media::serve(context.app_handle(), request)
@@ -1223,6 +1223,7 @@ fn main() {
         .on_window_event(|window, event| {
             if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed) {
                 quick_skip::shutdown(window.app_handle());
+                preferences::release_playback_shortcut(window.app_handle());
             }
         })
         .invoke_handler(tauri::generate_handler![

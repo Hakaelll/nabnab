@@ -1,3 +1,5 @@
+#[cfg(windows)]
+use crate::desktop_shortcut::Shortcut;
 use crate::store::Settings;
 use std::{path::Path, sync::Mutex};
 use tauri::{
@@ -5,17 +7,25 @@ use tauri::{
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, EventTarget, Manager, Webview,
 };
+#[cfg(windows)]
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_M;
 
 const TRAY_ID: &str = "nabnab";
 const TRAY_MINI: &str = "nabnab-playback-mini";
 
 #[derive(Default)]
-pub struct PlaybackTray(Mutex<PlaybackTrayState>);
+pub struct DesktopPlayback(Mutex<DesktopPlaybackState>);
 
 #[derive(Default)]
-struct PlaybackTrayState {
+struct DesktopPlaybackState {
     available: bool,
     item: Option<MenuItem<tauri::Wry>>,
+    #[cfg(windows)]
+    shortcut: Option<Shortcut>,
+}
+
+fn open_mini(app: &AppHandle) {
+    let _ = app.emit_to(EventTarget::webview("main"), "playback-mini-open", ());
 }
 
 #[tauri::command]
@@ -25,11 +35,11 @@ pub fn playback_tray_available(
     available: bool,
 ) -> Result<(), String> {
     if webview.label() != "main" {
-        return Err("Only the playback view can update the tray menu.".into());
+        return Err("Only the playback view can update desktop playback controls.".into());
     }
-    let tray = app.state::<PlaybackTray>();
+    let desktop = app.state::<DesktopPlayback>();
     let item = {
-        let mut state = tray.0.lock().unwrap();
+        let mut state = desktop.0.lock().unwrap();
         state.available = available;
         state.item.clone()
     };
@@ -37,7 +47,31 @@ pub fn playback_tray_available(
         item.set_enabled(available)
             .map_err(|error| error.to_string())?;
     }
+    #[cfg(windows)]
+    {
+        let mut state = desktop.0.lock().unwrap();
+        if !available {
+            state.shortcut.take();
+        } else if state.shortcut.is_none() {
+            let app = app.clone();
+            state.shortcut = Some(Shortcut::register(
+                &[(VK_M as u32, "Ctrl+Shift+M")],
+                "Ctrl+Shift+M is already in use. You can open the mini player from the nabnab tray menu.",
+                move || {
+                    let task = app.clone();
+                    let _ = app.run_on_main_thread(move || open_mini(&task));
+                },
+            )?);
+        }
+    }
     Ok(())
+}
+
+pub fn release_playback_shortcut(app: &AppHandle) {
+    #[cfg(windows)]
+    app.state::<DesktopPlayback>().0.lock().unwrap().shortcut.take();
+    #[cfg(not(windows))]
+    let _ = app;
 }
 
 fn show_main(app: &AppHandle) -> Result<(), String> {
@@ -61,7 +95,7 @@ fn set_tray(app: &AppHandle, enabled: bool, english: bool) -> Result<(), String>
     } else {
         "Abrir minirreproductor"
     };
-    let state = app.state::<PlaybackTray>();
+    let state = app.state::<DesktopPlayback>();
     if let Some(tray) = app.tray_by_id(TRAY_ID) {
         let item = state.0.lock().unwrap().item.clone();
         if let Some(item) = item {
@@ -95,9 +129,7 @@ fn set_tray(app: &AppHandle, enabled: bool, english: bool) -> Result<(), String>
             "nabnab-show" => {
                 let _ = show_main(app);
             }
-            TRAY_MINI => {
-                let _ = app.emit_to(EventTarget::webview("main"), "playback-mini-open", ());
-            }
+            TRAY_MINI => open_mini(app),
             "nabnab-exit" => app.exit(0),
             _ => {}
         })

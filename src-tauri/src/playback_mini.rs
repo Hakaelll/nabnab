@@ -12,6 +12,7 @@ pub enum Action {
     DetachAudio,
     DetachVideo,
     Restore,
+    Focus,
     Drag,
     ResizeAudio,
     ResizeVideo,
@@ -80,7 +81,7 @@ fn detach(app: &AppHandle, video: bool) -> tauri::Result<()> {
         let _ = mini.destroy();
         return Err(error);
     }
-    let minimize = if main.is_minimized().unwrap_or(false) {
+    let minimize = if main.is_minimized().unwrap_or(false) || !main.is_visible().unwrap_or(true) {
         Ok(())
     } else {
         main.minimize()
@@ -133,6 +134,7 @@ pub async fn playback_mini_window(
                 detach(&task, matches!(action, Action::DetachVideo))
             }
             Action::Restore => restore(&task),
+            Action::Focus if host.label() == MINI => host.set_focus(),
             Action::Drag if host.label() == MINI => host.start_dragging(),
             Action::ResizeAudio | Action::ResizeVideo if host.label() == MINI => {
                 resize(&host, matches!(action, Action::ResizeVideo))

@@ -1,4 +1,4 @@
-use crate::{capture_shortcut::Shortcut, queue, screen_capture as capture, AppState};
+use crate::{desktop_shortcut::Shortcut, queue, screen_capture as capture, AppState};
 use serde::Serialize;
 use std::{path::PathBuf, sync::{Arc, Mutex}, time::Duration};
 use tauri::{AppHandle, Emitter, State};
@@ -76,7 +76,7 @@ fn start_shortcut(app: AppHandle, state: Arc<AppState>, controller: capture::Con
     let handle = app.clone();
     let shared = state.clone();
     let callback_session=session.clone();
-    match Shortcut::start(move || {
+    match Shortcut::replay(move || {
         let handle = handle.clone();
         let shared = shared.clone();
         let controller = controller.clone();
