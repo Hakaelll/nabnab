@@ -27,6 +27,17 @@ const setup = `
     if (cmd === "get_snapshot") return structuredClone(state);
     if (cmd === "list_courses") return structuredClone(fixture.courses);
     if (cmd === "open_course_site") return;
+    if (cmd === "review_skillshare_resources") {
+      const names = {"Guide.pdf":"Guía del proyecto.pdf","Templates.zip":"Plantillas.zip","Unused.pdf":"Sin marcar.pdf","Referencias.pdf":"Referencias.pdf"};
+      const seen = new Set();
+      return args.links.map(link => {
+        const filename = names[link.split("/").at(-1)];
+        if (!filename) return {kind:"unsupported"};
+        if (seen.has(filename)) return {kind:"duplicate",filename};
+        seen.add(filename);
+        return {kind:"supported",filename};
+      });
+    }
     if (cmd === "add_skillshare_resources") {
       if (args.lessonId) {
         const course = fixture.courses.find(item => item.url === args.url);
@@ -273,8 +284,31 @@ try {
   await page.getByLabel("Enlace del curso").fill(skillshare);
   await page.getByLabel("Nombre del curso").fill("Diseño de un cuaderno");
   await page.locator("#course-skillshare-resources summary").press("Enter");
-  await page.getByLabel("Enlaces a adjuntos").fill(resources.join("\n"));
+  const mixed = [...resources, "https://static.skillshare.com/uploads/attachment/12345681/90abcdef/Unused.pdf",
+    resources[0], "https://example.invalid/no-admitido.mp4"];
+  await page.getByLabel("Enlaces a adjuntos").fill(mixed.join("\n"));
+  await page.screenshot({path:`${directory}/skillshare-links-before.png`,animations:"disabled"});
   await page.getByRole("button", {name:"Revisar enlaces"}).click();
+  const resourcesReview = page.getByRole("heading", {name:"Revisar adjuntos de Skillshare"});
+  await resourcesReview.waitFor({timeout:3000});
+  assert.equal(await resourcesReview.evaluate(node => node === document.activeElement), true);
+  assert.equal(await page.evaluate(() => window.courseFixture.calls.some(call => call.cmd === "add_skillshare_resources")), false);
+  await page.getByRole("button", {name:"Editar enlaces"}).press("Enter");
+  assert.equal(await page.getByLabel("Enlaces a adjuntos").inputValue(), mixed.join("\n"));
+  await page.getByRole("button", {name:"Revisar enlaces"}).click();
+  const confirmResources = page.getByRole("button", {name:"Añadir al curso",exact:true});
+  assert.equal(await confirmResources.isDisabled(), true);
+  await page.getByText("Enlace duplicado", {exact:true}).waitFor();
+  await page.getByText("Enlace no compatible", {exact:true}).waitFor();
+  await page.getByRole("checkbox", {name:"Incluir Guía del proyecto.pdf"}).press("Space");
+  await page.getByRole("checkbox", {name:"Incluir Plantillas.zip"}).press("Space");
+  for (const [width,height] of [[900,620],[1180,780]]) {
+    await page.setViewportSize({width,height});
+    assert.ok(await page.locator(".course-review").evaluate(node => node.scrollWidth <= node.clientWidth + 1));
+    await page.locator("#main").evaluate(node => { node.scrollTop = 0; });
+    await page.screenshot({path:`${directory}/skillshare-review-${width}x${height}.png`,animations:"disabled"});
+  }
+  await confirmResources.click();
   await page.getByRole("heading", {name:"Diseño de un cuaderno"}).waitFor();
   assert.equal(await page.getByText("Skillshare · 1 lección · 2 adjuntos").count(), 1);
   const reviewCall = await page.evaluate(() => window.courseFixture.calls.find(call => call.cmd === "add_skillshare_resources").args);
@@ -321,6 +355,10 @@ try {
     await page.screenshot({path:`${directory}/skillshare-destination-${width}x${height}.png`,animations:"disabled"});
   }
   await page.getByRole("button", {name:"Revisar enlaces"}).press("Enter");
+  await resourcesReview.waitFor();
+  await page.getByText("Destino · Organizar la página", {exact:true}).waitFor();
+  await page.getByRole("checkbox", {name:"Incluir Referencias.pdf"}).press("Space");
+  await page.getByRole("button", {name:"Añadir a la lección",exact:true}).press("Enter");
   const material = page.getByRole("checkbox", {name:"Seleccionar Referencias.pdf"});
   await material.waitFor();
   assert.equal(await page.getByRole("heading", {name:"Organizar la página"}).count(), 1);

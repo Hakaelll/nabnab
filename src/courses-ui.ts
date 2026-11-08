@@ -38,6 +38,11 @@ export interface CourseSection { id: string; title: string; lessons: CourseLesso
 export interface Course { id: string; title: string; provider: string; url: string | null; slug?: string | null; sections: CourseSection[]; createdAt: number }
 interface ReviewFile { id: number; name: string; kind: string; size: number }
 interface MaterialReview { id: number; title: string; provider: BrowserCourseProvider; groups: { title: string; files: ReviewFile[] }[] }
+type ResourceCheck = { kind: "supported" | "duplicate"; filename: string } | { kind: "unsupported" };
+interface ResourceReview {
+  url: string; title: string; lesson: Pick<CourseLesson, "id" | "title"> | null;
+  links: string[]; checks: ResourceCheck[]; selected: Set<number>;
+}
 interface CourseHooks {
   command<T>(name: string, args?: Record<string, unknown>): Promise<T>;
   getSnapshot(): { library: LibraryItem[]; jobs: Job[] };
@@ -69,6 +74,7 @@ export function createCoursesController(hooks: CourseHooks) {
   let noteText = "";
   let noteTime = "";
   let review: { plan: MaterialReview; files: Set<number>; trigger: string; lessonTitle?: string } | null = null;
+  let resourceReview: ResourceReview | null = null;
   const selected = new Set<string>();
   const current = () => courses.find(course => course.id === courseId);
   const currentLesson = () => current()?.sections.flatMap(section => section.lessons).find(lesson => lesson.id === lessonId);
@@ -115,6 +121,7 @@ export function createCoursesController(hooks: CourseHooks) {
   }
 
   async function open(url = "", initialProvider?: string): Promise<void> {
+    resourceReview = null;
     if (review) {
       const reviewId = review.plan.id;
       review = null;
@@ -160,12 +167,13 @@ export function createCoursesController(hooks: CourseHooks) {
   }
 
   function supportsDrop(): boolean {
+    if (resourceReview) return false;
     const course = current();
     return course ? Boolean(course.url && isBrowserProvider(course.provider)) : isBrowserProvider(provider);
   }
 
   async function receiveDrop(paths: string[]): Promise<void> {
-    if (!paths.length || busy || review) return;
+    if (!paths.length || busy || review || resourceReview) return;
     const course = current();
     if (course?.url && isBrowserProvider(course.provider)) {
       await reviewMaterials(course.provider, course.url, course.title, false, undefined, paths);
@@ -275,6 +283,31 @@ export function createCoursesController(hooks: CourseHooks) {
     </details>`;
   }
 
+  function resourceReviewView(plan: ResourceReview) {
+    const destination = plan.lesson?.title ?? t("Recursos generales del curso", "General course resources");
+    return `<section class="course-review" aria-busy="${busy}">
+      <div class="page-heading"><div><h1 id="course-heading" tabindex="-1">${t("Revisar adjuntos de Skillshare", "Review Skillshare attachments")}</h1>
+        <p>${h(plan.title)}</p></div></div>
+      <p class="course-review-note">${t("Destino", "Destination")} · <strong>${h(destination)}</strong></p>
+      <p class="course-review-note">${t("Marca los adjuntos que quieras guardar en el curso. La disponibilidad se comprueba al descargar.", "Select the attachments to save to the course. Availability is checked at download time.")}</p>
+      <ol class="course-resource-checks">${plan.checks.map((check, index) => `<li>
+        <span class="course-resource-line" aria-hidden="true">${index + 1}</span>
+        ${check.kind === "supported" ? `<label for="course-resource-check-${index}">
+          <span>${h(check.filename)}</span><input id="course-resource-check-${index}" type="checkbox" data-resource-check="${index}"
+            aria-label="${h(t("Incluir ", "Include ") + check.filename)}" ${plan.selected.has(index) ? "checked" : ""} ${busy ? "disabled" : ""}>
+        </label>` : `<div class="course-resource-unavailable">
+          <strong>${check.kind === "duplicate" ? t("Enlace duplicado", "Duplicate link") : t("Enlace no compatible", "Unsupported link")}</strong>
+          <small>${check.kind === "duplicate" ? h(check.filename) : t("Usa un enlace directo de Descargar recursos.", "Use a direct link from Download Resources.")}</small>
+        </div>`}
+      </li>`).join("")}</ol>
+      <footer class="course-review-footer">
+        <output>${plan.selected.size ? fileCount(plan.selected.size) : t("Elige al menos un adjunto", "Select at least one attachment")}</output>
+        <div class="button-group">${action("course-resource-back", t("Editar enlaces", "Edit links"), "back", "quiet", busy ? "disabled" : "")}
+          ${action("course-resource-confirm", plan.lesson ? t("Añadir a la lección", "Add to lesson") : t("Añadir al curso", "Add to course"), "add", "primary", busy || !plan.selected.size ? "disabled" : "")}</div>
+      </footer>
+    </section>`;
+  }
+
   function lessonPlayback(item: LibraryItem): string {
     const video = item.kind === "video";
     const thumbnail = video || item.details?.audioCover || item.details?.audio?.embeddedCover;
@@ -290,6 +323,7 @@ export function createCoursesController(hooks: CourseHooks) {
 
   function render(): string {
     if (review) return reviewView(review.plan, review.files, review.lessonTitle);
+    if (resourceReview) return resourceReviewView(resourceReview);
     const course = current();
     const platformField = `<label><span id="course-platform-label">${t("Plataforma", "Platform")}</span><select id="course-provider" aria-labelledby="course-platform-label">${courseProviders.map(([id, name]) => option(id, name, provider)).join("")}</select></label>`;
     const linkField = `<label>${t("Enlace del curso", "Course URL")}<input id="course-url" type="url" required value="${h(input)}" placeholder="https://…" autocomplete="off"></label>`;
@@ -322,6 +356,15 @@ export function createCoursesController(hooks: CourseHooks) {
   }
 
   function handleInput(element: HTMLElement): boolean {
+    if (resourceReview && element instanceof HTMLInputElement && element.dataset.resourceCheck !== undefined) {
+      const index = Number(element.dataset.resourceCheck);
+      if (resourceReview.checks[index]?.kind === "supported") {
+        if (element.checked) resourceReview.selected.add(index);
+        else resourceReview.selected.delete(index);
+        hooks.render();
+      }
+      return true;
+    }
     if (review && element instanceof HTMLInputElement && element.dataset.courseReviewFile !== undefined) {
       const id = Number(element.dataset.courseReviewFile);
       if (element.checked) review.files.add(id);
@@ -372,15 +415,38 @@ export function createCoursesController(hooks: CourseHooks) {
           document.getElementById("course-resource-links")?.focus();
           return true;
         }
-        let opened = false;
-        const target = course ? resourceLessonId || null : null;
+        const target = course?.sections.flatMap(section => section.lessons).find(lesson => lesson.id === resourceLessonId) ?? null;
         await perform(async () => {
-          const next = await hooks.command<Course>("add_skillshare_resources", { url: course?.url ?? input, title: course?.title ?? browserTitle, links, lessonId: target });
+          const checks = await hooks.command<ResourceCheck[]>("review_skillshare_resources", { links });
+          resourceReview = { url: course?.url ?? input, title: course?.title ?? browserTitle, lesson: target, links, checks, selected: new Set() };
+          return false;
+        });
+        if (resourceReview) focusCourseHeading();
+        return true;
+      }
+      case "course-resource-back": {
+        if (!resourceReview || busy) return true;
+        resourceReview = null;
+        hooks.render();
+        const entry = document.getElementById("course-skillshare-resources");
+        if (entry instanceof HTMLDetailsElement) entry.open = true;
+        document.getElementById("course-resource-links")?.focus();
+        return true;
+      }
+      case "course-resource-confirm": {
+        const plan = resourceReview;
+        if (!plan?.selected.size || busy) return true;
+        const links = plan.links.filter((_, index) => plan.selected.has(index));
+        const target = plan.lesson?.id ?? null;
+        let opened = false;
+        await perform(async () => {
+          const next = await hooks.command<Course>("add_skillshare_resources", { url: plan.url, title: plan.title, links, lessonId: target });
           if (courseId !== next.id) selected.clear();
           courseId = next.id;
           lessonId = target ?? next.sections.find(section => section.id === skillshareResourceSection)?.lessons[0]?.id ?? null;
           resourceLinks = "";
           resourceLessonId = "";
+          resourceReview = null;
           opened = true;
         });
         if (opened) {

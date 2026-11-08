@@ -2,6 +2,7 @@ use super::{
     browser, digest, label, save_course, Course, CourseAsset, CourseLesson, CourseSection,
 };
 use crate::{direct, file_sources::PublicSelection, queue, sessions, store::Repository, AppState};
+use serde::Serialize;
 use std::{collections::HashSet, path::Path, sync::Arc};
 use tauri::State;
 use url::Url;
@@ -115,6 +116,35 @@ pub(crate) fn validate_selection(selection: &PublicSelection) -> Result<Resource
         return Err("The Skillshare attachment does not match the reviewed resource.".into());
     }
     Ok(resource)
+}
+
+#[derive(Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ResourceCheck {
+    Supported { filename: String },
+    Duplicate { filename: String },
+    Unsupported,
+}
+
+#[tauri::command]
+pub fn review_skillshare_resources(links: Vec<String>) -> Result<Vec<ResourceCheck>, String> {
+    if links.is_empty() || links.len() > 30 {
+        return Err("Paste 1–30 Skillshare attachment links.".into());
+    }
+    let mut seen = HashSet::new();
+    Ok(links
+        .iter()
+        .map(|link| match parse(link) {
+            Ok(Resource { id, revision, filename, .. }) => {
+                if seen.insert((id, revision)) {
+                    ResourceCheck::Supported { filename }
+                } else {
+                    ResourceCheck::Duplicate { filename }
+                }
+            }
+            Err(_) => ResourceCheck::Unsupported,
+        })
+        .collect())
 }
 
 #[tauri::command]
@@ -331,6 +361,27 @@ pub(super) fn enqueue(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn skillshare_review_labels_duplicates_and_unsupported_lines() {
+        let base = "https://static.skillshare.com/uploads/attachment/12345678";
+        let reviewed = review_skillshare_resources(vec![
+            format!("{base}/90abcdef/Guide.pdf"),
+            format!("{base}/90abcdef/Renamed.pdf"),
+            format!("{base}/90abcdef/Guide.pdf?token=private"),
+            format!("{base}/90abcdee/Updated.pdf"),
+        ])
+        .unwrap();
+        assert_eq!(
+            serde_json::to_value(reviewed).unwrap(),
+            serde_json::json!([
+                {"kind": "supported", "filename": "Guide.pdf"},
+                {"kind": "duplicate", "filename": "Renamed.pdf"},
+                {"kind": "unsupported"},
+                {"kind": "supported", "filename": "Updated.pdf"}
+            ])
+        );
+    }
 
     #[test]
     fn skillshare_resource_links_accept_only_direct_supported_attachments() {

@@ -49,9 +49,11 @@ En Rocketseat, Coursera y Domestika, la sesión y la descarga se gestionan en el
 
 ### Adjuntos de Skillshare
 
-Abre el curso en Skillshare con tu sesión. En **Proyectos y recursos → Descargar recursos**, copia el enlace directo de cada archivo que el docente haya habilitado para descargar. En nabnab, abre **Descargar adjuntos de Skillshare**, pega un enlace por línea y pulsa **Revisar enlaces**. Puedes revisar hasta 30 enlaces por operación. Marca los archivos en el curso y pulsa **Añadir a la cola**. Los trabajos guardan los archivos en la carpeta de Descargas configurada y los asocian al curso. [Descargas autorizadas en las condiciones de Skillshare](https://learn.skillshare.com/en/terms)
+Abre el curso en Skillshare con tu sesión. En **Proyectos y recursos → Descargar recursos**, copia el enlace directo de cada archivo que el docente haya habilitado para descargar. En nabnab, abre **Descargar adjuntos de Skillshare**, pega un enlace por línea y pulsa **Revisar enlaces**. Puedes revisar hasta 30 enlaces por operación. La lista distingue los enlaces compatibles, duplicados e incompatibles. Marca los que quieras guardar y confirma con **Añadir al curso** o **Añadir a la lección**. Ya en el curso, selecciona los archivos que quieras descargar y pulsa **Añadir a la cola**. Los trabajos guardan los archivos en la carpeta de Descargas configurada y los asocian al curso. [Descargas autorizadas en las condiciones de Skillshare](https://learn.skillshare.com/en/terms)
 
-Si ya importaste las lecciones del curso, usa **Guardar en** para elegir una de ellas. Tras revisar los enlaces, los adjuntos aparecen en **Materiales** junto al contenido y las notas de esa lección. **Recursos generales del curso** guarda los enlaces en la sección común. Si un adjunto ya está asociado a otro destino, nabnab indica dónde se encuentra.
+![Revisión de enlaces compatibles, duplicados e incompatibles con datos de prueba](course-skillshare-link-review.png)
+
+Si ya importaste las lecciones del curso, usa **Guardar en** para elegir una de ellas. Tras confirmar la selección, los adjuntos aparecen en **Materiales** junto al contenido y las notas de esa lección. **Recursos generales del curso** guarda los enlaces en la sección común. Si un adjunto ya está asociado a otro destino, nabnab indica dónde se encuentra.
 
 ![Destino de un adjunto de Skillshare antes de enviarlo a la cola](course-skillshare-lesson.png)
 

@@ -93,3 +93,11 @@
 .course-resource-target { display: grid; gap: 6px; width: min(100%, 27rem); margin-block: 12px; }
 .course-resource-target select { width: 100%; min-width: 0; }
 .course-resource-entry textarea { display: block; width: 100%; min-width: 0; padding: 10px 12px; line-height: 1.5; resize: vertical; margin-block: 6px 10px; }
+.course-resource-checks { display: grid; margin: 0; padding: 0; list-style: none; border: 1px solid var(--edge-quiet); border-radius: 12px; background: var(--secondary); }
+.course-resource-checks li { display: grid; grid-template-columns: 2ch minmax(0, 1fr); align-items: center; gap: 12px; padding: 10px 14px; }
+.course-resource-checks li + li { border-top: 1px solid var(--edge-quiet); }
+.course-resource-checks li:has(input:checked) { background: var(--surface); }
+.course-resource-line { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.course-resource-checks label { display: flex; flex-direction: row; justify-content: space-between; align-items: center; gap: 12px; min-height: 24px; cursor: pointer; overflow-wrap: anywhere; color: var(--text); }
+.course-resource-checks label input { flex: none; }
+.course-resource-unavailable { display: grid; gap: 3px; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
