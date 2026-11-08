@@ -15,6 +15,7 @@ En **Plataformas → Archivos y documentos**, pega un enlace, un identificador o
 - Abre un enlace de registro, un ID numérico o un DOI. La ficha distingue el registro concreto del conjunto al que pertenece. Cada archivo queda ligado al registro concreto, aunque se haya abierto mediante un DOI de conjunto.
 - **Historial de versiones** enumera los registros públicos de la familia. Abre una versión para elegir sus archivos o usa **Seguir versiones** para revisar las novedades manualmente desde Biblioteca.
 - Revisa tipo, versión, tamaño y checksum de los archivos. La selección muestra el tamaño total conocido antes de enviar nada a la cola. Se verifica el checksum publicado MD5 o SHA-256 cuando esté disponible.
+- Usa **Solo seleccionados** para revisar todos los archivos marcados, incluidos los que el texto de búsqueda había ocultado. Puedes quitar archivos y ver cómo cambia el total. Pulsa el botón de nuevo para recuperar la búsqueda anterior.
 - Los registros con archivos restringidos, embargados o sin acceso público declarado muestran metadatos sin permitir la descarga. La cola guarda archivos sin ejecutarlos.
 
 [API de registros y límites](https://developers.zenodo.org/#records) · [Versiones de registros](https://help.zenodo.org/docs/deposit/manage-versions/)
@@ -50,6 +51,8 @@ Con `NABNAB_RESEARCH_CHAPTER_FILTERS_ONLY=1` la prueba combina idioma y lectura 
 ![Selección de PDF por versión de arXiv](arxiv-versions.png)
 
 ![Volumen y checksum antes de descargar un archivo de Zenodo](zenodo-selection.png)
+
+![Selección de Zenodo con un archivo de tamaño desconocido](zenodo-review.png)
 
 ![Capítulos seleccionados de una edición de LibriVox](librivox-chapters.png)
 

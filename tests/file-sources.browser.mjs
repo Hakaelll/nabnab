@@ -6,7 +6,7 @@ import { createRequire } from "node:module";
 const { chromium } = createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODULE || "playwright");
 const browser = await chromium.launch({ headless: true, ...(process.env.EDGE_EXECUTABLE ? { executablePath: process.env.EDGE_EXECUTABLE } : { channel: "msedge" }) });
 const base = process.env.NABNAB_UI_URL || "http://127.0.0.1:1420/";
-const directory = "artifacts/file-sources";
+const directory = process.env.NABNAB_FILE_SOURCES_ARTIFACTS || "artifacts/file-sources";
 await mkdir(directory, { recursive: true });
 const page = await browser.newPage({ viewport: { width: 1180, height: 780 } });
 const errors = [];
@@ -27,7 +27,11 @@ const setup = `
   const historyUrl="https://zenodo.org/api/records?q=conceptrecid%3A1234&all_versions=true";
   const dataset=(url,id,version)=>sourcePage(url,{provider:"zenodo",title:"Fixture dataset",
     zenodo:{recordId:String(id),familyId:"1234",version,versionsUrl:historyUrl},
-    assets:[asset("zenodo:"+id+":samples.csv","samples.csv",{sourceUrl:"https://zenodo.org/records/"+id,mime:"text/csv",size:2**31,version,checksum:"md5:"+"a".repeat(32)})]});
+    assets:[
+      asset("zenodo:"+id+":samples.csv","samples.csv",{sourceUrl:"https://zenodo.org/records/"+id,mime:"text/csv",size:2**31,version,checksum:"md5:"+"a".repeat(32)}),
+      asset("zenodo:"+id+":appendix.zip","appendix.zip",{mime:"application/zip",size:null,version}),
+      asset("zenodo:"+id+":readme.txt","readme.txt",{mime:"text/plain",size:2048,version}),
+    ]});
   const native=(id="doc",name="Project notes")=>({selection:{provider:"drive",accountId:"fixture-account",id,exportMime:null,version:"v1"},name,kind:"document",mime:"application/vnd.google-apps.document",size:null,location:"My Drive/Documents",exports:[{mime:"application/pdf",extension:"pdf",label:"PDF"},{mime:"application/vnd.openxmlformats-officedocument.wordprocessingml.document",extension:"docx",label:"Word (.docx)"}],downloadable:true});
   const binary=(id,name)=>({selection:{provider:"drive",accountId:"fixture-account",id,exportMime:null,version:"v1"},name,kind:"file",mime:"application/pdf",size:2048,location:"My Drive/Documents",exports:[],downloadable:true});
   mockIPC(async(cmd,args={})=>{
@@ -209,15 +213,46 @@ try {
     await page.locator("[data-file-source-select='zenodo:1236:samples.csv']").check();
     assert.match(await page.locator(".file-source-selection").innerText(), /2\.00 GiB/);
     assert.match(await page.locator(".file-source-list").innerText(), /md5:[a-f0-9]{32}/);
+    const fileQuery = page.getByRole("searchbox", { name: "Filtrar archivos cargados" });
+    await fileQuery.fill("appendix");
+    const appendix = page.locator("[data-file-source-select='zenodo:1236:appendix.zip']");
+    await appendix.check();
+    assert.match(await page.locator(".file-source-selection").innerText(), /2\.00 GiB \+ tamaño pendiente/);
+    assert.equal(await page.locator(".file-source-list input:checked").count(), 1);
+    for (const [width, height] of [[1180, 780], [900, 620]]) {
+      await page.setViewportSize({ width, height });
+      await page.locator(".file-source-filter").evaluate(element => element.scrollIntoView({ block: "start" }));
+      await page.screenshot({ path: `${directory}/zenodo-filter-${width}x${height}-fixture.png` });
+    }
+    const review = page.getByRole("button", { name: "Solo seleccionados" });
+    await review.press("Space", { timeout: 3000 });
+    assert.equal(await review.getAttribute("aria-pressed"), "true");
+    assert.equal(await fileQuery.isDisabled(), true);
+    assert.equal(await page.locator(".file-source-list input").count(), 2);
+    assert.equal(await page.locator(".file-source-list input:checked").count(), 2);
     for (const [width, height] of [[1180, 780], [900, 620]]) {
       await page.setViewportSize({ width, height });
       await checkNoHorizontalOverflow(`Zenodo ${width}`);
+      await page.locator(".file-source-selection").evaluate(element => element.scrollIntoView({ block: "end" }));
       await page.screenshot({ path: `${directory}/zenodo-${width}x${height}-fixture.png` });
     }
+    await appendix.press("Space");
+    assert.equal(await review.evaluate(element => element === document.activeElement), true);
+    assert.match(await page.locator(".file-source-selection").innerText(), /1 seleccionado.*2\.00 GiB/s);
+    assert.doesNotMatch(await page.locator(".file-source-selection").innerText(), /tamaño pendiente/);
+    await review.press("Enter");
+    assert.equal(await fileQuery.inputValue(), "appendix");
+    assert.equal(await fileQuery.isEnabled(), true);
+    assert.equal(await appendix.isChecked(), false);
+    await review.press("Enter");
+    await page.locator("[data-file-source-select='zenodo:1236:samples.csv']").press("Space");
+    await page.getByText("No hay archivos seleccionados.", { exact: true }).waitFor();
+    assert.equal(await page.locator("[data-action='file-source-queue']").isDisabled(), true);
     await page.getByRole("button", { name: "Historial de versiones" }).click();
     const oldVersion = page.locator("[data-action='file-source-entry'][data-id='zenodo:1235']");
     await oldVersion.click();
     await page.getByText("Versión v1 · Registro 1235 · Familia 1234", { exact: true }).waitFor();
+    assert.equal(await review.getAttribute("aria-pressed"), "false");
     const exactFile = page.locator("[data-file-source-select='zenodo:1235:samples.csv']");
     assert.equal(await exactFile.isChecked(), false);
     await exactFile.check();

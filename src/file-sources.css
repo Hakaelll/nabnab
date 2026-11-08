@@ -41,6 +41,7 @@
 .file-source-filter > label > svg { width: 16px; height: 16px; position: absolute; left: 12px; pointer-events: none; color: var(--muted); }
 .file-source-filter input { padding-left: 36px; width: 100%; }
 .file-source-filter > select { min-width: 0; max-width: min(100%, 18rem); text-overflow: ellipsis; }
+.file-source-filter > button[aria-pressed="true"] { background: var(--surface); border-color: var(--action); color: var(--text); }
 .file-source-filter > span { color: var(--muted); font-size: 12px; }
 .file-source-list { border-top: 1px solid var(--edge-quiet); }
 .file-source-row { display: grid; grid-template-columns: 18px 24px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 14px 12px; border-bottom: 1px solid var(--edge-quiet); font-size: 13px; }
