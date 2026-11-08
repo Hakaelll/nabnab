@@ -35,6 +35,7 @@ export function createPersonalServers(hooks: Hooks) {
   let entries: Entry[] | null = null;
   let selected = new Set<number>();
   let referenceId = "";
+  let reviewing: Reference | null = null;
   let error = "";
   let busy: "read" | "probe" | "save" | "copy" | null = null;
   let sequence = 0;
@@ -46,6 +47,11 @@ export function createPersonalServers(hooks: Hooks) {
   const activeReference = () => status?.references.find(reference => reference.id === referenceId);
   const disabled = () => busy ? "disabled" : "";
   const label = (value: string[]) => value.join("/");
+  const reviewedIndex = () => {
+    if (!reviewing || !entries) return -1;
+    const target = label(reviewing.selection.path);
+    return entries.findIndex(entry => !entry.directory && label(entry.path) === target);
+  };
   const cleanDraft = () => {
     draft = { name: "", root: "", username: "", host: "", port: "22", identity: "" };
     editor = null;
@@ -69,14 +75,17 @@ export function createPersonalServers(hooks: Hooks) {
     await run("save", async () => { status = await hooks.command<ServerStatus>("personal_servers_status"); });
   }
 
-  async function browse(id: string, folder: string[]) {
+  async function browse(id: string, folder: string[], reference: Reference | null = null) {
     if (busy) return;
     serverId = id;
     path = folder;
+    reviewing = reference;
     entries = null;
     selected.clear();
     await run("read", async () => {
       entries = await hooks.command<Entry[]>("personal_server_browse", { serverId: id, path: folder, requestId });
+      const index = reviewedIndex();
+      if (index >= 0) selected.add(index);
     });
   }
 
@@ -132,20 +141,52 @@ export function createPersonalServers(hooks: Hooks) {
     if (!selected.size || !entries) return "";
     const sizes = [...selected].map(index => entries?.[index]?.stamp.size ?? null);
     const total = sizes.reduce<number>((sum, size) => sum + (size ?? 0), 0);
+    const updating = selected.size === 1 && selected.has(reviewedIndex());
     return `<div class="file-source-selection personal-review"><div class="file-source-selection-title"><strong>${selected.size} ${selected.size === 1 ? t("archivo seleccionado", "file selected") : t("archivos seleccionados", "files selected")}</strong>
       <span>${bytesLabel(total)}${sizes.includes(null) ? ` + ${t("tamaño desconocido", "unknown size")}` : ""}</span></div>
-      ${destination()}<div class="button-group">${action("personal-index", t("Indexar referencia", "Index reference"), "link", "secondary", disabled())}${action("personal-copy", t("Copiar a mi biblioteca", "Copy to my library"), "downloads", "primary", disabled())}</div>
-      <p class="field-note">${t("Las referencias ocupan solo espacio de índice y requieren conexión al servidor.", "References only occupy index space and require a server connection.")}</p></div>`;
+      ${destination()}<div class="button-group">${action("personal-index", updating ? t("Actualizar referencia", "Update reference") : t("Indexar referencia", "Index reference"), "link", "secondary", disabled())}${action("personal-copy", t("Copiar a mi biblioteca", "Copy to my library"), "downloads", "primary", disabled())}</div>
+      <p class="field-note">${updating
+        ? t("Copiar guarda el archivo actual. Actualizar guarda sus metadatos en la referencia.", "Copy saves the current file. Update saves its metadata to the reference.")
+        : t("Las referencias ocupan solo espacio de índice y requieren conexión al servidor.", "References only occupy index space and require a server connection.")}</p></div>`;
+  }
+
+  function referenceReview(server: Server) {
+    if (!reviewing) return "";
+    const stored = reviewing.selection.stamp;
+    const current = entries?.[reviewedIndex()]?.stamp;
+    const different = current && (stored.size !== current.size || stored.modified !== current.modified || stored.etag !== current.etag);
+    const changedVersion = current?.etag && stored.etag && current.etag !== stored.etag;
+    const message = busy === "read" ? t("Consultando la carpeta…", "Reading the folder…")
+      : !entries ? t("Actualiza la carpeta para volver a consultar este archivo.", "Refresh the folder to check this file again.")
+      : !current ? t("El archivo ya no aparece en esta carpeta.", "The file is no longer listed in this folder.")
+      : changedVersion ? t("El identificador de versión es distinto.", "The version identifier differs.")
+      : different ? t("Los datos del archivo en el servidor cambiaron.", "The server reports different file metadata.")
+      : t("Los datos visibles coinciden con la referencia.", "The visible metadata matches the reference.");
+    const describe = (stamp: Stamp) => {
+      const size = stamp.size === null ? t("Tamaño desconocido", "Unknown size") : bytesLabel(stamp.size);
+      const time = stamp.modified === null ? NaN : server.kind === "sftp" ? Number(stamp.modified) * 1000 : Date.parse(stamp.modified);
+      const date = Number.isFinite(time) ? new Intl.DateTimeFormat(t("es", "en"), { dateStyle: "medium", timeStyle: "short" }).format(time) : "";
+      return h(date ? `${size} · ${date}` : size);
+    };
+    return `<section class="personal-reference-review" aria-labelledby="personal-reference-review-title">
+      <header><div><span class="file-source-eyebrow">${t("Revisión de referencia", "Reference review")}</span>
+        <h3 id="personal-reference-review-title" tabindex="-1">${h(reviewing.selection.path.at(-1) ?? "")}</h3></div>
+        ${action("personal-references", t("Volver a referencias", "Back to references"), "link", "quiet", disabled())}</header>
+      <p role="status">${message}</p>
+      ${current ? `<dl><div><dt>${t("Referencia guardada", "Saved reference")}</dt><dd>${describe(stored)}</dd></div>
+        <div><dt>${t("Archivo en el servidor", "File on server")}</dt><dd>${describe(current)}</dd></div></dl>` : ""}
+    </section>`;
   }
 
   function renderBrowser() {
     const server = activeServer();
-    return `<section class="personal-servers"><div class="page-heading"><div><h2>${t("Servidores personales", "Personal servers")}</h2>
+    return `<section class="personal-servers">${reviewing ? "" : `<div class="page-heading"><div><h2>${t("Servidores personales", "Personal servers")}</h2>
       <p>${t("Explora una raíz autorizada. Guarda referencias remotas o copia archivos a Biblioteca.", "Browse an authorized root. Save remote references or copy files to Library.")}</p></div>
       ${action("personal-references", t("Referencias guardadas", "Saved references"), "link", "quiet", disabled())}</div>
-      ${setup()}${feedback()}${serverList(false)}
+      ${setup()}${serverList(false)}`}${feedback()}
       ${server ? `<div class="file-source-results"><div class="file-source-result-heading"><div><span class="file-source-eyebrow">${t("Origen remoto", "Remote source")}</span><h2>${h(server.name)}</h2><p class="path">${h(server.location)}</p>${path.length ? `<p class="field-note">${t("Carpeta", "Folder")} · ${h(label(path))}</p>` : ""}</div>
         <div class="button-group">${path.length ? action("personal-parent", t("Subir carpeta", "Parent folder"), undefined, "quiet", disabled()) : ""}${action("personal-reload", t("Actualizar", "Refresh"), "retry", "quiet", disabled())}</div></div>
+        ${referenceReview(server)}
         ${entries?.length ? `<div class="file-source-list" role="group" aria-label="${t("Archivos del servidor", "Server files")}">${entries.map((entry, index) => {
           const name = h(entry.path.at(-1) ?? "");
           return entry.directory ? `<button class="file-source-entry" data-action="personal-folder" data-index="${index}" ${disabled()}><span>${icon("folder")} ${name}</span>${icon("arrow")}</button>`
@@ -174,7 +215,10 @@ export function createPersonalServers(hooks: Hooks) {
         ${action("personal-remove-reference", t("Quitar referencia", "Remove reference"), undefined, "quiet", `data-id="${h(reference.id)}" ${disabled()}`)}</div>`).join("")}</div>`
         : !busy ? `<p class="file-source-empty">${t("Aún no hay referencias guardadas.", "There are no saved references yet.")}</p>` : ""}
       ${chosen ? `<div class="file-source-selection personal-review"><div class="file-source-selection-title"><strong>${h(chosen.selection.path.at(-1) ?? "")}</strong><span>${chosen.selection.stamp.size === null ? t("Tamaño desconocido", "Unknown size") : bytesLabel(chosen.selection.stamp.size)}</span></div>
-        ${destination()}${action("personal-copy-reference", t("Obtener copia local", "Get local copy"), "downloads", "primary", busy || !connected(chosen) ? "disabled" : "")}</div>` : ""}</section>`;
+        ${destination()}<div class="button-group">
+          ${action("personal-review-reference", t("Revisar en servidor", "Review on server"), "folder", "secondary", busy || !connected(chosen) ? "disabled" : "")}
+          ${action("personal-copy-reference", t("Obtener copia local", "Get local copy"), "downloads", "primary", busy || !connected(chosen) ? "disabled" : "")}
+        </div></div>` : ""}</section>`;
   }
 
   function handleInput(element: HTMLElement): boolean {
@@ -230,7 +274,7 @@ export function createPersonalServers(hooks: Hooks) {
     const id = element.dataset.id ?? "";
     const paths = [...selected].map(index => entries?.[index]?.path).filter(value => value !== undefined);
     switch (name) {
-      case "personal-open": hooks.openBrowser(); await load(); break;
+      case "personal-open": reviewing = null; hooks.openBrowser(); await load(); break;
       case "personal-references": hooks.openReferences(); break;
       case "personal-destination": hooks.chooseFolder(); break;
       case "personal-add": {
@@ -251,7 +295,7 @@ export function createPersonalServers(hooks: Hooks) {
         }
         break;
       case "personal-parent": if (serverId) await browse(serverId, path.slice(0, -1)); break;
-      case "personal-reload": if (serverId) await browse(serverId, path); break;
+      case "personal-reload": if (serverId) await browse(serverId, path, reviewing); break;
       case "personal-folder": {
         const entry = entries?.[Number(element.dataset.index)];
         if (serverId && entry?.directory) await browse(serverId, entry.path);
@@ -273,10 +317,18 @@ export function createPersonalServers(hooks: Hooks) {
       case "personal-remove-reference": await run("save", async () => {
         status = await hooks.command<ServerStatus>("personal_server_remove", { id, reference: name === "personal-remove-reference" });
         if (id === referenceId) referenceId = "";
-        if (id === serverId) { serverId = ""; entries = null; path = []; selected.clear(); }
+        if (id === serverId) { serverId = ""; entries = null; path = []; reviewing = null; selected.clear(); }
       }); break;
+      case "personal-review-reference": {
+        const reference = activeReference();
+        if (!reference || !status?.servers.some(server => server.id === reference.selection.serverId)) break;
+        hooks.openBrowser();
+        await browse(reference.selection.serverId, reference.selection.path.slice(0, -1), reference);
+        document.getElementById("personal-reference-review-title")?.focus();
+      } break;
       case "personal-index": if (paths.length) await run("save", async () => {
         status = await hooks.command<ServerStatus>("personal_server_index", { serverId, paths });
+        if (reviewing) reviewing = status.references.find(ref => ref.id === reviewing?.id) ?? null;
         selected.clear();
         hooks.notify(t("Referencias guardadas en Biblioteca.", "References saved in Library."), "success");
       }); break;

@@ -20,6 +20,7 @@ const setup = `
   const fixture=window.fileSourceFixture={state,calls:[],pending:null};
   const personal={servers:[],references:[]};
   const stamp={size:4096,modified:"2026-11-07",etag:'"version-1"'};
+  fixture.personalStamp=stamp;
   const connections=["drive","onedrive","dropbox"].map(provider=>({provider,configured:false,connected:false,accountId:null,scope:provider==="drive"?"drive.readonly":provider==="onedrive"?"Files.Read offline_access":"files.metadata.read files.content.read sharing.read account_info.read",redirectUri:"http://127.0.0.1:53687/callback"}));
   const asset=(id,filename,extra={})=>({id,sourceUrl:"https://github.com/example/nabnab-fixture/releases/tag/v1.0",downloadUrl:"https://example.org/"+filename,filename,mime:"application/zip",size:1048576,title:filename,version:"v1.0",original:true,author:null,license:null,attribution:null,sha256:null,platform:null,architecture:null,...extra});
   const sourcePage=(url,extra={})=>({provider:"github",sourceUrl:url,title:"nabnab-fixture",description:"Public source fixture. No remote provider access is represented.",rights:null,entries:[],assets:[],nextCursor:null,warnings:[],...extra});
@@ -44,9 +45,9 @@ const setup = `
     if(cmd==="personal_server_trust_sftp"){personal.servers.push({id:"sftp-fixture",name:args.name,kind:"sftp",location:"sftp.example:22/media"});return copy(personal);}
     if(cmd==="personal_server_nas")return null;
     if(cmd==="personal_server_browse")return args.path.length
-      ? [{path:["Docs","notes.pdf"],directory:false,stamp,mime:"application/pdf"}]
+      ? (fixture.personalStamp?[{path:["Docs","notes.pdf"],directory:false,stamp:copy(fixture.personalStamp),mime:"application/pdf"}]:[])
       : [{path:["Docs"],directory:true,stamp:{size:null,modified:null,etag:null},mime:null}];
-    if(cmd==="personal_server_index"){personal.references=[{id:"ref-fixture",serverName:"Estudio",selection:{serverId:args.serverId,path:args.paths[0],stamp}}];return copy(personal);}
+    if(cmd==="personal_server_index"){personal.references=[{id:"ref-fixture",serverName:"Estudio",selection:{serverId:args.serverId,path:args.paths[0],stamp:copy(fixture.personalStamp)}}];return copy(personal);}
     if(cmd==="personal_server_copy")return [];
     if(cmd==="personal_server_remove"){personal.servers=personal.servers.filter(server=>server.id!==args.id);return copy(personal);}
     if(cmd==="queue_public_files"||cmd==="queue_cloud_files")return [];
@@ -262,6 +263,32 @@ try {
     assert.equal(copyArgs.referenceId,"ref-fixture");
     assert.equal(copyArgs.paths,null);
     assert(!JSON.stringify(copyArgs).includes("fixture-app-password"));
+    await page.getByRole("button", {name:/notes.pdf.*Remota/}).click();
+    await page.getByRole("button", {name:"Revisar en servidor",exact:true}).click();
+    const comparison = page.locator(".personal-reference-review");
+    await comparison.getByRole("status").filter({hasText:"Los datos visibles coinciden"}).waitFor();
+    await page.waitForFunction(() => document.activeElement?.id === "personal-reference-review-title");
+    assert.equal(await page.getByRole("checkbox", {name:/notes.pdf/}).isChecked(), true);
+    await page.evaluate(() => { window.fileSourceFixture.personalStamp = { ...window.fileSourceFixture.personalStamp, etag:'"version-2"' }; });
+    await page.getByRole("button", {name:"Actualizar",exact:true}).click();
+    await comparison.getByRole("status").filter({hasText:"El identificador de versión es distinto."}).waitFor();
+    assert.equal(await page.evaluate(() => window.fileSourceFixture.calls.filter(call => call.cmd==="personal_server_index").length), 1);
+    for (const [width, height] of [[1180, 780], [900, 620]]) {
+      await page.setViewportSize({width,height});
+      await comparison.scrollIntoViewIfNeeded();
+      await checkNoHorizontalOverflow(`Personal reference review ${width}`);
+      await page.screenshot({path:`${directory}/personal-reference-${width}x${height}-fixture.png`});
+    }
+    await page.getByRole("button", {name:"Actualizar referencia",exact:true}).click();
+    await comparison.getByRole("status").filter({hasText:"Los datos visibles coinciden"}).waitFor();
+    const updatedPaths = await page.evaluate(() => window.fileSourceFixture.calls.filter(call => call.cmd==="personal_server_index").at(-1).args.paths);
+    assert.deepEqual(updatedPaths, [["Docs","notes.pdf"]]);
+    await page.evaluate(() => { window.fileSourceFixture.personalStamp = null; });
+    await page.getByRole("button", {name:"Actualizar",exact:true}).click();
+    await comparison.getByRole("status").filter({hasText:"El archivo ya no aparece"}).waitFor();
+    assert.equal(await page.getByRole("button", {name:"Actualizar referencia",exact:true}).count(), 0);
+    await page.getByRole("button", {name:"Volver a referencias",exact:true}).click();
+    await page.getByRole("button", {name:/notes.pdf.*Remota/}).waitFor();
     await page.locator("[data-page='settings']").click();
     await page.locator("[data-action='settings-section'][data-section='connections']").click();
     await page.locator("[data-action='personal-remove'][data-id='dav-fixture']").click();
@@ -286,7 +313,8 @@ try {
     await page.locator("[data-action='library-section'][data-section='references']").click();
     await page.getByRole("button", {name:/notes.pdf.*Servidor desconectado/}).click();
     assert.equal(await page.getByRole("button", {name:"Obtener copia local",exact:true}).isDisabled(),true);
-    report.push("Personal server configuration, root-scoped browsing, reference indexing, explicit copy, disconnected references, SFTP confirmation and NAS picker cancellation passed.");
+    assert.equal(await page.getByRole("button", {name:"Revisar en servidor",exact:true}).isDisabled(),true);
+    report.push("Personal server configuration, scoped browsing, explicit copy, changed/missing reference review, disconnected references, SFTP confirmation and NAS picker cancellation passed.");
     const documentFormats = await page.evaluate(async () => {
       const { createDocuments, documentReaderPanel } = await import("/src/documents-ui.ts");
       const commands = [];

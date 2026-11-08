@@ -8,12 +8,16 @@ Abre **Plataformas → Archivos y documentos → Servidores personales**. Las co
 
 Abre la conexión, navega por carpetas y marca archivos. **Indexar referencia** guarda los metadatos en **Biblioteca → Referencias**. Una referencia depende del servidor y no contiene una copia. **Copiar a mi biblioteca** muestra el destino y envía la selección a Descargas. Las referencias guardadas también ofrecen **Obtener copia local**.
 
+Desde una referencia, **Revisar en servidor** abre su carpeta y compara los metadatos guardados con los actuales. Si cambia el identificador de versión, el panel lo señala aunque tamaño y fecha coincidan. **Actualizar referencia** guarda los metadatos revisados. **Copiar a mi biblioteca** solicita una copia de la versión seleccionada. Si el archivo desaparece o la carpeta está inaccesible, la referencia sigue disponible para revisarla más tarde.
+
 Las copias verifican los metadatos seleccionados y comprueban el recurso al finalizar. Los reintentos empiezan con una copia nueva. Para WebDAV se exige un ETag fuerte o un tamaño y una fecha de modificación comprobables. SFTP v3 comprueba tamaño y fecha de modificación en el archivo abierto y en la ruta. La precisión de esta última depende del servidor. Un archivo con metadatos insuficientes se puede indexar como referencia.
 
 La exploración consulta una carpeta a la vez y tiene límites de profundidad y tamaño. Las conexiones se limitan a lectura. Desconectar conserva las referencias y copias existentes. El índice de referencias se consulta en la interfaz local.
 
 [WebDAV de Nextcloud](https://docs.nextcloud.com/server/stable/developer_manual/client_apis/WebDAV/basic.html) · [OpenSSH](https://www.openssh.com/manual.html) · [Rutas UNC en Windows](https://learn.microsoft.com/dotnet/standard/io/file-path-formats)
 
-Las pruebas nativas comprobaron el contenido de una copia desde una carpeta de prueba de Windows, el rechazo de una versión que cambió y las validaciones de WebDAV y SFTP. La prueba de interfaz utilizó conexiones y huellas simuladas. Queda por comprobar una transferencia completa con una instancia Nextcloud o un servidor SFTP real.
+La prueba nativa en Windows abrió una conexión sintética a una carpeta local, guardó una copia, simuló una desconexión y sustituyó el archivo por otro de igual tamaño y fecha. La cola rechazó la referencia antigua y, tras actualizarla desde la interfaz, guardó la segunda versión conservando la primera. Las conexiones y huellas de WebDAV y SFTP se comprobaron con fixtures. Queda por verificar una transferencia completa con una instancia Nextcloud, un servidor SFTP o un NAS en red.
 
 ![Selección de un archivo remoto y destino de una copia, con datos de prueba](personal-server-selection.png)
+
+![Revisión de una versión distinta en la aplicación nativa de Windows](personal-server-review.png)
