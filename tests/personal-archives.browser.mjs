@@ -66,8 +66,9 @@ const setup = `
       [preview("media",3,"available",false,["media"])] : args.provider==="spotify"?
       [preview("listening",3,"available"),preview("playlists",1,"available")]:
       [preview("posts",threadPosts.length,"available"),preview("likes",null,"absent",false,[]),preview("bookmarks",null,"unsupported",false,["unsupported"]),
-        imports===0?preview("media",0,"empty"):preview("media",2,"available",false,["media"]),preview("messages",null,"requiresSelection",true)]};
+        imports===0?preview("media",0,"empty"):{...preview("media",2,"available",false,["media"]),files:3,bytes:6252},preview("messages",null,"requiresSelection",true)]};
     }
+    if(cmd==="personal_archive_review_media") return {files:2,bytes:4096,skippedPostFiles:0};
     if(cmd==="personal_archive_import"){
       const selected=args.selection;
       const all=[...selected.categories,...selected.sensitive];
@@ -270,6 +271,35 @@ try {
     await action("choose").click();
     await page.locator("#archive-account").fill("Cuenta de prueba");
     await page.locator("#archive-destination").fill(destination);
+    if (destination === "Archivo 2025") {
+      const calculate = page.getByRole("button", {name:"Calcular adjuntos"});
+      const summary = page.locator("#archive-media-review-result");
+      assert.equal(await calculate.isDisabled(), true);
+      await page.locator("#archive-from").fill("2025-01-08");
+      await calculate.press("Enter");
+      await page.getByText("2 adjuntos en el intervalo · 4 KB", {exact:true}).waitFor();
+      assert.equal(await summary.evaluate(node => node === document.activeElement), true);
+      const request = (await calls()).find(call => call.cmd === "personal_archive_review_media").args;
+      assert.equal(request.from, "2025-01-08");
+      assert.equal(request.to, null);
+      assert.deepEqual(Object.keys(request).sort(), ["fingerprint", "from", "requestId", "to"]);
+      for (const [width,height] of [[1180,890],[900,620]]) {
+        await page.setViewportSize({width,height});
+        await calculate.scrollIntoViewIfNeeded();
+        const bounds = await summary.boundingBox();
+        assert.ok(bounds && bounds.y >= 0 && bounds.y + bounds.height < height);
+        await page.screenshot({path:`${directory}/dated-media-${width}.png`});
+      }
+      await page.locator("input[value='media']").uncheck();
+      assert.equal(await summary.textContent(), "");
+      assert.equal(await calculate.isDisabled(), true);
+      await page.locator("input[value='media']").check();
+      await calculate.click();
+      await page.getByText("2 adjuntos en el intervalo · 4 KB", {exact:true}).waitFor();
+      await page.locator("#archive-from").fill("");
+      assert.equal(await summary.textContent(), "");
+      assert.equal(await calculate.isDisabled(), true);
+    }
     if (privateMessages) await page.locator("input[value='messages']").check();
     await page.getByRole("button", { name: "Importar selección" }).click();
     await page.locator("#archive-current").getByText("Cuenta de prueba", { exact: true }).waitFor();
@@ -377,7 +407,7 @@ try {
   assert.equal(await page.locator(".archive-media-stage img").count(), 0);
   assert.ok((await calls()).some(call => call.cmd === "personal_archive_preview_cancel"));
   assert.deepEqual(errors, []);
-  console.log("Verified archived X threads and attachments, privacy, Spotify history, local playlist matching and cancellable media previews at 900 and 1180 px in Edge.");
+  console.log("Verified dated attachment reviews, archived X threads and attachments, privacy, Spotify history, local playlist matching and cancellable media previews at 900 and 1180 px in Edge.");
 } finally {
   await browser.close();
 }

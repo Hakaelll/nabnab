@@ -28,6 +28,7 @@ interface CategoryPreview {
   formats: Format[];
 }
 interface Preview { source: string; fingerprint: string; bytes: number; categories: CategoryPreview[]; datedPostMedia?: boolean }
+interface DatedMediaReview { files: number; bytes: number; skippedPostFiles: number }
 interface Archive {
   id: string;
   provider: Provider;
@@ -112,6 +113,7 @@ export function createPersonalArchives(hooks: Hooks) {
   let provider: Provider = "instagram";
   let archives: Archive[] = [];
   let preview: Preview | null = null;
+  let mediaReview: DatedMediaReview | null = null;
   let archiveId = "";
   let category: Category | null = null;
   let result: RecordPage | null = null;
@@ -202,9 +204,33 @@ export function createPersonalArchives(hooks: Hooks) {
       const file = await hooks.command<Preview | null>("personal_archive_choose", { provider, requestId });
       if (!file) return;
       preview = file;
+      mediaReview = null;
       included.clear();
       for (const item of file.categories) if (!item.sensitive && selectable(item)) included.add(item.category);
     });
+  }
+
+  const canReviewMedia = () => Boolean(preview?.datedPostMedia && (draft.from || draft.to) && included.has("posts") && included.has("media"));
+
+  function resetMediaReview() {
+    mediaReview = null;
+    document.getElementById("archive-media-review-result")?.replaceChildren();
+    const button = document.getElementById("archive-review-media");
+    if (button instanceof HTMLButtonElement) button.disabled = busy || !canReviewMedia();
+  }
+
+  async function reviewMedia() {
+    if (!preview || !canReviewMedia()) return;
+    const fingerprint = preview.fingerprint;
+    await run(async () => {
+      mediaReview = null;
+      requestId = Date.now() * 1000 + 401;
+      hooks.render();
+      mediaReview = await hooks.command<DatedMediaReview>("personal_archive_review_media", {
+        fingerprint, from: draft.from || null, to: draft.to || null, requestId,
+      });
+    });
+    if (visible && mediaReview) document.getElementById("archive-media-review-result")?.focus();
   }
 
   function categoryRow(item: CategoryPreview) {
@@ -249,7 +275,12 @@ export function createPersonalArchives(hooks: Hooks) {
           ${preview.datedPostMedia
             ? t("Marca Publicaciones y Multimedia para incluir los adjuntos vinculados del intervalo. Los tamaños de arriba corresponden al archivo completo.", "Select Posts and Media to include linked attachments in the date range. The sizes above are for the entire archive.")
             : t("Si aplicas un intervalo, se omite el contenido multimedia sin fecha.", "Applying a date range skips undated media.")}</p>
-        <button type="submit" class="button primary" ${disabled()}>${t("Importar selección", "Import selection")}</button>
+        ${preview.datedPostMedia ? `<div id="archive-media-review-result" role="status" tabindex="-1">${mediaReview ? `<strong>${number(mediaReview.files)} ${mediaReview.files === 1 ? t("adjunto en el intervalo", "attachment in range") : t("adjuntos en el intervalo", "attachments in range")} · ${bytesLabel(mediaReview.bytes)}</strong>
+          ${mediaReview.skippedPostFiles ? `<small>${t("Archivos de publicaciones que no se pudieron leer", "Unreadable post files")} · ${number(mediaReview.skippedPostFiles)}</small>` : ""}` : ""}</div>` : ""}
+        <div class="archive-actions">
+          <button type="submit" class="button primary" ${disabled()}>${t("Importar selección", "Import selection")}</button>
+          ${preview.datedPostMedia ? action("archive-review-media", t("Calcular adjuntos", "Calculate attachments"), "list", "secondary", `id="archive-review-media" ${busy || !canReviewMedia() ? "disabled" : ""}`) : ""}
+        </div>
       </form>` : ""}
     </section>`;
   }
@@ -632,6 +663,7 @@ export function createPersonalArchives(hooks: Hooks) {
       case "archive-new":
         discardMediaPreview(); postAttachments = null; adding = true; error = ""; hooks.render(); document.getElementById("archive-provider")?.focus(); break;
       case "archive-choose": await choose(); break;
+      case "archive-review-media": await reviewMedia(); break;
       case "archive-close-form":
         adding = false; preview = null; error = ""; hooks.render();
         document.querySelector<HTMLElement>('[data-action="archive-new"]')?.focus({ preventScroll: true }); break;
@@ -756,6 +788,7 @@ export function createPersonalArchives(hooks: Hooks) {
     if (!(target instanceof HTMLInputElement)) return false;
     if (target.form?.id === "archive-import-form" && Object.hasOwn(draft, target.name)) {
       draft[target.name as keyof typeof draft] = target.value;
+      if (target.name === "from" || target.name === "to") resetMediaReview();
       return true;
     }
     if (target.id === "archive-query") { query = target.value; return true; }
@@ -766,12 +799,14 @@ export function createPersonalArchives(hooks: Hooks) {
     if (target instanceof HTMLSelectElement && target.id === "archive-provider") {
       provider = target.value as Provider;
       preview = null;
+      mediaReview = null;
       included.clear();
       error = "";
       hooks.render();
     } else if (target instanceof HTMLInputElement && target.name === "archive-category") {
       const key = target.value as Category;
       if (target.checked) included.add(key); else included.delete(key);
+      if (key === "posts" || key === "media") resetMediaReview();
     } else if (target instanceof HTMLInputElement && target.name === "archive-record") {
       const row = result?.rows.find(item => item.id === target.value);
       if (row && target.checked && selected.size < 200) selected.set(row.id, row);
@@ -802,7 +837,7 @@ export function createPersonalArchives(hooks: Hooks) {
         });
         archives = [...archives.filter(item => item.id !== archive.id), archive];
         loaded = true;
-        preview = null; adding = false; included.clear();
+        preview = null; mediaReview = null; adding = false; included.clear();
         draft = { account: "", destination: "", from: "", to: "" };
         await open(archive.id);
         if (skippedFiles) hooks.notify(t(`Exportación importada. Archivos incompatibles omitidos: ${number(skippedFiles)}.`, `Export imported. Unsupported files skipped: ${number(skippedFiles)}.`), "info");

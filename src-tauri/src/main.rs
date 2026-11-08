@@ -1331,7 +1331,7 @@ fn main() {
             audio_library::playlist_import::audio_playlist_choose, audio_library::playlist_import::audio_playlist_map,
             audio_library::audio_lyrics, audio_library::audio_lyrics_choose,
             audio_library::audio_cover_choose,
-            personal_archive::personal_archive_choose, personal_archive::personal_archive_import,
+            personal_archive::personal_archive_choose, personal_archive::personal_archive_review_media, personal_archive::personal_archive_import,
             personal_archive::personal_archive_list, personal_archive::personal_archive_records,
             personal_archive::personal_archive_thread,
             personal_archive::personal_archive_attachments,

@@ -492,6 +492,18 @@ fn date(value: &Option<String>, end: bool) -> Result<Option<u64>, String> {
         .transpose()
 }
 
+fn date_range(
+    from: &Option<String>,
+    to: &Option<String>,
+) -> Result<(Option<u64>, Option<u64>), String> {
+    let from = date(from, false)?;
+    let to = date(to, true)?;
+    if from.zip(to).is_some_and(|(from, to)| from > to) {
+        return Err("The start date must precede the end date.".into());
+    }
+    Ok((from, to))
+}
+
 fn in_range(time: Option<u64>, from: Option<u64>, to: Option<u64>) -> bool {
     if from.is_none() && to.is_none() {
         return true;
@@ -529,6 +541,107 @@ fn dated_post_media<'a>(plan: &'a Plan, posts: &[Record]) -> Vec<&'a Entry> {
                 }
         })
         .collect()
+}
+
+fn filtered_rows(
+    plan: &Plan,
+    scratch: &Scratch,
+    entry: &Entry,
+    from: Option<u64>,
+    to: Option<u64>,
+) -> Result<Vec<Record>, String> {
+    let text = read_text(&entry_path(plan, scratch, entry))?;
+    let mut rows = parse::parse(plan.provider, entry.classification, &entry.name, &text)?;
+    rows.retain(|row| in_range(row.time, from, to));
+    Ok(rows)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DatedMediaReview {
+    files: usize,
+    bytes: u64,
+    skipped_post_files: usize,
+}
+
+async fn review_dated_media(
+    root: &Path,
+    plan: &Plan,
+    from: Option<u64>,
+    to: Option<u64>,
+    cancel: watch::Receiver<bool>,
+) -> Result<DatedMediaReview, String> {
+    if !plan.zipped
+        || !(plan.provider.is_meta() || plan.provider == Provider::X)
+        || (from.is_none() && to.is_none())
+    {
+        return Err(
+            "Choose a supported ZIP and at least one date to review its post attachments.".into(),
+        );
+    }
+    if queue::digest(plan.path.clone(), cancel.clone()).await? != plan.fingerprint {
+        return Err("The export changed after preview. Choose it again.".into());
+    }
+    let entries: Vec<_> = plan
+        .entries
+        .iter()
+        .filter(|entry| {
+            entry.classification.category == Category::Posts
+                && entry.classification.format != Format::Unsupported
+        })
+        .collect();
+    if entries.iter().any(|entry| entry.size > MAX_TEXT)
+        || entries.iter().map(|entry| entry.size).sum::<u64>() > MAX_TEXT_TOTAL
+    {
+        return Err("The selected post metadata exceeds the import limits of 8 MiB per file and 32 MiB in total.".into());
+    }
+    let scratch = Scratch::new(root)?;
+    extract(root, plan, &scratch, &entries, cancel.clone()).await?;
+    let mut posts = Vec::new();
+    let mut skipped_post_files = 0;
+    for entry in entries {
+        cancelled(&cancel)?;
+        match filtered_rows(plan, &scratch, entry, from, to) {
+            Ok(rows) => posts.extend(rows),
+            Err(_) => skipped_post_files += 1,
+        }
+        if posts.len() > MAX_RECORDS {
+            return Err("Too many indexed records. Choose a narrower date range.".into());
+        }
+    }
+    if queue::digest(plan.path.clone(), cancel).await? != plan.fingerprint {
+        return Err("The export changed during review. Choose it again.".into());
+    }
+    let media = dated_post_media(plan, &posts);
+    Ok(DatedMediaReview {
+        files: media.len(),
+        bytes: media.iter().map(|entry| entry.size).sum(),
+        skipped_post_files,
+    })
+}
+
+#[tauri::command]
+pub async fn personal_archive_review_media(
+    state: State<'_, Arc<AppState>>,
+    fingerprint: String,
+    from: Option<String>,
+    to: Option<String>,
+    request_id: u64,
+) -> Result<DatedMediaReview, String> {
+    let plan = state
+        .personal_archive
+        .plan
+        .lock()
+        .unwrap()
+        .clone()
+        .filter(|plan| plan.fingerprint == fingerprint)
+        .ok_or("Preview the export again before reviewing attachments.")?;
+    let (from, to) = date_range(&from, &to)?;
+    let root = crate::config_root(&state)?;
+    let cancel = file_sources::begin(&state, request_id)?;
+    let result = review_dated_media(&root, &plan, from, to, cancel).await;
+    file_sources::finish(&state, request_id);
+    result
 }
 
 fn merge(records: &mut Records, new: Records) -> Result<(), String> {
@@ -597,11 +710,7 @@ async fn import(
     {
         return Err("Select at least one category included by this provider.".into());
     }
-    let from = date(&selection.from, false)?;
-    let to = date(&selection.to, true)?;
-    if from.zip(to).is_some_and(|(from, to)| from > to) {
-        return Err("The start date must precede the end date.".into());
-    }
+    let (from, to) = date_range(&selection.from, &selection.to)?;
     if queue::digest(plan.path.clone(), cancel.clone()).await? != plan.fingerprint {
         return Err("The export changed after preview. Choose it again.".into());
     }
@@ -654,13 +763,8 @@ async fn import(
             media_entries.push(entry);
             continue;
         }
-        let rows: Vec<_> = match read_text(&entry_path(&plan, &scratch, entry))
-            .and_then(|text| parse::parse(plan.provider, entry.classification, &entry.name, &text))
-        {
-            Ok(rows) => rows
-                .into_iter()
-                .filter(|row| in_range(row.time, from, to))
-                .collect(),
+        let rows = match filtered_rows(&plan, &scratch, entry, from, to) {
+            Ok(rows) => rows,
             Err(error) => {
                 first_error.get_or_insert(error);
                 skipped_files += 1;
@@ -1696,6 +1800,16 @@ mod tests {
             .await
             .unwrap();
         assert!(preview.dated_post_media);
+        let from = Some("2024-06-01".to_string());
+        let to = from.clone();
+        let (start, end) = date_range(&from, &to).unwrap();
+        let review = review_dated_media(&root, &plan, start, end, cancel.clone())
+            .await
+            .unwrap();
+        assert_eq!(review.files, 2);
+        assert_eq!(review.bytes, (files[4].1.len() + files[5].1.len()) as u64);
+        assert_eq!(review.skipped_post_files, 0);
+        assert!(!root.join("personal-archive-media").exists());
         let messages = preview
             .categories
             .iter()

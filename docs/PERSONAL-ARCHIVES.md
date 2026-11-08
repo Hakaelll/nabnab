@@ -27,6 +27,10 @@ For Instagram and Facebook JSON exports, select **Posts** and **Media** to see a
 
 When filtering an X, Instagram or Facebook ZIP by date, select **Posts** and **Media** to copy the attachments linked to posts in that interval. Loose media, attachments from other dates and undated private media are skipped. Importing a narrower interval adds to the previous import of the same package. To copy loose media, import its category without a date interval.
 
+Select **Calculate attachments** to see how many linked files the interval selects and their total uncompressed size, including files copied by an earlier import. Nabnab reads public post metadata and the ZIP index for this calculation. Changing the dates or either category clears the result.
+
+![Attachment count and size before importing a date range](personal-archive-date-review.png)
+
 ![Archived X thread opened in Windows with synthetic data](personal-archive-thread.png)
 
 ![Spotify listening history with separate event and completion counts](personal-archive-listening.png)

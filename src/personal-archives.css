@@ -100,6 +100,10 @@
 .archive-search .button svg { width: 15px; height: 15px; }
 #archive-import-form { display: grid; gap: 13px; justify-items: start; }
 #archive-import-form > :is(fieldset, .archive-fields) { width: 100%; }
+#archive-media-review-result:empty { display: none; }
+#archive-media-review-result { padding: 5px 9px; border-radius: 6px; background: var(--hover); }
+#archive-media-review-result:focus-visible { outline-offset: 2px; }
+#archive-media-review-result small { display: block; color: var(--muted); }
 .archive-categories, .archive-fields {
   display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px;
 }
