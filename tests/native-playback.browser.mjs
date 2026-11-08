@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { mkdir, mkdtemp, rename, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rename, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 
@@ -36,7 +36,7 @@ encode("-f", "lavfi", "-i", "testsrc2=size=360x640:rate=24:duration=22",
   "-metadata:s:a:0", "language=spa", "-metadata:s:a:1", "language=eng", "-shortest", video);
 encode("-i", video, "-t", "2", "-c", "copy", missing);
 encode("-f", "lavfi", "-i", "color=c=#354551:s=100x100", "-frames:v", "1", picture);
-encode("-f", "lavfi", "-i", "aevalsrc=if(between(t\\,4\\,7)\\,0\\,sin(2*PI*82*t)*(0.14+0.30*pow(0.5+0.5*cos(2*PI*2*t)\\,8))+0.13*sin(2*PI*540*t)+0.08*sin(2*PI*4800*t)*(0.5+0.5*sin(2*PI*1.7*t))):d=50", "-i", picture,
+encode("-f", "lavfi", "-i", "aevalsrc=if(between(t\\,4\\,10)\\,0\\,sin(2*PI*82*t)*(0.14+0.30*pow(0.5+0.5*cos(2*PI*2*t)\\,8))+0.13*sin(2*PI*540*t)+0.08*sin(2*PI*4800*t)*(0.5+0.5*sin(2*PI*1.7*t))):d=50", "-i", picture,
   "-map", "0:a", "-map", "1:v", "-c:a", "libmp3lame", "-c:v", "copy", "-disposition:v", "attached_pic",
   "-metadata", "title=Señal para la cola", "-metadata", "artist=Laboratorio nabnab", music);
 encode("-f", "lavfi", "-i", "testsrc2=size=720x248:rate=20:duration=6", "-f", "lavfi",
@@ -114,6 +114,44 @@ const play = id => page.locator(`.media-play[data-id="${id}"]`).click();
 const clickStage = action => stage().locator(`[data-stage-action="${action}"]`).click();
 const clip = file => JSON.parse(execFileSync(ffprobe, ["-v", "error", "-show_streams", "-of", "json", file], { windowsHide: true })).streams;
 
+async function downloadDuringPlayback(itemId) {
+  const { job, observations } = await page.evaluate(async () => {
+    const { invoke } = await import("/node_modules/@tauri-apps/api/core.js");
+    const { listen } = await import("/node_modules/@tauri-apps/api/event.js");
+    const media = document.getElementById("audio-engine");
+    const clientRequest = crypto.randomUUID();
+    const observations = [];
+    const { promise, resolve, reject } = Promise.withResolvers();
+    const timer = setTimeout(() => reject(Error("Sample download did not reach a terminal state.")), 30_000);
+    const unlisten = await listen("job-update", ({ payload: job }) => {
+      if (job.clientRequest !== clientRequest) return;
+      observations.push({ state: job.state, id: media.dataset.localPlayer, time: media.currentTime,
+        paused: media.paused, bytes: job.progress?.downloaded ?? 0 });
+      if (["completed", "error", "cancelled"].includes(job.state)) resolve(job);
+    });
+    try {
+      await invoke("queue_download", {
+        urls: ["https://developer.mozilla.org/shared-assets/videos/flower.mp4"], titles: ["MDN video sample"],
+        format: "source", height: null, audioBitrate: null, subtitleLanguage: null, clientRequest,
+      });
+      return { job: await promise, observations };
+    } finally {
+      clearTimeout(timer);
+      unlisten();
+    }
+  });
+  assert.equal(job.state, "completed", JSON.stringify(job.error));
+  const active = observations.filter(sample => sample.state === "downloading");
+  assert.ok(active.some(sample => sample.bytes > 0), JSON.stringify(observations));
+  assert.ok(observations.every(sample => sample.id === itemId && !sample.paused), JSON.stringify(observations));
+  const elapsed = observations.at(-1).time - active[0].time;
+  assert.ok(elapsed > 0, JSON.stringify(observations));
+  const { size } = await stat(job.outputs[0]);
+  assert.ok(size > 0 && size <= 4 * 1024 * 1024);
+  assert.ok(clip(job.outputs[0]).some(stream => stream.codec_type === "video"));
+  console.log(JSON.stringify({ downloadedDuringPlayback: size, elapsed }));
+}
+
 function windowCommand(operation, width = 0, height = 0) {
   const command = operation === "resize"
     ? `[Nabnab.PlaybackTestWindow]::SetWindowPos($window, [IntPtr]0, 0, 0, ${width}, ${height}, 0x4016)`
@@ -187,7 +225,7 @@ async function renderPreviews() {
     const { scenes, createMusicVisualizer } = await import("/src/music-visualizer.ts");
     const canvas = document.createElement("canvas");
     canvas.id = "native-scene-preview";
-    Object.assign(canvas.style, { position: "fixed", top: "0", left: "0", width: "416px", height: "260px", zIndex: "1000" });
+    Object.assign(canvas.style, { position: "fixed", top: "0", left: "0", width: "384px", height: "216px", zIndex: "1000" });
     document.body.append(canvas);
     const waveform = Float32Array.from({ length: 48 }, (_, i) => Math.sin(i * 0.3) * 0.48);
     const input = { bass: 0.56, mids: 0.42, highs: 0.25, level: 0.73, attack: 0.09, stereo: 0.14, waveform };
@@ -207,7 +245,7 @@ async function renderPreviews() {
       await page.evaluate(({ index, color }) => window.renderScenePreview(index, color), { index, color });
       await page.waitForFunction(() => document.querySelector("#native-scene-preview")?.dataset.failed === "false");
       await page.waitForTimeout(400);
-      const preview = await page.locator("#native-scene-preview").screenshot({ animations: "disabled" });
+      const preview = await page.locator("#native-scene-preview").screenshot({ animations: "disabled", scale: "css" });
       execFileSync(ffmpeg, ["-hide_banner", "-v", "error", "-y", "-f", "image2pipe", "-i", "pipe:0", "-frames:v", "1", "-c:v", "libwebp", "-quality", "84",
         path.join(output, `${name}${color ? "-color" : ""}.webp`)], { windowsHide: true, input: preview });
     }
@@ -223,6 +261,11 @@ try {
     process.exit(0);
   }
   const errors = [];
+  const unexpectedNetwork = [];
+  await page.route(/^https?:\/\/(?!(?:localhost|127\.0\.0\.1|nabmedia\.localhost|ipc\.localhost|tauri\.localhost)(?=[:/]))/, route => {
+    unexpectedNetwork.push(new URL(route.request().url()).origin);
+    return route.abort("internetdisconnected");
+  });
   page.on("pageerror", error => errors.push(error.message));
   const av1 = await av1Fixture();
   await page.addInitScript(() => {
@@ -294,10 +337,15 @@ try {
   const seek = stage().locator("#stage-seek");
   await wait(async () => (await playing()).time < 6);
   await seek.evaluate(range => {
-    range.value = "10";
-    range.dispatchEvent(new Event("input", { bubbles: true }));
+    for (const position of ["2", "18", "4", "17", "10"]) {
+      range.value = position;
+      range.dispatchEvent(new Event("input", { bubbles: true }));
+    }
   });
-  await wait(async () => Math.abs((await playing()).time - 10) < 0.05);
+  await wait(() => seek.evaluate(() => {
+    const media = document.getElementById("audio-engine");
+    return !media.seeking && Math.abs(media.currentTime - 10) < 0.05;
+  }));
   assert.equal((await playing()).paused, true);
   await seek.hover({ position: { x: 200, y: 12 } });
   const hoverFrame = stage().locator("#stage-hover img");
@@ -361,6 +409,7 @@ try {
   await play(musicId);
   await wait(async () => { const current = await playing(); return current.id === musicId && current.time > 0; });
   await page.locator("#audio-player").waitFor();
+  assert.ok(await page.locator("#audio-player").evaluate(bar => bar.scrollWidth <= bar.clientWidth + 1));
   await page.screenshot({ path: path.join(base, "compact-900.png"), animations: "disabled" });
   assert.equal(await original.evaluate(element => element === document.getElementById("audio-engine")), true);
 
@@ -373,8 +422,17 @@ try {
   await wait(async () => page.locator(".music-identity .audio-cover img").count());
   assert.deepEqual(await page.locator(".music-identity p").allTextContents(), ["Laboratorio nabnab"]);
   await page.mouse.move(220, 150);
+  assert.ok(await stage().locator(".stage-toolbar").evaluate(bar => {
+    const toggle = bar.querySelector("#stage-toggle").getBoundingClientRect();
+    return bar.scrollWidth <= bar.clientWidth + 1 && Math.abs(toggle.x + toggle.width / 2 - innerWidth / 2) < 2;
+  }));
   await page.screenshot({ path: path.join(base, "music-900.png"), animations: "disabled" });
   await clickStage("scenes");
+  assert.ok(await stage().locator("#stage-panel-scenes").evaluate(panel => {
+    const bounds = panel.getBoundingClientRect();
+    const timeline = document.querySelector(".stage-timeline").getBoundingClientRect();
+    return bounds.top >= 0 && bounds.right <= innerWidth && bounds.bottom < timeline.top && panel.scrollHeight <= panel.clientHeight + 1;
+  }));
   assert.equal(await page.locator(".music-scene-pick").count(), 8);
   await wait(async () => page.locator(".music-scene-pick img").evaluateAll(images => images.every(image => image.complete && image.naturalWidth > 0)));
   await page.locator("#scene-favorite-4").click();
@@ -400,8 +458,8 @@ try {
   assert.equal((await graphics()).frames, stillFrames);
   await page.locator("#scene-quality").selectOption("low");
   await page.keyboard.press("Escape");
-  await stage().locator("#stage-seek").evaluate(range => { range.value = "5.8"; range.dispatchEvent(new Event("input", { bubbles: true })); });
-  await wait(async () => (await graphics()).signal[3] < 0.1);
+  await stage().locator("#stage-seek").evaluate(range => { range.value = "5"; range.dispatchEvent(new Event("input", { bubbles: true })); });
+  await wait(async () => { const { time, paused } = await playing(); return !paused && time > 5 && time < 10 && (await graphics()).signal[3] < 0.1; }, 8000);
   await stage().locator("#stage-volume").evaluate(range => { range.value = "0"; range.dispatchEvent(new Event("input", { bubbles: true })); });
   await stage().locator("#stage-seek").evaluate(range => { range.value = "12"; range.dispatchEvent(new Event("input", { bubbles: true })); });
   await wait(async () => (await graphics()).signal[3] > 0.25);
@@ -468,11 +526,28 @@ try {
     await wait(async () => { const current = await playing(); return current.id === item(file).id && current.time > 0.15; });
     if (path.extname(file) === ".wav") {
       await page.locator(".audio-visualize").click();
+      assert.equal(await stage().locator(".music-identity h1").textContent(), "Audio 1");
+      assert.equal(await stage().locator(".music-identity :is(img, p)").count(), 0);
       await wait(async () => { const { signal } = await graphics(); return signal[1] > 0.09 && signal[0] < 0.045 && signal[3] > 0.23; });
       await clickStage("back");
     }
     console.log(JSON.stringify({ container: path.extname(file), codecs: clip(file).map(stream => stream.codec_name), outcome: "audio" }));
   }
+
+  await play(musicId);
+  await wait(async () => { const current = await playing(); return current.id === musicId && !current.paused && current.time > 0.15; });
+  const continuous = await playing();
+  for (let iteration = 0; iteration < 3; iteration++) {
+    await page.locator(".audio-visualize").click();
+    assert.equal(await page.locator("audio, video").count(), 1);
+    await clickStage("back");
+    await stage().waitFor({ state: "hidden" });
+    const current = await playing();
+    assert.equal(current.src, continuous.src);
+    assert.equal(current.paused, false);
+    assert.ok(current.time >= continuous.time);
+  }
+  if (process.env.NABNAB_PLAYBACK_LIVE_DOWNLOAD === "1") await downloadDuringPlayback(musicId);
 
   for (const file of [webm, mkv, ...(av1 ? [av1] : [])]) {
     await play(item(file).id);
@@ -488,6 +563,26 @@ try {
   await stage().locator(".stage-error").waitFor();
   await stage().getByRole("button", { name: "Convertir una copia" }).waitFor();
   await clickStage("back");
+  await page.locator("#library-sort").selectOption("name");
+  const webmId = item(webm).id, brokenId = item(broken).id;
+  for (const id of [webmId, brokenId]) await page.locator(`[data-select-media="${id}"]`).check();
+  await original.evaluate((media, id) => {
+    const observer = new MutationObserver(() => {
+      if (media.dataset.localPlayer !== id) return;
+      observer.disconnect();
+      window.loadingReplacement = media.readyState;
+      document.getElementById("playback-stage").dispatchEvent(new KeyboardEvent("keydown", {
+        key: "ArrowLeft", ctrlKey: true, bubbles: true,
+      }));
+    });
+    observer.observe(media, { attributes: true, attributeFilter: ["data-local-player"] });
+  }, brokenId);
+  await play(brokenId);
+  await wait(async () => { const current = await playing(); return current.id === webmId && current.width === 720 && current.time > 0.2; });
+  assert.equal(await page.evaluate(() => window.loadingReplacement), 0);
+  assert.equal(await stage().locator(".stage-error").isVisible(), false);
+  await clickStage("back");
+  for (const id of [webmId, brokenId]) await page.locator(`[data-select-media="${id}"]`).uncheck();
   await rename(missing, `${missing}.moved`);
   await play(item(missing).id);
   await stage().getByText("El archivo no está disponible.", { exact: false }).waitFor();
@@ -499,6 +594,7 @@ try {
   await clickStage("back");
   await wait(async () => (await rpc("get_snapshot")).library.find(candidate => candidate.id === videoId).details.playbackPosition >= 10);
   assert.deepEqual(errors, []);
+  assert.deepEqual(unexpectedNetwork, []);
   await shutdown();
   await launch();
   await page.locator("#audio-player").waitFor();
@@ -507,7 +603,8 @@ try {
   assert.equal((await playing()).id, videoId);
   assert.equal((await playing()).volume, 0.36);
   console.log(JSON.stringify({ sharedElement: true, compact: true, video: true, hidControlsAfterMouseClick: true, captions: true,
-    fullscreen: true, restoredOnRestart: true, playlistAudioCover: true, viewports: [1180, 900] }));
+    fullscreen: true, restoredOnRestart: true, playlistAudioCover: true, viewports: [1180, 900], rapidSeek: true,
+    replacedLoadingSource: true, compactRoundTrips: 3, externalWebViewRequests: unexpectedNetwork.length }));
 } catch (error) {
   console.error(log);
   console.error(await page?.locator("#playback-stage").innerText().catch(() => ""));

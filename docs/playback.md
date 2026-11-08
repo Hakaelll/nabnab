@@ -31,7 +31,9 @@ El lenguaje gráfico toma como referencia las estelas, deformaciones y simetría
 
 ## Verificación
 
-La prueba `tests/native-playback.browser.mjs` genera las muestras con FFmpeg y, cuando está disponible, WebCodecs para AV1. Abre la aplicación con un perfil aislado y comprueba vídeo, subtítulos, teclado, pantalla completa y reanudación tras reiniciar. En música verifica continuidad entre vistas, respuesta a ritmos distintos, silencio real, señal antes del volumen maestro, minimización y pérdida y recuperación del contexto gráfico. El HEVC no se incluyó en la matriz porque el codificador Media Foundation no estaba disponible en el equipo de pruebas.
+La prueba `tests/native-playback.browser.mjs` genera las muestras con FFmpeg y, cuando está disponible, WebCodecs para AV1. Abre la aplicación con un perfil aislado y comprueba vídeo, subtítulos, búsquedas rápidas en pausa, cambio de archivo durante la carga, pantalla completa y reanudación tras reiniciar. En música verifica tres cambios entre vistas con el mismo elemento, etiquetas ausentes, respuesta a ritmos distintos, silencio real, señal antes del volumen maestro, minimización y pérdida y recuperación del contexto gráfico. El reproductor y las escenas se probaron bloqueando peticiones externas del WebView. El codificador Media Foundation de HEVC no estaba disponible en el equipo de pruebas.
+
+Con `NABNAB_PLAYBACK_LIVE_DOWNLOAD=1`, la misma prueba descarga una muestra pública a través de la cola nativa mientras suena un archivo local. Con la pila normal de Windows se guardaron 1.128.375 bytes y la pista avanzó 1,74 segundos entre el inicio de la transferencia y su final, sin cambiar de archivo ni pasar a pausa. [Muestra de vídeo de MDN](https://developer.mozilla.org/shared-assets/videos/flower.mp4)
 
 En Windows, compilación 26200, con Intel Iris Xe y ANGLE/D3D11, se observaron 60 FPS en Automática y 30 FPS en Ahorro, en la escena Órbita a 900 × 620 px CSS. Se midieron los fotogramas dibujados durante 2,3 segundos en cada modo, con la música activa y el selector de escenas abierto. Ahorro usó un lienzo interno de 610 × 420 px. Las cifras corresponden a ese equipo y esas condiciones.
 

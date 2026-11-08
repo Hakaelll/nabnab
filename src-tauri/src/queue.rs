@@ -1749,11 +1749,17 @@ fn reserve(state: &AppState) -> Option<(Job, watch::Receiver<bool>)> {
 }
 
 async fn run_budgeted(app:&AppHandle,state:&Arc<AppState>,job:&Job,staging:&Path,cancel:watch::Receiver<bool>)->Result<PublishedOutput,String>{
-    if job.automation.is_none(){return run(app,state,job,staging,cancel).await;}
-    crate::automation::begin_run(state,job)?;
-    let started=std::time::Instant::now();
-    crate::automation::verify_input(state,job)?;
-    let work=run(app,state,job,staging,cancel);tokio::pin!(work);
+    let started = if job.automation.is_some() {
+        crate::automation::begin_run(state, job)?;
+        let started = std::time::Instant::now();
+        crate::automation::verify_input(state, job)?;
+        Some(started)
+    } else {
+        None
+    };
+    // Keep the combined job future out of the worker's stack frames in debug builds.
+    let mut work = Box::pin(run(app, state, job, staging, cancel));
+    let Some(started) = started else { return work.await };
     loop{tokio::select!{
         result=&mut work=>return result,
         _=tokio::time::sleep(std::time::Duration::from_millis(100))=>{
