@@ -19,6 +19,12 @@
 .file-source-result-heading h2 { margin: 4px 0 0; font-size: 20px; font-weight: 600; letter-spacing: -.3px; overflow-wrap: anywhere; }
 .file-source-eyebrow { font-size: 12px; color: var(--muted); }
 .file-source-description { color: var(--muted); white-space: pre-line; overflow-wrap: anywhere; max-height: 160px; overflow: auto; margin-bottom: 16px; }
+.file-source-return { margin-top: 16px; }
+.file-source-return + .file-source-results { margin-top: 12px; }
+.file-source-abstract { margin-bottom: 16px; border-bottom: 1px solid var(--edge-quiet); }
+.file-source-abstract > summary { padding: 10px 4px; font-size: 13px; cursor: pointer; }
+.file-source-abstract > .file-source-description { max-height: none; margin: 4px 4px 14px; max-width: 74ch; }
+.file-source-abstract > summary:focus-visible, .file-source-result-heading h2[tabindex]:focus-visible { outline: 2px solid var(--action); outline-offset: 2px; border-radius: 4px; }
 .file-source-warnings { list-style: disc; padding: 12px 16px 12px 32px; margin: 16px 0; border-left: 2px solid var(--muted); background: var(--secondary); color: var(--muted); font-size: 13px; }
 .file-source-warnings li + li { margin-top: 8px; }
 .file-source-entries { border-block: 1px solid var(--edge-quiet); }
@@ -46,6 +52,15 @@ label.file-source-row { cursor: pointer; }
 .file-source-row-main strong { display: block; font-weight: 500; overflow-wrap: anywhere; }
 .file-source-row-main small { display: block; color: var(--muted); font-size: 12px; margin-top: 4px; overflow-wrap: anywhere; }
 .file-source-size { font-size: 12px; color: var(--muted); white-space: nowrap; align-self: start; padding-top: 2px; }
+.file-source-list-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; margin: 12px 0 8px; min-height: 30px; }
+.file-source-list-heading > h3 { margin: 0; font-size: 14px; font-weight: 600; }
+.file-source-research-list { display: grid; gap: 6px; border: 0; }
+.file-source-research-list .file-source-row { grid-template-columns: 18px 36px minmax(0, 1fr) auto; border: 1px solid var(--edge-quiet); border-radius: 10px; background: var(--secondary); }
+.file-source-research-list .file-source-row.is-selected { background: var(--surface); border-color: var(--action); }
+.file-source-research-list .file-source-row:has(input:focus-visible) { outline: 2px solid var(--action); outline-offset: 2px; }
+.file-source-research-list .file-source-file-icon { display: grid; place-items: center; width: 36px; height: 36px; border: 1px solid var(--edge-quiet); border-radius: 9px; background: var(--surface); color: var(--text); font-variant-numeric: tabular-nums; font-weight: 600; }
+.file-source-research-list .file-source-file-icon svg { width: 18px; height: 18px; }
+.file-source-research-list .file-source-row-main strong { font-weight: 600; }
 .file-source-folder { display: block; min-width: 0; background: none; border: 0; color: var(--text); font: inherit; text-align: left; padding: 4px 0; cursor: pointer; }
 .file-source-folder strong { display: block; font-weight: 500; overflow-wrap: anywhere; }
 .file-source-folder small { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
@@ -94,6 +109,7 @@ label.file-source-row { cursor: pointer; }
   .file-source-tabs button:hover:not(:disabled) { color: var(--text); }
   .file-source-row:hover, .file-source-entry:hover:not(:disabled) { background: var(--hover); }
   .file-source-folder:hover:not(:disabled) { color: var(--action); }
+  .file-source-research-list .file-source-row:hover:not(.is-selected):has(input:enabled) { background: var(--hover); }
 }
 @media (max-width: 1050px) {
   .file-source-selection { position: static; grid-template-columns: minmax(0, 1fr) auto; padding: 16px; }
@@ -103,6 +119,7 @@ label.file-source-row { cursor: pointer; }
 @media (max-width: 700px) {
   .file-source-tabs { gap: 4px 16px; }
   .file-source-row { gap: 8px; padding-inline: 8px; grid-template-columns: 18px 20px minmax(0, 1fr); }
+  .file-source-research-list .file-source-row { grid-template-columns: 18px 36px minmax(0, 1fr); }
   .file-source-size { grid-column: 3; padding-top: 0; }
   .file-source-form > div { flex-wrap: wrap; }
   .file-source-form input { min-width: 180px; }

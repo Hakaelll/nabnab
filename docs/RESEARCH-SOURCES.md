@@ -1,11 +1,11 @@
 # Investigación y audiolibros
 
-En **Plataformas → Archivos y documentos**, pega un enlace, un identificador o un DOI. Selecciona los archivos, revisa el tamaño y el destino, y usa **Añadir a Descargas**. También puedes pegar enlaces de estos orígenes en Inicio. Las búsquedas de arXiv y LibriVox se pueden guardar en **Biblioteca → Fuentes** para revisarlas manualmente.
+En **Plataformas → Archivos y documentos**, pega un enlace, un identificador o un DOI. Selecciona los archivos, revisa el tamaño y el destino, y usa **Añadir a Descargas**. También puedes pegar enlaces de estos orígenes en Inicio. Las búsquedas de arXiv y LibriVox se pueden guardar en **Biblioteca → Fuentes** para revisarlas manualmente. Dentro de una ficha, **Volver a resultados** recupera las páginas ya cargadas y devuelve el foco a la fila que abriste.
 
 ## arXiv
 
 - Busca por título, autor o categoría. Puedes abrir un identificador como `arXiv:2401.00001` o un enlace de artículo.
-- La ficha contiene metadatos y, si existe, un resumen. El PDF se ofrece por versión. La referencia guardada identifica la versión exacta y conserva autores, fecha y licencia cuando los informa el origen.
+- Cada PDF tiene su propia fila con número de versión, nombre de archivo y fecha si el origen la indica. Puedes desplegar el resumen en la misma ficha. La referencia guardada identifica la versión exacta y conserva autores, fecha y licencia cuando los informa el origen.
 - La búsqueda consulta hasta 20 resultados por página y 200 por búsqueda. La API Atom se consulta de una en una, con tres segundos entre peticiones y una caché acotada en memoria.
 
 [Manual de la API](https://info.arxiv.org/help/api/user-manual.html) · [Condiciones de la API](https://info.arxiv.org/help/api/tou.html) · [Disponibilidad por versión](https://info.arxiv.org/help/versions.html)
@@ -32,7 +32,11 @@ El flujo de Rocketseat, Coursera, Domestika y Skillshare utiliza el sitio oficia
 
 ## Comprobaciones
 
-Las capturas usan fixtures de interfaz. Las pruebas Rust cubren identidad por versión, lectura de metadatos, capítulos ordenados y seguimiento manual. Se consultó en vivo la ficha Atom de una versión de arXiv. En Zenodo se comprobó el formato del registro, la búsqueda por conjunto y la respuesta de un archivo público de 450 bytes. La consulta en vivo de LibriVox agotó el tiempo de espera.
+Las capturas usan datos de prueba. La prueba de interfaz recorre la selección por versión, el retorno con teclado tras paginar o encontrar un error, y la selección de capítulos en ventanas de 1180 × 780 y 900 × 620. Las pruebas Rust cubren identidad por versión, lectura de metadatos, capítulos ordenados y seguimiento manual.
+
+La prueba nativa descargó dos versiones distintas del mismo PDF de arXiv y comprobó que ambas se conservan. Descargó un CSV de Zenodo de 450 bytes y verificó el MD5 publicado. Descargó dos capítulos de LibriVox en orden inverso y comprobó el orden de lectura en Biblioteca. [Artículo de arXiv](https://arxiv.org/abs/2506.08399) · [Registro de Zenodo](https://zenodo.org/records/14634897) · [Edición de LibriVox](https://librivox.org/aesops-fables-volume-1-fables-1-25/)
+
+Para repetir la prueba nativa, inicia Vite en el puerto 1420 y ejecuta `node tests/native-research.browser.mjs` con Playwright y el ejecutable de depuración de Windows disponibles. Los archivos y el perfil de prueba quedan en `artifacts/native-research`.
 
 ![Selección de PDF por versión de arXiv](arxiv-versions.png)
 

@@ -1,0 +1,156 @@
+// Opt-in live verification. Vite and the Windows debug executable must be available.
+import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdir, mkdtemp, readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
+import path from "node:path";
+
+const { chromium } = createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODULE || "playwright");
+const root = path.resolve(import.meta.dirname, "..");
+const base = path.join(root, "artifacts/native-research");
+await mkdir(base, { recursive: true });
+const data = await mkdtemp(path.join(base, "run-"));
+const output = path.join(data, "output");
+await mkdir(output);
+const port = process.env.NABNAB_RESEARCH_DEBUG_PORT || 9259;
+const endpoint = `http://127.0.0.1:${port}`;
+const child = spawn(path.join(root, "src-tauri/target/debug/nabnab.exe"), [], {
+  cwd: root, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
+  env: { ...process.env, NABNAB_TEST_DATA_DIR: data, WEBVIEW2_USER_DATA_FOLDER: path.join(data, "webview"),
+    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}` },
+});
+let browser, page, log = "";
+let requestId = Date.now();
+const results = [];
+const errors = [];
+for (const stream of [child.stdout, child.stderr]) stream.on("data", bytes => { log = (log + bytes).slice(-5000); });
+
+async function wait(check, timeout = 25_000) {
+  const end = Date.now() + timeout;
+  while (Date.now() < end) {
+    if (child.exitCode !== null) throw Error(`Native app exited ${child.exitCode}`);
+    const value = await check();
+    if (value) return value;
+    await new Promise(resolve => setTimeout(resolve, 150));
+  }
+  throw Error("Timed out waiting for the public source.");
+}
+const rpc = (name, args = {}) => page.evaluate(async ({ name, args }) => {
+  const { invoke } = await import("/node_modules/@tauri-apps/api/core.js");
+  return invoke(name, args);
+}, { name, args });
+const inspect = url => rpc("public_source_inspect", { url, cursor: null, requestId: ++requestId });
+const getSnapshot = () => rpc("get_snapshot");
+
+async function queue(source, asset, size, kind) {
+  assert.ok(size > 0 && size <= 2 * 1024 * 1024);
+  const jobs = await rpc("queue_public_files", { sourceUrl: source.sourceUrl, assetIds: [asset.id], collection: "Prueba de fuentes públicas", clientRequest: randomUUID() });
+  assert.equal(jobs.length, 1);
+  const { job, item } = await wait(async () => {
+    const snapshot = await getSnapshot();
+    const job = snapshot.jobs.find(value => value.id === jobs[0].id);
+    if (job?.state === "error") throw Error(JSON.stringify(job.error));
+    if (job?.state !== "completed") return null;
+    return { job, item: snapshot.library.find(value => value.path === job.outputs[0]) };
+  }, 80_000);
+  assert.equal(job.outputs.length, 1);
+  assert.equal(item.kind, kind);
+  assert.equal(item.details.contentId, asset.id);
+  assert.equal(item.details.sourceUrl, asset.sourceUrl);
+  assert.equal(item.details.creator, asset.author);
+  assert.equal(item.details.license, asset.license);
+  const bytes = await readFile(item.path);
+  assert.equal(bytes.length, size);
+  if (asset.checksum) {
+    const [algorithm, digest] = asset.checksum.split(":");
+    assert.equal(createHash(algorithm).update(bytes).digest("hex"), digest);
+  }
+  return { item, bytes };
+}
+
+async function verify(provider, run) {
+  try {
+    const detail = await run();
+    results.push(provider);
+    console.log(JSON.stringify({ provider, ...detail }));
+  } catch (error) {
+    errors.push(error);
+    console.error(JSON.stringify({ provider, error: String(error) }));
+  }
+}
+
+try {
+  browser = await wait(async () => {
+    try {
+      if ((await fetch(`${endpoint}/json/version`, { signal: AbortSignal.timeout(400) })).ok) return await chromium.connectOverCDP(endpoint);
+    } catch { /* WebView2 is still starting. */ }
+    return null;
+  });
+  page = await wait(() => browser.contexts()[0]?.pages().find(tab => /:1420/.test(tab.url())));
+  const initial = await wait(async () => { try { return await getSnapshot(); } catch { return null; } });
+  assert.equal(initial.jobs.length, 0);
+  await rpc("save_settings", { settings: { ...initial.settings, language: "es", folder: output, reducedMotion: true, trayEnabled: false, closeToTray: false } });
+  await page.reload();
+
+  await verify("arXiv", async () => {
+    const paper = "2506.08399";
+    const source = await inspect(`https://arxiv.org/abs/${paper}`);
+    assert.deepEqual(source.assets.map(asset => asset.version), ["v2", "v1"]);
+    const saved = [];
+    for (const version of ["v1", "v2"]) {
+      const asset = source.assets.find(value => value.version === version);
+      const headers = await fetch(`https://arxiv.org/pdf/${paper}${version}`, { method: "HEAD", signal: AbortSignal.timeout(15_000) });
+      assert.ok(headers.ok);
+      assert.match(headers.headers.get("content-type"), /^application\/pdf\b/i);
+      const result = await queue(source, asset, Number(headers.headers.get("content-length")), "document");
+      assert.equal(result.bytes.subarray(0, 5).toString(), "%PDF-");
+      saved.push(result);
+    }
+    assert.notEqual(saved[0].item.path, saved[1].item.path);
+    assert.notDeepEqual(saved[0].bytes, saved[1].bytes);
+    assert.deepEqual(await readFile(saved[0].item.path), saved[0].bytes);
+    return { versions: saved.map(value => value.item.name), bytes: saved.map(value => value.bytes.length) };
+  });
+
+  await verify("Zenodo", async () => {
+    const source = await inspect("10.5281/zenodo.14634897");
+    const asset = source.assets.find(value => value.filename === "Fig_3b_left.csv");
+    assert.equal(asset.size, 450);
+    assert.equal(asset.checksum, "md5:e9cdc5528564d20d0516ef90a9e3a980");
+    const { item } = await queue(source, asset, asset.size, "document");
+    assert.equal(item.name, "Fig_3b_left.csv");
+    return { filename: item.name, bytes: item.size, checksum: asset.checksum };
+  });
+
+  await verify("LibriVox", async () => {
+    const source = await inspect("https://librivox.org/rss/353");
+    const chapters = source.assets.map(asset => asset.audiobook?.chapter);
+    assert.ok(chapters.length > 2);
+    assert.deepEqual(chapters, [...chapters].sort((a, b) => a - b));
+    const assets = source.assets.filter(asset => asset.audiobook?.chapter > 0 && asset.size > 0 && asset.size <= 1024 * 1024).slice(0, 2);
+    assert.equal(assets.length, 2);
+    for (const asset of [...assets].reverse()) {
+      const { item } = await queue(source, asset, asset.size, "audio");
+      assert.deepEqual(item.details.audiobook, asset.audiobook);
+    }
+    await page.locator('[data-page="library"]').click();
+    await page.locator('[data-action="library-section"][data-section="audio"]').click();
+    await page.getByRole("button", { name: "Audiolibros", exact: true }).click();
+    const shown = await page.locator(".audio-row .audio-track-number").allTextContents();
+    assert.deepEqual(shown, assets.map(asset => `Cap. ${asset.audiobook.chapter}`));
+    return { chapters: assets.map(asset => asset.audiobook.chapter), bytes: assets.map(asset => asset.size) };
+  });
+  assert.deepEqual(results, ["arXiv", "Zenodo", "LibriVox"], errors.map(String).join("\n"));
+} catch (error) {
+  console.error(log);
+  throw error;
+} finally {
+  try { await page?.evaluate(async () => { const { getCurrentWindow } = await import("/node_modules/@tauri-apps/api/window.js"); await getCurrentWindow().close(); }); } catch {}
+  if (child.exitCode === null) {
+    const exited = new Promise(resolve => child.once("exit", resolve));
+    await Promise.race([exited, new Promise(resolve => setTimeout(resolve, 4000))]);
+    if (child.exitCode === null) { child.kill(); await exited; }
+  }
+  await browser?.close().catch(() => {});
+}
