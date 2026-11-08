@@ -21,15 +21,20 @@ function jobErrorLabel(job: Job, t: Copy): string {
         : t("Copia interrumpida. Puedes reanudarla o descartar el archivo parcial.", "Copy interrupted. Resume it or discard the partial file.");
     }
     case "mounted_changed":
-    case "webdav_changed": return t("El archivo cambió en el servidor. Actualiza la carpeta y elige la nueva versión.", "The file changed on the server. Refresh the folder and select the new version.");
+    case "webdav_changed": return t("El archivo cambió en el servidor. Revisa la versión actual para guardarla.", "The file changed on the server. Review the current version before saving it.");
     case "webdav_range": return t("El servidor devolvió un tramo incompatible. Reintenta para copiar desde el principio.", "The server returned an incompatible byte range. Retry to copy from the beginning.");
     case "sftp_disconnected": return t("La conexión SFTP se cortó. Reintenta para copiar desde el principio.", "The SFTP connection closed. Retry to copy from the beginning.");
-    case "sftp_changed": return t("El archivo SFTP cambió o no se pudo verificar. Actualiza la carpeta y vuelve a revisarlo.", "The SFTP file changed or could not be verified. Refresh the folder and review the file again.");
+    case "sftp_changed": return t("El archivo SFTP cambió o no se pudo verificar. Revisa la versión disponible.", "The SFTP file changed or could not be verified. Review the available version.");
     default: return job.error?.message ?? "";
   }
 }
 function interruptedCopy(job: Job): boolean {
   return job.state === "error" && (job.error?.code === "webdav_interrupted" || job.error?.code === "mounted_interrupted");
+}
+export function needsPersonalCopyReview(job: Job): job is Job & { source: Extract<Job["source"], { kind: "personalFile" }> } {
+  const code = job.error?.code;
+  return job.state === "error" && job.source.kind === "personalFile"
+    && (code === "mounted_changed" || code === "webdav_changed" || code === "sftp_changed");
 }
 function activityLabel(job:Job,t:Copy):string{
   if (interruptedCopy(job)) return t("Interrumpida", "Interrupted");
@@ -49,7 +54,8 @@ function jobActions(job: Job, t: Copy): string {
   const hasPartial = partial || mounted && job.state === "paused" && Boolean(job.progress?.downloaded);
   const cancel = hasPartial ? discard : t("Cancelar", "Cancel");
   return `${job.source.kind==="captionTranslation"&&job.state==="completed"?action("translation-open-draft",t("Abrir borrador","Open draft"),"document","icon-button",id):""}${job.source.kind==='live'&&job.state==='downloading'&&job.progress?.phase.startsWith('recording:')?action("stop-recording",t("Detener y guardar","Stop and save"),"check","secondary",id):""}${(job.state === "pending"||job.source.kind==='voice'&&activeStates.includes(job.state)||(job.source.kind==='torrent'||job.source.kind==='advancedFile'||mounted)&&job.state==='downloading') ? action("pause-job", t("Pausar", "Pause"), "pause", "icon-button", id + ` title="${t("Pausar trabajo", "Pause job")}"`) : ""}
-    ${["error", "cancelled", "paused"].includes(job.state) ? action("retry-job", retry, "retry", "icon-button", id + ` title="${retry}"`) : ""}
+    ${needsPersonalCopyReview(job) ? action("review-personal-copy", t("Revisar versión", "Review version"), "file", "secondary", id)
+      : ["error", "cancelled", "paused"].includes(job.state) ? action("retry-job", retry, "retry", "icon-button", id + ` title="${retry}"`) : ""}
     ${cancellableStates.includes(job.state) || hasPartial ? action("cancel-job", cancel, "close", "icon-button", id + ` title="${cancel}"`) : ""}`;
 }
 export function filteredJobs(snapshot: Snapshot, view: DownloadView): Job[] {
@@ -85,6 +91,8 @@ export function downloadsView(snapshot: Snapshot, view: DownloadView, t: Copy): 
   const playablePaths = new Set(snapshot.library.filter(isPlayable).map(item => item.path));
   const previewItems = new Map(snapshot.library.filter(item => !item.missing && (item.kind === "image" || item.kind === "video")).map(item => [item.path, item.id]));
   const filters: [DownloadView["filter"],string][] = [["all",t("Todas", "All")],["activity",t("Actividad", "Activity")],["pending",t("Pendientes", "Pending")],["completed",t("Completadas", "Completed")],["error",t("Errores", "Errors")]];
+  const canRetrySelected = view.selected.size > 0 && snapshot.jobs.some(job => view.selected.has(job.id)
+    && (job.state === "error" || job.state === "cancelled") && !needsPersonalCopyReview(job));
   const counts = { all: snapshot.jobs.length, activity: 0, pending: 0, completed: 0, error: 0 };
   for (const job of snapshot.jobs) {
     if (activeStates.includes(job.state)) counts.activity++;
@@ -94,7 +102,7 @@ export function downloadsView(snapshot: Snapshot, view: DownloadView, t: Copy): 
   }
   return `<div class="page-heading"><div><h1>${t("Descargas", "Downloads")}</h1><p>${t("Descargas y operaciones locales en una misma cola.", "Downloads and local operations in one queue.")}</p></div>${action("go-home", t("Añadir enlace", "Add link"), "add", "primary")}</div>
     <div class="view-toolbar queue-view-toolbar"><div class="filter-tabs" role="group" aria-label="${t("Estado de los trabajos", "Job status")}">${filters.map(([filter,label]) => `<button data-action="job-filter" data-filter="${filter}" aria-pressed="${view.filter === filter}">${label}<span>${counts[filter]}</span></button>`).join("")}</div><label class="search-control">${icon("search")}<input id="job-search" type="search" placeholder="${t("Buscar trabajos", "Search jobs")}" aria-label="${t("Buscar trabajos", "Search jobs")}" value="${h(view.query)}"></label></div>
-    ${view.selected.size ? `<div class="selection-toolbar"><span>${view.selected.size} ${t("seleccionados", "selected")}</span>${action("cancel-selected", t("Cancelar compatibles", "Cancel eligible"), "close", "quiet")}${action("retry-selected", t("Reintentar errores", "Retry errors"), "retry", "quiet")}${action("clear-job-selection",t("Quitar selección", "Clear selection"),undefined,"quiet")}</div>` : ""}
+    ${view.selected.size ? `<div class="selection-toolbar"><span>${view.selected.size} ${t("seleccionados", "selected")}</span>${action("cancel-selected", t("Cancelar compatibles", "Cancel eligible"), "close", "quiet")}${action("retry-selected", t("Reintentar errores", "Retry errors"), "retry", "quiet", canRetrySelected ? "" : "disabled")}${action("clear-job-selection",t("Quitar selección", "Clear selection"),undefined,"quiet")}</div>` : ""}
     ${jobs.length ? `<ul class="job-list" aria-label="${t("Cola de trabajos", "Job queue")}">${ordered.slice(0,200).map((job,index) => {
       const transferring = job.state === "downloading";
       const percent = transferring ? job.progress?.percent ?? null : null;

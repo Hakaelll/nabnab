@@ -9,6 +9,7 @@ export interface PersonalSelection { serverId: string; path: string[]; stamp: St
 interface Entry { path: string[]; directory: boolean; stamp: Stamp; mime: string | null }
 interface Server { id: string; name: string; kind: Kind; location: string }
 interface Reference { id: string; serverName: string; selection: PersonalSelection }
+interface Review { kind: "reference" | "copy"; id: string; selection: PersonalSelection }
 interface ServerStatus { servers: Server[]; references: Reference[] }
 interface Challenge { challenge: number; fingerprint: string }
 
@@ -21,6 +22,7 @@ interface Hooks {
   chooseFolder(): void;
   openBrowser(): void;
   openReferences(): void;
+  openDownload(jobId: string): void;
   t: Copy;
 }
 
@@ -36,11 +38,12 @@ export function createPersonalServers(hooks: Hooks) {
   let entries: Entry[] | null = null;
   let selected = new Set<number>();
   let referenceId = "";
-  let reviewing: Reference | null = null;
+  let reviewing: Review | null = null;
   let error = "";
   let busy: "read" | "probe" | "save" | "copy" | null = null;
   let sequence = 0;
   let requestId = 0;
+  let cancelled = false;
 
   const nameFor = (kind: Kind) => kind === "webdav" ? "Nextcloud / WebDAV"
     : kind === "sftp" ? "SFTP" : t("Carpeta de red / NAS", "Network folder / NAS");
@@ -63,6 +66,7 @@ export function createPersonalServers(hooks: Hooks) {
     if (busy) return;
     busy = kind;
     requestId = Date.now() * 1000 + ++sequence % 1000;
+    cancelled = false;
     error = "";
     hooks.render();
     try { await task(); }
@@ -76,18 +80,30 @@ export function createPersonalServers(hooks: Hooks) {
     await run("save", async () => { status = await hooks.command<ServerStatus>("personal_servers_status"); });
   }
 
-  async function browse(id: string, folder: string[], reference: Reference | null = null) {
+  async function browse(id: string, folder: string[], review: Review | null = null) {
     if (busy) return;
     serverId = id;
     path = folder;
-    reviewing = reference;
+    reviewing = review;
     entries = null;
     selected.clear();
     await run("read", async () => {
+      if (review?.kind === "copy") {
+        status = await hooks.command<ServerStatus>("personal_servers_status");
+        if (cancelled || !activeServer()) return;
+      }
       entries = await hooks.command<Entry[]>("personal_server_browse", { serverId: id, path: folder, requestId });
       const index = reviewedIndex();
       if (index >= 0) selected.add(index);
     });
+  }
+
+  async function openReview(review: Review) {
+    if (busy) return;
+    hooks.openBrowser();
+    const { serverId, path } = review.selection;
+    await browse(serverId, path.slice(0, -1), review);
+    document.getElementById("personal-reference-review-title")?.focus();
   }
 
   function input(id: string, text: string, value: string, attributes = "") {
@@ -147,39 +163,45 @@ export function createPersonalServers(hooks: Hooks) {
     if (!selected.size || !entries) return "";
     const sizes = [...selected].map(index => entries?.[index]?.stamp.size ?? null);
     const total = sizes.reduce<number>((sum, size) => sum + (size ?? 0), 0);
-    const updating = selected.size === 1 && selected.has(reviewedIndex());
+    const reviewed = selected.size === 1 && selected.has(reviewedIndex());
+    const updating = reviewing?.kind === "reference" && reviewed;
+    const copyingVersion = reviewing?.kind === "copy" && reviewed;
     return `<div class="file-source-selection personal-review"><div class="file-source-selection-title"><strong>${selected.size} ${selected.size === 1 ? t("archivo seleccionado", "file selected") : t("archivos seleccionados", "files selected")}</strong>
       <span>${bytesLabel(total)}${sizes.includes(null) ? ` + ${t("tamaño desconocido", "unknown size")}` : ""}</span></div>
-      ${destination()}<div class="button-group">${action("personal-index", updating ? t("Actualizar referencia", "Update reference") : t("Indexar referencia", "Index reference"), "link", "secondary", disabled())}${action("personal-copy", t("Copiar a mi biblioteca", "Copy to my library"), "downloads", "primary", disabled())}</div>
-      <p class="field-note">${updating
+      ${destination()}<div class="button-group">${copyingVersion ? "" : action("personal-index", updating ? t("Actualizar referencia", "Update reference") : t("Indexar referencia", "Index reference"), "link", "secondary", disabled())}${action("personal-copy", copyingVersion ? t("Copiar versión actual", "Copy current version") : t("Copiar a mi biblioteca", "Copy to my library"), "downloads", "primary", disabled())}</div>
+      <p class="field-note">${copyingVersion ? t("La versión actual se añadirá a Descargas como una copia nueva.", "The current version will be added to Downloads as a new copy.") : updating
         ? t("Copiar guarda el archivo actual. Actualizar guarda sus metadatos en la referencia.", "Copy saves the current file. Update saves its metadata to the reference.")
         : t("Las referencias ocupan solo espacio de índice y requieren conexión al servidor.", "References only occupy index space and require a server connection.")}</p></div>`;
   }
 
-  function referenceReview(server: Server) {
+  function referenceReview(server?: Server) {
     if (!reviewing) return "";
+    const fromCopy = reviewing.kind === "copy";
     const stored = reviewing.selection.stamp;
     const current = entries?.[reviewedIndex()]?.stamp;
     const different = current && (stored.size !== current.size || stored.modified !== current.modified || stored.etag !== current.etag);
     const changedVersion = current?.etag && stored.etag && current.etag !== stored.etag;
     const message = busy === "read" ? t("Consultando la carpeta…", "Reading the folder…")
+      : !server && !error ? t("La conexión ya no está configurada.", "The connection is no longer configured.")
       : !entries ? t("Actualiza la carpeta para volver a consultar este archivo.", "Refresh the folder to check this file again.")
       : !current ? t("El archivo ya no aparece en esta carpeta.", "The file is no longer listed in this folder.")
       : changedVersion ? t("El identificador de versión es distinto.", "The version identifier differs.")
       : different ? t("Los datos del archivo en el servidor cambiaron.", "The server reports different file metadata.")
+      : fromCopy ? t("Los datos visibles coinciden con la versión solicitada.", "The visible metadata matches the requested version.")
       : t("Los datos visibles coinciden con la referencia.", "The visible metadata matches the reference.");
     const describe = (stamp: Stamp) => {
       const size = stamp.size === null ? t("Tamaño desconocido", "Unknown size") : bytesLabel(stamp.size);
-      const time = stamp.modified === null ? NaN : server.kind === "sftp" ? Number(stamp.modified) * 1000 : Date.parse(stamp.modified);
+      const time = stamp.modified === null ? NaN : server?.kind === "sftp" ? Number(stamp.modified) * 1000 : Date.parse(stamp.modified);
       const date = Number.isFinite(time) ? new Intl.DateTimeFormat(t("es", "en"), { dateStyle: "medium", timeStyle: "short" }).format(time) : "";
       return h(date ? `${size} · ${date}` : size);
     };
     return `<section class="personal-reference-review" aria-labelledby="personal-reference-review-title">
-      <header><div><span class="file-source-eyebrow">${t("Revisión de referencia", "Reference review")}</span>
+      <header><div><span class="file-source-eyebrow">${fromCopy ? t("Revisión de copia", "Copy review") : t("Revisión de referencia", "Reference review")}</span>
         <h3 id="personal-reference-review-title" tabindex="-1">${h(reviewing.selection.path.at(-1) ?? "")}</h3></div>
-        ${action("personal-references", t("Volver a referencias", "Back to references"), "link", "quiet", disabled())}</header>
+        ${fromCopy ? action("personal-back-download", t("Volver a Descargas", "Back to Downloads"), undefined, "quiet", disabled())
+          : action("personal-references", t("Volver a referencias", "Back to references"), "link", "quiet", disabled())}</header>
       <p role="status">${message}</p>
-      ${current ? `<dl><div><dt>${t("Referencia guardada", "Saved reference")}</dt><dd>${describe(stored)}</dd></div>
+      ${current ? `<dl><div><dt>${fromCopy ? t("Versión solicitada", "Requested version") : t("Referencia guardada", "Saved reference")}</dt><dd>${describe(stored)}</dd></div>
         <div><dt>${t("Archivo en el servidor", "File on server")}</dt><dd>${describe(current)}</dd></div></dl>` : ""}
     </section>`;
   }
@@ -200,7 +222,7 @@ export function createPersonalServers(hooks: Hooks) {
               <span class="file-source-file-icon">${icon("file")}</span><span class="file-source-row-main"><strong>${name}</strong>${entry.mime ? `<small>${h(entry.mime)}</small>` : ""}</span>
               <span class="file-source-size">${entry.stamp.size === null ? t("Tamaño desconocido", "Unknown size") : bytesLabel(entry.stamp.size)}</span></label>`;
         }).join("")}</div>` : entries ? `<p class="file-source-empty">${t("Esta carpeta no contiene archivos visibles.", "This folder has no visible files.")}</p>` : ""}
-        ${review()}</div>` : ""}</section>`;
+        ${review()}</div>` : referenceReview()}</section>`;
   }
 
   function renderConnections() {
@@ -278,7 +300,10 @@ export function createPersonalServers(hooks: Hooks) {
   async function handleClick(name: string, element: HTMLElement) {
     if (!name.startsWith("personal-")) return false;
     if (name === "personal-cancel") {
-      if (busy === "probe" || busy === "read") await hooks.command("cancel_file_source_inspection", { requestId });
+      if (busy === "probe" || busy === "read") {
+        cancelled = true;
+        await hooks.command("cancel_file_source_inspection", { requestId });
+      }
       return true;
     }
     if (busy) return true;
@@ -287,6 +312,11 @@ export function createPersonalServers(hooks: Hooks) {
     switch (name) {
       case "personal-open": reviewing = null; hooks.openBrowser(); await load(); break;
       case "personal-references": hooks.openReferences(); break;
+      case "personal-back-download": if (reviewing?.kind === "copy") {
+        const { id } = reviewing;
+        reviewing = null;
+        hooks.openDownload(id);
+      } break;
       case "personal-destination": hooks.chooseFolder(); break;
       case "personal-add": {
         const kind = element.dataset.kind;
@@ -333,13 +363,14 @@ export function createPersonalServers(hooks: Hooks) {
       case "personal-review-reference": {
         const reference = activeReference();
         if (!reference || !status?.servers.some(server => server.id === reference.selection.serverId)) break;
-        hooks.openBrowser();
-        await browse(reference.selection.serverId, reference.selection.path.slice(0, -1), reference);
-        document.getElementById("personal-reference-review-title")?.focus();
+        await openReview({ kind: "reference", id: reference.id, selection: reference.selection });
       } break;
       case "personal-index": if (paths.length) await run("save", async () => {
         status = await hooks.command<ServerStatus>("personal_server_index", { serverId, paths });
-        if (reviewing) reviewing = status.references.find(ref => ref.id === reviewing?.id) ?? null;
+        if (reviewing?.kind === "reference") {
+          const reference = status.references.find(ref => ref.id === reviewing?.id);
+          reviewing = reference ? { kind: "reference", id: reference.id, selection: reference.selection } : null;
+        }
         selected.clear();
         hooks.notify(t("Referencias guardadas en Biblioteca.", "References saved in Library."), "success");
       }); break;
@@ -361,5 +392,6 @@ export function createPersonalServers(hooks: Hooks) {
     return true;
   }
 
-  return { load, renderBrowser, renderConnections, renderReferences, handleInput, handleSubmit, handleClick };
+  return { load, renderBrowser, renderConnections, renderReferences, handleInput, handleSubmit, handleClick,
+    reviewCopy: (id: string, selection: PersonalSelection) => openReview({ kind: "copy", id, selection }) };
 }

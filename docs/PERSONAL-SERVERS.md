@@ -10,6 +10,8 @@ Abre la conexión, navega por carpetas y marca archivos. **Indexar referencia** 
 
 Desde una referencia, **Revisar en servidor** abre su carpeta y compara los metadatos guardados con los actuales. Si cambia el identificador de versión, el panel lo señala aunque tamaño y fecha coincidan. **Actualizar referencia** guarda los metadatos revisados. **Copiar a mi biblioteca** solicita una copia de la versión seleccionada. Si el archivo desaparece o la carpeta está inaccesible, la referencia sigue disponible para revisarla más tarde.
 
+Cuando una copia falla porque cambió el archivo, pulsa **Revisar versión** en Descargas. Se abre su carpeta y se comparan los datos de la versión solicitada con los del archivo actual. **Copiar versión actual** crea un trabajo nuevo. Las copias publicadas y la referencia guardada se conservan. **Volver a Descargas** devuelve el foco al trabajo anterior. Si la conexión se ha retirado, el panel lo indica.
+
 Las copias verifican los metadatos seleccionados y comprueban el recurso al finalizar. En WebDAV, si se interrumpe una copia con ETag fuerte y tamaño conocido, **Reanudar** solicita los bytes pendientes de esa versión. Si el servidor devuelve el mismo archivo completo, la copia vuelve a empezar. [Rangos HTTP y combinación de fragmentos](https://www.rfc-editor.org/rfc/rfc9110.html#name-combining-parts)
 
 En una carpeta montada puedes **Pausar** la copia desde Descargas. Si se interrumpe después de guardar datos, vuelve a conectar la carpeta en Windows y pulsa **Reanudar**. La aplicación comprueba el volumen, la identidad del archivo, el tamaño y las marcas de escritura y cambio antes de saltar a los bytes pendientes y al terminar. **Descartar parcial** elimina los datos guardados por el trabajo. Si cambia la versión, nabnab descarta el parcial y pide elegir el archivo de nuevo. [Identidad del archivo en Windows](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-file_id_info) · [Marcas del archivo abierto](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-file_basic_info)
@@ -39,3 +41,5 @@ La prueba de la copia montada pausa el lector de Windows tras 65.536 bytes. Comp
 ![Selección de un archivo remoto y destino de una copia, con datos de prueba](personal-server-selection.png)
 
 ![Revisión de una versión distinta en la aplicación nativa de Windows](personal-server-review.png)
+
+![Revisión desde Descargas de una copia de prueba cuya versión cambió](personal-server-copy-review.png)

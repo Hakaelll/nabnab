@@ -44,6 +44,7 @@ import { startGraphics,handleEmblemClick } from "./graphics";
 import { errorLabel, errorDetails, isCancelled, searchKey } from "./presentation";
 import { activeStates, cancellableStates, defaultToolOptions, initialSettings, sourceUrls, type BridgeStatus, type Copy, type DownloadView, type EngineStatus, type HomeState, type Job, type LibraryView, type Page, type SessionStatus, type Settings, type SettingsSection, type SettingsView, type ThumbnailCacheStatus, type Snapshot, type Startup, type ToolKind, type ToolOptions, type ToolsView, type Media } from "./contracts";
 import { downloadsView, homeView, icon, jobInspector, libraryView, mediaInspector, settingsView, stateLabel, toolsView } from "./views";
+import { needsPersonalCopyReview } from "./views-downloads";
 import { filteredLibrary } from "./views-library";
 import {createBatchController} from './batch-ui';
 import {createSourcesController} from './sources-ui';
@@ -108,6 +109,11 @@ const personalServers=createPersonalServers({
   chooseFolder: () => { void chooseFolder().then(renderCurrent).catch(showError); },
   openBrowser: () => { platformModule = "fileSources"; navigate("platforms"); fileSources.openPersonal(); },
   openReferences: () => { librarySection = "references"; navigate("library"); void personalServers.load(); },
+  openDownload: jobId => {
+    navigate("downloads");
+    const selector = `[data-action="review-personal-copy"][data-id="${CSS.escape(jobId)}"]`;
+    (document.querySelector<HTMLElement>(`#detail-dialog[open] ${selector}`) ?? document.querySelector<HTMLElement>(selector))?.focus();
+  },
 });
 const fileSources=createFileSources({command,refresh,render:renderCurrent,notify,showError,t,renderPersonal:personalServers.renderBrowser,loadPersonal:personalServers.load,followSource:(url,kind)=>{librarySection="sources";sources.openAdd(url,kind);navigate("library");},folder:()=>snapshot.settings.folder,chooseFolder:()=>{void chooseFolder().then(renderCurrent).catch(showError);}});
 const advancedFiles=createAdvancedFilesController({command,refresh,render:renderCurrent,notify,showError,t,settings:()=>{preferences.section='engines';navigate('settings');void loadSettingsSection().catch(showError);},folder:()=>snapshot.settings.folder});
@@ -855,8 +861,12 @@ async function handleAction(action: string, button: HTMLButtonElement): Promise<
     case 'cancel-job':await actOnJobs([id],'cancel');break;
     case 'pause-job':await actOnJobs([id],'pause');break;
     case 'retry-job':await actOnJobs([id],'retry');break;
+    case 'review-personal-copy': {
+      const job = snapshot.jobs.find(job => job.id === id);
+      if (job && needsPersonalCopyReview(job)) await personalServers.reviewCopy(job.id, job.source.selection);
+    } break;
     case 'cancel-selected':await actOnJobs(snapshot.jobs.filter(job=>downloads.selected.has(job.id)&&cancellableStates.includes(job.state)).map(job=>job.id),'cancel');break;
-    case 'retry-selected':await actOnJobs(snapshot.jobs.filter(job=>downloads.selected.has(job.id)&&['error','cancelled'].includes(job.state)).map(job=>job.id),'retry');break;
+    case 'retry-selected':await actOnJobs(snapshot.jobs.filter(job=>downloads.selected.has(job.id)&&['error','cancelled'].includes(job.state)&&!needsPersonalCopyReview(job)).map(job=>job.id),'retry');break;
     case 'clear-job-selection':downloads.selected.clear();renderCurrent();break;
     case 'copy-job-error':{const job=snapshot.jobs.find(job=>job.id===id);if(job?.error)await copyText(job.error.technical);break;}
     case 'library-filter':{const value=button.dataset.filter;if(isLibraryFilter(value)){library.filter=value;library.offset=0;renderCurrent();}break;}

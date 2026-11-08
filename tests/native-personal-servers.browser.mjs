@@ -463,14 +463,25 @@ try {
   assert.equal(stale.state, "error");
   assert.match(JSON.stringify(stale.error), /mounted file changed/i);
   assert.deepEqual(stale.outputs, []);
-
-  await selectReference();
-  await button("Revisar en servidor").click();
-  await button("Actualizar referencia").click();
-  await comparison().getByRole("status").filter({ hasText: "Los datos visibles coinciden" }).waitFor();
-  await button("Volver a referencias").click();
-  await selectReference();
-  await button("Obtener copia local").click();
+  await page.locator('[data-page="downloads"]').click();
+  const staleRow = page.locator(`.job-row:has([data-action="inspect-job"][data-id="${stale.id}"])`);
+  const reviewVersion = staleRow.getByRole("button", { name: "Revisar versión", exact: true });
+  assert.equal(await staleRow.getByRole("button", { name: "Reintentar", exact: true }).count(), 0);
+  await staleRow.getByRole("checkbox").check();
+  assert.equal(await button("Reintentar errores").isDisabled(), true);
+  await staleRow.getByRole("checkbox").uncheck();
+  await staleRow.screenshot({ path: path.join(data, "changed-copy.png") });
+  await reviewVersion.press("Enter");
+  await comparison().getByRole("status").filter({ hasText: "El identificador de versión es distinto." }).waitFor();
+  await page.waitForFunction(() => document.activeElement?.id === "personal-reference-review-title");
+  assert.equal((await rpc("get_snapshot")).jobs.length, 2, "Reviewing must not enqueue another copy");
+  assert.equal(await page.getByRole("checkbox", { name: /Cuaderno ñ\.txt/ }).isChecked(), true);
+  assert.equal(await page.getByRole("button", { name: "Actualizar referencia", exact: true }).count(), 0);
+  await page.setViewportSize({ width: 900, height: 620 });
+  assert.ok(await comparison().evaluate(panel => panel.scrollWidth <= panel.clientWidth + 1));
+  await comparison().screenshot({ path: path.join(data, "changed-copy-review.png") });
+  await page.setViewportSize({ width: 1180, height: 780 });
+  await button("Copiar versión actual").click();
   const updated = await job(2);
   assert.equal(updated.state, "completed", JSON.stringify(updated.error));
   assert.equal(updated.source.selection.stamp.size, first.source.selection.stamp.size);
@@ -480,7 +491,18 @@ try {
   assert.equal(await readFile(updated.outputs[0], "utf8"), replacement);
   assert.equal(await readFile(first.outputs[0], "utf8"), original);
   assert.equal(await readFile(remote, "utf8"), replacement);
-  console.log("Native mounted-folder reconnection rejected the old version and preserved both verified copies.");
+  const saved = await rpc("personal_servers_status");
+  assert.equal(saved.references[0].selection.stamp.etag, first.source.selection.stamp.etag);
+  await button("Volver a Descargas").click();
+  assert.equal(await reviewVersion.evaluate(control => document.activeElement === control), true);
+  await page.locator('[data-page="library"]').click();
+
+  await selectReference();
+  await button("Revisar en servidor").click();
+  await button("Actualizar referencia").click();
+  await comparison().getByRole("status").filter({ hasText: "Los datos visibles coinciden" }).waitFor();
+  await button("Volver a referencias").click();
+  console.log("Native Downloads review rejected the old version, preserved both copies, and left the reference unchanged until explicitly updated.");
 
   await rename(mount, offline);
   await selectReference();
@@ -512,6 +534,12 @@ try {
   assert.equal(await readFile(resumed.outputs[0], "utf8"), replacement);
   await wait(async () => (await readdir(stage).catch(() => [])).every(name => !name.endsWith(".part")));
   console.log("Native mounted-folder retry retained the owned prefix offline and published the verified file after reconnecting.");
+  await rpc("personal_server_remove", { id, reference: false });
+  await reviewVersion.click();
+  await comparison().getByText("La conexión ya no está configurada.", { exact: true }).waitFor();
+  assert.equal(await button("Copiar versión actual").count(), 0);
+  await button("Volver a Descargas").click();
+  assert.equal((await rpc("get_snapshot")).jobs.length, 4);
   if (process.env.NABNAB_TEST_OPENSSL) await verifyWebdav(process.env.NABNAB_TEST_OPENSSL);
   if (process.env.NABNAB_TEST_SSH2_MODULE) await verifySftp(process.env.NABNAB_TEST_SSH2_MODULE);
 } catch (error) {
