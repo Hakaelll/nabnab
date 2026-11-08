@@ -4,9 +4,9 @@ Open **Library → Personal archives → Add export**, choose the provider, and 
 
 ![Category selection before importing a fixture export](personal-archive-selection.png)
 
-The import footer totals the selected categories and flags any private categories you selected. Its file count and uncompressed size come from the source before date filtering. The separate attachment calculation reports the media linked to posts in the chosen interval.
+The import footer totals the selected categories and flags any private categories you selected. Its file count and uncompressed size come from the source before date filtering. The preview shows how many files it already knows it will skip in a mixed category, including recognized filenames whose contents use an unsupported format. A category with a data file over 8 MiB is unavailable. You can still select other categories in the same export. Private records are read only after you explicitly select and import their category. The separate attachment calculation reports the media linked to posts in the chosen interval.
 
-![Selected categories and source volume with private messages explicitly included](personal-archive-selection-total.png)
+![A mixed category with two incompatible files marked for omission](personal-archive-selection-total.png)
 
 | Provider | Recognized content |
 | --- | --- |

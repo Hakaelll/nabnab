@@ -65,7 +65,9 @@ const setup = `
       return {fingerprint,source:provider+"-export.zip",bytes:10234,datedPostMedia:["x","instagram","facebook"].includes(provider),categories:provider==="instagram"?
       [preview("media",3,"available",false,["media"])] : args.provider==="spotify"?
       [preview("listening",3,"available"),preview("playlists",1,"available")]:
-      [preview("posts",threadPosts.length,"available"),preview("likes",null,"absent",false,[]),preview("bookmarks",null,"unsupported",false,["unsupported"]),
+      args.provider==="linkedin"?[{...preview("contacts",null,"overLimit",true,["json"]),bytes:8388609,overLimitFiles:1},preview("messages",null,"absent",true,[])]:
+      [imports===0?{...preview("posts",threadPosts.length,"available"),files:3,bytes:624,incompatibleFiles:2}:preview("posts",threadPosts.length,"available"),
+        preview("likes",null,"absent",false,[]),preview("bookmarks",null,"unsupported",false,["unsupported"]),
         imports===0?preview("media",0,"empty"):{...preview("media",2,"available",false,["media"]),files:3,bytes:6252},preview("messages",null,"requiresSelection",true)]};
     }
     if(cmd==="personal_archive_review_media") return {files:2,bytes:4096,skippedPostFiles:0};
@@ -154,14 +156,19 @@ try {
   await page.getByText("No incluido", { exact: false }).waitFor();
   await page.getByText("Vacío", { exact: false }).waitFor();
   const summary = page.locator("#archive-selection-summary");
+  const omissions = page.locator("#archive-selection-skipped");
   const importSelection = page.getByRole("button", { name: "Importar selección", exact: true });
   const postChoice = page.locator("input[name='archive-category'][value='posts']");
-  assert.equal(await summary.innerText(), "1 categoría · 1 archivo · 314 B");
+  assert.equal(await summary.innerText(), "1 categoría · 3 archivos · 624 B");
+  assert.equal(await omissions.innerText(), "Se omitirán 2 archivos incompatibles.");
+  assert.equal(await postChoice.locator("..").getByText("Se omitirán 2 archivos incompatibles.").count(), 1);
   await postChoice.press("Space");
   assert.equal(await summary.innerText(), "Elige al menos una categoría.");
+  assert.equal(await omissions.isHidden(), true);
   assert.equal(await importSelection.isDisabled(), true);
   assert.equal(await postChoice.evaluate(input => input === document.activeElement), true);
   await postChoice.press("Space");
+  assert.equal(await omissions.isVisible(), true);
   assert.equal(await importSelection.isEnabled(), true);
   assert.equal(await page.locator("input[value='messages']").isChecked(), false);
   assert.equal(await page.locator("input[value='bookmarks']").isDisabled(), true);
@@ -183,7 +190,7 @@ try {
     await page.screenshot({ path: `${directory}/selection-${width}.png` });
   }
   await page.locator("input[value='messages']").check();
-  assert.equal(await summary.innerText(), "2 categorías · 1 con datos privados · 2 archivos · 628 B");
+  assert.equal(await summary.innerText(), "2 categorías · 1 con datos privados · 4 archivos · 938 B");
   assert.equal((await calls()).filter(call => call.cmd === "personal_archive_import" || call.cmd === "personal_archive_records").length, 0);
   await importSelection.scrollIntoViewIfNeeded();
   await page.screenshot({ path: `${directory}/selection-private-900.png` });
@@ -454,6 +461,15 @@ try {
   await page.getByRole("alert").getByText("No se pudo mostrar la vista previa.", { exact: false }).waitFor();
   assert.equal(await page.locator(".archive-media-stage img").count(), 0);
   assert.ok((await calls()).some(call => call.cmd === "personal_archive_preview_cancel"));
+  await page.keyboard.press("Escape");
+  await action("new").click();
+  await page.locator("#archive-provider").selectOption("linkedin");
+  await action("choose").click();
+  const oversized = page.locator("input[name='archive-category'][value='contacts']");
+  await oversized.locator("..").getByText("1 archivo de datos supera 8 MiB.", { exact: true }).waitFor();
+  assert.equal(await oversized.isDisabled(), true);
+  assert.equal(await importSelection.isDisabled(), true);
+  assert.equal((await calls()).filter(call => call.cmd === "personal_archive_records" && call.args.category === "contacts").length, 0);
   assert.deepEqual(errors, []);
   console.log("Verified dated attachment reviews, archived X threads and attachments, privacy, Spotify history, local playlist matching and cancellable media previews at 900 and 1180 px in Edge.");
 } finally {

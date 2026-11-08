@@ -120,6 +120,7 @@
 .archive-import-summary { display: grid; gap: 3px; flex: 1 1 14rem; min-width: 0; }
 .archive-import-summary output { color: var(--text); font-variant-numeric: tabular-nums; }
 .archive-import-summary small { color: var(--muted); }
+.archive-import-summary #archive-selection-skipped { color: var(--text); }
 .archive-categories, .archive-fields {
   display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px;
 }
@@ -131,6 +132,7 @@
 }
 .archive-option strong, .archive-option small, .archive-record-name strong, .archive-record-name small { display: block; overflow-wrap: anywhere; }
 .archive-option small, .archive-record-name small, .archive-file span { color: var(--muted); }
+.archive-option small.archive-option-note { color: var(--text); margin-top: 2px; }
 .archive-option input, .archive-record-name input { min-height: auto; margin-top: 3px; }
 .archive-metrics {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(min(140px, 100%), 1fr)); gap: 12px 16px;

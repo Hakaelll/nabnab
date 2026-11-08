@@ -79,6 +79,7 @@ enum Availability {
     Absent,
     Unsupported,
     Empty,
+    OverLimit,
     Available,
     RequiresSelection,
 }
@@ -91,6 +92,8 @@ struct CategoryPreview {
     availability: Availability,
     files: usize,
     bytes: u64,
+    incompatible_files: usize,
+    over_limit_files: usize,
     records: Option<usize>,
     start: Option<u64>,
     end: Option<u64>,
@@ -271,6 +274,7 @@ async fn inspect(
         })
         .collect::<Vec<_>>();
     extract(root, &plan, &scratch, &sample, cancel.clone()).await?;
+    let sampled = sample.iter().map(|entry| entry.name.as_str()).collect::<HashSet<_>>();
     let mut categories = Vec::new();
     for &category in provider.categories() {
         cancelled(&cancel)?;
@@ -290,8 +294,11 @@ async fn inspect(
         let mut end = None;
         let mut read = 0;
         let mut deferred = false;
+        let mut incompatible_files = 0;
+        let mut over_limit_files = 0;
         for entry in &found {
             if entry.classification.format == Format::Unsupported {
+                incompatible_files += 1;
                 continue;
             }
             if entry.classification.format == Format::Media {
@@ -299,9 +306,12 @@ async fn inspect(
                 read += 1;
                 continue;
             }
-            if category.sensitive() || !sample.iter().any(|candidate| candidate.name == entry.name)
-            {
-                deferred |= entry.size <= MAX_TEXT;
+            if entry.size > MAX_TEXT {
+                over_limit_files += 1;
+                continue;
+            }
+            if !sampled.contains(entry.name.as_str()) {
+                deferred = true;
                 continue;
             }
             if let Ok(rows) = read_text(&entry_path(&plan, &scratch, entry))
@@ -312,10 +322,14 @@ async fn inspect(
                 let (first, last) = interval(&rows);
                 start = start.into_iter().chain(first).min();
                 end = end.into_iter().chain(last).max();
+            } else {
+                incompatible_files += 1;
             }
         }
         let availability = if found.is_empty() {
             Availability::Absent
+        } else if over_limit_files > 0 {
+            Availability::OverLimit
         } else if category.sensitive() && (deferred || count > 0) {
             Availability::RequiresSelection
         } else if count > 0 {
@@ -333,6 +347,8 @@ async fn inspect(
             availability,
             files: found.len(),
             bytes: found.iter().map(|entry| entry.size).sum(),
+            incompatible_files,
+            over_limit_files,
             records: (!deferred && !category.sensitive() && read > 0).then_some(count),
             start,
             end,
@@ -1792,8 +1808,11 @@ mod tests {
                 "your_facebook_activity/posts/media/other/photo.jpg",
                 "same filename, different path",
             ),
+            ("your_facebook_activity/posts/your_posts_future.json", r#"{"futureSchema":true}"#),
+            ("your_facebook_activity/posts/your_posts_other.xml", "<posts/>"),
+            ("your_facebook_activity/saved_items.json", "[]"),
         ];
-        let inputs = files
+        let mut inputs = files
             .iter()
             .enumerate()
             .map(|(index, (name, content))| {
@@ -1802,6 +1821,9 @@ mod tests {
                 (name.to_string(), file)
             })
             .collect::<Vec<_>>();
+        let oversized = fixture.0.join("oversized");
+        File::create(&oversized).unwrap().set_len(MAX_TEXT + 1).unwrap();
+        inputs.push(("your_facebook_activity/contacts/contacts.json".into(), oversized));
         let source = fixture.0.join("facebook-export.zip");
         let (_sender, cancel) = watch::channel(false);
         crate::portable_zip::write_generated(&source, &inputs, cancel.clone())
@@ -1821,7 +1843,7 @@ mod tests {
             .unwrap();
         assert_eq!(review.files, 2);
         assert_eq!(review.bytes, (files[4].1.len() + files[5].1.len()) as u64);
-        assert_eq!(review.skipped_post_files, 0);
+        assert_eq!(review.skipped_post_files, 1);
         assert!(!root.join("personal-archive-media").exists());
         let messages = preview
             .categories
@@ -1834,6 +1856,17 @@ mod tests {
         ));
         assert_eq!(messages.records, None);
         assert_eq!(messages.files, 2);
+        assert_eq!(messages.incompatible_files, 0);
+        let category = |value| preview.categories.iter().find(|item| item.category == value).unwrap();
+        let posts = category(Category::Posts);
+        assert!(matches!(posts.availability, Availability::Available));
+        assert_eq!(posts.records, Some(2));
+        assert_eq!(posts.incompatible_files, 2);
+        assert!(matches!(category(Category::Saved).availability, Availability::Empty));
+        let contacts = category(Category::Contacts);
+        assert!(matches!(contacts.availability, Availability::OverLimit));
+        assert_eq!(contacts.over_limit_files, 1);
+        assert_eq!(contacts.records, None);
         let plan = Arc::new(plan);
         let archive = ArchiveState::default();
         let selection = |categories, sensitive| Selection {
@@ -1857,8 +1890,9 @@ mod tests {
             cancel.clone(),
         )
         .await
-        .unwrap()
-        .archive;
+        .unwrap();
+        assert_eq!(imported.skipped_files, 2);
+        let imported = imported.archive;
         assert_eq!(imported.categories, BTreeMap::from([(Category::Posts, 1)]));
         assert_eq!(imported.media_bytes, 0);
         let first = read_records(&root, &imported).unwrap();

@@ -14,7 +14,7 @@ const categoryIcons: Record<Category, Icon> = {
   listening: "wave", playlists: "list", contacts: "lock", messages: "lock",
 };
 const categoryKeys = Object.keys(categoryIcons) as Category[];
-type Availability = "absent" | "unsupported" | "empty" | "available" | "requiresSelection";
+type Availability = "absent" | "unsupported" | "empty" | "overLimit" | "available" | "requiresSelection";
 type Format = "json" | "csv" | "html" | "media" | "xAssignment" | "unsupported";
 interface CategoryPreview {
   category: Category;
@@ -22,6 +22,8 @@ interface CategoryPreview {
   availability: Availability;
   files: number;
   bytes: number;
+  incompatibleFiles?: number;
+  overLimitFiles?: number;
   records: number | null;
   start: number | null;
   end: number | null;
@@ -139,6 +141,7 @@ export function createPersonalArchives(hooks: Hooks) {
   const availability = (value: Availability) => ({
     absent: t("No incluido", "Not included"), unsupported: t("Formato no compatible", "Unsupported format"),
     empty: t("Vacío", "Empty"), available: t("Disponible", "Available"),
+    overLimit: t("Supera el límite", "Over the size limit"),
     requiresSelection: t("Se lee al importar", "Read on import"),
   })[value];
   const current = () => archives.find(item => item.id === archiveId);
@@ -246,10 +249,20 @@ export function createPersonalArchives(hooks: Hooks) {
     const range = dates(item.start, item.end);
     if (range) info.push(range);
     if (item.formats.length && selectable(item)) info.push(item.formats.filter(format => format !== "unsupported").map(formatName).join(", "));
+    const incompatible = item.incompatibleFiles ?? 0;
+    const oversized = item.overLimitFiles ?? 0;
+    const note = oversized ? oversized === 1 ? t("1 archivo de datos supera 8 MiB.", "1 data file exceeds 8 MiB.")
+      : t(`${number(oversized)} archivos de datos superan 8 MiB.`, `${number(oversized)} data files exceed 8 MiB.`)
+      : incompatible && selectable(item) ? omittedFiles(incompatible) : "";
     return `<label class="archive-option">
       <input type="checkbox" name="archive-category" value="${item.category}" ${included.has(item.category) ? "checked" : ""} ${!selectable(item) || busy ? "disabled" : ""}>
-      <span><strong>${name(item.category)}</strong><small>${h(info.join(" · "))}</small></span>
+      <span><strong>${name(item.category)}</strong><small>${h(info.join(" · "))}</small>${note ? `<small class="archive-option-note">${h(note)}</small>` : ""}</span>
     </label>`;
+  }
+
+  function omittedFiles(count: number): string {
+    return count === 1 ? t("Se omitirá 1 archivo incompatible.", "1 incompatible file will be skipped.")
+      : t(`Se omitirán ${number(count)} archivos incompatibles.`, `${number(count)} incompatible files will be skipped.`);
   }
 
   function selectionSummary() {
@@ -266,14 +279,27 @@ export function createPersonalArchives(hooks: Hooks) {
     ].filter(Boolean).join(" · ");
   }
 
+  function selectionOmissions() {
+    const count = preview?.categories.reduce((total, item) =>
+      total + (included.has(item.category) ? item.incompatibleFiles ?? 0 : 0), 0) ?? 0;
+    return count ? omittedFiles(count) : "";
+  }
+
   function syncImportSelection() {
     const output = document.getElementById("archive-selection-summary");
     if (output) output.textContent = selectionSummary();
+    const skipped = document.getElementById("archive-selection-skipped");
+    if (skipped) {
+      const message = selectionOmissions();
+      skipped.textContent = message;
+      skipped.hidden = !message;
+    }
     const submit = document.getElementById("archive-import-submit");
     if (submit instanceof HTMLButtonElement) submit.disabled = busy || !included.size;
   }
 
   function importForm() {
+    const omissions = selectionOmissions();
     return `<section class="archive-panel" aria-labelledby="archive-import-title">
       <div class="archive-heading"><h2 id="archive-import-title">${t("Importar exportación", "Import an export")}</h2>
         ${action("archive-close-form", t("Cerrar formulario", "Close form"), undefined, "secondary", disabled())}</div>
@@ -307,6 +333,7 @@ export function createPersonalArchives(hooks: Hooks) {
         <footer class="archive-import-footer">
           <div class="archive-import-summary"><strong>${t("Selección de importación", "Import selection")}</strong>
             <output id="archive-selection-summary" aria-atomic="true">${h(selectionSummary())}</output>
+            <small id="archive-selection-skipped" role="status" ${omissions ? "" : "hidden"}>${h(omissions)}</small>
             <small>${t("Tamaño de origen sin comprimir, antes de aplicar fechas.", "Uncompressed source size before applying dates.")}</small></div>
           <div class="archive-actions">
             ${preview.datedPostMedia ? action("archive-review-media", t("Calcular adjuntos", "Calculate attachments"), "list", "secondary", `id="archive-review-media" ${busy || !canReviewMedia() ? "disabled" : ""}`) : ""}
