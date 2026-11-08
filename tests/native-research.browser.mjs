@@ -13,9 +13,10 @@ await mkdir(base, { recursive: true });
 const data = await mkdtemp(path.join(base, "run-"));
 const output = path.join(data, "output");
 await mkdir(output);
+const languageOnly = process.env.NABNAB_RESEARCH_LANGUAGE_ONLY === "1";
 const port = process.env.NABNAB_RESEARCH_DEBUG_PORT || 9259;
 const endpoint = `http://127.0.0.1:${port}`;
-const child = spawn(path.join(root, "src-tauri/target/debug/nabnab.exe"), [], {
+const child = spawn(process.env.NABNAB_RESEARCH_TEST_EXE ?? path.join(root, "src-tauri/target/debug/nabnab.exe"), [], {
   cwd: root, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
   env: { ...process.env, NABNAB_TEST_DATA_DIR: data, WEBVIEW2_USER_DATA_FOLDER: path.join(data, "webview"),
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}` },
@@ -76,7 +77,8 @@ async function verify(provider, run) {
     console.log(JSON.stringify({ provider, ...detail }));
   } catch (error) {
     errors.push(error);
-    console.error(JSON.stringify({ provider, error: String(error) }));
+    const notices = await page?.locator(".file-source-error, #notification-text").allTextContents().catch(() => []);
+    console.error(JSON.stringify({ provider, error: String(error), notices }));
   }
 }
 
@@ -93,7 +95,48 @@ try {
   await rpc("save_settings", { settings: { ...initial.settings, language: "es", folder: output, reducedMotion: true, trayEnabled: false, closeToTray: false } });
   await page.reload();
 
-  await verify("arXiv", async () => {
+  await verify("LibriVox language", async () => {
+    await page.locator('[data-page="platforms"]').click();
+    await page.locator('[data-action="open-fileSources"][data-id="librivox"]').click();
+    await page.getByRole("combobox", { name: "Idioma", exact: true }).selectOption({ label: "Español" });
+    await page.locator("#file-source-catalog-form button[type=submit]").click();
+    const entries = page.locator('[data-action="file-source-entry"]');
+    await entries.first().waitFor({ timeout: 45_000 });
+    const count = await entries.count();
+    assert.ok(count > 0 && count <= 25);
+    const ids = await entries.evaluateAll(buttons => buttons.map(button => button.dataset.id));
+    assert.equal(new Set(ids).size, count);
+    await page.locator("#file-source-catalog-form").scrollIntoViewIfNeeded();
+    await page.screenshot({ path: path.join(data, "librivox-language.png") });
+    const more = page.getByRole("button", { name: "Cargar más", exact: true });
+    assert.equal(await more.getAttribute("data-cursor"), "2");
+    await more.click();
+    await page.locator('[data-action="file-source-more"][data-cursor="3"]').waitFor({ timeout: 45_000 });
+    const total = await entries.count();
+    assert.ok(total >= count && total <= 50);
+    const allIds = await entries.evaluateAll(buttons => buttons.map(button => button.dataset.id));
+    assert.equal(new Set(allIds).size, total);
+    const first = await entries.first().getAttribute("data-id");
+    await entries.first().press("Enter");
+    await page.locator("[data-file-source-select]").first().waitFor({ timeout: 60_000 });
+    await page.getByRole("button", { name: "Volver a resultados" }).click();
+    assert.equal(await entries.count(), total);
+    assert.equal(await entries.first().evaluate(button => button === document.activeElement), true);
+    await page.getByRole("button", { name: "Seguir idioma" }).click();
+    await page.locator("#source-exploration-limit").fill("25");
+    await page.locator("#source-editor button[type=submit]").click();
+    const followed = await wait(async () => {
+      const { sources } = await getSnapshot();
+      return sources.find(source => source.url === "https://librivox.org/search/?language_id=5" && source.items.length > 0);
+    }, 55_000);
+    assert.equal(followed.settings.intervalHours, null);
+    assert.equal(followed.settings.automatic, false);
+    assert.equal(followed.settings.pageSize, 25);
+    assert.equal((await getSnapshot()).jobs.length, 0);
+    return { firstPage: count, loaded: total, first, followed: followed.items.length };
+  });
+
+  if (!languageOnly) await verify("arXiv", async () => {
     const paper = "2506.08399";
     const source = await inspect(`https://arxiv.org/abs/${paper}`);
     assert.deepEqual(source.assets.map(asset => asset.version), ["v2", "v1"]);
@@ -113,7 +156,7 @@ try {
     return { versions: saved.map(value => value.item.name), bytes: saved.map(value => value.bytes.length) };
   });
 
-  await verify("Zenodo", async () => {
+  if (!languageOnly) await verify("Zenodo", async () => {
     const family = await inspect("14634896");
     assert.equal(family.zenodo.recordId, "14634897");
     assert.equal(family.zenodo.familyId, "14634896");
@@ -132,7 +175,7 @@ try {
     return { family: family.zenodo.familyId, record: source.zenodo.recordId, filename: item.name, bytes: item.size, checksum: asset.checksum };
   });
 
-  await verify("LibriVox", async () => {
+  if (!languageOnly) await verify("LibriVox", async () => {
     const source = await inspect("https://librivox.org/rss/353");
     const chapters = source.assets.map(asset => asset.audiobook?.chapter);
     assert.ok(chapters.length > 2);
@@ -150,7 +193,7 @@ try {
     assert.deepEqual(shown, assets.map(asset => `Cap. ${asset.audiobook.chapter}`));
     return { chapters: assets.map(asset => asset.audiobook.chapter), bytes: assets.map(asset => asset.size) };
   });
-  assert.deepEqual(results, ["arXiv", "Zenodo", "LibriVox"], errors.map(String).join("\n"));
+  assert.deepEqual(results, languageOnly ? ["LibriVox language"] : ["LibriVox language", "arXiv", "Zenodo", "LibriVox"], errors.map(String).join("\n"));
 } catch (error) {
   console.error(log);
   throw error;

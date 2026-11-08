@@ -151,6 +151,14 @@ label.file-source-row { cursor: pointer; }
   flex: 1 1 14rem;
   min-width: 0;
 }
+.file-source-catalog-form label:has(#file-source-language) {
+  flex: 0 1 13rem;
+  min-width: 0;
+}
+#file-source-language {
+  width: 100%;
+  min-width: 0;
+}
 .file-source-checksum {
   overflow-wrap: anywhere;
 }

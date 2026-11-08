@@ -19,9 +19,10 @@ interface Editor { id: string | null; name: string; url: string; settings: Sourc
 const fileReview = (kind: EditorKind | SourceKind) => kind === "github" || kind === "publicSearch";
 const catalogName = (url: string) => url.startsWith("https://arxiv.org/") ? "arXiv"
   : url.startsWith("https://zenodo.org/") ? "Zenodo" : "LibriVox";
-const manualSearchSettings = (settings: SourceSettings): SourceSettings => ({
+const catalogPageSize = (url: string) => /^https?:\/\/(?:www\.)?librivox\.org\/search\/?\?language_id=\d+$/i.test(url.trim()) ? 25 : 20;
+const manualSearchSettings = (settings: SourceSettings, url: string): SourceSettings => ({
   ...settings, intervalHours: null, automatic: false, presetId: null, relativeFolder: "",
-  pageSize: 20, explorationLimit: 200, history: "reviewHistory",
+  pageSize: catalogPageSize(url), explorationLimit: 200, history: "reviewHistory",
 });
 
 export function createSourcesController(hooks: SourceHooks) {
@@ -71,7 +72,7 @@ export function createSourcesController(hooks: SourceHooks) {
       ${value.id ? "" : `<fieldset><legend>${t("Qué contenido considerar", "Which content to consider")}</legend><label><input type="radio" name="source-history" value="fromNow" ${settings.history === "fromNow" ? "checked" : ""}>${t("Desde ahora. Conservar el historial como observado", "From now. Record existing history as observed")}</label><label><input type="radio" name="source-history" value="reviewHistory" ${settings.history === "reviewHistory" ? "checked" : ""}>${t("Revisar una selección inicial del historial", "Review an initial history selection")}</label></fieldset>`}
       ${publicSearch ? `<p class="field-note">${t("Comprobaciones manuales. Abre un resultado para elegir archivos. Puedes seguir búsquedas e historiales desde Plataformas.", "Manual checks. Open a result to choose files. You can follow searches and version histories from Platforms.")}</p>` : `<label>${t("Comprobaciones", "Checks")}<select id="source-interval">${[["", t("Solo manuales", "Manual only")], ["1", t("Cada hora", "Every hour")], ["6", t("Cada 6 horas", "Every 6 hours")], ["24", t("Cada 24 horas", "Every 24 hours")]].map(([value, label]) => option(value, label, String(settings.intervalHours ?? ""))).join("")}</select></label>`}
       ${publicSearch ? "" : value.kind === "github" ? `<p class="field-note">${t("Las versiones nuevas quedan para revisión. Abre una versión y elige sus archivos antes de descargar. No se ejecuta ni instala software.", "New releases await review. Open a release and choose its files before downloading. Software is never run or installed.")}</p>` : `<fieldset><legend>${t("Qué hacer con novedades", "What to do with new items")}</legend><label><input type="checkbox" id="source-automatic" ${settings.automatic ? "checked" : ""}>${t("Autorizar descarga automática de novedades identificadas", "Allow automatic downloads of identified new items")}</label><p class="field-note">${t("Sin marcar, todo queda para revisión. El historial y los elementos ambiguos siempre requieren selección. La descarga automática requiere un ajuste guardado.", "When unchecked, all new items await review. History and ambiguous items always require selection. Automatic downloads require a saved preset.")}</p><label>${t("Máximo automático por comprobación", "Automatic limit per check")}<input id="source-auto-limit" type="number" min="1" max="1000" value="${settings.automaticLimit}"></label><p class="field-note">${t("El exceso queda pendiente de revisión. El límite inicial es 20.", "Excess items await review. The initial limit is 20.")}</p></fieldset>`}
-      ${publicSearch ? `<label>${t("Límite de posiciones por búsqueda", "Position limit per search")}<input id="source-exploration-limit" type="number" min="20" max="200" step="20" value="${settings.explorationLimit}"></label><p class="field-note">${t("Se consultan bloques de 20. Los filtros pueden reducir las coincidencias visibles.", "Each page checks 20 positions. Filters can reduce the number of matches.")}</p>` : `<details><summary>${t("Alcance de exploración", "Exploration scope")}</summary><div class="form-grid"><label>${t("Elementos por bloque", "Items per page")}<input id="source-page-size" type="number" min="1" max="${value.kind === "github" ? 50 : 1000}" value="${settings.pageSize}"></label><label>${t("Límite antes de ampliar", "Limit before extending")}<input id="source-exploration-limit" type="number" min="1" max="${value.kind === "github" ? 5000 : 100000}" value="${settings.explorationLimit}"></label></div></details>`}
+      ${publicSearch ? `<label>${t("Límite de posiciones por búsqueda", "Position limit per search")}<input id="source-exploration-limit" type="number" min="${settings.pageSize}" max="200" step="${settings.pageSize}" value="${settings.explorationLimit}"></label><p class="field-note">${t(`Se consultan bloques de ${settings.pageSize}. Los filtros pueden reducir las coincidencias visibles.`, `Each page checks ${settings.pageSize} positions. Filters can reduce the number of matches.`)}</p>` : `<details><summary>${t("Alcance de exploración", "Exploration scope")}</summary><div class="form-grid"><label>${t("Elementos por bloque", "Items per page")}<input id="source-page-size" type="number" min="1" max="${value.kind === "github" ? 50 : 1000}" value="${settings.pageSize}"></label><label>${t("Límite antes de ampliar", "Limit before extending")}<input id="source-exploration-limit" type="number" min="1" max="${value.kind === "github" ? 5000 : 100000}" value="${settings.explorationLimit}"></label></div></details>`}
       ${value.kind === "gallery" ? `<p class="field-note">${t("Requiere Galerías activado. La exploración conserva los originales y envía los archivos seleccionados a una colección. Las fechas ausentes o sin zona horaria requieren revisión manual.", "Requires Galleries enabled. Selected files keep their original format and go to a collection. Missing dates or dates without a timezone require manual review.")}</p>` : ""}
       ${value.id ? `<label><input id="source-paused" type="checkbox" ${value.paused ? "checked" : ""}>${t("Pausar futuras comprobaciones e incorporaciones", "Pause future checks and additions")}</label>` : ""}
       <p class="field-note">${t("Funciona mientras nabnab está abierto, también en bandeja. No comprueba ni despierta el equipo con la app cerrada. La primera exploración no descarga archivos.", "Works while nabnab is open, including in the tray. A closed app cannot check or wake the computer. Initial exploration downloads no files.")}</p>
@@ -106,7 +107,7 @@ export function createSourcesController(hooks: SourceHooks) {
   function resetScroll(): void { document.getElementById("main")?.scrollTo({ top: 0, behavior: "instant" }); }
   function openAdd(url = "", kind: EditorKind = "youtube"): void {
     const defaults = defaultSourceSettings();
-    editor = { id: null, name: "", url, settings: kind === "publicSearch" ? manualSearchSettings(defaults) : defaults, paused: false, kind, publicFeed: false };
+    editor = { id: null, name: "", url, settings: kind === "publicSearch" ? manualSearchSettings(defaults, url) : defaults, paused: false, kind, publicFeed: false };
     detailId = null; selected.clear(); hooks.render(); resetScroll();
     document.getElementById("source-url")?.focus({ preventScroll: true });
   }
@@ -122,7 +123,7 @@ export function createSourcesController(hooks: SourceHooks) {
           case "podcast": case "gallery": case "github": case "publicSearch": editor.kind = element.value; break;
           default: editor.kind = "youtube";
         }
-        if (editor.kind === "publicSearch") editor.settings = manualSearchSettings(settings);
+        if (editor.kind === "publicSearch") editor.settings = manualSearchSettings(settings, editor.url);
         if (editor.kind === "github") {
           settings.automatic = false;
           settings.pageSize = Math.min(50, settings.pageSize);
@@ -131,7 +132,18 @@ export function createSourcesController(hooks: SourceHooks) {
         hooks.render(); return true;
       }
       case "source-public-feed": if (element instanceof HTMLInputElement) editor.publicFeed = element.checked; return true;
-      case "source-url": editor.url = element.value; return true;
+      case "source-url": {
+        editor.url = element.value;
+        if (editor.kind === "publicSearch") {
+          const pageSize = catalogPageSize(editor.url);
+          if (pageSize !== settings.pageSize) {
+            settings.pageSize = pageSize;
+            settings.explorationLimit = 200;
+            hooks.render();
+          }
+        }
+        return true;
+      }
       case "source-name": editor.name = element.value; return true;
       case "source-preset": settings.presetId = element.value || null; return true;
       case "source-folder": settings.relativeFolder = element.value; return true;

@@ -36,6 +36,7 @@ const setup = `
     if(cmd==="startup")return {...copy(state),folder:settings.folder,enginesReady:true,engineError:null};
     if(cmd==="get_snapshot")return copy(state);
     if(cmd==="local_timezone")return "Romance Standard Time";
+    if(cmd==="librivox_catalog_languages")return [{id:5,name:"Spanish"},{id:1,name:"English"},{id:48,name:"North American Indian (undetermined dialect)"}];
     if(cmd==="cloud_status")return copy(connections);
     if(cmd==="cloud_configure"){const connection=connections.find(value=>value.provider===args.provider);connection.configured=true;return copy(connection);}
     if(cmd==="cloud_connect"){const connection=connections.find(value=>value.provider===args.provider);connection.connected=true;connection.accountId="fixture-account";return copy(connection);}
@@ -56,6 +57,12 @@ const setup = `
     if(cmd==="personal_server_remove"){personal.servers=personal.servers.filter(server=>server.id!==args.id);return copy(personal);}
     if(cmd==="queue_public_files"||cmd==="queue_cloud_files")return [];
     if(cmd==="public_source_inspect"){
+      if(args.url==="https://librivox.org/search/?language_id=5"){
+        const edition=args.cursor?"Cuentos (segunda edición)":"Cuentos de prueba";
+        return sourcePage(args.url,{provider:"librivox",title:"LibriVox · Spanish",
+          entries:[{id:"librivox:catalog:"+(args.cursor?"cuentos-2":"cuentos"),title:edition,url:"https://librivox.org/cuentos/",prerelease:false,publishedAt:null}],
+          nextCursor:args.cursor?null:"2"});
+      }
       if(args.url.startsWith("https://arxiv.org/search/")){
         const paper = args.cursor
           ? {id:"arxiv:2401.00002v1",title:"A second paper",url:"https://arxiv.org/abs/2401.00002/error"}
@@ -68,7 +75,7 @@ const setup = `
       if(args.url===historyUrl)return sourcePage(historyUrl,{provider:"zenodo",title:"Fixture dataset",
         entries:[{id:"zenodo:1236",title:"v2 · Fixture dataset",url:"https://zenodo.org/records/1236",prerelease:false,publishedAt:"2024-02-02"},{id:"zenodo:1235",title:"v1 · Fixture dataset",url:"https://zenodo.org/records/1235",prerelease:false,publishedAt:"2024-01-02"}]});
       if(args.url==="https://zenodo.org/records/1235")return dataset(args.url,1235,"v1");
-      if(args.url.includes("librivox.org/api/feed/audiobooks/id/"))return sourcePage(args.url,{provider:"librivox",title:"Fixture audiobook",assets:[1,2,3].map(chapter=>asset("librivox:52:"+chapter,"chapter-"+chapter+".mp3",{mime:"audio/mpeg",title:"Chapter title",audiobook:{bookId:"librivox:52",bookTitle:"Fixture audiobook",chapter,reader:chapter===2?"Second Reader":"Fixture Reader",language:"English"}}))});
+      if(args.url==="https://librivox.org/cuentos/"||args.url.includes("librivox.org/api/feed/audiobooks/id/"))return sourcePage("https://librivox.org/api/feed/audiobooks/id/52",{provider:"librivox",title:"Fixture audiobook",assets:[1,2,3].map(chapter=>asset("librivox:52:"+chapter,"chapter-"+chapter+".mp3",{mime:"audio/mpeg",title:"Chapter title",audiobook:{bookId:"librivox:52",bookTitle:"Fixture audiobook",chapter,reader:chapter===2?"Second Reader":"Fixture Reader",language:"Spanish"}}))});
       if(args.url.includes("/slow"))return await new Promise(resolve=>{fixture.pending=()=>resolve(sourcePage(args.url,{title:"Stale result must not appear"}));});
       if(args.url.includes("/empty"))return sourcePage(args.url,{title:"Empty release"});
       if(args.url.includes("archive.org"))return sourcePage(args.url,{provider:"archive",title:"A sample archive item",rights:"Rights supplied by uploader, permission must be checked.",assets:[asset("ia:original","scan.pdf",{mime:"application/pdf"}),asset("ia:derived","scan_text.txt",{mime:"text/plain",original:false})]});
@@ -219,12 +226,31 @@ try {
     await page.getByRole("button", { name: "Volver a versiones" }).click();
     assert.equal(await oldVersion.evaluate(node => node === document.activeElement), true);
 
-    await inspect("https://librivox.org/api/feed/audiobooks/id/52");
+    await page.locator("[data-action='file-source-search-mode'][data-id='librivox']").click();
+    const language = page.getByRole("combobox", { name: "Idioma", exact: true });
+    await language.selectOption({ label: "Español" });
+    assert.equal(await page.locator("#file-source-catalog-query").inputValue(), "");
+    await page.locator("#file-source-catalog-form button[type=submit]").click();
+    const edition = page.getByRole("button", { name: "Cuentos de prueba", exact: true });
+    await edition.waitFor();
+    await page.getByRole("button", { name: "Cargar más" }).click();
+    await page.getByRole("button", { name: "Cuentos (segunda edición)", exact: true }).waitFor();
+    for (const [width, height] of [[1180, 780], [900, 620]]) {
+      await page.setViewportSize({ width, height });
+      await page.locator("#file-source-catalog-form").scrollIntoViewIfNeeded();
+      await checkNoHorizontalOverflow(`LibriVox language ${width}`);
+      await page.screenshot({ path: `${directory}/librivox-language-${width}x${height}-fixture.png` });
+    }
+    await edition.press("Enter");
+    await page.locator("[data-file-source-select='librivox:52:2']").waitFor();
+    await page.getByRole("button", { name: "Volver a resultados" }).click();
+    assert.equal(await edition.evaluate(node => node === document.activeElement), true);
+    await edition.press("Enter");
     await page.locator("[data-file-source-select='librivox:52:2']").waitFor();
     assert.deepEqual(await page.locator(".file-source-research-list .file-source-file-icon").allTextContents(), ["01", "02", "03"]);
     assert.equal(await page.getByRole("checkbox", { name: "Capítulo 1 · Chapter title", exact: true }).count(), 1);
     assert.equal(await page.getByRole("checkbox", { name: "Capítulo 2 · Chapter title", exact: true }).count(), 1);
-    assert.match(await page.locator(".file-source-list").innerText(), /Fixture Reader · English/);
+    assert.match(await page.locator(".file-source-list").innerText(), /Fixture Reader · Spanish/);
     const narration = page.getByRole("combobox", { name: "Lectura" });
     await narration.focus();
     await narration.selectOption("Fixture Reader");
@@ -247,6 +273,12 @@ try {
       call.cmd === "queue_public_files" && call.args.sourceUrl.includes("librivox.org")));
     const queuedChapters = await page.evaluate(() => window.fileSourceFixture.calls.filter(call => call.cmd === "queue_public_files").at(-1).args.assetIds);
     assert.deepEqual(queuedChapters, ["librivox:52:1", "librivox:52:3"]);
+    await page.getByRole("button", { name: "Volver a resultados" }).click();
+    await page.getByRole("button", { name: "Seguir idioma" }).click();
+    assert.equal(await page.locator("#source-url").inputValue(), "https://librivox.org/search/?language_id=5");
+    assert.equal(await page.locator("#source-exploration-limit").getAttribute("step"), "25");
+    await page.locator("[data-page='platforms']").click();
+    await page.locator("[data-action='open-fileSources']").first().click();
     report.push("arXiv author search, version selection and keyboard return after pagination or error passed. Zenodo DOI with reviewed volume and LibriVox chapter selection by narrator passed.");
 
     await inspect("https://github.com/example/empty");

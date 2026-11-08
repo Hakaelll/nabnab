@@ -6,6 +6,7 @@ import { action, icon, option } from "./views-common";
 type CloudProvider = "drive" | "onedrive" | "dropbox";
 type SourceTab = "public" | "personal" | CloudProvider;
 type CatalogSearch = "arxiv" | "librivox";
+type CatalogLanguage = { id: number; name: string };
 export interface PublicAsset {
   id: string; sourceUrl: string; filename: string; mime: string; size: number | null;
   title: string; version: string | null; original: boolean; author: string | null;
@@ -55,6 +56,12 @@ const publicNames = {
   arxiv: "arXiv", zenodo: "Zenodo", librivox: "LibriVox",
 };
 const searches: CatalogSearch[] = ["arxiv", "librivox"];
+const librivoxSpanish = new Map(Object.entries({
+  English: "Inglés", Spanish: "Español", French: "Francés", German: "Alemán", Italian: "Italiano",
+  Portuguese: "Portugués", Catalan: "Catalán", Galician: "Gallego", Chinese: "Chino",
+  Japanese: "Japonés", Russian: "Ruso", Arabic: "Árabe", Dutch: "Neerlandés",
+  Multilingual: "Multilingüe",
+}));
 function isCloud(value: string): value is CloudProvider { return providers.some(provider => provider.id === value); }
 function cloudName(provider: CloudProvider): string { return providers.find(value => value.id === provider)?.name ?? provider; }
 function fileSize(value: number | null, t: Copy): string {
@@ -79,6 +86,8 @@ export function createFileSources(hooks: FileSourceHooks) {
   let searchQuery = "";
   let arxivField = "title";
   let language = "";
+  let languages: CatalogLanguage[] = [];
+  let loadingLanguages = false;
   let publicPage: PublicPage | null = null;
   let catalogReturn: { page: PublicPage; entryId: string; mode: CatalogSearch | null } | null = null;
   let cloudPage: CloudPage | null = null;
@@ -144,16 +153,46 @@ export function createFileSources(hooks: FileSourceHooks) {
   function warningList(warnings: string[]): string {
     return warnings.length ? `<ul class="file-source-warnings">${warnings.map(warning => `<li>${h(warning)}</li>`).join("")}</ul>` : "";
   }
+  async function loadLibrivoxLanguages() {
+    if (languages.length || loadingLanguages) return;
+    loadingLanguages = true;
+    try {
+      const options = await hooks.command<CatalogLanguage[]>("librivox_catalog_languages", {});
+      if (Array.isArray(options)) {
+        languages = options;
+        if (!languages.some(option => option.name === language)) language = "";
+      }
+    } catch { /* Searching by title can still use a manually entered catalog language. */ }
+    finally {
+      loadingLanguages = false;
+      if (tab === "public" && searchMode === "librivox" && document.getElementById("file-source-language")) hooks.render();
+    }
+  }
+  function librivoxLanguage(disabled: string): string {
+    if (loadingLanguages) {
+      return `<select id="file-source-language" disabled><option>${t("Cargando idiomas…", "Loading languages…")}</option></select>`;
+    }
+    if (!languages.length) {
+      return `<input id="file-source-language" value="${h(language)}" maxlength="80" placeholder="Spanish" ${disabled}>`;
+    }
+    const choices = languages.map(({ name }) => ({ name, label: displayLibrivoxLanguage(name) }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+    return `<select id="file-source-language" ${disabled}>${option("", t("Cualquier idioma", "Any language"), language)}
+      ${choices.map(({ name, label }) => option(name, label, language)).join("")}</select>`;
+  }
+  function displayLibrivoxLanguage(name: string): string {
+    return t(librivoxSpanish.get(name) ?? name, name);
+  }
   function catalogSearch(): string {
     const disabled = busy ? "disabled" : "";
     return `<div class="file-source-catalog"><div class="button-group" role="group" aria-label="${t("Búsqueda en catálogos", "Catalog search")}">
       ${searches.map(id => `<button class="button secondary" type="button" data-action="file-source-search-mode" data-id="${id}" aria-expanded="${searchMode === id}" aria-controls="file-source-catalog-form" ${disabled}>${icon("search")}${publicNames[id]}</button>`).join("")}
     </div>${searchMode ? `<form id="file-source-catalog-form" class="file-source-catalog-form">
       ${searchMode === "arxiv" ? `<label>${t("Buscar por", "Search by")}<select id="file-source-arxiv-field" ${disabled}>${option("title", t("Título", "Title"), arxivField)}${option("author", t("Autor", "Author"), arxivField)}${option("category", t("Categoría", "Category"), arxivField)}</select></label>` : ""}
-      <label>${searchMode === "arxiv" ? t("Consulta", "Query") : t("Título del libro", "Book title")}<input id="file-source-catalog-query" value="${h(searchQuery)}" required maxlength="160" ${disabled}></label>
-      ${searchMode === "librivox" ? `<label>${t("Idioma, opcional", "Language, optional")}<input id="file-source-language" value="${h(language)}" maxlength="50" placeholder="Spanish" ${disabled}></label>` : ""}
+      <label>${searchMode === "arxiv" ? t("Consulta", "Query") : t("Inicio del título", "Beginning of title")}<input id="file-source-catalog-query" value="${h(searchQuery)}" ${searchMode === "arxiv" || !languages.length ? "required" : ""} maxlength="160" ${disabled}></label>
+      ${searchMode === "librivox" ? `<label>${t("Idioma", "Language")}${librivoxLanguage(disabled)}</label>` : ""}
       <button type="submit" class="button primary" ${disabled}>${t("Buscar", "Search")}</button>
-    </form>` : `<div id="file-source-catalog-form" hidden></div>`}</div>`;
+    </form>${searchMode === "librivox" && languages.length ? `<p class="field-note">${t("Deja el título vacío para explorar las ediciones recientes de un idioma.", "Leave the title blank to browse recent editions in one language.")}</p>` : ""}` : `<div id="file-source-catalog-form" hidden></div>`}</div>`;
   }
   function matchesPublicFilter(asset: PublicAsset): boolean {
     return (filter === "all" || asset.original === (filter === "original"))
@@ -242,8 +281,13 @@ export function createFileSources(hooks: FileSourceHooks) {
     const provider: CloudProvider = tab === "public" ? "drive" : tab;
     const isSearch = isCatalogSearch(publicPage);
     const zenodoHistory = isZenodoHistory(publicPage);
+    const languageBrowse = publicPage?.sourceUrl.startsWith("https://librivox.org/search/?language_id=");
+    const publicTitle = languageBrowse && publicPage
+      ? `LibriVox · ${displayLibrivoxLanguage(publicPage.title.replace(/^LibriVox · /, ""))}`
+      : publicPage?.title ?? "";
     const followLabel = zenodoHistory ? t("Seguir versiones", "Follow versions")
-      : isSearch ? t("Seguir búsqueda", "Follow search") : t("Seguir versiones", "Follow releases");
+      : languageBrowse ? t("Seguir idioma", "Follow language")
+        : isSearch ? t("Seguir búsqueda", "Follow search") : t("Seguir versiones", "Follow releases");
     const returnLabel = isZenodoHistory(catalogReturn?.page ?? null) ? t("Volver a versiones", "Back to versions") : t("Volver a resultados", "Back to results");
     const hasPage = isPublic ? Boolean(publicPage) : Boolean(cloudPage);
     const cursor = isPublic ? publicPage?.nextCursor : cloudPage?.nextCursor;
@@ -253,13 +297,13 @@ export function createFileSources(hooks: FileSourceHooks) {
       ${error ? `<div class="file-source-error" role="alert">${icon("error")}<span>${h(error)}</span></div>` : ""}${busy === "inspect" || busy === "connect" ? `<div class="file-source-progress" role="status"><span>${busy === "connect" ? t("Esperando autorización en el navegador…", "Waiting for browser authorization…") : t("Consultando archivos del origen…", "Reading source files…")}</span>${action("file-source-cancel", t("Cancelar", "Cancel"), "close", "quiet")}</div>` : ""}
       ${hasPage ? `<div class="file-source-results"><div class="file-source-result-heading"><div>
         <span class="file-source-eyebrow">${isPublic ? zenodoHistory ? t("Zenodo · Historial de versiones", "Zenodo · Version history") : h(publicPage ? publicNames[publicPage.provider] : "") : h(cloudName(provider))}</span>
-        <h2${isPublic && (catalogReturn || zenodoHistory) ? ' tabindex="-1"' : ""}>${h(isPublic ? publicPage?.title ?? "" : trail.at(-1)?.name ?? t("Mis archivos", "My files"))}</h2>${isPublic ? zenodoSummary() : ""}</div>
+        <h2${isPublic && (catalogReturn || zenodoHistory) ? ' tabindex="-1"' : ""}>${h(isPublic ? publicTitle : trail.at(-1)?.name ?? t("Mis archivos", "My files"))}</h2>${isPublic ? zenodoSummary() : ""}</div>
         ${isPublic && !catalogReturn && publicPage?.zenodo?.versionsUrl ? action("file-source-versions", t("Historial de versiones", "Version history"), "list", "quiet", busy ? "disabled" : "") : ""}
         ${isPublic && (publicPage?.provider === "github" || isSearch) && hooks.followSource ? action("file-source-follow", followLabel, "add", "quiet", busy ? "disabled" : "") : ""}
         ${!isPublic && trail.length ? action("file-source-parent", t("Volver", "Back"), undefined, "quiet", busy ? "disabled" : "") : ""}</div>${isPublic ? publicDescription() : ""}${isPublic && publicPage?.rights ? `<p class="field-note">${t("Derechos indicados por el origen", "Rights stated by the source")}: ${h(publicPage.rights)}</p>` : ""}${warningList(isPublic ? publicPage?.warnings ?? [] : cloudPage?.warnings ?? [])}
         ${isPublic && publicPage?.entries.length ? `<div class="file-source-entries">${publicPage.entries.map(entry => `<button type="button" class="file-source-entry" data-action="file-source-entry" data-id="${h(entry.id)}" ${busy ? "disabled" : ""}><span><strong>${h(entry.title)}</strong><small>${h(entry.publishedAt ?? "")}</small></span>${publicPage?.provider === "github" ? `<span class="file-source-status">${entry.prerelease ? "Prerelease" : t("Estable", "Stable")}</span>` : ""}${icon("arrow")}</button>`).join("")}</div>` : ""}
         ${(isPublic ? publicPage?.assets.length : cloudPage?.entries.length) ? `<div class="file-source-filter"><label>${icon("search")}<input id="file-source-query" type="search" value="${h(query)}" placeholder="${t("Filtrar archivos cargados", "Filter loaded files")}" aria-label="${t("Filtrar archivos cargados", "Filter loaded files")}"></label>${isPublic && publicPage?.provider === "archive" ? `<select id="file-source-kind" aria-label="${t("Tipo de archivo", "File type")}">${option("all", t("Originales y derivados", "Originals and derivatives"), filter)}${option("original", t("Solo originales", "Originals only"), filter)}${option("derivative", t("Solo derivados", "Derivatives only"), filter)}</select>` : ""}${isPublic && publicPage?.provider === "librivox" ? readerFilter(publicPage.assets) : ""}<span>${isPublic ? publicPage?.assets.length ?? 0 : cloudPage?.entries.length ?? 0} ${t("cargados", "loaded")}</span></div>` : ""}${isPublic ? publicRows() : cloudRows()}
-        ${cursor ? `<div class="file-source-pagination"><p>${t("Solo se ha cargado una parte del origen. La selección incluye únicamente archivos revisados.", "Only part of this source has loaded. Selection includes reviewed files only.")}</p>${action("file-source-more", t("Cargar más", "Load more"), "add", "secondary", busy ? "disabled" : "")}</div>` : !isPublic && cloudPage?.partial ? `<p class="field-note">${t("El origen informa de resultados parciales. Revisa los avisos antes de descargar.", "The source reports partial results. Review warnings before downloading.")}</p>` : ""}</div>` : !busy && isPublic && !catalogReturn ? `<div class="file-source-intro">${icon("folder")}<h2>${t("Elige qué conservar", "Choose what to keep")}</h2><p>${t("Consulta versiones y archivos antes de descargar. No se selecciona ningún formato automáticamente.", "Review versions and files before downloading. No format is selected automatically.")}</p><div><span>GitHub</span><small>${t("Versiones y assets publicados", "Versions and published assets")}</small><span>Internet Archive</span><small>${t("Originales, derivados y procedencia", "Originals, derivatives and provenance")}</small><span>Commons</span><small>${t("Imágenes y atribución por archivo", "Images and attribution per file")}</small></div></div>` : ""}${selectionFooter()}<p class="file-source-footnote">${t("Descargar conserva una copia local. No ejecuta archivos, instala programas ni modifica el origen.", "Downloading keeps a local copy. It does not run files, install software or modify the source.")}</p></section>`;
+        ${cursor ? `<div class="file-source-pagination"><p>${languageBrowse ? t(`Página ${Number(cursor) - 1} · ${publicPage?.entries.length ?? 0} ediciones únicas`, `Page ${Number(cursor) - 1} · ${publicPage?.entries.length ?? 0} unique editions`) : isSearch ? t(`${publicPage?.entries.length ?? 0} resultados cargados.`, `${publicPage?.entries.length ?? 0} results loaded.`) : t("Solo se ha cargado una parte del origen. La selección incluye únicamente archivos revisados.", "Only part of this source has loaded. Selection includes reviewed files only.")}</p>${action("file-source-more", t("Cargar más", "Load more"), "add", "secondary", `data-cursor="${h(cursor)}" ${busy ? "disabled" : ""}`)}</div>` : !isPublic && cloudPage?.partial ? `<p class="field-note">${t("El origen informa de resultados parciales. Revisa los avisos antes de descargar.", "The source reports partial results. Review warnings before downloading.")}</p>` : ""}</div>` : !busy && isPublic && !catalogReturn ? `<div class="file-source-intro">${icon("folder")}<h2>${t("Elige qué conservar", "Choose what to keep")}</h2><p>${t("Consulta versiones y archivos antes de descargar. No se selecciona ningún formato automáticamente.", "Review versions and files before downloading. No format is selected automatically.")}</p><div><span>GitHub</span><small>${t("Versiones y assets publicados", "Versions and published assets")}</small><span>Internet Archive</span><small>${t("Originales, derivados y procedencia", "Originals, derivatives and provenance")}</small><span>Commons</span><small>${t("Imágenes y atribución por archivo", "Images and attribution per file")}</small></div></div>` : ""}${selectionFooter()}<p class="file-source-footnote">${t("Descargar conserva una copia local. No ejecuta archivos, instala programas ni modifica el origen.", "Downloading keeps a local copy. It does not run files, install software or modify the source.")}</p></section>`;
   }
   function handleInput(element: HTMLElement): boolean {
     if (element instanceof HTMLInputElement) {
@@ -283,6 +327,7 @@ export function createFileSources(hooks: FileSourceHooks) {
       }
     }
     if (element instanceof HTMLSelectElement) {
+      if (element.id === "file-source-language") { language = element.value; return true; }
       if (element.id === "file-source-arxiv-field") { arxivField = element.value; return true; }
       if (element.id === "file-source-kind" && (element.value === "all" || element.value === "original" || element.value === "derivative")) { filter = element.value; hooks.render(); return true; }
       if (element.id === "file-source-reader") { reader = element.value; hooks.render(); return true; }
@@ -296,14 +341,24 @@ export function createFileSources(hooks: FileSourceHooks) {
       return true;
     }
     if (form.id === "file-source-catalog-form") {
-      if (!busy && searchMode && form.reportValidity() && searchQuery.trim()) {
+      if (!busy && searchMode && form.reportValidity()) {
+        const query = searchQuery.trim();
+        const selectedLanguage = languages.find(option => option.name === language);
+        if (!query && !(searchMode === "librivox" && selectedLanguage)) {
+          error = t("Escribe un título o elige un idioma del catálogo.", "Enter a title or choose a catalog language.");
+          hooks.render();
+          document.getElementById("file-source-catalog-query")?.focus();
+          return true;
+        }
         const search = new URL(searchMode === "arxiv" ? "https://arxiv.org/search/" : "https://librivox.org/search/");
         if (searchMode === "arxiv") {
           search.searchParams.set("field", arxivField);
-          search.searchParams.set("query", searchQuery.trim());
-        } else {
-          search.searchParams.set("title", searchQuery.trim());
+          search.searchParams.set("query", query);
+        } else if (query) {
+          search.searchParams.set("title", query);
           if (language.trim()) search.searchParams.set("language", language.trim());
+        } else if (selectedLanguage) {
+          search.searchParams.set("language_id", String(selectedLanguage.id));
         }
         catalogReturn = null;
         url = search.href;
@@ -437,6 +492,7 @@ export function createFileSources(hooks: FileSourceHooks) {
         if (id === "arxiv" || id === "librivox") {
           searchMode = searchMode === id ? null : id;
           searchQuery = "";
+          if (searchMode === "librivox") void loadLibrivoxLanguages();
           hooks.render();
           if (searchMode) document.getElementById("file-source-catalog-query")?.focus();
           else document.querySelector<HTMLElement>(`[data-action="file-source-search-mode"][data-id="${id}"]`)?.focus();
@@ -465,6 +521,7 @@ export function createFileSources(hooks: FileSourceHooks) {
     url = "";
     searchQuery = "";
     searchMode = id === "zenodo" ? null : id;
+    if (searchMode === "librivox") void loadLibrivoxLanguages();
     hooks.render();
     document.getElementById(id === "zenodo" ? "file-source-url" : "file-source-catalog-query")?.focus();
   }

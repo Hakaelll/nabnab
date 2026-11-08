@@ -75,6 +75,11 @@ pub fn cancel_file_source_inspection(state: State<Arc<AppState>>, request_id: u6
 }
 
 #[tauri::command]
+pub async fn librivox_catalog_languages() -> Result<Vec<public_sources::CatalogLanguage>, String> {
+    public_sources::librivox_languages().await
+}
+
+#[tauri::command]
 pub async fn public_source_inspect(state: State<'_, Arc<AppState>>, url: String, cursor: Option<String>, request_id: u64) -> Result<public_sources::Page, String> {
     let cancel = begin(&state, request_id)?;
     let result = public_sources::inspect(&url, cursor.as_deref(), cancel.clone()).await;

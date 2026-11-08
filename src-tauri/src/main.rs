@@ -1239,6 +1239,7 @@ fn main() {
             document_operations::ocr_status,document_operations::ocr_models,document_operations::install_ocr_model,document_operations::queue_ocr,
             document_operations::ocr_get,document_operations::ocr_preview,document_operations::ocr_correct_page,document_operations::ocr_remove_generated,document_operations::ocr_search,document_operations::ocr_save_text,
             file_sources::public_source_inspect, file_sources::cancel_file_source_inspection,
+            file_sources::librivox_catalog_languages,
             file_sources::queue_public_files, file_sources::cloud_status, file_sources::cloud_configure,
             file_sources::cloud_connect, file_sources::cloud_revoke, file_sources::cloud_browse, file_sources::cloud_preview_folder, file_sources::queue_cloud_files,
             personal_servers::personal_servers_status, personal_servers::personal_server_webdav, personal_servers::personal_server_choose_key,

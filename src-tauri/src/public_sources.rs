@@ -5,6 +5,7 @@ use tokio::sync::watch;
 
 mod arxiv;
 mod librivox;
+pub use librivox::{catalog_languages as librivox_languages, CatalogLanguage};
 mod zenodo;
 
 const PAGE_SIZE: usize = 50;
@@ -246,7 +247,7 @@ pub fn supported(input: &str) -> bool {
 pub fn canonical_followed_search(input: &str) -> Result<String, String> {
     let target = target(input)?;
     if !matches!(target, Target::Arxiv(arxiv::ArxivTarget::Search { .. })
-        | Target::Librivox(librivox::LibrivoxTarget::Search { .. })
+        | Target::Librivox(librivox::LibrivoxTarget::Search { .. } | librivox::LibrivoxTarget::Language(_))
         | Target::Zenodo(zenodo::ZenodoTarget::Versions(_)))
     {
         return Err("Choose an arXiv or LibriVox search or a Zenodo version history to follow.".into());
@@ -255,7 +256,12 @@ pub fn canonical_followed_search(input: &str) -> Result<String, String> {
 }
 
 pub fn followed_search_page_size(input: &str) -> Result<usize, String> {
-    canonical_followed_search(input).map(|_| 20)
+    let canonical = canonical_followed_search(input)?;
+    Ok(if matches!(target(&canonical)?, Target::Librivox(librivox::LibrivoxTarget::Language(_))) {
+        librivox::LANGUAGE_PAGE_SIZE
+    } else {
+        20
+    })
 }
 
 pub fn valid_followed_search_entry(search: &str, entry_url: &str, entry_id: &str) -> bool {
@@ -266,6 +272,8 @@ pub fn valid_followed_search_entry(search: &str, entry_url: &str, entry_id: &str
             id.matches_search_entry(entry_id),
         (Ok(Target::Librivox(librivox::LibrivoxTarget::Search { .. })), Target::Librivox(librivox::LibrivoxTarget::Edition(id))) =>
             entry_id == format!("librivox:{id}"),
+        (Ok(Target::Librivox(librivox::LibrivoxTarget::Language(_))), Target::Librivox(librivox::LibrivoxTarget::CatalogPage(slug))) =>
+            entry_id == format!("librivox:catalog:{slug}"),
         (Ok(Target::Zenodo(zenodo::ZenodoTarget::Versions(_))), Target::Zenodo(zenodo::ZenodoTarget::Record(id))) =>
             entry_id == format!("zenodo:{id}"),
         _ => false,
@@ -554,11 +562,14 @@ async fn api_bytes(input: &str, accept: &str) -> Result<Vec<u8>, String> {
         ))
         .build()
         .map_err(|_| "Could not prepare the public source request.")?;
-    let mut response = client
+    let mut request = client
         .get(parsed.clone())
         .header(reqwest::header::ACCEPT, accept)
-        .header(reqwest::header::ACCEPT_ENCODING, "identity")
-        .send()
+        .header(reqwest::header::ACCEPT_ENCODING, "identity");
+    if host == "librivox.org" && parsed.path() == "/search/get_results" {
+        request = request.header("X-Requested-With", "XMLHttpRequest");
+    }
+    let mut response = request.send()
         .await
         .map_err(|_| "The public source request failed. Check the connection and retry.")?;
     let status = response.status().as_u16();

@@ -4,6 +4,8 @@ use super::{
     AudiobookChapter, Entry, Page, Provider, Target, PAGE_SIZE, PUBLIC_NOT_FOUND,
 };
 use crate::podcasts::{parse_feed, Episode, Feed};
+use regex::Regex;
+use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{
@@ -16,8 +18,10 @@ use url::Url;
 
 const ORIGIN: &str = "https://librivox.org";
 const CATALOG: &str = "https://librivox.org/api/feed/audiobooks";
+const SEARCH: &str = "https://librivox.org/search/";
 const RIGHTS: &str = "Public domain in the United States (LibriVox). Check the status in your country: https://librivox.org/pages/public-domain/";
 const SEARCH_SIZE: usize = 20;
+pub(super) const LANGUAGE_PAGE_SIZE: usize = 25;
 const CACHE_LIMIT: usize = 8;
 const MAX_CACHED_RESPONSE: usize = 2 * 1024 * 1024;
 
@@ -25,6 +29,7 @@ const MAX_CACHED_RESPONSE: usize = 2 * 1024 * 1024;
 pub(super) enum LibrivoxTarget {
     Edition(u64),
     CatalogPage(String),
+    Language(u64),
     Search {
         title: String,
         language: Option<String>,
@@ -54,6 +59,7 @@ pub(super) fn parse(url: &Url, parts: &[String]) -> Result<LibrivoxTarget, Strin
         [search] if search == "search" => {
             let mut title = None;
             let mut language = None;
+            let mut language_id = None;
             for (name, value) in url.query_pairs() {
                 let value = value.trim();
                 match name.as_ref() {
@@ -63,17 +69,21 @@ pub(super) fn parse(url: &Url, parts: &[String]) -> Result<LibrivoxTarget, Strin
                     "language" if language.is_none() && search_value(value, 80) => {
                         language = Some(value.to_owned())
                     }
+                    "language_id" if language_id.is_none() => {
+                        language_id = Some(positive_id(value).ok_or("Invalid LibriVox language ID.")?)
+                    }
                     _ => {
                         return Err(
-                            "Enter a LibriVox title and an optional catalog language.".into()
+                            "Choose a LibriVox catalog language or enter a title.".into()
                         )
                     }
                 }
             }
-            Ok(Search {
-                title: title.ok_or("Enter a title to search the LibriVox catalog.")?,
-                language,
-            })
+            match (title, language, language_id) {
+                (None, None, Some(id)) => Ok(Language(id)),
+                (Some(title), language, None) => Ok(Search { title, language }),
+                _ => Err("Choose a LibriVox catalog language or enter a title.".into()),
+            }
         }
         [rss, id] if rss == "rss" => positive_id(id)
             .map(Edition)
@@ -107,8 +117,9 @@ pub(super) fn canonical(target: &LibrivoxTarget) -> String {
     match target {
         LibrivoxTarget::Edition(id) => format!("{CATALOG}/id/{id}"),
         LibrivoxTarget::CatalogPage(slug) => format!("{ORIGIN}/{slug}/"),
+        LibrivoxTarget::Language(id) => format!("{SEARCH}?language_id={id}"),
         LibrivoxTarget::Search { title, language } => {
-            let mut url = Url::parse("https://librivox.org/search/").expect("constant catalog URL");
+            let mut url = Url::parse(SEARCH).expect("constant catalog URL");
             url.query_pairs_mut().append_pair("title", title);
             if let Some(language) = language {
                 url.query_pairs_mut().append_pair("language", language);
@@ -156,6 +167,105 @@ async fn json(url: &str) -> Result<Value, String> {
     let bytes = request(url, "application/json").await?;
     serde_json::from_slice(&bytes)
         .map_err(|_| "LibriVox or its archive returned invalid metadata JSON.".into())
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub struct CatalogLanguage {
+    id: u64,
+    name: String,
+}
+
+fn catalog_text(value: &str) -> String {
+    static TAGS: OnceLock<Regex> = OnceLock::new();
+    let value = TAGS.get_or_init(|| Regex::new(r"<[^>]*>").unwrap()).replace_all(value, " ");
+    let value = value.replace("&nbsp;", " ");
+    let text = quick_xml::escape::unescape(&value).unwrap_or(std::borrow::Cow::Borrowed(&value));
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn parse_languages(html: &str) -> Result<Vec<CatalogLanguage>, String> {
+    static SELECT: OnceLock<Regex> = OnceLock::new();
+    static OPTIONS: OnceLock<Regex> = OnceLock::new();
+    let select = SELECT.get_or_init(|| Regex::new(r#"(?is)<select\b[^>]*\s+id="recorded_language"[^>]*>(.*?)</select>"#).unwrap());
+    let options = OPTIONS.get_or_init(|| Regex::new(r#"(?is)<option\b[^>]*\s+value="(\d+)"[^>]*>([^<]+)</option>"#).unwrap());
+    let body = select.captures(html).and_then(|value| value.get(1))
+        .ok_or("LibriVox did not return its language list.")?;
+    let mut known = HashSet::new();
+    let languages: Vec<_> = options.captures_iter(body.as_str()).filter_map(|value| {
+        let id = positive_id(&value[1])?;
+        let name = catalog_text(&value[2]);
+        (search_value(&name, 80) && known.insert(id)).then_some(CatalogLanguage { id, name })
+    }).take(256).collect();
+    if languages.is_empty() {
+        return Err("LibriVox did not return any catalog languages.".into());
+    }
+    Ok(languages)
+}
+
+pub async fn catalog_languages() -> Result<Vec<CatalogLanguage>, String> {
+    let html = request("https://librivox.org/search", "text/html").await?;
+    parse_languages(std::str::from_utf8(&html).map_err(|_| "The LibriVox language list is not UTF-8.")?)
+}
+
+fn language_results(language: &CatalogLanguage, payload: &Value, current: usize) -> Result<Page, String> {
+    static TITLE: OnceLock<Regex> = OnceLock::new();
+    static AUTHOR: OnceLock<Regex> = OnceLock::new();
+    static PAGE: OnceLock<Regex> = OnceLock::new();
+    let title = TITLE.get_or_init(|| Regex::new(r#"(?is)<h3>\s*<a\s+href="([^"]+)"[^>]*>(.*?)</a>\s*</h3>"#).unwrap());
+    let author = AUTHOR.get_or_init(|| Regex::new(r#"(?is)<p class="book-author">\s*<a\s[^>]*>([^<]+)"#).unwrap());
+    let page_number = PAGE.get_or_init(|| Regex::new(r#"data-page_number="(\d+)""#).unwrap());
+    let results = payload["results"].as_str().ok_or("LibriVox did not return a catalog page.")?;
+    let mut result = page(
+        &Target::Librivox(LibrivoxTarget::Language(language.id)),
+        Provider::Librivox,
+        format!("LibriVox · {}", language.name),
+    );
+    result.rights = Some(RIGHTS.into());
+    let mut seen = HashSet::new();
+    for row in results.split(r#"<li class="catalog-result">"#).skip(1).take(LANGUAGE_PAGE_SIZE) {
+        let Some(value) = title.captures(row) else { continue; };
+        let Ok(Target::Librivox(LibrivoxTarget::CatalogPage(slug))) = super::target(&value[1]) else { continue; };
+        if !seen.insert(slug.clone()) { continue; }
+        // The language catalog also lists chapter matches inside an edition.
+        let title = &value[2];
+        let edition_title = title.strip_suffix(')')
+            .and_then(|value| value.rsplit_once(" (in  ").map(|(_, edition)| edition))
+            .unwrap_or(title);
+        let name: String = catalog_text(edition_title).chars().take(240).collect();
+        if name.is_empty() { continue; }
+        let author = author.captures(row).map(|value| catalog_text(&value[1])).filter(|value| !value.is_empty());
+        result.entries.push(Entry {
+            id: format!("librivox:catalog:{slug}"),
+            url: canonical(&LibrivoxTarget::CatalogPage(slug)),
+            title: match author {
+                Some(author) => format!("{name} · {}", author.chars().take(160).collect::<String>()),
+                None => name,
+            },
+            prerelease: false,
+            published_at: None,
+        });
+    }
+    if payload["status"] == "SUCCESS" && result.entries.is_empty() {
+        return Err("LibriVox returned a catalog layout that could not be read.".into());
+    }
+    let more = page_number.captures_iter(payload["pagination"].as_str().unwrap_or_default())
+        .any(|value| value[1].parse::<usize>().is_ok_and(|page| page > current));
+    next_page(&mut result, current, more);
+    Ok(result)
+}
+
+async fn browse_language(id: u64, current: usize) -> Result<Page, String> {
+    let languages = catalog_languages().await?;
+    let language = languages.iter().find(|language| language.id == id)
+        .ok_or("That language is no longer listed in the LibriVox catalog.")?;
+    let mut url = Url::parse("https://librivox.org/search/get_results").expect("constant catalog endpoint");
+    url.query_pairs_mut()
+        .append_pair("primary_key", &id.to_string())
+        .append_pair("search_category", "language")
+        .append_pair("search_page", &current.to_string())
+        .append_pair("search_order", "catalog_date");
+    let payload = json(url.as_str()).await?;
+    language_results(language, &payload, current)
 }
 
 fn people(values: &Value, name: impl Fn(&Value) -> Option<String>) -> Option<String> {
@@ -691,6 +801,7 @@ async fn edition(
 pub(super) async fn inspect(target: &LibrivoxTarget, cursor: Option<&str>) -> Result<Page, String> {
     let current = numeric_page(cursor)?;
     let mut result = match target {
+        LibrivoxTarget::Language(id) => return browse_language(*id, current).await,
         LibrivoxTarget::Search { title, language } => {
             let mut url = Url::parse(CATALOG).expect("constant catalog API URL");
             url.query_pairs_mut()
@@ -799,6 +910,46 @@ mod tests {
             "https://librivox.org/api/feed/audiobooks/id/2"
         );
         assert_eq!(result.next_cursor.as_deref(), Some("2"));
+    }
+
+    #[test]
+    fn official_language_page_keeps_editions_and_an_explicit_next_page() {
+        let languages = parse_languages(r#"
+            <select id="recorded_language"><option value="5">Spanish</option>
+            <option value="-1">All Except English</option><option value="5">Spanish</option>
+            <option value="13">Catalan</option></select>
+            <select id="unrelated"><option value="9">Arabic</option></select>
+        "#).unwrap();
+        assert_eq!(languages, [
+            CatalogLanguage { id: 5, name: "Spanish".into() },
+            CatalogLanguage { id: 13, name: "Catalan".into() },
+        ]);
+        let payload = json!({
+            "status": "SUCCESS",
+            "pagination": "<a data-page_number=\"2\">2</a>",
+            "results": r#"
+                <li class="catalog-result"><h3><a href="https://librivox.org/cuentos/">Prólogo (in  Cuentos &amp; relatos)</a></h3>
+                <p class="book-author"><a href="/author/1">Jane Example <span>(1850)</span></a></p></li>
+                <li class="catalog-result"><h3><a href="https://librivox.org/cuentos/">Otra sección (in  Cuentos &amp; relatos)</a></h3></li>
+                <li class="catalog-result"><h3><a href="https://librivox.org/cuentos-2/">Cuentos (versión 2)</a></h3></li>
+                <li class="catalog-result"><h3><a href="https://example.org/cuentos/">Untrusted</a></h3></li>
+            "#,
+        });
+        let result = language_results(&languages[0], &payload, 1).unwrap();
+        assert_eq!(result.source_url, "https://librivox.org/search/?language_id=5");
+        assert_eq!(result.entries.len(), 2);
+        assert_eq!(result.entries[0].title, "Cuentos & relatos · Jane Example");
+        assert_eq!(result.entries[1].url, "https://librivox.org/cuentos-2/");
+        assert_eq!(result.next_cursor.as_deref(), Some("2"));
+        assert_eq!(super::super::followed_search_page_size(&result.source_url), Ok(25));
+        assert!(super::super::valid_followed_search_entry(
+            &result.source_url, &result.entries[0].url, &result.entries[0].id,
+        ));
+        assert!(!super::super::valid_followed_search_entry(
+            &result.source_url, &result.entries[0].url, &result.entries[1].id,
+        ));
+        assert!(super::super::target("https://librivox.org/search/?language_id=5&title=Other").is_err());
+        assert!(language_results(&languages[0], &json!([]), 1).is_err());
     }
 
     #[test]
