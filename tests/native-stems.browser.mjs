@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { openTool } from "./tool-navigation.mjs";
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { copyFile, mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
@@ -74,7 +75,7 @@ try {
   const status = async () => (await rpc("optional_components")).find(item => item.id === "stems");
   assert.equal((await status()).installed, Boolean(fixtureRuntime));
   await page.locator('[data-page="tools"]').click();
-  await page.locator("#local-tool-stems").click();
+  await openTool(page, "stems");
   if (!fixtureRuntime) {
     await page.getByRole("button", { name: "Ver componentes" }).click();
     const row = page.locator(".component-row").filter({ hasText: "Spleeter · sherpa-onnx" });

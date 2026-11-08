@@ -56,3 +56,6 @@ export function canRetry(error: unknown): boolean { return isFailure(error) ? er
 export function errorDetails(error: unknown): string {
   return isFailure(error) ? `${error.code} · ${error.phase}\n${error.technical}${error.retryAfter ? `\nRetry after at least ${error.retryAfter} seconds.` : ""}` : errorLabel(error);
 }
+export function searchKey(text: string): string {
+  return text.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+}

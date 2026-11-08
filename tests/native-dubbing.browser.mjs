@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { openTool } from "./tool-navigation.mjs";
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
@@ -157,7 +158,7 @@ try {
   const errors = [];
   page.on("pageerror", error => errors.push(error.message));
   await page.locator('[data-page="tools"]').click();
-  await page.locator('#local-tool-translation').click();
+  await openTool(page, "translation");
   await page.locator("#translation-draft").selectOption(draftId);
   await page.locator("#dub-open").click();
   await page.locator("#dub-voice").waitFor();

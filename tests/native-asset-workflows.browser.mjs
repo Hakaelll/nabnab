@@ -1,5 +1,6 @@
 // Real native IPC, image engines, common queue and filesystem operations on generated local fixtures.
 import assert from "node:assert/strict";
+import { openTool } from "./tool-navigation.mjs";
 import {spawn} from "node:child_process";
 import {createHash} from "node:crypto";
 import {mkdir,mkdtemp,readFile,writeFile,copyFile} from "node:fs/promises";
@@ -67,8 +68,8 @@ try{
   const imported=await result(await rpc("queue_portable_import",{planId:importPreview.planId,clientRequest:"native-portable-import"}));assert.ok(imported.item.name.endsWith(".json"));assert.equal(imported.snapshot.library.filter(i=>ids.includes(i.id)).length,4);
   checks.push({case:"Portable ZIP manifest, duplicate preview and queued idempotent library import",passed:true,files:portableFiles.size,duplicateBytes:importPreview.duplicateBytes});
 
-  await page.reload();await page.locator('[data-page="tools"]').click();await page.locator('[data-action="tool-module"][data-id="imageAssets"]').click();await page.locator('[data-action="asset-kind"][data-kind="pack"]').click();await page.locator(`[data-asset-input="${ids[0]}"]`).check();await page.locator(`[data-asset-input="${ids[2]}"]`).check();await page.locator('[data-action="asset-preview"]').click();await page.locator('.asset-preview-image img').waitFor();await page.locator('.asset-preview-image').scrollIntoViewIfNeeded();await page.screenshot({path:path.join(data,"native-atlas-preview.png"),animations:"disabled"});
-  await page.locator('[data-action="tool-module"][data-id="fileOrganization"]').click();await page.locator(`[data-file-org-select="${ids[0]}"]`).check();await page.locator(`[data-file-org-select="${ids[3]}"]`).check();await page.locator('[data-action="file-org-analyze"]').click();await page.locator('.org-duplicate-group').waitFor();await page.locator('.org-results').scrollIntoViewIfNeeded();await page.screenshot({path:path.join(data,"native-file-organization.png"),animations:"disabled"});
+  await page.reload();await page.locator('[data-page="tools"]').click();await openTool(page, "imageAssets");await page.locator('[data-action="asset-kind"][data-kind="pack"]').click();await page.locator(`[data-asset-input="${ids[0]}"]`).check();await page.locator(`[data-asset-input="${ids[2]}"]`).check();await page.locator('[data-action="asset-preview"]').click();await page.locator('.asset-preview-image img').waitFor();await page.locator('.asset-preview-image').scrollIntoViewIfNeeded();await page.screenshot({path:path.join(data,"native-atlas-preview.png"),animations:"disabled"});
+  await openTool(page, "fileOrganization");await page.locator(`[data-file-org-select="${ids[0]}"]`).check();await page.locator(`[data-file-org-select="${ids[3]}"]`).check();await page.locator('[data-action="file-org-analyze"]').click();await page.locator('.org-duplicate-group').waitFor();await page.locator('.org-results').scrollIntoViewIfNeeded();await page.screenshot({path:path.join(data,"native-file-organization.png"),animations:"disabled"});
   for(const [file,expected] of originals)assert.equal(hash(await readFile(file)),expected);
   assert.deepEqual(errors,[]);checks.push({case:"Original hashes unchanged and rendered native workspaces",passed:true});
   await writeFile(path.join(data,"results.json"),JSON.stringify({scope:"Generated local fixtures, real native IPC/engines/queue/filesystem; no provider or account access",checks,errors},null,2));

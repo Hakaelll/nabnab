@@ -1,5 +1,6 @@
 // Checks playback of completed FLAC fixtures without downloading a model.
 import assert from "node:assert/strict";
+import { openTool } from "./tool-navigation.mjs";
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
@@ -90,7 +91,7 @@ try {
   const errors = [];
   page.on("pageerror", error => errors.push(error.message));
   await page.locator('[data-page="tools"]').click();
-  await page.locator("#local-tool-stems").click();
+  await openTool(page, "stems");
   await page.locator("#stems-source").selectOption(source.id);
   const panel = page.locator(".stems-output");
   const baseline = process.argv.includes("--baseline");

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { openTool } from "./tool-navigation.mjs";
 import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, readFile, readdir, writeFile, copyFile } from "node:fs/promises";
 import path from "node:path";
@@ -84,7 +85,7 @@ try {
   const status = async () => (await rpc("optional_components")).find(item => item.id === "background");
   assert.equal((await status()).installed, Boolean(fixtureModel));
   await page.locator('[data-page="tools"]').click();
-  await page.locator("#local-tool-background").click();
+  await openTool(page, "background");
   if (!fixtureModel) await page.getByRole("button", { name: "Ver componentes" }).click();
   else {
     await page.locator('[data-page="settings"]').click();

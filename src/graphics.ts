@@ -1,5 +1,6 @@
 import sourcePoints from "./emblem-points.json";
 import { createFieldRenderer, type Glyph, type Wave } from "./field";
+import { fieldMix, fieldVariation } from "./field-motion";
 import { COLOR_WAVE_SECONDS, waveDelay, isFullColor, onColorModeChange, spectrumAt, tintPacked } from "./graphics-color";
 export { handleEmblemClick } from "./graphics-color";
 type Point = { x: number; y: number; z: number; edge: boolean; face: number; hue: number };
@@ -82,12 +83,14 @@ export function startGraphics(background: HTMLCanvasElement, emblem: HTMLCanvasE
 
   function drawField(time: number) {
     const reducedMotion=motionReduced(),fullColor=isFullColor();
-    if (gpu) { gpu.draw(time, reducedMotion?[]:waves, fullColor); return; }
+    const mix = fieldMix(reducedMotion ? 0 : time);
+    if (gpu) { gpu.draw(time, reducedMotion?[]:waves, fullColor, mix); return; }
     if (!field) return;
     fieldPixels.fill(0xff0c0a09);
     const span = 680;
     const readingWidth = Math.min(width - 64, width >= 1500 ? 740 : width >= 900 ? 600 : 480);
     const drift = time * 0.16;
+    const current = 1 - mix[0] - mix[1] - mix[2];
     for (const g of glyphs) {
       const u = (g.x - width * 0.5) / span, v = (g.y - height * 0.48) / span;
       const first = u * 0.62 + Math.sin(u * 2.3 + drift * 0.75) * 0.16 + Math.cos(time * 0.04) * 0.13 - 0.5;
@@ -124,13 +127,14 @@ export function startGraphics(background: HTMLCanvasElement, emblem: HTMLCanvasE
       const sweep = Math.pow(.5 + .5 * Math.cos(u * 4.8 + v * 2.4 - time * .67), 5);
       const glints = filament * lattice * (.35 + .65 * sweep);
       const quiet = 1 - .83 * Math.exp(-Math.pow((x - width * .56) / (readingWidth * .68), 4) - Math.pow((y - height * .50) / (height * .31), 4));
-      const opacity = Math.min(.58, ((.027 + ribbon * (.39 + .12 * crest) + filament * .17) * depth * breathe
-        * (.86 + .24 * twinkle) + light * .19 + etch * .35 + glints * .15) * quiet);
+      const variation = fieldVariation(u, v, time, mix);
+      const opacity = Math.min(.58, ((.027 + current * (ribbon * (.39 + .12 * crest) + filament * .17) + variation * .68)
+        * depth * breathe * (.86 + .24 * twinkle) + light * .19 + etch * (.14 + .21 * current) + glints * .15 * current) * quiet);
       if (opacity < 0.025) continue;
       const level = Math.round(opacity * 108);
       const palette = level * 16;
       const spectrum = spectrumAt(time, x, y, width, height, waves, fullColor, reducedMotion);
-      const ambient = (.09 + .30 * sweep) * Math.max(ribbon, etch);
+      const ambient = (.09 + .30 * sweep) * Math.max(ribbon * current, etch, variation);
       const saturation = fullColor ? Math.max(.19 + ambient, Math.min(.85, spectrum.saturation / .9))
         : Math.max(ambient, Math.min(.72, spectrum.saturation * .87 / .72));
       const tinted = saturation > .001;

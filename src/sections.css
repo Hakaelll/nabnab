@@ -142,38 +142,40 @@ body[data-page="platforms"] .platform-footnote { margin-left: 182px; max-width: 
 
 /* Tool selection and the selected operation sit beside one another. */
 body[data-page="tools"] .tool-catalog { margin: 0 0 34px; }
-body[data-page="tools"] .tool-catalog .tool-search { display: grid; gap: 7px; max-width: min(100%, 540px); margin: 0 0 22px; }
-body[data-page="tools"] .tool-catalog h2 { font-size: 15px; margin: 0 0 10px; }
-body[data-page="tools"] .tool-catalog-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px 12px; }
-body[data-page="tools"] .tool-catalog-item {
-  min-height: 118px;
-  display: grid;
-  align-content: center;
-  justify-items: center;
-  gap: 5px;
-  padding: 8px 4px;
-  border: 1px solid transparent;
-  border-radius: 16px;
-  color: var(--text);
-  cursor: pointer;
+body[data-page="tools"] .tool-catalog .tool-search { max-width: 100%; margin: 0 0 20px; }
+.tool-catalog-index { display: grid; grid-template-columns: minmax(145px, 180px) minmax(0, 1fr); gap: 20px; align-items: start; }
+.tool-catalog-groups { display: grid; gap: 4px; }
+.tool-catalog-groups h2 { margin: 0 0 8px; padding-inline: 11px; font-size: 12px; font-weight: 550; color: var(--muted); }
+.tool-catalog-item, .tool-catalog-operation {
+  width: 100%; min-height: 42px; display: grid; align-items: center; grid-template-columns: 17px minmax(0,1fr) auto;
+  gap: 9px; padding: 8px 10px; border: 1px solid transparent; border-radius: 9px; text-align: start; color: var(--muted); cursor: pointer;
 }
-body[data-page="tools"] .tool-catalog-item:is(:hover,:focus-visible) { border-color: var(--edge-quiet); background: var(--secondary); }
-body[data-page="tools"] .tool-catalog-symbol {
-  width: 64px;
-  height: 64px;
-  display: grid;
-  place-items: center;
-  margin-bottom: 3px;
-  border: 1px solid var(--edge-quiet);
-  border-radius: 16px;
-  background: var(--surface);
+.tool-catalog-item { position: relative; }
+.tool-catalog-item:is(:hover,[aria-pressed="true"]), .tool-catalog-operation:hover {
+  border-color: var(--edge-quiet); background: var(--hover); color: var(--text);
 }
-body[data-page="tools"] .tool-catalog-symbol svg { width: 32px; height: 32px; stroke-width: 1.45; }
-body[data-page="tools"] .tool-catalog-item:is(:hover,:focus-visible) .tool-catalog-symbol { background: var(--action); color: var(--background); }
-body[data-page="tools"] .tool-catalog-item strong { font-size: 14px; font-weight: 580; }
-body[data-page="tools"] .tool-catalog-item small { color: var(--muted); font-size: 12px; }
+.tool-catalog-item[aria-pressed="true"]::before {
+  content: ""; position: absolute; inset: 11px auto 11px 0; width: 2px; background: currentColor; border-radius: 2px;
+}
+.tool-catalog-item svg, .tool-catalog-operation svg { width: 16px; height: 16px; }
+.tool-catalog-item strong, .tool-catalog-operation span { overflow-wrap: anywhere; font-size: 13px; font-weight: 550; }
+.tool-catalog-item small, .tool-catalog-operation svg:last-child { color: var(--auxiliary); }
+.tool-catalog-panels { min-width: 0; }
+.tool-catalog-panel { padding: 0 16px 12px; border-radius: 16px; border: 1px solid var(--edge-quiet); background: var(--secondary); }
+.tool-catalog-panel header { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 100px; border-bottom: 1px solid var(--edge-quiet); }
+.tool-catalog-panel h3 { margin: 0; min-width: 0; overflow-wrap: anywhere; font-size: clamp(22px, 3vw, 31px); font-weight: 620; letter-spacing: -.035em; }
+.tool-catalog-panel header svg {
+  width: min(45%, 212px); height: 90px; flex: none; fill: none; stroke: var(--muted);
+  stroke-width: 1; stroke-linecap: round; stroke-linejoin: round; opacity: .65;
+}
+.tool-catalog-panel ul { list-style: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr)); gap: 3px 12px; margin: 8px 0 0; padding: 0; }
+.tool-catalog-operation { color: var(--text); }
+@media (max-width: 720px) {
+  .tool-catalog-index { grid-template-columns: 1fr; gap: 12px; }
+  .tool-catalog-groups { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .tool-catalog-groups h2 { grid-column: 1/-1; }
+}
 body[data-page="tools"] .tool-studio { display: grid; grid-template-columns: 188px minmax(0,1fr); gap: 28px; align-items: start; margin-bottom: 36px; }
-body[data-page="tools"] .tool-catalog + .tool-studio { padding-top: 22px; border-top: 1px solid var(--edge-quiet); }
 body[data-page="tools"] .tool-directory { min-width: 0; }
 body[data-page="tools"] .tool-search { display: grid; gap: 8px; max-width: none; margin: 0 0 20px; color: var(--muted); font-size: 12px; }
 body[data-page="tools"] .tool-search input { width: 100%; font-size: 12px; padding-inline: 12px; }
@@ -221,6 +223,15 @@ body[data-page="settings"] .settings-navigation button { display: grid; grid-tem
 body[data-page="settings"] .settings-navigation svg { width: 16px; height: 16px; color: var(--auxiliary); }
 body[data-page="settings"] .settings-navigation [aria-current="page"] svg { color: var(--text); }
 body[data-page="settings"] .settings-navigation [aria-current="page"] { box-shadow: none; background: var(--surface); color: var(--text); }
+:is(.tool-directory .tool-navigation, .settings-navigation, .platform-filters) button:is([aria-current="page"], [aria-pressed="true"]) { position: relative; }
+:is(.tool-directory .tool-navigation, .settings-navigation, .platform-filters) button:is([aria-current="page"], [aria-pressed="true"])::before {
+  content: "";
+  position: absolute;
+  inset: 10px auto 10px 0;
+  width: 2px;
+  border-radius: 2px;
+  background: currentColor;
+}
 body[data-page="settings"] .settings-content { background: var(--secondary); border: 1px solid var(--section-edge); border-radius: 20px; padding: 28px; }
 body[data-page="settings"] .settings-content > h2 { margin: 0 0 28px; font-size: 22px; line-height: 1.25; letter-spacing: -.4px; }
 body[data-page="settings"] .settings-form { max-width: none; gap: 20px; align-items: stretch; }
@@ -368,7 +379,6 @@ body[data-page="platforms"] #page-content .platform-filters { position: sticky; 
   body[data-page="downloads"] .job-row.is-transferring { grid-template-columns: 18px 72px minmax(0,1fr) 100px minmax(60px, auto) 76px; }
 }
 @media (max-width: 760px) {
-  body[data-page="tools"] .tool-catalog-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   body[data-page="tools"] .tool-directory { position: static; max-height: none; overflow: visible; }
   body[data-page="platforms"] #page-content .platform-filters { position: static; }
 }

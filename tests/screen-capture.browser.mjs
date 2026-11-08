@@ -1,5 +1,6 @@
 // Exercises rendered controls with IPC fixtures, not live Windows capture or audio devices.
 import assert from "node:assert/strict";
+import { openTool } from "./tool-navigation.mjs";
 import { createRequire } from "node:module";
 import { mkdir, writeFile } from "node:fs/promises";
 import { routeFixture } from "./capture-voice-fixture.mjs";
@@ -9,7 +10,7 @@ const base = process.env.NABNAB_UI_URL || "http://127.0.0.1:1420/", directory = 
 try {
   for (const [width, height] of [[1180, 780], [900, 620]]) {
     const page = await browser.newPage({ viewport: { width, height } }); const errors = [], remote = []; page.on("pageerror", error => errors.push(error.message)); page.on("request", request => { if (!request.url().startsWith(base) && !/^(data:|blob:)/.test(request.url())) remote.push(request.url()); }); await routeFixture(page, base);
-    await page.goto(base); await page.locator("[data-page='tools']").click(); await page.locator("[data-action='tool-module'][data-id='screenCapture']").click();
+    await page.goto(base); await page.locator("[data-page='tools']").click(); await openTool(page, "screenCapture");
     await page.locator("#screen-capture-source").waitFor();
     assert.equal(await page.locator("#screen-capture-microphone").isChecked(), false); assert.equal(await page.locator("#screen-capture-system-audio").isChecked(), false);
     assert.equal(await page.evaluate(() => window.localMediaFixture.calls.some(call => call.cmd === "screen_capture_start" || call.cmd === "screen_capture_preview")), false, "Opening the workspace must not capture pixels or start recording.");
@@ -32,7 +33,7 @@ try {
     assert.equal(await page.locator("#screen-capture-source").isDisabled(), true);
     await page.locator("[data-page='home']").click();
     const globalStop = page.locator("#capture-indicator button[data-action='screen-capture-stop']"); await globalStop.waitFor(); await globalStop.click();
-    await page.locator("[data-page='tools']").click(); await page.locator("[data-action='tool-module'][data-id='screenCapture']").click(); await page.locator("[data-action='screen-capture-mode'][data-mode='replay']").click();
+    await page.locator("[data-page='tools']").click(); await openTool(page, "screenCapture"); await page.locator("[data-action='screen-capture-mode'][data-mode='replay']").click();
     await page.locator("#screen-capture-microphone").uncheck(); await page.locator("#screen-capture-system-audio").uncheck();
     await page.locator("#screen-capture-replay-seconds").selectOption("60"); await page.locator("[data-action='screen-capture-preview']").click(); await page.locator(".capture-preview-ready").waitFor(); await page.locator("#screen-capture-form button[type='submit']").click();
     await page.locator(".screen-capture-session [data-action='screen-capture-save-replay']").waitFor(); assert.match(await page.locator(".screen-capture-session").innerText(), /Tiempo realmente disponible/); assert.match(await page.locator(".screen-capture-session").innerText(), /2 s/);

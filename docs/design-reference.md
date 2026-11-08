@@ -12,11 +12,17 @@ La petición posterior del usuario autoriza ondas ocasionales de color y el modo
 
 Inicio y las demás secciones comparten el marco, la posición de la navegación, el emblema pequeño y el acceso **Buscar en nabnab**. La barra de título conserva su región de arrastre. La selección lateral combina superficie, peso e indicador. Al navegar con el puntero cambia el contenido dentro del marco y baja la intensidad del fondo. Con teclado o movimiento reducido, el cambio es inmediato.
 
+**Ctrl + K** abre la búsqueda desde la barra de título. Escribe el nombre de una herramienta, sección o archivo. Puedes omitir las tildes y combinar palabras del nombre y la categoría. Usa **↑** y **↓** o el puntero para seleccionar, **Intro** para abrir y **Esc** para volver al control anterior. La búsqueda reutiliza el emblema de la entrada de Inicio y la línea de selección que también identifica la vista activa en Herramientas, Plataformas y Ajustes. [Búsqueda en la ventana compacta](search-nabnab.png)
+
+En **Herramientas**, cambia de categoría para ver sus operaciones. Cada grupo tiene un dibujo lineal propio. El formulario aparece al elegir una operación. En **Ajustes → Apariencia** puedes reducir el movimiento, usar superficies opacas o contraer la navegación. [Índice de herramientas](tools-workbench.png)
+
 Tokens canónicos: fondo `#090A0C`, secundario `#101114`, elevado `#17191D`, hover `#1E2126`, borde `#2B2E34`, texto `#F2F2F3`, secundario `#B2B5BD`, auxiliar `#858A95`, acción clara `#E9EBEF`. Espaciado 4/8/12/16/24/32, controles 36–40 px, radios 8–10 px y paneles 12–14 px. Fuente de sistema, 13–15 px habitual, títulos 20–24 px.
 
 Ventana inicial 1180 × 780, mínimo 900 × 620. Navegación de 200 px expandida y 64 px contraída. Foco visible, errores con texto, estados deshabilitados y movimiento reducido. El campo y el emblema reutilizan el renderer existente y se detienen fuera de Inicio o con la ventana oculta.
 
 El campo ocupa la ventana completa, incluida la zona detrás de la navegación y la barra nativa. Tres corrientes de caracteres se desplazan a ritmos distintos y los contornos de interferencia se concentran hacia los bordes. El centro tiene menos contraste para dejar espacio a la entrada. Fuera de Inicio se conserva el último fotograma con menos intensidad y se detiene el bucle gráfico. La barra lateral usa el mismo material translúcido en todas las secciones. El emblema central mantiene su tamaño de 72 px y su animación original.
+
+El fondo de Inicio alterna corrientes, arcos orbitales, un entramado y dos bandas de marea. Los mismos caracteres forman los cuatro patrones y cada transición mezcla sus formas durante seis segundos. Se comprobaron los cambios con WebGL y Canvas a 1180 × 780 y 900 × 620. [Entramado en Inicio](home-field-weave.png)
 
 Inicio vacío equilibra el emblema de 72 px y la entrada de 680 px con espacio negativo. La entrada mide 54 px y crece con varios enlaces hasta unos 128 px. Al cargar contenido, la composición se compacta. La columna de 560 px en ventanas de hasta 900 px de alto recupera la densidad de la interfaz anterior; una ventana más alta permite 600 px. La previsualización de paisaje llena esa columna y conserva su proporción. Los retratos limitan su altura y mantienen su proporción natural. Sin imagen, queda un icono compacto junto al título.
 

@@ -40,6 +40,12 @@ try{
   await page.locator('[data-page="library"]').click();await page.screenshot({path:path.join(data,'native-library.png')});
   await page.reload();await page.locator('[data-page="library"]').click();await page.getByText(video.name,{exact:true}).first().waitFor();
   await page.keyboard.press('Control+k');await page.locator('#palette-query').fill('Native scene');await page.locator('[role="option"]').first().waitFor();await page.keyboard.press('Escape');
+  await page.keyboard.press('Control+k');await page.locator('#palette-query').fill('coleccion portatil');
+  const paletteOption=page.locator('#palette-results [aria-selected="true"]');
+  assert.match(await paletteOption.innerText(),/Colección portátil/);
+  await page.locator('#palette-query').press('Enter');
+  await page.locator('#portable-export-form').waitFor();
+  assert.equal(await page.locator('.tool-workspace h2').first().evaluate(heading=>heading===document.activeElement),true);
   const pairing=await rpc('bridge_pair',{extensionId:'a'.repeat(32)});
   const send=async(endpoint,body)=>{const response=await fetch(`http://127.0.0.1:${pairing.port}${endpoint}`,{method:'POST',headers:{Origin:'chrome-extension://'+'a'.repeat(32),Authorization:'Bearer '+pairing.token,'Content-Type':'application/json'},body:JSON.stringify(body)});const result=await response.json();assert.equal(response.status,200,JSON.stringify(result));return result;};
   const localPresets=await send('/presets',{version:1});assert.ok(localPresets.presets.some(preset=>preset.id==='reference'));assert.equal('options' in localPresets.presets[0],false);

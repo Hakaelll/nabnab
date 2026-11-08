@@ -1,5 +1,6 @@
 // Rendered section layouts with IPC fixtures. No provider or engine access is asserted.
 import assert from "node:assert/strict";
+import { openTool } from "./tool-navigation.mjs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 
@@ -29,9 +30,13 @@ mockIPC(async(cmd,args={})=>{
 window.sectionFixture.calls.push({cmd,args});
 if(cmd==="startup")return {...structuredClone(state),folder:settings.folder,enginesReady:true,engineError:null};
 if(cmd==="get_snapshot")return structuredClone(state);
+if(cmd==="library_search"){
+  if(args.query==="consulta tardia")return new Promise((_,reject)=>{window.sectionFixture.rejectSearch=()=>reject(new Error("Stale search fixture"));});
+  return [];
+}
 if(cmd==="local_timezone")return "Romance Standard Time";
 if(cmd==="engine_status")return ["yt-dlp","FFmpeg","ffprobe","Deno"].map(name=>({name,version:"Installed fixture",path:"C:/Components/"+name,size:1024,status:"installed",source:"Local UI fixture"}));
-if(cmd==="optional_components"||cmd==="sessions_status"||cmd==="list_courses"||cmd==="ocr_models")return [];
+if(cmd==="optional_components"||cmd==="sessions_status"||cmd==="list_courses"||cmd==="ocr_models"||cmd==="translation_drafts"||cmd==="personal_archive_list")return [];
 if(cmd==="ocr_status")return {installed:false,enabled:false};
 if(cmd==="cache_status")return {bytes:0,files:0};
 if(cmd==="cloud_status")return ["drive","onedrive","dropbox"].map(provider=>({provider,configured:false,connected:false,accountId:null,scope:"Read selected files",redirectUri:"http://127.0.0.1:53687/callback"}));
@@ -57,6 +62,16 @@ async function capture(section,width,height){
 try{
   await page.goto(base);await page.locator("#url").waitFor();
   for(const size of [[1180,780],[900,620]])for(const section of ["downloads","library","tools","platforms","settings"])await capture(section,...size);
+  for (const [width,height] of [[1180,780],[900,620]]) {
+    await page.setViewportSize({width,height});
+    await page.locator('button[data-page="library"]').click();
+    await page.keyboard.press("Control+k");
+    const palette=page.locator(".action-palette");
+    await palette.waitFor();
+    assert.ok(await palette.evaluate(dialog=>dialog.scrollWidth<=dialog.clientWidth+1 && dialog.getBoundingClientRect().bottom<=innerHeight));
+    await page.screenshot({path:`${directory}/palette-${before?"before":"after"}-${width}x${height}.png`,animations:"disabled"});
+    await page.keyboard.press("Escape");
+  }
   if(!before){
     await page.locator('[data-page="downloads"]').click();
     assert.equal(await page.locator(".job-row").count(),5);
@@ -69,8 +84,18 @@ try{
     await preview.locator("img").waitFor();
     await page.locator("#toggle-sidebar").click();
     await page.getByRole("button",{name:"Buscar en nabnab"}).click();
-    await page.locator(".action-palette").waitFor();
+    const palette=page.locator(".action-palette");
+    const query=palette.getByRole("combobox");
+    const selected=palette.locator('[role="option"][aria-selected="true"]');
+    const searchButton=page.getByRole("button",{name:"Buscar en nabnab",exact:true});
+    await palette.waitFor();
+    assert.equal(await palette.evaluate(element=>getComputedStyle(element).backdropFilter),"blur(18px)");
+    await palette.getByRole("option",{name:"Descargas Sección",exact:true}).hover();
+    assert.match(await selected.innerText(),/Descargas/);
+    await page.keyboard.press("ArrowDown");
+    assert.match(await selected.innerText(),/Biblioteca/);
     await page.keyboard.press("Escape");
+    assert.equal(await searchButton.evaluate(button=>button===document.activeElement),true);
     assert.equal(await page.locator(".sidebar .nav-item[aria-current='page']").getAttribute("data-page"),"downloads");
     assert.ok(await page.locator(".sidebar").evaluate(sidebar => sidebar.scrollWidth <= sidebar.clientWidth + 1));
     await page.locator("#toggle-sidebar").click();
@@ -79,16 +104,52 @@ try{
     await page.locator("[data-action='job-filter'][data-filter='all']").click();
     await page.locator("#job-search").fill("Documento");assert.equal(await page.locator(".job-row").count(),1);
     checks.push("Queue filters and search preserve actual rows and actions.");
+    await page.keyboard.press("Control+k");
+    await query.fill("consulta tardia");
+    await page.waitForFunction(()=>typeof window.sectionFixture.rejectSearch==="function");
+    await query.fill("no hay coincidencia 1234");
+    await palette.getByRole("status").getByText("0 resultados",{exact:true}).waitFor();
+    await page.evaluate(()=>window.sectionFixture.rejectSearch());
+    assert.equal(await palette.getByRole("status").innerText(),"0 resultados");
+    assert.equal(await query.getAttribute("aria-activedescendant"),null);
+    await palette.getByRole("button",{name:"Borrar búsqueda",exact:true}).click();
+    assert.equal(await query.inputValue(),"");
+    await query.fill("traducir subtitulos");
+    assert.match(await selected.innerText(),/Traducir subtítulos/);
+    await page.keyboard.press("Control+k");
+    assert.equal(await query.evaluate(input=>input.selectionEnd-input.selectionStart), "traducir subtitulos".length);
+    await query.press("Enter");
+    await page.locator('#local-tool-translation[aria-pressed="true"]').waitFor();
+    assert.equal(await page.locator(".tool-workspace h2").first().evaluate(heading=>heading===document.activeElement),true);
+    await page.keyboard.press("Control+k");
+    await query.fill("extraer audio");
+    await query.press("Enter");
+    await page.locator("#tool-audio-format").waitFor();
+    await page.keyboard.press("Control+k");
+    await query.fill("archivos personales");
+    assert.match(await selected.innerText(),/Archivos personales/);
+    await query.press("Enter");
+    await page.locator('[data-action="library-section"][data-section="archives"][aria-current="page"]').waitFor();
+    checks.push("Global search supports pointer and keyboard selection, accent-free tool names, direct destinations, and stale search isolation.");
     await page.locator('[data-page="tools"]').click();
+    await page.getByRole("button",{name:"Ver categorías",exact:true}).click();
     assert.equal(await page.locator(".tool-catalog-item:visible").count(),7);
+    assert.equal(await page.locator(".tool-studio").isVisible(),false);
+    await page.locator(".tool-catalog-item[data-id='image']").press("Enter");
+    await page.locator(".tool-catalog-panel:visible").getByRole("button",{name:"Eliminar fondo"}).waitFor();
+    assert.equal(await page.locator(".tool-studio").isVisible(),false);
+    await page.locator("#tool-search").fill("traducir subtitulos");
+    assert.equal(await page.locator(".tool-catalog-item[data-id='subtitles']").isVisible(),true);
+    assert.equal(await page.locator(".tool-catalog-item:visible").count(),1);
     await page.locator("#tool-search").fill("Extraer audio");
     assert.equal(await page.locator(".tool-catalog-item:visible").count(),1);
     const audioCategory=page.locator(".tool-catalog-item[data-id='audio']");
     await audioCategory.focus();await page.keyboard.press("Enter");
+    await page.locator(".tool-catalog-panel:visible").getByRole("button",{name:"Extraer audio"}).press("Enter");
     await page.locator("#tool-audio-format").waitFor();
     assert.equal(await page.locator(".tool-directory [data-tool-category='video']").isVisible(),false);
     await page.getByRole("button",{name:"Ver categorías",exact:true}).click();
-    await page.locator('[data-action="tool-kind"][data-kind="extractAudio"]').click();
+    await page.locator(".tool-catalog-panel:visible").getByRole("button",{name:"Extraer audio"}).click();
     await page.locator("#tool-audio-format").waitFor();
     await page.locator("[data-action='pick-tool-library']").click();
     await page.locator('[data-tool-input="clip"]').check();
@@ -97,7 +158,7 @@ try{
     assert.equal(await page.locator("#tool-form button[type=submit]").isEnabled(),true);
     checks.push("Tool category search, keyboard activation, return to categories, library input selection and options passed.");
     for(const module of ['imageAssets','fileOrganization','portable']){
-      await page.locator('[data-action="tool-module"][data-id="'+module+'"]').click();
+      await openTool(page,module);
       const heading=page.locator('.tool-workspace h2').first();
       assert.ok(await heading.evaluate(element=>Number.parseFloat(getComputedStyle(element).fontSize))>=18,'Module titles must keep their visual hierarchy.');
     }
@@ -113,6 +174,9 @@ try{
     await page.locator("#reduced-transparency").check();
     await page.locator("#appearance-settings button[type=submit]").click();
     assert.equal(await page.evaluate(()=>window.sectionFixture.state.settings.reducedTransparency),true);
+    await page.keyboard.press("Control+k");
+    assert.equal(await palette.evaluate(element=>getComputedStyle(element).backdropFilter),"none");
+    await page.keyboard.press("Escape");
     await page.locator("[data-action='settings-section'][data-section='general']").click();
     await page.locator("#language").focus();assert.equal(await page.locator("#language").evaluate(el=>el===document.activeElement),true);
     checks.push("Settings navigation, persistent appearance preference and keyboard focus work.");
@@ -120,4 +184,8 @@ try{
   assert.deepEqual(errors,[]);
   await writeFile(`${directory}/${before?"baseline":"verification"}.json`,JSON.stringify({evidence:"Rendered UI with IPC fixtures",checks,browserErrors:errors},null,2)+"\n");
   console.log(before?"Captured existing sections at both desktop sizes.":checks.join("\n"));
+}catch(error){
+  console.error({checks,browserErrors:errors});
+  await page.screenshot({path:`${directory}/failure.png`,animations:"disabled"}).catch(()=>{});
+  throw error;
 }finally{await browser.close();}

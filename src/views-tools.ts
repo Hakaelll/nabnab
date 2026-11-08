@@ -9,6 +9,13 @@ const toolGroups: { key: string; es: string; en: string; kinds: ToolKind[] }[] =
   { key: "image", es: "Imágenes", en: "Images", kinds: ["imageConvert"] },
   { key: "subtitles", es: "Voz y subtítulos", en: "Speech and subtitles", kinds: ["transcribe"] },
 ];
+const symbols = {convert:"retry",extractAudio:"audio",trim:"scissors",compress:"compress",animate:"image",frame:"image",contactSheet:"grid",rotate:"retry",crop:"scissors",mute:"video",audioProcess:"audio",imageConvert:"image",transcribe:"audio"} satisfies Record<ToolKind,Icon>;
+
+export function toolDestinations(t: Copy) {
+  return toolGroups.flatMap(group => group.kinds.map(id => ({
+    id, label: toolName(id, t), group: t(group.es, group.en), glyph: symbols[id],
+  })));
+}
 
 const catalogGroups = [
   ["video", "Vídeo", "Video", "video"],
@@ -20,17 +27,47 @@ const catalogGroups = [
   ["capture", "Captura", "Capture", "grid"],
 ] satisfies [string, string, string, Icon][];
 
+const traces: Record<string, string> = {
+  video: "M8 18H204V84H8ZM8 31H204M8 71H204M42 31V71M105 31V71M168 31V71M69 39V63L86 51Z",
+  audio: "M8 51H29L35 44L43 63L53 26L63 75L74 34L82 63L93 49H108L117 30L127 70L137 41L149 54L157 51H204M8 25H204M8 77H204",
+  image: "M26 32V17H51M160 17H185V32M185 70V85H160M51 85H26V70M41 71L77 43L99 61L130 31L171 71M115 27a6 6 0 1 1-12 0a6 6 0 1 1 12 0",
+  subtitles: "M24 29H183V73H24ZM41 48H88M102 48H163M41 60H111M124 60H151M41 83H162",
+  documents: "M62 12H127L149 34V91H62ZM127 12V34H149M78 48H132M78 60H132M78 72H113M44 31V83",
+  files: "M16 37H54L65 48H102V80H16ZM110 19H148L159 30H195V62H110ZM102 64H152V71",
+  capture: "M41 34V17H61M150 17H170V34M170 67V84H150M61 84H41V67M106 39A12 12 0 1 0 106 63A12 12 0 1 0 106 39M106 24V33M106 69V78",
+};
+
 export function toolsCatalog(directory: HTMLElement, t: Copy): string {
+  const groups = catalogGroups.map(([key, es, en, glyph]) => ({
+    key, label: t(es, en), glyph,
+    tools: [...directory.querySelectorAll<HTMLButtonElement>(`[data-tool-category="${key}"] button[data-tool-name]`)],
+  }));
   return `<section class="tool-catalog" aria-labelledby="tool-catalog-title">
-    <h2 id="tool-catalog-title">${t("Categorías", "Categories")}</h2>
-    <div class="tool-catalog-grid">${catalogGroups.map(([key, es, en, glyph]) => {
-      const count = directory.querySelectorAll(`[data-tool-category="${key}"] [data-tool-name]`).length;
-      return `<button class="tool-catalog-item" type="button" data-action="tool-catalog-group" data-id="${key}">
-        <span class="tool-catalog-symbol">${icon(glyph)}</span><strong>${t(es,en)}</strong>
-        <small>${count} ${count === 1 ? t("herramienta", "tool") : t("herramientas", "tools")}</small>
-      </button>`;
-    }).join("")}</div>
-    <p class="field-note" id="tool-catalog-empty" role="status" hidden>${t("No hay herramientas para esta búsqueda.", "No tools match this search.")}</p>
+    <div class="tool-catalog-index">
+      <div class="tool-catalog-groups" role="group" aria-labelledby="tool-catalog-title">
+        <h2 id="tool-catalog-title">${t("Categorías", "Categories")}</h2>
+        ${groups.map(({ key, label, glyph, tools }) => `<button class="tool-catalog-item" type="button" data-action="tool-catalog-group"
+          data-id="${key}" aria-pressed="false" aria-controls="tool-catalog-${key}">${icon(glyph)}<strong>${label}</strong>
+          <small aria-hidden="true">${tools.length}</small></button>`).join("")}
+      </div>
+      <div class="tool-catalog-panels">
+        ${groups.map(({ key, label, tools }) => `<section id="tool-catalog-${key}" class="tool-catalog-panel" data-catalog-panel="${key}" aria-label="${label}" hidden>
+          <header><h3>${label}</h3><svg viewBox="0 0 212 102" aria-hidden="true"><path d="${traces[key]}"/></svg></header>
+          <ul>${tools.map(tool => {
+            const button = tool.cloneNode(true) as HTMLButtonElement;
+            button.removeAttribute("id");
+            button.removeAttribute("aria-pressed");
+            button.dataset.catalogName = button.dataset.toolName;
+            delete button.dataset.toolName;
+            button.dataset.catalogGroup = key;
+            button.className = "tool-catalog-operation";
+            button.insertAdjacentHTML("beforeend", icon("arrow"));
+            return `<li>${button.outerHTML}</li>`;
+          }).join("")}</ul>
+        </section>`).join("")}
+        <p class="field-note" id="tool-catalog-empty" role="status" hidden>${t("No hay herramientas para esta búsqueda.", "No tools match this search.")}</p>
+      </div>
+    </div>
   </section>`;
 }
 
@@ -84,7 +121,6 @@ export function toolName(kind: ToolsView["kind"], t: Copy): string {
 export function toolsView(snapshot: Snapshot, view: ToolsView, t: Copy, catalog: boolean): string {
   const inputs=snapshot.library.filter(item=>view.ids.has(item.id)&&(item.kind==='audio'||item.kind==='video'||item.kind==='image'));
   const options=view.options;
-  const symbols={convert:"retry",extractAudio:"audio",trim:"scissors",compress:"compress",animate:"image",frame:"image",contactSheet:"grid",rotate:"retry",crop:"scissors",mute:"video",audioProcess:"audio",imageConvert:"image",transcribe:"audio"} satisfies Record<ToolsView["kind"],Icon>;
   const category = toolGroups.find(group => group.kinds.includes(view.kind));
   const pickInputs = `<div class="button-group">${action("pick-tool-files",t("Importar archivos", "Import files"),"add",inputs.length?"quiet":"secondary")}${action("pick-tool-library",t("Elegir de biblioteca", "Choose from library"),"library","quiet")}</div>`;
   return `<div class="page-heading"><div><h1>${t("Herramientas", "Tools")}</h1><p>${t("Procesa archivos en este equipo. Los originales se conservan.", "Process files on this computer. Originals are preserved.")}</p></div>${catalog ? "" : action("tool-catalog-open", t("Ver categorías", "Browse categories"), "grid", "quiet")}</div><div class="tool-studio"><aside class="tool-directory"><label class="tool-search">${t("Buscar herramienta", "Find a tool")}<input id="tool-search" type="search" placeholder="${t("GIF, audio, imágenes…", "GIF, audio, images…")}"></label>${toolGroups.map(group=>`<section class="tool-group" data-tool-category="${group.key}"><h2>${t(group.es,group.en)}</h2><div class="tool-navigation" role="group" aria-label="${t(group.es,group.en)}">${group.kinds.map(kind=>`<button data-action="tool-kind" data-kind="${kind}" data-tool-name="${h((t(group.es,group.en)+" "+toolName(kind,t)).toLocaleLowerCase())}" aria-pressed="${view.kind===kind}">${icon(symbols[kind])}<span>${toolName(kind,t)}</span></button>`).join("")}</div></section>`).join("")}

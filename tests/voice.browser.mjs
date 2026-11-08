@@ -1,5 +1,6 @@
 // Real browser audio playback and UI with IPC fixtures; synthesis is tested natively elsewhere.
 import assert from "node:assert/strict";
+import { openTool } from "./tool-navigation.mjs";
 import { createRequire } from "node:module";
 import { mkdir, writeFile } from "node:fs/promises";
 import { routeFixture } from "./capture-voice-fixture.mjs";
@@ -9,7 +10,7 @@ const base = process.env.NABNAB_UI_URL || "http://127.0.0.1:1420/", directory = 
 try {
   for (const [width, height] of [[1180, 780], [900, 620]]) {
     const page = await browser.newPage({ viewport: { width, height } }); const errors = [], remote = []; page.on("pageerror", error => errors.push(error.message)); page.on("request", request => { if (!request.url().startsWith(base) && !/^(data:|blob:)/.test(request.url())) remote.push(request.url()); }); await routeFixture(page, base);
-    await page.goto(base); await page.locator("[data-page='tools']").click(); await page.locator("[data-action='tool-module'][data-id='voice']").click(); await page.locator("#voice-voice option[value='es-1']").waitFor({ state: "attached" });
+    await page.goto(base); await page.locator("[data-page='tools']").click(); await openTool(page, "voice"); await page.locator("#voice-voice option[value='es-1']").waitFor({ state: "attached" });
     assert.equal(await page.evaluate(() => window.localMediaFixture.calls.some(call => call.cmd === "voice_prepare" || call.cmd === "queue_voice" || call.cmd === "voice_sample")), false);
     await page.locator("#voice-text-title").fill("A local speech fixture"); await page.locator("#voice-text").fill('A local paragraph with <script>window.voiceXss=true</script>. A second paragraph stays in the same prepared version.');
     await page.locator("#voice-prepare-form button[type='submit']").click(); await page.locator(".voice-segments").waitFor(); assert.equal(await page.locator(".voice-segment script").count(), 0); assert.match(await page.locator(".voice-segments").innerText(), /<script>/);

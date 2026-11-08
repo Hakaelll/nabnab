@@ -1,5 +1,6 @@
 // Portable workflow UI with explicit IPC fixtures. Native ZIP and filesystem checks run separately.
 import assert from "node:assert/strict";
+import { openTool } from "./tool-navigation.mjs";
 import { createRequire } from "node:module";
 import { mkdir, writeFile } from "node:fs/promises";
 const { chromium } = createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODULE || "playwright");
@@ -54,7 +55,7 @@ try {
   for (const [width, height] of [[1180, 780], [900, 620]]) {
     const page = await browser.newPage({ viewport: { width, height } }); const errors = []; page.on("pageerror", error => errors.push(error.message));
     await page.route(base, async route => { const response = await route.fetch(); const html = (await response.text()).replace(/<script\s+type="module"\s+src="\/src\/main\.ts[^"]*"><\/script>/, `<script type="module">${setup}</script>`); await route.fulfill({ response, body: html }); });
-    await page.goto(base); await page.locator("[data-page='tools']").click(); await page.locator("[data-action='tool-module'][data-id='portable']").click();
+    await page.goto(base); await page.locator("[data-page='tools']").click(); await openTool(page, "portable");
     assert.equal(await page.locator("[data-action='portable-export-queue']").count(), 0); assert.equal(await page.locator("#portable-ocr").isChecked(), false);
     assert.equal(await page.locator(".portable-file-picker > label").first().evaluate(element => getComputedStyle(element).flexDirection), "row");
     assert.equal(await page.locator(".portable-file-picker img").count(), 0); assert.equal(await page.evaluate(() => window.portableXss), false);

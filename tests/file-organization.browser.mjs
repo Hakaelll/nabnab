@@ -1,5 +1,6 @@
 // Rendered controller and IPC fixtures. Native file safety has separate Rust tests.
 import assert from "node:assert/strict";
+import { openTool } from "./tool-navigation.mjs";
 import {mkdir,writeFile} from "node:fs/promises";
 import {createRequire} from "node:module";
 const {chromium}=createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODULE||"playwright");
@@ -44,7 +45,7 @@ try{
   for(const[width,height]of[[1180,780],[900,620]]){
     const page=await browser.newPage({viewport:{width,height}});const errors=[];page.on("pageerror",error=>errors.push(error.message));
     await page.route(base,async route=>{const response=await route.fetch();const html=(await response.text()).replace(/<script\s+type="module"\s+src="\/src\/main\.ts[^"]*"><\/script>/,`<script type="module">${setup}</script>`);await route.fulfill({response,body:html});});
-    await page.goto(base);await page.locator("#url").waitFor();await page.locator("[data-page='tools']").click();await page.locator("[data-action='tool-module'][data-id='fileOrganization']").click();
+    await page.goto(base);await page.locator("#url").waitFor();await page.locator("[data-page='tools']").click();await openTool(page, "fileOrganization");
     const checkOverflow=async label=>{const dimensions=await page.locator(".file-organization").evaluate(element=>({width:element.clientWidth,scroll:element.scrollWidth}));assert.ok(dimensions.scroll<=dimensions.width+1,`${label}: horizontal overflow ${JSON.stringify(dimensions)}`);};
     await page.locator("#file-org-select-text-a").focus();await page.keyboard.press("Space");assert.equal(await page.locator("#file-org-select-text-a").isChecked(),true);assert.equal(await page.locator("#file-org-select-text-a").evaluate(element=>element===document.activeElement),true);await page.keyboard.press("Space");assert.equal(await page.locator("#file-org-select-text-a").isChecked(),false);assert.equal(await page.locator("#file-org-select-text-a").evaluate(element=>element===document.activeElement),true);await page.locator("[data-file-org-select='text-a']").check();await page.locator("[data-file-org-select='text-b']").check();await page.locator("[data-action='file-org-analyze']").click();await page.locator(".org-duplicate-group").waitFor();assert.match(await page.locator(".org-duplicate-group").innerText(),/registros comparten/);
     await page.locator("#file-org-review-text-b").focus();await page.keyboard.press("Space");assert.equal(await page.locator("#file-org-review-text-b").isChecked(),true);assert.equal(await page.locator("#file-org-review-text-b").evaluate(element=>element===document.activeElement),true);await page.locator("#file-org-collection").fill("Copies to review");await page.locator("#file-org-collection-form button[type='submit']").click();

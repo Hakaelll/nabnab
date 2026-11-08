@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { openTool } from "./tool-navigation.mjs";
 import { spawn } from "node:child_process";
 import { cp, mkdir, mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -59,7 +60,7 @@ try {
   const status = async () => (await rpc("optional_components")).find(item => item.id === "upscale");
   assert.equal((await status()).installed, Boolean(runtime));
   await page.locator('[data-page="tools"]').click();
-  await page.locator("#local-tool-upscale").click();
+  await openTool(page, "upscale");
   if (!runtime) await page.getByRole("button", { name: "Ver componentes" }).click();
   else {
     await page.locator('[data-page="settings"]').click();

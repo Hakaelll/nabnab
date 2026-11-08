@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { openTool } from "./tool-navigation.mjs";
 import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -87,7 +88,7 @@ try {
   assert.match(rejected ?? "", /preview/i);
 
   await page.locator('[data-page="tools"]').click();
-  await page.locator('#local-tool-stickers').click();
+  await openTool(page, "stickers");
   const module = page.locator(".sticker-tool");
   const submit = module.getByRole("button", { name: "Exportar en la cola" });
   assert.equal(await submit.isDisabled(), true);

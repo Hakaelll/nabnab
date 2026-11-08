@@ -1,5 +1,6 @@
 // Real rendered UI with explicit IPC fixtures. OCR engines and native PDF operations are tested separately.
 import assert from "node:assert/strict";
+import { openTool } from "./tool-navigation.mjs";
 import {mkdir, writeFile} from "node:fs/promises";
 import {createRequire} from "node:module";
 
@@ -30,6 +31,7 @@ const setup=String.raw`
     fixture.calls.push({cmd,args:copy(args)});
     if(cmd==="startup")return {...copy(state),folder:settings.folder,enginesReady:true,engineError:null};
     if(cmd==="get_snapshot")return copy(state);
+    if(cmd==="screen_capture_status"||cmd==="quick_skip_session"&&args.configuration===null)return null;
     if(cmd==="local_timezone")return "Europe/Madrid";
     if(cmd==="plugin:window|is_maximized")return false;
     if(cmd.startsWith("plugin:"))return null;
@@ -91,7 +93,7 @@ try{
       await page.goto(base);await page.locator("#url").waitFor();
       await page.locator('[data-page="tools"]').click();
       assert.equal(await page.locator("#ocr-form").count(),0,"Advanced forms are opened from the tools directory");
-      await page.locator('[data-action="tool-module"][data-id="ocr"]').click();await page.locator("#ocr-form").waitFor();
+      await openTool(page, "ocr");await page.locator("#ocr-form").waitFor();
       await page.getByText("Componente ausente",{exact:true}).waitFor();
       assert.equal(await page.locator('#ocr-form button[type="submit"]').isDisabled(),true);
       assert.equal((await calls("install_ocr_model")).length,0,"No model installs during startup");
@@ -123,7 +125,7 @@ try{
       assert.deepEqual((await last("queue_ocr")).options,{languages:["spa"],pages:"1-2",dpi:300,region:null,output:"searchablePdf",acknowledgeStructureChanges:true});
       await screenshot("ocr-configured",page.locator("#ocr-form"));
 
-      await page.locator('[data-action="tool-module"][data-id="pdfEdits"]').click();
+      await openTool(page, "pdfEdits");
       assert.equal(await page.locator("#ocr-form").count(),0,"Changing module removes the previous advanced form");
       await page.locator('#document-edits > summary').click();await page.locator('#pdf-edit-input').selectOption("pdf");
       await page.locator('#pdf-edit-quality').waitFor();

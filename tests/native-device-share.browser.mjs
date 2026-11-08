@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { openTool } from "./tool-navigation.mjs";
 import { execFileSync, spawn } from "node:child_process";
 import { mkdir, mkdtemp, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -197,7 +198,7 @@ try {
   ], { windowsHide: true });
   const source = (await rpc("import_paths", { paths: [image] })).library.find(item => item.name === path.basename(image));
   assert.ok(source);
-  await page.locator("#local-tool-stickers").click();
+  await openTool(page, "stickers");
   await page.getByRole("button", { name: "Elegir archivo", exact: true }).click();
   await page.getByRole("radio", { name: source.name, exact: true }).click();
   await page.getByRole("button", { name: "Generar muestra", exact: true }).click();
@@ -231,7 +232,7 @@ try {
   await closeShare();
   await page.reload();
   await page.locator('[data-page="tools"]').click();
-  await page.locator("#local-tool-stickers").click();
+  await openTool(page, "stickers");
   await sendSticker.waitFor();
   await exports.scrollIntoViewIfNeeded();
   const box = await exports.boundingBox();

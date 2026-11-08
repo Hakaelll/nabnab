@@ -8,14 +8,14 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||"playwright");
 const browser=await chromium.launch({headless:true,channel:"msedge"});
 const directory="artifacts/home-motion";await mkdir(directory,{recursive:true});
 const base=process.env.NABNAB_UI_URL||"http://127.0.0.1:1420/";
-const before=process.argv.includes("--before"),cpu=process.argv.includes("--cpu"),checks=[];
+const before=process.argv.includes("--before"),cpu=process.argv.includes("--cpu"),patterns=process.argv.includes("--patterns"),checks=[];
 const label=before?"before":cpu?"after-cpu":"after";
 try{
   for(const [width,height] of [[1180,780],[900,620]]){
     const page=await browser.newPage({viewport:{width,height}}),errors=[];page.on("pageerror",e=>errors.push(e.message));
     if(before){const ts=require("typescript");for(const file of ["graphics.ts","field.ts"]){const source=execFileSync("git",["show",`011d9bc:src/${file}`],{encoding:"utf8"});const compiled=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText.replace(/from "\.\/([^"\n]+)"/g,(_,name)=>`from "/src/${name.endsWith(".json")?name+"?import":name+".ts"}"`);await page.route(`**/src/${file}*`,route=>route.fulfill({contentType:"application/javascript",body:compiled}));}}
     if(cpu)await page.addInitScript(()=>{const original=HTMLCanvasElement.prototype.getContext;HTMLCanvasElement.prototype.getContext=function(kind,...options){if(kind==="webgl2")return null;return original.call(this,kind,...options);};});
-    await page.addInitScript(()=>{let clock=0,next=0;const callbacks=new Map();window.requestAnimationFrame=callback=>{callbacks.set(++next,callback);return next;};window.cancelAnimationFrame=id=>callbacks.delete(id);window.stepMotion=(frames=1)=>{for(let i=0;i<frames;i++){clock+=1000/60;const pending=[...callbacks.values()];callbacks.clear();for(const callback of pending)callback(clock);}return callbacks.size;};});
+    await page.addInitScript(()=>{let clock=0,next=0;const callbacks=new Map();window.requestAnimationFrame=callback=>{callbacks.set(++next,callback);return next;};window.cancelAnimationFrame=id=>callbacks.delete(id);window.stepMotion=(frames=1,step=1000/60)=>{for(let i=0;i<frames;i++){clock+=step;const pending=[...callbacks.values()];callbacks.clear();for(const callback of pending)callback(clock);}return callbacks.size;};});
     const setup=`import {mockIPC,mockWindows} from '/node_modules/@tauri-apps/api/mocks.js';globalThis.isTauri=true;mockWindows('main');
       const settings={folder:'C:/Downloads/nabnab',language:'es',networkLimit:3,processingLimit:1,reducedMotion:false,reducedTransparency:false,sidebarExpanded:true,trayEnabled:false,closeToTray:false,startWithWindows:false};
       const state={settings,jobs:[],library:[],collections:[],drafts:[],sources:[],rules:[],presets:[],smartCollections:[]};
@@ -39,7 +39,7 @@ try{
       return [canvas.clientWidth, canvas.clientHeight, orbit.content];
     }), [72, 72, "none"], "Home retains the original emblem and its size.");
     await page.screenshot({path:`${directory}/home-${label}-${width}x${height}.png`,animations:"disabled"});
-    const initial=await page.locator('#field').evaluate(canvas=>canvas.toDataURL());await page.evaluate(()=>window.stepMotion(180));const moved=await page.locator('#field').evaluate(canvas=>canvas.toDataURL());assert.notEqual(moved,initial,"Ambient current must actually change its pixels.");
+    const initial=await page.locator('#field').evaluate(canvas=>canvas.toDataURL());await page.evaluate(()=>window.stepMotion(180));let moved=await page.locator('#field').evaluate(canvas=>canvas.toDataURL());assert.notEqual(moved,initial,"Ambient current must actually change its pixels.");
     if (!before) {
       const colored = await page.locator("#field").evaluate(canvas => {
         const sample = document.createElement("canvas");
@@ -59,7 +59,17 @@ try{
       assert.ok(colored > 100, `The default field should show the traveling color without enabling full color (${colored} colored pixels).`);
     }
     await page.screenshot({path:`${directory}/home-${label}-moving-${width}x${height}.png`,animations:"disabled"});
-    await page.locator('[data-page="tools"]').click();await page.locator('.tool-workspace').waitFor();assert.equal(await page.evaluate(()=>window.stepMotion(3)),0,"Leaving Home must release the animation loop.");
+    if(patterns){
+      assert.equal(await page.locator("#field").evaluate(canvas=>Boolean(canvas.getContext("webgl2"))),!cpu);
+      for(const [name,frames] of [["orbit",120],["weave",140],["tide",140]]){
+        await page.evaluate(frames=>window.stepMotion(frames,100),frames);
+        const next=await page.locator('#field').evaluate(canvas=>canvas.toDataURL());
+        assert.notEqual(next,moved);
+        moved=next;
+        await page.screenshot({path:`${directory}/field-${label}-${name}-${width}x${height}.png`,animations:"disabled"});
+      }
+    }
+    await page.locator('[data-page="tools"]').click();await page.locator('.tool-catalog').waitFor();assert.equal(await page.evaluate(()=>window.stepMotion(3)),0,"Leaving Home must release the animation loop.");
     assert.deepEqual(await shell(), homeShell, "Tools uses the same window and navigation geometry as Home.");
     assert.equal(await page.locator("#field").evaluate(canvas => canvas.toDataURL()), moved, "The field retains its last frame outside Home.");
     await page.locator('[data-page="library"]').click();

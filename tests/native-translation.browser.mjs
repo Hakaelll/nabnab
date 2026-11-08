@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { openTool } from "./tool-navigation.mjs";
 import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -58,7 +59,7 @@ try {
   const initial = await wait(async () => { try { return await rpc("get_snapshot"); } catch { return null; } });
   await rpc("save_settings", { settings: { ...initial.settings, folder: output, language: "es", reducedMotion: true, trayEnabled: false, closeToTray: false } });
   await page.locator('[data-page="tools"]').click();
-  await page.locator("#local-tool-translation").click();
+  await openTool(page, "translation");
   await page.getByRole("button", { name: "Ver componentes" }).click();
   const directions = [
     ["translate-es-en", "Bergamot · ES → EN", 17_448_973],
@@ -162,7 +163,7 @@ try {
 
   await page.reload();
   await page.locator('[data-page="tools"]').click();
-  await page.locator("#local-tool-translation").click();
+  await openTool(page, "translation");
   await tool.locator("#translation-draft").selectOption(job.id);
   await tool.locator("#translation-cue-0").waitFor();
   assert.equal(await tool.locator("#translation-cue-0").inputValue(), edited);
