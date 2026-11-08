@@ -56,7 +56,7 @@ pub fn can_open(item: &LibraryItem) -> bool {
             && item.path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("html"))))
 }
 
-fn is_link(metadata: &fs::Metadata) -> bool {
+pub(crate) fn is_link(metadata: &fs::Metadata) -> bool {
     if metadata.file_type().is_symlink() {
         return true;
     }

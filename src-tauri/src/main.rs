@@ -221,6 +221,9 @@ fn open_repository(app: &AppHandle, state: &AppState) -> Result<store::Settings,
     let default = app.path().download_dir().map_err(|e| e.to_string())?;
     let repo = store::Repository::open(&root, &default)?;
     sessions::cleanup(&root)?;
+    if let Err(error) = support::trim_thumbnail_cache(&root) {
+        let _ = app.emit("app-warning", error);
+    }
     let settings = repo.data.settings.clone();
     *guard = Some(repo);
     Ok(settings)
@@ -998,28 +1001,13 @@ fn cache_status(state: State<Arc<AppState>>) -> Result<support::CacheStatus, Str
 }
 #[tauri::command]
 async fn clear_cache(
-    app: AppHandle,
+    webview: tauri::Webview,
     state: State<'_, Arc<AppState>>,
 ) -> Result<support::CacheStatus, String> {
-    let status = support::cache_status(&state)?;
-    let dialog = app.clone();
-    let message=format!("Remove {} cached thumbnails ({} bytes)? Downloads, sessions and active jobs are not included.",status.files,status.bytes);
-    let accepted = tauri::async_runtime::spawn_blocking(move || {
-        dialog
-            .dialog()
-            .message(message)
-            .title("nabnab")
-            .kind(MessageDialogKind::Info)
-            .buttons(MessageDialogButtons::YesNo)
-            .blocking_show()
-    })
-    .await
-    .map_err(|e| e.to_string())?;
-    if accepted {
-        support::clear_cache(&state).await
-    } else {
-        Ok(status)
+    if webview.label() != "main" {
+        return Err("Only the settings view can clear the thumbnail cache.".into());
     }
+    support::clear_cache(&state).await
 }
 #[tauri::command]
 async fn export_diagnostics(

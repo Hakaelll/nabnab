@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {createRequire} from "node:module";
 import {spawn} from "node:child_process";
 import {createHash} from "node:crypto";
-import {mkdir,mkdtemp,readFile,writeFile,stat} from "node:fs/promises";
+import {mkdir,mkdtemp,readFile,writeFile,stat,utimes} from "node:fs/promises";
 import path from "node:path";
 const {chromium}=createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODULE||"playwright");
 const root=path.resolve(import.meta.dirname,"..");
@@ -13,6 +13,16 @@ const original=createHash("sha256").update(await readFile(fixture)).digest("hex"
 await mkdir(path.join(root,"artifacts/native"),{recursive:true});
 const data=await mkdtemp(path.join(root,"artifacts/native/run-"));
 const output=path.join(data,"outputs");await mkdir(output);
+const thumbnails=path.join(data,"thumbnail-cache");
+await mkdir(thumbnails);
+await writeFile(path.join(thumbnails,".nabnab-cache-v1"),"nabnab thumbnails v1");
+await writeFile(path.join(thumbnails,"dead.jpg"),"unrelated");
+const seededThumbnails=Array.from({length:514},(_,index)=>path.join(thumbnails,`abc-4-${index}.jpg`));
+await Promise.all(seededThumbnails.map(file=>writeFile(file,"test")));
+for(const [index,file] of seededThumbnails.slice(0,3).entries()){
+  const old=new Date(Date.UTC(2000+index,0,1));
+  await utimes(file,old,old);
+}
 const port=Number(process.env.NABNAB_DEBUG_PORT||9223);
 let child,browser,page;
 const results=[];
@@ -34,6 +44,11 @@ async function close(){if(page&&!page.isClosed()){try{await page.evaluate(async(
 async function completed(id){return waitFor(async()=>{const snapshot=await rpc("get_snapshot");const job=snapshot.jobs.find(j=>j.id===id);if(job?.state==="error")throw Error(`${job.error?.code}: ${job.error?.technical}`);return job?.state==="completed"?job:false;},90000);}
 try{
   await launch();
+  assert.deepEqual(await rpc("cache_status"),{files:512,bytes:2048,maxFiles:512,maxBytes:128*1024*1024});
+  await assert.rejects(stat(seededThumbnails[0]),{code:"ENOENT"});
+  await assert.rejects(stat(seededThumbnails[1]),{code:"ENOENT"});
+  assert.equal(await readFile(seededThumbnails[2],"utf8"),"test");
+  assert.equal(await readFile(path.join(thumbnails,"dead.jpg"),"utf8"),"unrelated");
   await page.screenshot({path:path.join(data,'home-native.png')});
   const state=await rpc("get_snapshot");
   engines=(await rpc('engine_status')).map(({name,version,status})=>({name,version,status}));
@@ -61,7 +76,39 @@ try{
     results.push({case:`native queue ${options.kind}`,status:"passed",bytes:(await stat(job.outputs[0])).size});
   }
   const thumb=await rpc("thumbnail",{id:input.id});assert.match(thumb,/nabmedia\.localhost\/thumbnail\//);
-  const cache=await rpc("cache_status");assert.ok(cache.files>=1&&cache.bytes>0);
+  const cache=await rpc("cache_status");assert.equal(cache.files,cache.maxFiles);assert.ok(cache.bytes>2048&&cache.bytes<=cache.maxBytes);
+  await assert.rejects(stat(seededThumbnails[2]),{code:"ENOENT"});
+  const thumbnail=await page.evaluate(async url=>{
+    const image=new Image();
+    image.src=url;
+    await image.decode();
+    return {width:image.naturalWidth,height:image.naturalHeight};
+  },thumb);
+  assert.ok(thumbnail.width>0&&thumbnail.width<=320&&thumbnail.height>0&&thumbnail.height<=180);
+  assert.equal(await readFile(path.join(thumbnails,"dead.jpg"),"utf8"),"unrelated");
+  await page.locator('[data-page="settings"]').click();
+  await page.locator('[data-action="settings-section"][data-section="sessions"]').click();
+  const cacheSection=page.locator('section[aria-labelledby="thumbnail-cache-heading"]');
+  await cacheSection.getByText(/512 miniaturas|512 thumbnails/).first().waitFor();
+  await cacheSection.scrollIntoViewIfNeeded();
+  await page.screenshot({path:path.join(data,"thumbnail-cache-native.png")});
+  const clear=cacheSection.locator('[data-action="clear-cache"]');
+  const confirmation=page.locator("#thumbnail-cache-confirm");
+  await clear.click();
+  const cancel=confirmation.locator("button[autofocus]");
+  assert.equal(await cancel.evaluate(button=>document.activeElement===button),true);
+  await page.screenshot({path:path.join(data,"thumbnail-cache-confirm.png")});
+  await cancel.click();
+  await confirmation.waitFor({state:"hidden"});
+  assert.deepEqual(await rpc("cache_status"),cache);
+  await clear.click();
+  await confirmation.locator('[data-action="confirm-clear-cache"]').click();
+  await waitFor(async()=>await clear.isDisabled());
+  assert.deepEqual(await rpc("cache_status"),{...cache,files:0,bytes:0});
+  assert.equal(await page.locator("#thumbnail-cache-heading").evaluate(heading=>document.activeElement===heading),true);
+  assert.equal(await readFile(path.join(thumbnails,"dead.jpg"),"utf8"),"unrelated");
+  results.push({case:"thumbnail budget at startup and after generation",status:"passed",bytes:cache.bytes,count:cache.files});
+  results.push({case:"settings confirm or cancel generated thumbnail cleanup",status:"passed"});
   const probe=await page.evaluate(async id=>{const response=await fetch(`http://nabmedia.localhost/${id}`,{headers:{Range:"bytes=0-31"}});return{status:response.status,bytes:(await response.arrayBuffer()).byteLength};},input.id);
   assert.deepEqual(probe,{status:206,bytes:32});
   const denied=await page.evaluate(async()=>{try{return(await fetch('http://nabmedia.localhost/../../windows/win.ini')).status;}catch{return 0;}});assert.ok([0,404].includes(denied));

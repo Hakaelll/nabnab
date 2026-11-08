@@ -42,7 +42,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { startGraphics,handleEmblemClick } from "./graphics";
 import { errorLabel, errorDetails, isCancelled } from "./presentation";
-import { activeStates, cancellableStates, defaultToolOptions, initialSettings, sourceUrls, type BridgeStatus, type Copy, type DownloadView, type EngineStatus, type HomeState, type Job, type LibraryView, type Page, type SessionStatus, type Settings, type SettingsSection, type SettingsView, type Snapshot, type Startup, type ToolKind, type ToolOptions, type ToolsView, type Media } from "./contracts";
+import { activeStates, cancellableStates, defaultToolOptions, initialSettings, sourceUrls, type BridgeStatus, type Copy, type DownloadView, type EngineStatus, type HomeState, type Job, type LibraryView, type Page, type SessionStatus, type Settings, type SettingsSection, type SettingsView, type ThumbnailCacheStatus, type Snapshot, type Startup, type ToolKind, type ToolOptions, type ToolsView, type Media } from "./contracts";
 import { downloadsView, homeView, icon, jobInspector, libraryView, mediaInspector, settingsView, stateLabel, toolsView } from "./views";
 import { filteredLibrary } from "./views-library";
 import {createBatchController} from './batch-ui';
@@ -607,7 +607,14 @@ async function loadSettingsSection(): Promise<void> {
   if(section==='engines'){await platforms.loadComponents();preferences.engines=await command<EngineStatus[]>("engine_status");enginesReady=preferences.engines.length>=4&&preferences.engines.every(engine=>engine.status==='installed');}
   else if(section==='automation')await automation.open();
   else if(section==='connections')await Promise.all([fileSources.loadConnections(),personalServers.load()]);
-  else if(section==='sessions'){preferences.sessions=await command<SessionStatus[]>("sessions_status");preferences.cache=await command<{bytes:number;files:number}>("cache_status");}
+  else if(section==='sessions'){
+    const [sessions,cache]=await Promise.all([
+      command<SessionStatus[]>("sessions_status"),
+      command<ThumbnailCacheStatus>("cache_status").catch(()=>"unavailable" as const),
+    ]);
+    preferences.sessions=sessions;
+    preferences.cache=cache;
+  }
   else if(section==='browser')preferences.bridge=await command<BridgeStatus>("bridge_status");
   if(page==='settings'&&section===preferences.section)renderCurrent();
 }
@@ -799,7 +806,20 @@ async function handleAction(action: string, button: HTMLButtonElement): Promise<
     case 'rollback-engine-update':await engineOperation('rollback');break;
     case 'rollback-engines':await command('rollback_engines');await loadSettingsSection();notify(t("Conjunto anterior de motores restaurado.", "Previous engine set restored."),'success');break;
     case 'export-diagnostics':{const path=await command<string|null>('export_diagnostics');if(path)notify(t("Diagnóstico sanitizado exportado.", "Sanitized diagnostic exported."),'success');break;}
-    case 'clear-cache':await command('clear_cache');preferences.cache=await command<{bytes:number;files:number}>('cache_status');renderCurrent();notify(t("Caché de miniaturas revisada. Los archivos multimedia y las sesiones se conservan.", "Thumbnail cache reviewed. Media files and sessions are preserved."),'success');break;
+    case 'clear-cache':{
+      required<HTMLDialogElement>("#thumbnail-cache-confirm").showModal();
+      break;
+    }
+    case 'confirm-clear-cache':{
+      required<HTMLDialogElement>("#thumbnail-cache-confirm").close();
+      preferences.cache=await command<ThumbnailCacheStatus>("clear_cache");
+      if(page==="settings"&&preferences.section==="sessions"){
+        renderCurrent();
+        required("#thumbnail-cache-heading").focus();
+      }
+      notify(t("Caché de miniaturas vaciada.", "Thumbnail cache cleared."),"success");
+      break;
+    }
     case 'revoke-session':await command('revoke_session',{site:button.dataset.site??""});await loadSettingsSection();notify(t("Sesión eliminada.", "Session removed."),'success');break;
     case 'copy-pairing':if(preferences.pairing)await copyText(preferences.pairing.token);break;
     case 'revoke-bridge':await command('bridge_revoke',{extensionId:id});preferences.pairing=null;await loadSettingsSection();break;
@@ -854,7 +874,7 @@ document.addEventListener('change',event=>{
     else if(target.id==='library-sort'&&(value==='newest'||value==='name'||value==='duration'||value==='size')){library.sort=value;library.offset=0;renderCurrent();}
   }
 });
-document.addEventListener('submit',event=>{const form=event.target;if(form instanceof HTMLFormElement){event.preventDefault();void submitForm(form).catch(showError);}});
+document.addEventListener('submit',event=>{const form=event.target;if(form instanceof HTMLFormElement&&form.method!=="dialog"){event.preventDefault();void submitForm(form).catch(showError);}});
 async function submitForm(form: HTMLFormElement): Promise<void> {
   if(await automation.submit(form)||await screenCapture.submit(form)||await voice.submit(form))return;
   if(await imageAssets.submit(form)||await stickerTool.submit(form)||await upscaleTool.submit(form)||await backgroundTool.submit(form)||await stemsTool.submit(form)||await translationTool.submit(form)||await fileOrganization.submit(form)||await portable.submit(form))return;
