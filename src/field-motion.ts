@@ -1,46 +1,72 @@
-type FieldMix = readonly [orbit: number, weave: number, tide: number];
+export const fieldScenes = { current: 0, dunes: 1, orbit: 2, interference: 3, weave: 4, prism: 5, tide: 6 } as const;
+type FieldScene = typeof fieldScenes[keyof typeof fieldScenes];
+export type FieldMix = readonly [from: FieldScene, to: FieldScene, blend: number];
 
-const scenes: readonly FieldMix[] = [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]];
-const hold = 8;
+const scenes = Object.values(fieldScenes);
+const hold = 6;
 const transition = 6;
 
 export function fieldMix(seconds: number): FieldMix {
   const period = hold + transition;
   const index = Math.floor(seconds / period) % scenes.length;
-  const current = scenes[index];
   const position = Math.max(0, (seconds % period - hold) / transition);
-  if (!position) return current;
-  const next = scenes[(index + 1) % scenes.length];
   const blend = position * position * (3 - 2 * position);
-  return [
-    current[0] + (next[0] - current[0]) * blend,
-    current[1] + (next[1] - current[1]) * blend,
-    current[2] + (next[2] - current[2]) * blend,
-  ];
+  return [scenes[index], scenes[(index + 1) % scenes.length], blend];
 }
 
 // Keep the spatial profiles in sync with the WebGL vertex shader.
-export function fieldVariation(u: number, v: number, time: number, [orbit, weave, tide]: FieldMix): number {
-  let glow = 0;
-  if (orbit) {
-    const x = u + .08 * Math.sin(time * .19), y = v * 1.7;
-    const radius = Math.hypot(x, y);
-    const contour = .72 + .08 * Math.cos(time * .22 + x * 3);
-    const arcs = .38 + .62 * (.5 + .5 * Math.sin(x * 5 - y * 3 + time * .43));
-    glow += orbit * Math.exp(-((radius - contour) ** 2) * 13)
-      * (.26 + .74 * (.5 + .5 * Math.cos(radius * 35 - time * .65)) ** 5) * arcs;
+function fieldProfile(scene: FieldScene, u: number, v: number, time: number): number {
+  switch (scene) {
+    case fieldScenes.current:
+      return 0;
+    case fieldScenes.dunes: {
+      const ridge = v + .15 * Math.sin(u * 3.4 - time * .26) + .064 * Math.sin(u * 7 + v * 1.8 + time * .17);
+      const crest = (.5 + .5 * Math.cos(ridge * 31 + u * 3.2 + v * v * 2.1 - time * .58)) ** 4;
+      const upper = v + .37 + .12 * Math.cos(u * 2.2 - time * .12);
+      const lower = v - .38 + .15 * Math.sin(u * 2 + time * .13);
+      return crest * (Math.exp(-lower * lower * 10) + .82 * Math.exp(-upper * upper * 14));
+    }
+    case fieldScenes.orbit: {
+      const x = u + .08 * Math.sin(time * .19), y = v * 1.7;
+      const radius = Math.hypot(x, y);
+      const contour = .72 + .08 * Math.cos(time * .22 + x * 3);
+      const arcs = .38 + .62 * (.5 + .5 * Math.sin(x * 5 - y * 3 + time * .43));
+      return Math.exp(-((radius - contour) ** 2) * 13)
+        * (.26 + .74 * (.5 + .5 * Math.cos(radius * 35 - time * .65)) ** 5) * arcs;
+    }
+    case fieldScenes.interference: {
+      const left = Math.hypot(u + .61, (v + .34 + .09 * Math.sin(time * .16)) * 1.18);
+      const right = Math.hypot(u - .59, (v - .31 + .08 * Math.cos(time * .19)) * 1.2);
+      const front = (.5 + .5 * Math.cos(left * 24 - time * .81)) ** 4;
+      const back = (.5 + .5 * Math.cos(right * 24 - time * .67 + 1.4)) ** 4;
+      const reach = front * Math.exp(-left * left * 1.25) + back * Math.exp(-right * right * 1.25);
+      return .69 * reach + .31 * front * back;
+    }
+    case fieldScenes.weave: {
+      const a = Math.sin(u * 7.3 - v * 4.6 + time * .29);
+      const b = Math.sin(u * 5.2 + v * 7.4 - time * .39);
+      return (.5 + .5 * Math.cos((a + b) * 5.7)) ** 5
+        * (.34 + .66 * (.5 + .5 * Math.sin(u * 2.9 + v * 5 + time * .26)));
+    }
+    case fieldScenes.prism: {
+      const x = u + .91 + .11 * Math.sin(time * .19), y = v + .52;
+      const distance = Math.hypot(x, y);
+      const angle = Math.atan2(y, Math.max(.04, x));
+      const spread = angle - .46 - .12 * Math.sin(time * .18);
+      const ribs = (.5 + .5 * Math.cos(angle * 38 + .73 * Math.sin(distance * 8 - time * .45))) ** 3;
+      const light = .65 + .35 * (.5 + .5 * Math.cos(distance * 18 - time * 1.05));
+      return (.12 + .96 * ribs) * light * Math.exp(-spread * spread * 4 - (distance - .93) ** 2 * 1.2);
+    }
+    case fieldScenes.tide: {
+      const first = u + .38 + Math.sin(v * 5 + time * .34) * .25;
+      const second = u - .44 + Math.cos(v * 4 - time * .29) * .22;
+      const bands = Math.exp(-first * first * 17) + Math.exp(-second * second * 19);
+      return bands * (.29 + .71 * (.5 + .5 * Math.cos(v * 15 + u * 3 - time * .58)) ** 3);
+    }
   }
-  if (weave) {
-    const a = Math.sin(u * 7.3 - v * 4.6 + time * .29);
-    const b = Math.sin(u * 5.2 + v * 7.4 - time * .39);
-    glow += weave * (.5 + .5 * Math.cos((a + b) * 5.7)) ** 5
-      * (.34 + .66 * (.5 + .5 * Math.sin(u * 2.9 + v * 5 + time * .26)));
-  }
-  if (tide) {
-    const first = u + .38 + Math.sin(v * 5 + time * .34) * .25;
-    const second = u - .44 + Math.cos(v * 4 - time * .29) * .22;
-    const bands = Math.exp(-first * first * 17) + Math.exp(-second * second * 19);
-    glow += tide * bands * (.29 + .71 * (.5 + .5 * Math.cos(v * 15 + u * 3 - time * .58)) ** 3);
-  }
-  return glow;
+}
+
+export function fieldVariation(u: number, v: number, time: number, [from, to, blend]: FieldMix): number {
+  const first = fieldProfile(from, u, v, time);
+  return blend ? first * (1 - blend) + fieldProfile(to, u, v, time) * blend : first;
 }

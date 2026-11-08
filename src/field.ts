@@ -1,3 +1,6 @@
+import { fieldScenes, type FieldMix } from "./field-motion";
+import { COLOR_CYCLE_SECONDS, COLOR_WAVE_SECONDS, CONTINUOUS_COLOR_CYCLE_SECONDS } from "./graphics-color";
+
 export type Glyph = { x: number; y: number; phase: number; depth: number; glyph: number };
 export type Wave = { x: number; y: number; born: number; strength: number; ellipse: number };
 
@@ -21,6 +24,50 @@ export function createFieldRenderer(canvas: HTMLCanvasElement) {
     out float opacity;
     flat out vec2 cell;
     flat out vec3 ink;
+    // Keep the spatial profiles in sync with field-motion.ts.
+    float fieldProfile(int scene, float u, float v) {
+      switch (scene) {
+        case ${fieldScenes.dunes}: {
+          float ridge=v+.15*sin(u*3.4-time*.26)+.064*sin(u*7.+v*1.8+time*.17);
+          float crest=pow(.5+.5*cos(ridge*31.+u*3.2+v*v*2.1-time*.58),4.);
+          float upper=v+.37+.12*cos(u*2.2-time*.12), lower=v-.38+.15*sin(u*2.+time*.13);
+          return crest*(exp(-lower*lower*10.)+.82*exp(-upper*upper*14.));
+        }
+        case ${fieldScenes.orbit}: {
+          float x=u+.08*sin(time*.19), y=v*1.7;
+          float radius=length(vec2(x,y)), contour=.72+.08*cos(time*.22+x*3.);
+          float arcs=.38+.62*(.5+.5*sin(x*5.-y*3.+time*.43));
+          return exp(-pow(abs(radius-contour),2.)*13.)
+            *(.26+.74*pow(.5+.5*cos(radius*35.-time*.65),5.))*arcs;
+        }
+        case ${fieldScenes.interference}: {
+          float left=length(vec2(u+.61,(v+.34+.09*sin(time*.16))*1.18));
+          float right=length(vec2(u-.59,(v-.31+.08*cos(time*.19))*1.2));
+          float front=pow(.5+.5*cos(left*24.-time*.81),4.);
+          float back=pow(.5+.5*cos(right*24.-time*.67+1.4),4.);
+          float reach=front*exp(-left*left*1.25)+back*exp(-right*right*1.25);
+          return .69*reach+.31*front*back;
+        }
+        case ${fieldScenes.weave}: {
+          float a=sin(u*7.3-v*4.6+time*.29), b=sin(u*5.2+v*7.4-time*.39);
+          return pow(.5+.5*cos((a+b)*5.7),5.)*(.34+.66*(.5+.5*sin(u*2.9+v*5.+time*.26)));
+        }
+        case ${fieldScenes.prism}: {
+          float x=u+.91+.11*sin(time*.19), y=v+.52;
+          float radius=length(vec2(x,y)), angle=atan(y,max(.04,x));
+          float spread=angle-.46-.12*sin(time*.18);
+          float ribs=pow(.5+.5*cos(angle*38.+.73*sin(radius*8.-time*.45)),3.);
+          float light=.65+.35*(.5+.5*cos(radius*18.-time*1.05));
+          return (.12+.96*ribs)*light*exp(-spread*spread*4.-pow(abs(radius-.93),2.)*1.2);
+        }
+        case ${fieldScenes.tide}: {
+          float a=u+.38+sin(v*5.+time*.34)*.25, b=u-.44+cos(v*4.-time*.29)*.22;
+          float bands=exp(-a*a*17.)+exp(-b*b*19.);
+          return bands*(.29+.71*pow(.5+.5*cos(v*15.+u*3.-time*.58),3.));
+        }
+        default: return 0.;
+      }
+    }
     void main() {
       vec2 uv = (origin - size * vec2(.5, .48)) / 680.;
       float u = uv.x, v = uv.y, drift = time * .16;
@@ -59,30 +106,16 @@ export function createFieldRenderer(canvas: HTMLCanvasElement) {
       float sweep = pow(.5+.5*cos(u*4.8+v*2.4-time*.67),5.);
       float glints = filament*lattice*(.35+.65*sweep);
       float quiet = 1.-.83*exp(-pow(abs((p.x-size.x*.56)/(readingWidth*.68)),4.)-pow(abs((p.y-size.y*.50)/(size.y*.31)),4.));
-      float current = 1.-dot(morph,vec3(1.));
-      float variation = 0.;
-      if (morph.x>0.) {
-        float x=u+.08*sin(time*.19), y=v*1.7;
-        float radius=length(vec2(x,y)), contour=.72+.08*cos(time*.22+x*3.);
-        float arcs=.38+.62*(.5+.5*sin(x*5.-y*3.+time*.43));
-        variation+=morph.x*exp(-pow(abs(radius-contour),2.)*13.)
-          *(.26+.74*pow(.5+.5*cos(radius*35.-time*.65),5.))*arcs;
-      }
-      if (morph.y>0.) {
-        float a=sin(u*7.3-v*4.6+time*.29), b=sin(u*5.2+v*7.4-time*.39);
-        variation+=morph.y*pow(.5+.5*cos((a+b)*5.7),5.)
-          *(.34+.66*(.5+.5*sin(u*2.9+v*5.+time*.26)));
-      }
-      if (morph.z>0.) {
-        float a=u+.38+sin(v*5.+time*.34)*.25, b=u-.44+cos(v*4.-time*.29)*.22;
-        float bands=exp(-a*a*17.)+exp(-b*b*19.);
-        variation+=morph.z*bands*(.29+.71*pow(.5+.5*cos(v*15.+u*3.-time*.58),3.));
-      }
+      int from=int(morph.x), to=int(morph.y);
+      float blend=morph.z;
+      float current=from==${fieldScenes.current} ? 1.-blend : to==${fieldScenes.current} ? blend : 0.;
+      float variation=fieldProfile(from,u,v);
+      if (blend>0.) variation=mix(variation,fieldProfile(to,u,v),blend);
       opacity = min(.58,((.027+current*(ribbon*(.39+.12*crest)+filament*.17)+variation*.68)*depth*breathe*(.86+.24*twinkle)
         +light*.19+etch*(.14+.21*current)+glints*.15*current)*quiet);
       float hue = time/mix(${COLOR_CYCLE_SECONDS.toFixed(1)},${CONTINUOUS_COLOR_CYCLE_SECONDS.toFixed(1)},fullColor) + dot(p/size,vec2(.025,.02));
       hue += .075*fold + (1.-fullColor)*time/120.;
-      float ambient = (.09+.30*sweep)*max(max(ribbon*current,etch),variation);
+      float ambient = max((.09+.30*sweep)*max(ribbon*current,etch),(.20+.28*sweep)*variation);
       float saturation = mix(max(ambient,min(.72,chroma*.87)),max(.19+ambient,min(.85,chroma)),fullColor);
       vec3 spectrum = clamp(abs(fract(hue+vec3(0.,2./3.,1./3.))*6.-3.)-1.,0.,1.);
       ink = mix(vec3(1.),spectrum,saturation);
@@ -157,7 +190,7 @@ export function createFieldRenderer(canvas: HTMLCanvasElement) {
       gl.enable(gl.BLEND); gl.blendEquation(gl.MAX); gl.blendFunc(gl.ONE,gl.ONE);
       count = glyphs.length;
     },
-    draw(time: number, waves: Wave[], fullColor: boolean, morph: ReturnType<typeof fieldMix>) {
+    draw(time: number, waves: Wave[], fullColor: boolean, morph: FieldMix) {
       if (gl.isContextLost()) return;
       for (let i = 0; i < Math.min(3, waves.length); i++) {
         const wave = waves[i];
@@ -175,5 +208,3 @@ export function createFieldRenderer(canvas: HTMLCanvasElement) {
     dispose,
   };
 }
-import { COLOR_CYCLE_SECONDS, COLOR_WAVE_SECONDS, CONTINUOUS_COLOR_CYCLE_SECONDS } from "./graphics-color";
-import type { fieldMix } from "./field-motion";

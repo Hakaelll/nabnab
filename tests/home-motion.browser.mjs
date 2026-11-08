@@ -6,7 +6,7 @@ import {mkdir,writeFile} from "node:fs/promises";
 const require=createRequire(import.meta.url);
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE||"playwright");
 const browser=await chromium.launch({headless:true,channel:"msedge"});
-const directory="artifacts/home-motion";await mkdir(directory,{recursive:true});
+const directory=process.env.NABNAB_MOTION_ARTIFACTS||"artifacts/home-motion";await mkdir(directory,{recursive:true});
 const base=process.env.NABNAB_UI_URL||"http://127.0.0.1:1420/";
 const before=process.argv.includes("--before"),cpu=process.argv.includes("--cpu"),patterns=process.argv.includes("--patterns"),checks=[];
 const label=before?"before":cpu?"after-cpu":"after";
@@ -61,7 +61,8 @@ try{
     await page.screenshot({path:`${directory}/home-${label}-moving-${width}x${height}.png`,animations:"disabled"});
     if(patterns){
       assert.equal(await page.locator("#field").evaluate(canvas=>Boolean(canvas.getContext("webgl2"))),!cpu);
-      for(const [name,frames] of [["orbit",120],["weave",140],["tide",140]]){
+      const samples = [["blend",60],["dunes",60],["orbit",120],["interference",120],["weave",120],["prism",120],["tide",120]];
+      for(const [name,frames] of samples){
         await page.evaluate(frames=>window.stepMotion(frames,100),frames);
         const next=await page.locator('#field').evaluate(canvas=>canvas.toDataURL());
         assert.notEqual(next,moved);

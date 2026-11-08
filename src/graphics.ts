@@ -1,6 +1,6 @@
 import sourcePoints from "./emblem-points.json";
 import { createFieldRenderer, type Glyph, type Wave } from "./field";
-import { fieldMix, fieldVariation } from "./field-motion";
+import { fieldMix, fieldScenes, fieldVariation } from "./field-motion";
 import { COLOR_WAVE_SECONDS, waveDelay, isFullColor, onColorModeChange, spectrumAt, tintPacked } from "./graphics-color";
 export { handleEmblemClick } from "./graphics-color";
 type Point = { x: number; y: number; z: number; edge: boolean; face: number; hue: number };
@@ -90,7 +90,8 @@ export function startGraphics(background: HTMLCanvasElement, emblem: HTMLCanvasE
     const span = 680;
     const readingWidth = Math.min(width - 64, width >= 1500 ? 740 : width >= 900 ? 600 : 480);
     const drift = time * 0.16;
-    const current = 1 - mix[0] - mix[1] - mix[2];
+    const [from, to, blend] = mix;
+    const current = from === fieldScenes.current ? 1 - blend : to === fieldScenes.current ? blend : 0;
     for (const g of glyphs) {
       const u = (g.x - width * 0.5) / span, v = (g.y - height * 0.48) / span;
       const first = u * 0.62 + Math.sin(u * 2.3 + drift * 0.75) * 0.16 + Math.cos(time * 0.04) * 0.13 - 0.5;
@@ -134,7 +135,7 @@ export function startGraphics(background: HTMLCanvasElement, emblem: HTMLCanvasE
       const level = Math.round(opacity * 108);
       const palette = level * 16;
       const spectrum = spectrumAt(time, x, y, width, height, waves, fullColor, reducedMotion);
-      const ambient = (.09 + .30 * sweep) * Math.max(ribbon * current, etch, variation);
+      const ambient = Math.max((.09 + .30 * sweep) * Math.max(ribbon * current, etch), (.20 + .28 * sweep) * variation);
       const saturation = fullColor ? Math.max(.19 + ambient, Math.min(.85, spectrum.saturation / .9))
         : Math.max(ambient, Math.min(.72, spectrum.saturation * .87 / .72));
       const tinted = saturation > .001;
