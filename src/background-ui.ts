@@ -1,5 +1,6 @@
 import "./background.css";
 import { escapeHtml as h, type Copy, type Snapshot } from "./contracts";
+import { imageExports } from "./image-exports";
 import { isCancelled } from "./presentation";
 import { action, icon, option } from "./views-common";
 
@@ -129,7 +130,7 @@ export function createBackgroundTool(hooks: Hooks) {
           ${action("choose-folder", t("Cambiar carpeta", "Change folder"), "folder", "quiet", disabled())}</div>
         <div class="asset-submit"><p class="field-note">${t("La copia aparece en Biblioteca vinculada al original.", "The copy appears in Library linked to the original.")}</p>
           <button type="submit" class="button primary" ${!preview || busy || picking || !ready() || !selected() ? "disabled" : ""}>${t("Exportar en la cola", "Queue export")}</button></div>
-      </form></section>`;
+      </form>${imageExports(hooks.snapshot(), "background", t)}</section>`;
   }
 
   async function click(kind: string) {

@@ -1,5 +1,6 @@
 import "./upscale.css";
 import { escapeHtml as h, type Copy, type Snapshot } from "./contracts";
+import { imageExports } from "./image-exports";
 import { isCancelled } from "./presentation";
 import { action, icon, option } from "./views-common";
 
@@ -151,7 +152,7 @@ export function createUpscaleTool(hooks: Hooks) {
           ${action("choose-folder", t("Cambiar carpeta", "Change folder"), "folder", "quiet", disabled())}</div>
         <div class="asset-submit"><p class="field-note">${t("Se amplían las imágenes completas. Las copias aparecen en Biblioteca.", "Whole images are enlarged. Copies appear in Library.")}</p>
           <button class="button primary" type="submit" ${!preview || busy || picking || !ready() || !valid() ? "disabled" : ""}>${t("Ampliar en la cola", "Queue upscale")}</button></div>
-      </form></section>`;
+      </form>${imageExports(hooks.snapshot(), "upscale", t)}</section>`;
   }
 
   async function click(kind: string) {

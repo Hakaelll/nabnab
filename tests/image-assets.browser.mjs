@@ -54,5 +54,43 @@ try{
   assert.equal(await page.locator('img[src="x"]').count(),0);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
   await page.evaluate(()=>{window.imageAssetsFixture.delay=true;});await page.getByRole("button",{name:"Previsualizar resultado",exact:true}).click();await page.getByRole("button",{name:"Cancelar",exact:true}).click();await page.getByRole("alert").waitFor();assert.equal(await page.getByRole("button",{name:"Crear en la cola",exact:true}).isDisabled(),true);
   await mkdir("artifacts/image-assets",{recursive:true});await page.screenshot({path:"artifacts/image-assets/controller.png",fullPage:true});
-  assert.deepEqual(errors,[]);console.log("Image asset controller: four option contracts, stale preview rejection, ordering, cancellation, escaping and layout passed.");
+  const published = await page.evaluate(async () => {
+    const [{ createUpscaleTool }, { createBackgroundTool }] = await Promise.all([
+      import("/src/upscale-ui.ts"), import("/src/background-ui.ts"),
+    ]);
+    const file = (id, parentId, missing = false) => ({
+      id, parentId, name: `${id}.png`, path: `C:/out/${id}.png`, kind: "image", width: 512, height: 384, size: 9216, missing,
+    });
+    const job = (kind, groupId, state, libraryId, output) => ({
+      source: { kind, selection: { libraryId } }, groupId, state, outputs: [`C:/out/${output}.png`],
+    });
+    const snapshot = {
+      settings: { folder: "C:/out" },
+      jobs: [
+        job("upscale", "earlier", "completed", "a", "old-upscale"),
+        job("upscale", "batch", "completed", "a", "latest-upscale"),
+        job("upscale", "batch", "processing", "b", "still-running"),
+        job("upscale", "batch", "completed", "c", "unrelated"),
+        job("upscale", "batch", "completed", "d", "missing"),
+        job("background", "cutout", "completed", "a", "latest-cutout"),
+      ],
+      library: [file("old-upscale", "a"), file("latest-upscale", "a"), file("still-running", "b"),
+        file("unrelated", "x"), file("missing", "d", true), file("latest-cutout", "a")],
+    };
+    const hooks = { t: es => es, snapshot: () => snapshot };
+    return [createUpscaleTool(hooks), createBackgroundTool(hooks)].map(controller => {
+      const tree = new DOMParser().parseFromString(controller.render(), "text/html");
+      const region = tree.querySelector(".asset-exports");
+      return {
+        files: Array.from(region.querySelectorAll('[data-action="share-file"]'), button => button.dataset.id),
+        status: region.querySelector(".section-heading > span")?.textContent ?? null,
+        size: region.querySelector("li small").textContent,
+      };
+    });
+  });
+  assert.deepEqual(published, [
+    { files: ["latest-upscale"], status: "1 de 4 disponibles", size: "512 × 384 px · 9 KB" },
+    { files: ["latest-cutout"], status: null, size: "512 × 384 px · 9 KB" },
+  ]);
+  assert.deepEqual(errors,[]);console.log("Image asset controller: options, stale previews, ordering, cancellation, escaping, layout, and exact published exports passed.");
 }finally{await browser.close();}

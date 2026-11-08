@@ -3,6 +3,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { mkdir, mkdtemp, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const root = path.resolve(import.meta.dirname, "..");
 const base = path.join(root, "artifacts/device-share");
@@ -188,9 +189,57 @@ try {
   assert.equal(final.length, beforeZip.length + 1);
   assert.equal(final.at(-1)[0], `--device=${device}`);
   assert.ok(decodeURIComponent(final.at(-1)[1]).endsWith(`/${zipName}`));
+  await closeShare();
+
+  const image = path.join(data, "Estrella ñ de prueba.png");
+  execFileSync(path.join(root, "src-tauri/engines/ffmpeg.exe"), [
+    "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=s=160x120", "-frames:v", "1", image,
+  ], { windowsHide: true });
+  const source = (await rpc("import_paths", { paths: [image] })).library.find(item => item.name === path.basename(image));
+  assert.ok(source);
+  await page.locator("#local-tool-stickers").click();
+  await page.getByRole("button", { name: "Elegir archivo", exact: true }).click();
+  await page.getByRole("radio", { name: source.name, exact: true }).click();
+  await page.getByRole("button", { name: "Generar muestra", exact: true }).click();
+  await page.getByRole("button", { name: "Exportar en la cola", exact: true }).click();
+  const sticker = await wait(async () => {
+    const snapshot = await rpc("get_snapshot");
+    const job = snapshot.jobs.find(job => job.source.kind === "sticker");
+    if (job?.state === "error") throw Error(JSON.stringify(job.error));
+    return job?.state === "completed" && snapshot.library.find(item => item.path === job.outputs[0]);
+  });
+  const exports = page.getByRole("region", { name: "Última exportación", exact: true });
+  await exports.waitFor({ state: "attached", timeout: 5000 });
+  for (const [width, height] of [[1180, 780], [900, 620]]) {
+    await page.setViewportSize({ width, height });
+    await page.locator("#main").evaluate(main => { main.scrollTop = main.scrollHeight; });
+    await page.screenshot({ path: path.join(data, `sticker-export-${width}.png`), animations: "disabled" });
+  }
+  assert.ok(await exports.evaluate(element => element.scrollWidth <= element.clientWidth + 1));
+  const sendSticker = exports.getByRole("button", { name: `Enviar a dispositivo · ${sticker.name}`, exact: true });
+  await sendSticker.press("Enter");
+  await choose();
+  await inShare("review").click();
+  await inShare("send").waitFor();
+  assert.deepEqual(await modal().locator(".device-share-review li > span").allTextContents(), [sticker.name]);
+  assert.deepEqual(await calls(), final);
+  await inShare("send").click();
+  await modal().getByText("Entregado a KDE Connect", { exact: true }).waitFor();
+  const stickerCall = (await calls()).at(-1);
+  assert.equal(stickerCall.length, 2);
+  assert.equal(path.toNamespacedPath(fileURLToPath(stickerCall[1].replace(/^--share=/, ""))), path.toNamespacedPath(sticker.path));
+  await closeShare();
+  await page.reload();
+  await page.locator('[data-page="tools"]').click();
+  await page.locator("#local-tool-stickers").click();
+  await sendSticker.waitFor();
+  await exports.scrollIntoViewIfNeeded();
+  const box = await exports.boundingBox();
+  await page.screenshot({ path: path.join(data, "sticker-export.png"), animations: "disabled",
+    clip: { x: box.x - 10, y: box.y, width: box.width + 20, height: box.height } });
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ nativeCliFixture: true, unicodeFile: true, staleFileRejected: true, signedLinkRejected: true,
-    publicLink: true, textOneArgument: true, ambiguousHandoff: true, replayRejected: true, offlineDeviceRejected: true, collection: true, realPortableZip: true, shareFromExportResult: true }));
+    publicLink: true, textOneArgument: true, ambiguousHandoff: true, replayRejected: true, offlineDeviceRejected: true, collection: true, realPortableZip: true, shareFromExportResult: true, shareFromRealSticker: true, outputSurvivesReload: true, output: data }));
 } catch (error) {
   console.error(log);
   await page?.screenshot({ path: path.join(base, "failure.png"), animations: "disabled" }).catch(() => {});

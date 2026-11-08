@@ -53,4 +53,13 @@
 .asset-destination > span { display: grid; gap: 4px; min-width: 0; color: var(--muted); font-size: 12px; }
 .asset-destination .path { font-size: 13px; color: var(--text); overflow-wrap: anywhere; }
 .asset-submit p { margin: 0; }
+.asset-exports .section-heading { gap: 8px; flex-wrap: wrap; }
+.asset-export-files { list-style: none; margin: 8px 0 0; padding: 0; }
+.asset-export-files > li { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px 16px; padding: 10px 0; }
+.asset-export-files > li + li { border-top: 1px solid var(--edge-quiet); }
+.asset-export-file { display: flex; align-items: center; gap: 10px; flex: 1 1 200px; min-width: 0; }
+.asset-export-file > svg { width: 18px; height: 18px; flex: none; color: var(--muted); }
+.asset-export-file > span { display: grid; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
+.asset-export-file strong { font-size: 13px; font-weight: 600; }
+.asset-export-file small { font-size: 12px; color: var(--muted); }
 @media (max-width: 1080px) { .asset-workspace { grid-template-columns: 1fr; } .asset-configuration { border-left: 0; border-top: 1px solid var(--border); padding: 20px 0 0; } }

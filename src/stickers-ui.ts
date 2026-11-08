@@ -1,5 +1,6 @@
 import "./stickers.css";
 import { escapeHtml as h, type Copy, type Snapshot } from "./contracts";
+import { imageExports } from "./image-exports";
 import { isCancelled } from "./presentation";
 import { action, icon, option } from "./views-common";
 
@@ -175,7 +176,7 @@ export function createStickerTool(hooks: Hooks) {
         <details class="sticker-instructions"><summary>${t("Cómo usar el archivo exportado", "How to use the exported file")}</summary><p>${profile.startsWith("telegram")
           ? t("En Telegram abre @Stickers, elige un paquete compatible y adjunta el archivo generado.", "Open @Stickers in Telegram, choose a compatible pack and attach the generated file.")
           : t("Para añadirlo como sticker de WhatsApp, importa el WebP en una aplicación de paquetes compatible y añade el paquete desde el móvil.", "To add it as a WhatsApp sticker, import the WebP into a compatible pack app and add the pack from your phone.")}</p></details>
-      </form>
+      </form>${imageExports(hooks.snapshot(), "sticker", t)}
     </section>`;
   }
 
