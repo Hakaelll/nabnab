@@ -801,7 +801,6 @@ try {
   await page.locator("#scene-color").selectOption("color");
   await wait(async () => (await graphics()).blend === 1);
   await page.screenshot({ path: path.join(base, "music-scenes-900.png"), animations: "disabled" });
-  await stage().locator("#stage-seek").evaluate(range => { range.value = "12"; range.dispatchEvent(new Event("input", { bubbles: true })); });
   const pixels = () => page.locator(".music-surface canvas").evaluate(canvas => {
     const gl = canvas.getContext("webgl2");
     const data = new Uint8Array(canvas.width * canvas.height * 4);
@@ -816,6 +815,7 @@ try {
   });
   const signatures = new Set();
   for (const [index, name] of [[8, "moire"], [9, "phosphor"], [10, "cassette"], [11, "nacre"], [12, "vector"]]) {
+    await stage().locator("#stage-seek").evaluate(range => { range.value = "12"; range.dispatchEvent(new Event("input", { bubbles: true })); });
     await page.locator(`#scene-pick-${index}`).click();
     await wait(async () => { const state = await graphics(); return state.scene === index && state.blend === 1 && state.signal[3] > .25; });
     const first = await pixels();
