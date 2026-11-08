@@ -10,7 +10,7 @@ import { openSftpFixture } from "./native-sftp-fixture.mjs";
 
 const { chromium } = createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODULE || "playwright");
 const root = path.resolve(import.meta.dirname, "..");
-const artifacts = path.join(root, "artifacts/native-personal-servers");
+const artifacts = path.resolve(process.env.NABNAB_PERSONAL_SERVER_ARTIFACTS ?? path.join(root, "artifacts/native-personal-servers"));
 await mkdir(artifacts, { recursive: true });
 const data = await mkdtemp(path.join(artifacts, "run-"));
 const sftpIdentity = path.join(data, "SFTP fixture key");
@@ -227,7 +227,8 @@ async function verifyWebdav(openssl) {
       version = nextVersion;
       interrupt = true;
       const entries = await rpc("personal_server_browse", { serverId: webdavId, path: ["Cuadernos"], requestId: ++requestId });
-      await rpc("personal_server_copy", { serverId: webdavId, paths: [entries.find(entry => !entry.directory).path], referenceId: null, clientRequest: randomUUID() });
+      const { path, stamp } = entries.find(entry => !entry.directory);
+      await rpc("personal_server_copy", { selections: [{ serverId: webdavId, path, stamp }], referenceId: null, clientRequest: randomUUID() });
       const failed = await job(index, webdavId);
       assert.equal(failed.state, "error");
       assert.equal(failed.error.code, "webdav_interrupted", JSON.stringify(failed.error));
@@ -455,6 +456,14 @@ try {
   await rename(offline, mount);
   await button("Actualizar").click();
   await comparison().getByRole("status").filter({ hasText: "El identificador de versión es distinto." }).waitFor();
+  const previousSelection = first.source.selection;
+  const savedReference = (await rpc("personal_servers_status")).references[0];
+  const newerSelection = { ...previousSelection, stamp: { ...previousSelection.stamp, etag: "different" } };
+  await assert.rejects(rpc("personal_server_index", { selections: [previousSelection] }), /server listing changed/);
+  await assert.rejects(rpc("personal_server_copy", { selections: [previousSelection], referenceId: null, clientRequest: randomUUID() }), /server listing changed/);
+  await assert.rejects(rpc("personal_server_copy", { selections: [newerSelection], referenceId: savedReference.id, clientRequest: randomUUID() }), /saved reference changed/);
+  assert.equal((await rpc("get_snapshot")).jobs.length, 1);
+  assert.deepEqual((await rpc("personal_servers_status")).references[0].selection, previousSelection);
   await comparison().screenshot({ path: path.join(data, "reference-reconnected.png") });
   await button("Volver a referencias").click();
   await selectReference();

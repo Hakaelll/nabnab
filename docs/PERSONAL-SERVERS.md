@@ -8,6 +8,10 @@ Abre **Plataformas → Archivos y documentos → Servidores personales**. Las co
 
 Abre la conexión, navega por carpetas y marca archivos. **Indexar referencia** guarda los metadatos en **Biblioteca → Referencias**. Una referencia depende del servidor y no contiene una copia. **Copiar a mi biblioteca** muestra el destino y envía la selección a Descargas. Las referencias guardadas también ofrecen **Obtener copia local**.
 
+Si pulsas **Actualizar** en la carpeta, se conservan las marcas cuyos metadatos visibles coinciden con el listado anterior, aunque cambie el orden. Los archivos modificados o ausentes quedan fuera de la selección. Vuelve a marcar un archivo modificado para elegir la versión actual. Si la carpeta está inaccesible, puedes actualizar de nuevo para recuperar las marcas que todavía coincidan. Al copiar o indexar, nabnab comprueba que los metadatos seleccionados corresponden al último listado.
+
+![Selección de servidor después de actualizar una carpeta con un archivo modificado y otro ausente](personal-server-refresh.png)
+
 Desde una referencia, **Revisar en servidor** abre su carpeta y compara los metadatos guardados con los actuales. Si cambia el identificador de versión, el panel lo señala aunque tamaño y fecha coincidan. **Actualizar referencia** guarda los metadatos revisados. **Copiar a mi biblioteca** solicita una copia de la versión seleccionada. Si el archivo desaparece o la carpeta está inaccesible, la referencia sigue disponible para revisarla más tarde.
 
 Cuando una copia falla porque cambió el archivo, pulsa **Revisar versión** en Descargas. Se abre su carpeta y se comparan los datos de la versión solicitada con los del archivo actual. **Copiar versión actual** crea un trabajo nuevo. Las copias publicadas y la referencia guardada se conservan. **Volver a Descargas** devuelve el foco al trabajo anterior. Si la conexión se ha retirado, el panel lo indica.
@@ -35,6 +39,8 @@ La prueba también cortó una copia HTTPS después de 96.000 bytes. Verificó el
 ![Copia WebDAV interrumpida y acciones de recuperación en Windows, con datos de prueba](personal-server-resume.png)
 
 La prueba de la copia montada pausa el lector de Windows tras 65.536 bytes. Comprueba que una carpeta desconectada conserva esos bytes, que la copia continúa desde ese punto y que un reemplazo con el mismo tamaño y fecha invalida el parcial. La prueba de escritorio introduce un parcial de tamaño conocido en el trabajo y verifica el aviso, las acciones y el archivo publicado al volver a conectar la carpeta de prueba.
+
+La prueba de Edge simula una carpeta desconectada y luego cambia, elimina y reordena sus archivos. Verifica las marcas y los avisos a 900 y 1180 px. En Windows, después de cargar un listado nuevo, los comandos de copia e indexación rechazan la selección antigua sin crear trabajos ni modificar la referencia guardada.
 
 ![Copia de una carpeta montada interrumpida con 64 KB guardados, en Descargas](personal-server-mounted-resume.png)
 

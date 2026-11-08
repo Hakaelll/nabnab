@@ -7,6 +7,7 @@ const kinds: Kind[] = ["webdav", "sftp", "nas"];
 interface Stamp { size: number | null; modified: string | null; etag: string | null }
 export interface PersonalSelection { serverId: string; path: string[]; stamp: Stamp }
 interface Entry { path: string[]; directory: boolean; stamp: Stamp; mime: string | null }
+interface SelectionChange { path: string; state: "changed" | "missing" }
 interface Server { id: string; name: string; kind: Kind; location: string }
 interface Reference { id: string; serverName: string; selection: PersonalSelection }
 interface Review { kind: "reference" | "copy"; id: string; selection: PersonalSelection }
@@ -37,6 +38,8 @@ export function createPersonalServers(hooks: Hooks) {
   let path: string[] = [];
   let entries: Entry[] | null = null;
   let selected = new Set<number>();
+  let pendingRefresh: Entry[] = [];
+  let selectionChanges: SelectionChange[] = [];
   let referenceId = "";
   let reviewing: Review | null = null;
   let error = "";
@@ -51,6 +54,11 @@ export function createPersonalServers(hooks: Hooks) {
   const activeReference = () => status?.references.find(reference => reference.id === referenceId);
   const disabled = () => busy ? "disabled" : "";
   const label = (value: string[]) => value.join("/");
+  const sameStamp = (left: Stamp, right: Stamp) => left.size === right.size && left.modified === right.modified && left.etag === right.etag;
+  const selectedEntries = () => [...selected].flatMap(index => {
+    const entry = entries?.[index];
+    return entry && !entry.directory ? [entry] : [];
+  });
   const reviewedIndex = () => {
     if (!reviewing || !entries) return -1;
     const target = label(reviewing.selection.path);
@@ -80,8 +88,11 @@ export function createPersonalServers(hooks: Hooks) {
     await run("save", async () => { status = await hooks.command<ServerStatus>("personal_servers_status"); });
   }
 
-  async function browse(id: string, folder: string[], review: Review | null = null) {
+  async function browse(id: string, folder: string[], review: Review | null = null, preserveSelection = false) {
     if (busy) return;
+    const previous = preserveSelection && !review ? entries ? selectedEntries() : pendingRefresh : [];
+    pendingRefresh = previous;
+    selectionChanges = [];
     serverId = id;
     path = folder;
     reviewing = review;
@@ -92,7 +103,17 @@ export function createPersonalServers(hooks: Hooks) {
         status = await hooks.command<ServerStatus>("personal_servers_status");
         if (cancelled || !activeServer()) return;
       }
-      entries = await hooks.command<Entry[]>("personal_server_browse", { serverId: id, path: folder, requestId });
+      const listing = await hooks.command<Entry[]>("personal_server_browse", { serverId: id, path: folder, requestId });
+      if (cancelled) return;
+      entries = listing;
+      pendingRefresh = [];
+      const current = new Map(listing.flatMap((entry, index) => entry.directory ? [] : [[label(entry.path), { entry, index }] as const]));
+      for (const item of previous) {
+        const key = label(item.path);
+        const match = current.get(key);
+        if (match && sameStamp(item.stamp, match.entry.stamp)) selected.add(match.index);
+        else selectionChanges.push({ path: key, state: match ? "changed" : "missing" });
+      }
       const index = reviewedIndex();
       if (index >= 0) selected.add(index);
     });
@@ -179,7 +200,7 @@ export function createPersonalServers(hooks: Hooks) {
     const fromCopy = reviewing.kind === "copy";
     const stored = reviewing.selection.stamp;
     const current = entries?.[reviewedIndex()]?.stamp;
-    const different = current && (stored.size !== current.size || stored.modified !== current.modified || stored.etag !== current.etag);
+    const different = current && !sameStamp(stored, current);
     const changedVersion = current?.etag && stored.etag && current.etag !== stored.etag;
     const message = busy === "read" ? t("Consultando la carpeta…", "Reading the folder…")
       : !server && !error ? t("La conexión ya no está configurada.", "The connection is no longer configured.")
@@ -206,6 +227,19 @@ export function createPersonalServers(hooks: Hooks) {
     </section>`;
   }
 
+  function selectionReview() {
+    if (!selectionChanges.length) return "";
+    const message = selectionChanges.some(item => item.state === "changed")
+      ? t("Vuelve a marcar los archivos modificados para elegir su versión actual.", "Select changed files again to choose their current version.")
+      : t("Los archivos que faltan se retiraron de la selección.", "Missing files were removed from the selection.");
+    return `<section class="personal-reference-review personal-selection-review" aria-labelledby="personal-selection-review-title">
+      <h3 id="personal-selection-review-title">${t("La selección cambió", "The selection changed")}</h3>
+      <p role="status">${message}</p>
+      <ul ${selectionChanges.length > 5 ? 'tabindex="0"' : ""}>${selectionChanges.map(item => `<li><span>${h(item.path)}</span>
+        <small>${item.state === "changed" ? t("Versión distinta", "Different version") : t("Ya no aparece", "No longer listed")}</small></li>`).join("")}</ul>
+    </section>`;
+  }
+
   function renderBrowser() {
     const server = activeServer();
     return `<section class="personal-servers">${reviewing ? "" : `<div class="page-heading"><div><h2>${t("Servidores personales", "Personal servers")}</h2>
@@ -213,8 +247,8 @@ export function createPersonalServers(hooks: Hooks) {
       ${action("personal-references", t("Referencias guardadas", "Saved references"), "link", "quiet", disabled())}</div>
       ${setup()}${serverList(false)}`}${feedback()}
       ${server ? `<div class="file-source-results"><div class="file-source-result-heading"><div><span class="file-source-eyebrow">${t("Origen remoto", "Remote source")}</span><h2>${h(server.name)}</h2><p class="path">${h(server.location)}</p>${path.length ? `<p class="field-note">${t("Carpeta", "Folder")} · ${h(label(path))}</p>` : ""}</div>
-        <div class="button-group">${path.length ? action("personal-parent", t("Subir carpeta", "Parent folder"), undefined, "quiet", disabled()) : ""}${action("personal-reload", t("Actualizar", "Refresh"), "retry", "quiet", disabled())}</div></div>
-        ${referenceReview(server)}
+        <div class="button-group">${path.length ? action("personal-parent", t("Subir carpeta", "Parent folder"), undefined, "quiet", disabled()) : ""}${action("personal-reload", t("Actualizar", "Refresh"), "retry", "quiet", `id="personal-reload" ${disabled()}`)}</div></div>
+        ${referenceReview(server)}${selectionReview()}
         ${entries?.length ? `<div class="file-source-list" role="group" aria-label="${t("Archivos del servidor", "Server files")}">${entries.map((entry, index) => {
           const name = h(entry.path.at(-1) ?? "");
           return entry.directory ? `<button class="file-source-entry" data-action="personal-folder" data-index="${index}" ${disabled()}><span>${icon("folder")} ${name}</span>${icon("arrow")}</button>`
@@ -264,7 +298,11 @@ export function createPersonalServers(hooks: Hooks) {
     if (element.dataset.personalFile !== undefined) {
       const index = Number(element.dataset.personalFile);
       if (entries?.[index] && !entries[index].directory) {
-        if (element.checked && selected.size < 200) selected.add(index); else selected.delete(index);
+        if (element.checked && selected.size < 200) {
+          selected.add(index);
+          const key = label(entries[index].path);
+          selectionChanges = selectionChanges.filter(item => item.path !== key);
+        } else selected.delete(index);
         hooks.render();
       }
       return true;
@@ -308,7 +346,7 @@ export function createPersonalServers(hooks: Hooks) {
     }
     if (busy) return true;
     const id = element.dataset.id ?? "";
-    const paths = [...selected].map(index => entries?.[index]?.path).filter(value => value !== undefined);
+    const selections = selectedEntries().map(entry => ({ serverId, path: entry.path, stamp: entry.stamp }));
     switch (name) {
       case "personal-open": reviewing = null; hooks.openBrowser(); await load(); break;
       case "personal-references": hooks.openReferences(); break;
@@ -336,7 +374,10 @@ export function createPersonalServers(hooks: Hooks) {
         }
         break;
       case "personal-parent": if (serverId) await browse(serverId, path.slice(0, -1)); break;
-      case "personal-reload": if (serverId) await browse(serverId, path, reviewing); break;
+      case "personal-reload": if (serverId) {
+        await browse(serverId, path, reviewing, true);
+        document.getElementById("personal-reload")?.focus({ preventScroll: true });
+      } break;
       case "personal-folder": {
         const entry = entries?.[Number(element.dataset.index)];
         if (serverId && entry?.directory) await browse(serverId, entry.path);
@@ -358,15 +399,15 @@ export function createPersonalServers(hooks: Hooks) {
       case "personal-remove-reference": await run("save", async () => {
         status = await hooks.command<ServerStatus>("personal_server_remove", { id, reference: name === "personal-remove-reference" });
         if (id === referenceId) referenceId = "";
-        if (id === serverId) { serverId = ""; entries = null; path = []; reviewing = null; selected.clear(); }
+        if (id === serverId) { serverId = ""; entries = null; path = []; reviewing = null; pendingRefresh = []; selectionChanges = []; selected.clear(); }
       }); break;
       case "personal-review-reference": {
         const reference = activeReference();
         if (!reference || !status?.servers.some(server => server.id === reference.selection.serverId)) break;
         await openReview({ kind: "reference", id: reference.id, selection: reference.selection });
       } break;
-      case "personal-index": if (paths.length) await run("save", async () => {
-        status = await hooks.command<ServerStatus>("personal_server_index", { serverId, paths });
+      case "personal-index": if (selections.length) await run("save", async () => {
+        status = await hooks.command<ServerStatus>("personal_server_index", { selections });
         if (reviewing?.kind === "reference") {
           const reference = status.references.find(ref => ref.id === reviewing?.id);
           reviewing = reference ? { kind: "reference", id: reference.id, selection: reference.selection } : null;
@@ -377,9 +418,10 @@ export function createPersonalServers(hooks: Hooks) {
       case "personal-copy":
       case "personal-copy-reference": {
         const reference = activeReference();
-        if (name === "personal-copy" ? paths.length > 0 : reference) await run("copy", async () => {
-          await hooks.command("personal_server_copy", { serverId: name === "personal-copy" ? serverId : null,
-            paths: name === "personal-copy" ? paths : null, referenceId: name === "personal-copy-reference" ? reference?.id : null,
+        const useReference = name === "personal-copy-reference";
+        const files = useReference ? reference ? [reference.selection] : [] : selections;
+        if (files.length) await run("copy", async () => {
+          await hooks.command("personal_server_copy", { selections: files, referenceId: useReference ? reference?.id : null,
             clientRequest: crypto.randomUUID() });
           selected.clear();
           referenceId = "";

@@ -66,10 +66,13 @@ const setup = `
     if(cmd==="personal_server_probe_sftp")return {challenge:args.requestId,fingerprint:"SHA256:fixture-fingerprint"};
     if(cmd==="personal_server_trust_sftp"){personal.servers.push({id:"sftp-fixture",name:args.name,kind:"sftp",location:"sftp.example:22/media"});return copy(personal);}
     if(cmd==="personal_server_nas")return null;
-    if(cmd==="personal_server_browse")return args.path.length
-      ? (fixture.personalStamp?[{path:["Docs","notes.pdf"],directory:false,stamp:copy(fixture.personalStamp),mime:"application/pdf"}]:[])
-      : [{path:["Docs"],directory:true,stamp:{size:null,modified:null,etag:null},mime:null}];
-    if(cmd==="personal_server_index"){personal.references=[{id:"ref-fixture",serverName:"Estudio",selection:{serverId:args.serverId,path:args.paths[0],stamp:copy(fixture.personalStamp)}}];return copy(personal);}
+    if(cmd==="personal_server_browse"){
+      if(fixture.personalOffline)throw "Folder offline in fixture.";
+      return args.path.length
+        ? [...(fixture.personalStamp?[{path:["Docs","notes.pdf"],directory:false,stamp:copy(fixture.personalStamp),mime:"application/pdf"}]:[]), ...(fixture.personalExtras??[])]
+        : [{path:["Docs"],directory:true,stamp:{size:null,modified:null,etag:null},mime:null}];
+    }
+    if(cmd==="personal_server_index"){personal.references=[{id:"ref-fixture",serverName:"Estudio",selection:copy(args.selections[0])}];return copy(personal);}
     if(cmd==="personal_server_copy")return [];
     if(cmd==="personal_server_remove"){personal.servers=personal.servers.filter(server=>server.id!==args.id);return copy(personal);}
     if(cmd==="queue_public_files"||cmd==="queue_cloud_files")return [];
@@ -477,8 +480,49 @@ try {
     await page.getByRole("button", {name:"Guardar conexión",exact:true}).click();
     assert.equal(await page.evaluate(() => window.fileSourceFixture.calls.find(call => call.cmd === "personal_server_webdav").args.certificatePem), pem);
     await page.getByRole("button", {name:/Estudio.*Nextcloud/}).click();
+    await page.evaluate(() => {
+      const fixture = window.fileSourceFixture;
+      fixture.personalExtras = ["removed.txt","stable.txt"].map(name => ({path:["Docs",name],directory:false,stamp:{...fixture.personalStamp},mime:"text/plain"}));
+    });
     await page.getByRole("button", {name:"Docs",exact:true}).click();
-    await page.getByRole("checkbox", {name:/notes.pdf/}).check();
+    const notes = page.getByRole("checkbox", {name:/notes.pdf/});
+    const stable = page.getByRole("checkbox", {name:/stable.txt/});
+    await notes.check();
+    await stable.check();
+    await page.getByRole("checkbox", {name:/removed.txt/}).check();
+    const reloadFolder = page.locator("#personal-reload");
+    await page.setViewportSize({width:900,height:620});
+    await reloadFolder.scrollIntoViewIfNeeded();
+    await page.screenshot({path:`${directory}/personal-refresh-before-900.png`});
+    await page.evaluate(() => { window.fileSourceFixture.personalOffline = true; });
+    await reloadFolder.press("Enter");
+    await page.getByRole("alert").filter({hasText:"Folder offline in fixture."}).waitFor();
+    assert.equal(await page.locator(".personal-review").count(), 0);
+    await page.evaluate(() => {
+      const fixture = window.fileSourceFixture;
+      fixture.personalOffline = false;
+      fixture.personalStamp = {...fixture.personalStamp,etag:'"version-reselected"'};
+      fixture.personalExtras.shift();
+    });
+    await reloadFolder.press("Enter");
+    const selectionChanges = page.getByRole("region", {name:"La selección cambió"});
+    await selectionChanges.waitFor();
+    assert.equal(await reloadFolder.evaluate(button => button === document.activeElement), true);
+    assert.equal(await notes.isChecked(), false);
+    assert.equal(await stable.isChecked(), true);
+    assert.equal(await selectionChanges.getByText("Versión distinta", {exact:true}).count(), 1);
+    assert.equal(await selectionChanges.getByText("Docs/notes.pdf", {exact:true}).count(), 1);
+    assert.equal(await selectionChanges.getByText("Docs/removed.txt", {exact:true}).count(), 1);
+    assert.equal(await selectionChanges.getByText("Ya no aparece", {exact:true}).count(), 1);
+    for (const [width,height] of [[1180,780],[900,620]]) {
+      await page.setViewportSize({width,height});
+      await selectionChanges.evaluate(panel => panel.scrollIntoView({block:"start"}));
+      await checkNoHorizontalOverflow(`Personal selection refresh ${width}`);
+      await page.screenshot({path:`${directory}/personal-refresh-${width}.png`});
+    }
+    await notes.press("Space");
+    assert.equal(await selectionChanges.getByText("Docs/notes.pdf", {exact:true}).count(), 0);
+    await stable.uncheck();
     for (const [width, height] of [[1180, 780], [900, 620]]) {
       await page.setViewportSize({width,height});
       await page.locator(".personal-review").scrollIntoViewIfNeeded();
@@ -492,7 +536,8 @@ try {
     await page.waitForFunction(() => window.fileSourceFixture.calls.some(call => call.cmd === "personal_server_copy"));
     const copyArgs = await page.evaluate(() => window.fileSourceFixture.calls.find(call => call.cmd === "personal_server_copy").args);
     assert.equal(copyArgs.referenceId,"ref-fixture");
-    assert.equal(copyArgs.paths,null);
+    assert.deepEqual(copyArgs.selections, [{ serverId:"dav-fixture",path:["Docs","notes.pdf"],
+      stamp:{size:4096,modified:"2026-11-07",etag:'"version-reselected"'} }]);
     assert(!JSON.stringify(copyArgs).includes("fixture-app-password"));
     await page.getByRole("button", {name:/notes.pdf.*Remota/}).click();
     await page.getByRole("button", {name:"Revisar en servidor",exact:true}).click();
@@ -512,8 +557,8 @@ try {
     }
     await page.getByRole("button", {name:"Actualizar referencia",exact:true}).click();
     await comparison.getByRole("status").filter({hasText:"Los datos visibles coinciden"}).waitFor();
-    const updatedPaths = await page.evaluate(() => window.fileSourceFixture.calls.filter(call => call.cmd==="personal_server_index").at(-1).args.paths);
-    assert.deepEqual(updatedPaths, [["Docs","notes.pdf"]]);
+    const updated = await page.evaluate(() => window.fileSourceFixture.calls.filter(call => call.cmd==="personal_server_index").at(-1).args.selections);
+    assert.deepEqual(updated, [{ serverId:"dav-fixture",path:["Docs","notes.pdf"],stamp:{size:4096,modified:"2026-11-07",etag:'"version-2"'} }]);
     await page.evaluate(() => { window.fileSourceFixture.personalStamp = null; });
     await page.getByRole("button", {name:"Actualizar",exact:true}).click();
     await comparison.getByRole("status").filter({hasText:"El archivo ya no aparece"}).waitFor();

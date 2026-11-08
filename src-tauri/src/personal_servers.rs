@@ -121,7 +121,7 @@ struct ServerView {
     location: String,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Selection {
     server_id: String,
@@ -556,49 +556,48 @@ pub async fn personal_server_browse(
 }
 
 fn reviewed(
-    state: &AppState,
-    server_id: &str,
-    paths: Vec<Vec<String>>,
+    state: &BrowserState,
+    selections: Vec<Selection>,
 ) -> Result<Vec<Selection>, String> {
-    if paths.is_empty() || paths.len() > 200 {
+    if selections.is_empty() || selections.len() > 200 {
         return Err("Choose 1–200 reviewed files.".into());
     }
-    let pages = state.personal_servers.pages.lock().unwrap();
+    let server_id = selections[0].server_id.clone();
+    let pages = state.pages.lock().unwrap();
     let page = pages
-        .get(server_id)
+        .get(&server_id)
         .ok_or("Browse the server again before selecting files.")?;
     let mut seen = HashSet::new();
-    let mut selections = Vec::new();
-    for path in paths {
-        if !seen.insert(path.clone()) {
-            continue;
+    let mut files = Vec::new();
+    for selection in selections {
+        selection.validate()?;
+        if selection.server_id != server_id {
+            return Err("Select files from one server folder at a time.".into());
         }
         let entry = page
             .iter()
-            .find(|entry| !entry.directory && entry.path == path)
+            .find(|entry| !entry.directory && entry.path == selection.path)
             .ok_or("Select files from the current folder listing.")?;
-        let selection = Selection {
-            server_id: server_id.into(),
-            path,
-            stamp: entry.stamp.clone(),
-        };
-        selection.validate()?;
-        selections.push(selection);
+        if entry.stamp != selection.stamp {
+            return Err("The server listing changed. Refresh the folder and review your selection.".into());
+        }
+        if seen.insert(selection.path.clone()) {
+            files.push(selection);
+        }
     }
-    Ok(selections)
+    Ok(files)
 }
 
 #[tauri::command]
 pub fn personal_server_index(
     state: State<Arc<AppState>>,
-    server_id: String,
-    paths: Vec<Vec<String>>,
+    selections: Vec<Selection>,
 ) -> Result<Snapshot, String> {
-    let selections = reviewed(&state, &server_id, paths)?;
+    let selections = reviewed(&state.personal_servers, selections)?;
     let root = crate::config_root(&state)?;
     let _guard = state.personal_servers.vault.lock().unwrap();
     let mut data = load(&root)?;
-    let name = connected(&data, &server_id)?.name.clone();
+    let name = connected(&data, selections[0].server_id())?.name.clone();
     for selection in selections {
         let id = fingerprint(&(&selection.server_id, &selection.path));
         let reference = Reference {
@@ -622,15 +621,14 @@ pub fn personal_server_index(
 #[tauri::command]
 pub fn personal_server_copy(
     state: State<Arc<AppState>>,
-    server_id: Option<String>,
-    paths: Option<Vec<Vec<String>>>,
+    selections: Vec<Selection>,
     reference_id: Option<String>,
     client_request: String,
 ) -> Result<Vec<queue::Job>, String> {
     let root = crate::config_root(&state)?;
-    let selections = match (server_id, paths, reference_id) {
-        (Some(id), Some(paths), None) => reviewed(&state, &id, paths)?,
-        (None, None, Some(id)) => {
+    let selections = match reference_id {
+        None => reviewed(&state.personal_servers, selections)?,
+        Some(id) => {
             let _guard = state.personal_servers.vault.lock().unwrap();
             let data = load(&root)?;
             let reference = data
@@ -638,9 +636,11 @@ pub fn personal_server_copy(
                 .into_iter()
                 .find(|entry| entry.id == id)
                 .ok_or("This remote reference was removed.")?;
-            vec![reference.selection]
+            if selections.as_slice() != [reference.selection] {
+                return Err("The saved reference changed. Open it again to review the current version.".into());
+            }
+            selections
         }
-        _ => return Err("Choose reviewed files or a saved reference.".into()),
     };
     {
         let _guard = state.personal_servers.vault.lock().unwrap();
