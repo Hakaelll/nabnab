@@ -96,6 +96,42 @@ try {
   const shelfTitles = () => page.locator(".audio-shelf-item strong").allTextContents();
   assert.deepEqual(await trackTitles(), ["Primera pista", "Segunda pista", "Tercera pista", "En directo", "Improvisación", "Toma nocturna"]);
   assert.deepEqual(await shelfTitles(), ["Sesiones", "Archivo", "Cuaderno"]);
+  await page.getByRole("checkbox", {name:"Seleccionar Primera pista",exact:true}).check();
+  await page.getByRole("button", {name:"Grupos siguientes"}).press("Enter");
+  await category("podcasts").press("Enter");
+  assert.equal(await page.locator(".audio-selection").count(), 0, "Music selection leaked into Podcasts");
+  await page.locator("#audio-query").fill("Episodio");
+  await page.getByRole("checkbox", {name:"Seleccionar Episodio",exact:true}).check();
+  await page.getByRole("button", {name:"Editar etiquetas",exact:true}).click();
+  await page.locator('[data-action="audio-tag-enable"][data-field="genre"]').check();
+  await page.locator("#audio-tag-genre").fill("Entrevista");
+  await category("music").press("Enter");
+  assert.equal(await page.locator("#audio-query").inputValue(), "");
+  assert.equal(await page.locator("#audio-tag-form").count(), 0);
+  assert.equal(await page.getByRole("checkbox", {name:"Seleccionar Primera pista",exact:true}).isChecked(), true);
+  assert.deepEqual(await shelfTitles(), ["Nocturno"]);
+  await page.locator("#audio-query").fill("Toma nocturna");
+  assert.equal(await page.getByText("1 fuera de esta página", {exact:true}).count(), 1);
+  await category("podcasts").press("Enter");
+  assert.equal(await page.locator("#audio-query").inputValue(), "Episodio");
+  const episode = page.getByRole("checkbox", {name:"Seleccionar Episodio",exact:true});
+  assert.equal(await episode.isChecked(), true);
+  assert.equal(await page.locator("#audio-tag-genre").inputValue(), "Entrevista");
+  await episode.uncheck();
+  assert.equal(await page.locator("#audio-tag-form").count(), 0);
+  await page.locator("#audio-query").clear();
+  await category("music").press("Enter");
+  assert.equal(await page.locator("#audio-query").inputValue(), "Toma nocturna");
+  assert.equal(await page.getByText("1 fuera de esta página", {exact:true}).count(), 1);
+  for (const [width,height] of [[900,620],[1180,780]]) {
+    await page.setViewportSize({width,height});
+    const toolbar = page.locator(".audio-selection");
+    await toolbar.scrollIntoViewIfNeeded();
+    assert.ok(await toolbar.evaluate(node => node.scrollWidth <= node.clientWidth + 1));
+    await page.screenshot({path:`${directory}/audio-view-selection-${width}x${height}.png`,animations:"disabled"});
+  }
+  await page.getByRole("button", {name:"Quitar selección",exact:true}).click();
+  await page.locator("#audio-query").clear();
   await page.getByRole("button", {name:"Grupos siguientes"}).press("Enter");
   assert.deepEqual(await shelfTitles(), ["Nocturno"]);
   await page.getByRole("button", {name:"Nocturno Zeta 1 pista",exact:true}).press("Enter");
@@ -234,7 +270,11 @@ try {
   await category("podcasts").click();
   assert.deepEqual(await page.locator(".audio-track strong").allTextContents(), ["Episodio"]);
   await category("books").click();
-  await page.getByRole("button", {name:"Quitar selección",exact:true}).click();
+  assert.equal(await page.locator(".audio-selection").count(), 0);
+  await category("music").click();
+  assert.equal(await page.getByRole("checkbox", {name:"Seleccionar Primera pista",exact:true}).isChecked(), true);
+  assert.equal(await page.getByRole("checkbox", {name:"Seleccionar Segunda pista",exact:true}).isChecked(), true);
+  await category("books").click();
   assert.deepEqual(await trackTitles(), ["Capítulo 1", "Capítulo 2", "Capítulo 3", "Prólogo"]);
   assert.deepEqual(await shelfTitles(), ["Libro de prueba", "Otro libro"]);
   const partial = page.getByRole("button", {name:/Continuar · Otro libro · Capítulo 1 · 0:09/});
@@ -281,5 +321,5 @@ try {
   assert.deepEqual(await chapterIndex.locator("strong").allTextContents(), ["Parte 31", "Parte 32", "Parte 33"]);
   assert.equal(await chapterIndex.getByRole("heading").evaluate(node => node === document.activeElement), true);
   assert.deepEqual(errors, []);
-  console.log("Audio shelves, keyboard filtering, persistent playback, playlist review, and audiobook sleep and chapter resumption passed.");
+  console.log("Audio shelves, independent tab state, keyboard filtering, persistent playback, playlist review, and audiobook controls passed.");
 } finally { await browser.close(); }

@@ -85,6 +85,7 @@
 .audio-lyrics ol { list-style: none; padding: 0; max-height: 270px; overflow: auto; }
 .audio-selection, .audio-editor { display: grid; gap: 12px; padding: 14px; margin-bottom: 16px; border: 1px solid var(--edge-quiet); border-radius: 12px; }
 .audio-selection-heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; }
+.audio-selection-scope { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
 .audio-selection-heading span { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 .audio-selection-heading b { color: var(--text); font-weight: 550; }
 .audio-editor .page-heading { margin-bottom: 0; }

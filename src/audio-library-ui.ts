@@ -78,16 +78,24 @@ function compareChapters(left: LibraryItem, right: LibraryItem) {
     || compareTracks(left, right);
 }
 
+interface TrackView {
+  query: string;
+  offset: number;
+  shelfOffset: number;
+  selected: Set<string>;
+  tags: { patch: Partial<Record<TagField, string>>; preview: boolean } | null;
+}
+
+function createTrackView(): TrackView {
+  return { query: "", offset: 0, shelfOffset: 0, selected: new Set(), tags: null };
+}
+
 export function createAudioLibrary(hooks: Hooks) {
   const { t, player } = hooks;
   let category: Category = "music";
-  let artist = "", album = "", genre = "", book = "", query = "";
-  let offset = 0;
-  let shelfOffset = 0;
+  const views = { music: createTrackView(), podcasts: createTrackView(), books: createTrackView(), playlists: createTrackView() };
+  let artist = "", album = "", genre = "", book = "";
   let chapterOffset = 0;
-  let selected = new Set<string>();
-  let tagDraft: Partial<Record<TagField, string>> | null = null;
-  let tagPreview = false;
   let editing: { id: string | null; name: string; entries: AudioPlaylistEntry[] } | null = null;
   let activeList = "";
   let addTo = "";
@@ -132,7 +140,7 @@ export function createAudioLibrary(hooks: Hooks) {
     const byCategory = all.filter(item => category === "books" ? isAudiobook(item)
       : category === "podcasts" ? !isAudiobook(item) && isPodcast(item)
       : !isAudiobook(item) && !isPodcast(item));
-    const needle = query.trim().toLocaleLowerCase();
+    const needle = views[category].query.trim().toLocaleLowerCase();
     const results = byCategory.filter(item => {
       const meta = item.details?.audio;
       if (category === "music" && (artist && artist !== JSON.stringify(meta?.artist ?? "")
@@ -151,6 +159,7 @@ export function createAudioLibrary(hooks: Hooks) {
   }
 
   function filters(all: LibraryItem[]) {
+    const { query } = views[category];
     const artists = new Map<string, string>();
     const albums = new Map<string, string>();
     const genres = new Map<string, string>();
@@ -193,7 +202,9 @@ export function createAudioLibrary(hooks: Hooks) {
     if (!groups.size) return "";
     const label = music ? t("Álbumes", "Albums") : t("Estantería", "Bookshelf");
     const entries = [...groups.entries()];
-    shelfOffset = Math.min(shelfOffset, Math.floor((entries.length - 1) / SHELF_SIZE) * SHELF_SIZE);
+    const view = views[category];
+    view.shelfOffset = Math.min(view.shelfOffset, Math.floor((entries.length - 1) / SHELF_SIZE) * SHELF_SIZE);
+    const { shelfOffset } = view;
     return `<section class="audio-shelf" aria-label="${label}"><div class="audio-shelf-heading"><h2>${label}</h2>
       ${entries.length > SHELF_SIZE ? `<div class="audio-shelf-navigation"><span>${shelfOffset + 1}–${Math.min(shelfOffset + SHELF_SIZE, entries.length)} / ${entries.length}</span>
         ${action("audio-shelf-back", t("Grupos anteriores", "Previous groups"), "back", "icon-button", `aria-label="${t("Grupos anteriores", "Previous groups")}" ${shelfOffset ? "" : "disabled"}`)}
@@ -273,6 +284,7 @@ export function createAudioLibrary(hooks: Hooks) {
   }
 
   function row(item: LibraryItem) {
+    const { selected } = views[category];
     const tags = item.details?.audio;
     const chapter = item.details?.audiobook;
     const title = audioTitle(item);
@@ -291,8 +303,9 @@ export function createAudioLibrary(hooks: Hooks) {
   }
 
   function editTags() {
-    if (!tagDraft) return "";
-    const patch = tagDraft;
+    const { tags, selected } = views[category];
+    if (!tags) return "";
+    const { patch, preview: tagPreview } = tags;
     const changed = tagFields.filter(field => patch[field] !== undefined);
     const affected = [...selected].flatMap(id => { const item = itemFor(id); return item ? [item] : []; });
     return `<form id="audio-tag-form" class="audio-editor"><div class="page-heading"><div><h2>${t("Editar etiquetas de Biblioteca", "Edit library tags")}</h2>
@@ -309,8 +322,10 @@ export function createAudioLibrary(hooks: Hooks) {
       ${tagPreview ? `<p class="field-note">${t("Las copias pasan por Descargas. Formatos admitidos: MP3, M4A, M4B, FLAC, OGG y Opus.", "Copies use Downloads. Supported formats: MP3, M4A, M4B, FLAC, OGG and Opus.")}</p>` : ""}</form>`;
   }
 
-  function selection(next: LibraryItem | undefined) {
+  function selection(next: LibraryItem | undefined, visible: LibraryItem[]) {
+    const { selected } = views[category];
     if (!selected.size) return "";
+    const hidden = selected.size - visible.filter(item => selected.has(item.id)).length;
     const pending = [...selected].filter(id => !itemFor(id)?.details?.audio && !itemFor(id)?.missing).length;
     const playlists = lists();
     const current = player.current();
@@ -318,7 +333,8 @@ export function createAudioLibrary(hooks: Hooks) {
       const item = itemFor(id);
       return id !== current?.id && isPlayable(item) && !isAudiobook(item);
     });
-    return `<div class="audio-selection"><div class="audio-selection-heading"><strong>${selected.size} ${t("en selección", "selected")}</strong>
+    return `<div class="audio-selection"><div class="audio-selection-heading"><div class="audio-selection-scope"><strong>${selected.size} ${t("en selección", "selected")}</strong>
+      ${hidden ? `<span>${hidden} ${t("fuera de esta página", "outside this page")}</span>` : ""}</div>
       ${next ? `<span>${t("Siguiente", "Next")} · <b>${h(audioTitle(next))}</b></span>` : ""}</div><div class="button-group">
       ${category !== "books" && !(current && isAudiobook(current))
         ? action("audio-queue-next", t("Reproducir a continuación", "Play next"), "next", "secondary", busy || !canQueueNext ? "disabled" : "") : ""}
@@ -418,15 +434,27 @@ export function createAudioLibrary(hooks: Hooks) {
     const upcoming = queue.slice(0, 16).map(({ position, id }) => ({ position, item: library.find(item => item.id === id) }));
     const next = upcoming.find(entry => isPlayable(entry.item));
     const chapterFile = category === "books" && book ? byCategory.find(item => bookKey(item) === book && !item.details?.audiobook) : undefined;
-    offset = Math.min(offset, Math.max(0, Math.floor((results.length - 1) / PAGE_SIZE) * PAGE_SIZE));
+    const view = views[category];
+    if (view.selected.size) {
+      const available = new Set(byCategory.map(item => item.id));
+      for (const id of view.selected) {
+        if (available.has(id)) continue;
+        view.selected.delete(id);
+        if (view.tags) view.tags.preview = false;
+      }
+      if (!view.selected.size) view.tags = null;
+    }
+    view.offset = Math.min(view.offset, Math.max(0, Math.floor((results.length - 1) / PAGE_SIZE) * PAGE_SIZE));
+    const { offset } = view;
+    const visible = results.slice(offset, offset + PAGE_SIZE);
     return `<section class="audio-library"><div class="page-heading"><div><h1>${t("Audio", "Audio")}</h1>
       <p>${t("Música, podcasts y audiolibros de tu biblioteca.", "Music, podcasts and audiobooks from your library.")}</p></div>
       ${action("audio-import-media", t("Importar audio", "Import audio"), "add", "secondary", disabled())}</div>
       <nav class="audio-category-nav" aria-label="${t("Tipo de audio", "Audio type")}">${categories.map(value => `<button type="button" data-action="audio-category" data-id="${value}" ${value === category ? 'aria-current="page"' : ""}>${icon(categoryIcons[value])}${categoryName(value)}</button>`).join("")}</nav>
       <div class="audio-layout"><div class="audio-content">${category === "playlists" ? imported ? importView(imported) : playlistView() : `${continueBook(byCategory)}${shelf(results)}${filters(byCategory)}
         ${embeddedChapters(chapterFile)}
-        ${selection(next?.item)}${editTags()}${request ? `<p role="status" class="field-note">${t("Leyendo etiquetas locales…", "Reading local tags…")} ${action("audio-cancel-read", t("Cancelar", "Cancel"), undefined, "quiet")}</p>` : ""}
-        ${results.length ? `<ol class="audio-rows">${results.slice(offset, offset + PAGE_SIZE).map(row).join("")}</ol>`
+        ${selection(next?.item, visible)}${editTags()}${request ? `<p role="status" class="field-note">${t("Leyendo etiquetas locales…", "Reading local tags…")} ${action("audio-cancel-read", t("Cancelar", "Cancel"), undefined, "quiet")}</p>` : ""}
+        ${visible.length ? `<ol class="audio-rows">${visible.map(row).join("")}</ol>`
           : `<div class="empty-state">${icon("audio")}<h2>${t("Sin audio en esta vista", "No audio in this view")}</h2><p>${t("Importa archivos o cambia los filtros.", "Import files or change the filters.")}</p></div>`}
         ${results.length > PAGE_SIZE ? `<div class="library-pagination"><span>${offset + 1}–${Math.min(offset + PAGE_SIZE, results.length)} / ${results.length}</span>
           ${action("audio-page-back", t("Anterior", "Previous"), undefined, "quiet", offset === 0 ? "disabled" : "")}${action("audio-page-next", t("Siguiente", "Next"), undefined, "quiet", offset + PAGE_SIZE >= results.length ? "disabled" : "")}</div>` : ""}`}</div>${context(upcoming, next, queue.length - upcoming.length)}</div></section>`;
@@ -461,11 +489,13 @@ export function createAudioLibrary(hooks: Hooks) {
     const id = button.dataset.id ?? "";
     const index = Number(button.dataset.index);
     const list = active();
+    const view = views[category];
+    const { selected } = view;
     switch (name) {
       case "audio-import-media": hooks.importMedia(); break;
       case "audio-category":
         if (id === "music" || id === "books" || id === "podcasts" || id === "playlists") {
-          category = id; offset = 0; shelfOffset = 0; hooks.render();
+          category = id; hooks.render();
         } break;
       case "audio-play": playTrack(id); break;
       case "audio-play-chapter": {
@@ -486,26 +516,26 @@ export function createAudioLibrary(hooks: Hooks) {
       case "audio-continue-book": {
         const item = itemFor(id);
         if (category !== "books" || !item || !isAudiobook(item)) break;
-        book = bookKey(item); query = ""; offset = 0; chapterOffset = 0;
+        book = bookKey(item); view.query = ""; view.offset = 0; chapterOffset = 0;
         playTrack(id);
         document.querySelector<HTMLElement>(".audio-continue [data-action='audio-continue-book']")?.focus({ preventScroll: true });
       } break;
       case "audio-shelf-open":
         if (category === "music") album = id;
         else if (category === "books") { book = id; chapterOffset = 0; }
-        offset = 0; hooks.render();
+        view.offset = 0; hooks.render();
         document.querySelector<HTMLElement>(".audio-shelf-trail button")?.focus({ preventScroll: true });
         break;
       case "audio-shelf-clear": {
         const key = category === "books" ? book : album;
         if (category === "music") album = "";
         else if (category === "books") book = "";
-        offset = 0; hooks.render();
+        view.offset = 0; hooks.render();
         document.querySelector<HTMLElement>(`.audio-shelf-item[data-id="${CSS.escape(key)}"]`)?.focus({ preventScroll: true });
       } break;
       case "audio-shelf-back":
       case "audio-shelf-next": {
-        shelfOffset = Math.max(0, shelfOffset + (name === "audio-shelf-next" ? SHELF_SIZE : -SHELF_SIZE));
+        view.shelfOffset = Math.max(0, view.shelfOffset + (name === "audio-shelf-next" ? SHELF_SIZE : -SHELF_SIZE));
         hooks.render();
         const direction = document.querySelector<HTMLButtonElement>(`[data-action="${name}"]:not(:disabled)`);
         (direction ?? document.querySelector<HTMLElement>(".audio-shelf-item"))?.focus({ preventScroll: true });
@@ -518,17 +548,21 @@ export function createAudioLibrary(hooks: Hooks) {
           : t(`${count} pistas colocadas a continuación.`, `${count} tracks queued next.`));
       } break;
       case "audio-remove-queue": player.remove(index); break;
-      case "audio-page-back": offset = Math.max(0, offset - PAGE_SIZE); hooks.render(); break;
-      case "audio-page-next": offset += PAGE_SIZE; hooks.render(); break;
-      case "audio-clear": selected.clear(); tagDraft = null; tagPreview = false; hooks.render(); break;
-      case "audio-edit-tags": tagDraft = {}; tagPreview = false; hooks.render(); break;
-      case "audio-cancel-tags": tagDraft = null; tagPreview = false; hooks.render(); break;
-      case "audio-tag-copies": if (tagPreview && tagDraft) await run(async () => {
-        await hooks.command("audio_tags_queue_copies", { ids: [...selected], patch: tagDraft, clientRequest: crypto.randomUUID() });
-        tagDraft = null; tagPreview = false;
-        await hooks.refresh();
-        hooks.notify(t("Copias añadidas a Descargas.", "Copies added to Downloads."), "success");
-      }); break;
+      case "audio-page-back": view.offset = Math.max(0, view.offset - PAGE_SIZE); hooks.render(); break;
+      case "audio-page-next": view.offset += PAGE_SIZE; hooks.render(); break;
+      case "audio-clear": selected.clear(); view.tags = null; hooks.render(); break;
+      case "audio-edit-tags": view.tags = { patch: {}, preview: false }; hooks.render(); break;
+      case "audio-cancel-tags": view.tags = null; hooks.render(); break;
+      case "audio-tag-copies": {
+        const tags = view.tags;
+        if (!tags?.preview) break;
+        await run(async () => {
+          await hooks.command("audio_tags_queue_copies", { ids: [...selected], patch: tags.patch, clientRequest: crypto.randomUUID() });
+          view.tags = null;
+          await hooks.refresh();
+          hooks.notify(t("Copias añadidas a Descargas.", "Copies added to Downloads."), "success");
+        });
+      } break;
       case "audio-read-tags": await run(async () => {
         const ids = [...selected].filter(id => !itemFor(id)?.details?.audio && !itemFor(id)?.missing).slice(0, 50);
         if (!ids.length) return;
@@ -633,22 +667,27 @@ export function createAudioLibrary(hooks: Hooks) {
   }
 
   function input(element: HTMLElement): boolean {
+    const view = views[category];
+    const { selected, tags } = view;
     if (element instanceof HTMLInputElement) {
       if (element.id === "audio-csv-ms") { milliseconds = element.checked; return true; }
-      if (element.id === "audio-query") { query = element.value; offset = 0; shelfOffset = 0; hooks.render(); return true; }
+      if (element.id === "audio-query") { view.query = element.value; view.offset = 0; view.shelfOffset = 0; hooks.render(); return true; }
       if (element.id === "audio-playlist-name" && editing) { editing.name = element.value; return true; }
       if (element.dataset.action === "audio-select" && element.dataset.id) {
-        if (element.checked && selected.size < 200) selected.add(element.dataset.id); else selected.delete(element.dataset.id);
-        tagPreview = false; hooks.render(); return true;
+        if (!element.checked) selected.delete(element.dataset.id);
+        else if (selected.size < 200) selected.add(element.dataset.id);
+        if (!selected.size) view.tags = null;
+        else if (tags) tags.preview = false;
+        hooks.render(); return true;
       }
       const field = tagFields.find(field => element.dataset.field === field || element.id === `audio-tag-${field}`);
-      if (field && tagDraft) {
+      if (field && tags) {
         if (element.dataset.action === "audio-tag-enable") {
-          if (element.checked) tagDraft[field] = ""; else delete tagDraft[field];
-          tagPreview = false; hooks.render();
+          if (element.checked) tags.patch[field] = ""; else delete tags.patch[field];
+          tags.preview = false; hooks.render();
         } else {
-          tagDraft[field] = element.value;
-          if (tagPreview) { tagPreview = false; hooks.render(); }
+          tags.patch[field] = element.value;
+          if (tags.preview) { tags.preview = false; hooks.render(); }
         }
         return true;
       }
@@ -673,8 +712,8 @@ export function createAudioLibrary(hooks: Hooks) {
       case "audio-add-list": addTo = element.value; break;
       default: return false;
     }
-    offset = 0;
-    shelfOffset = 0;
+    view.offset = 0;
+    view.shelfOffset = 0;
     hooks.render();
     return true;
   }
@@ -695,11 +734,13 @@ export function createAudioLibrary(hooks: Hooks) {
       return true;
     }
     if (form.id !== "audio-tag-form") return false;
-    if (!tagDraft || !form.reportValidity()) return true;
-    if (!tagPreview) { tagPreview = true; hooks.render(); return true; }
+    const view = views[category];
+    const { tags, selected } = view;
+    if (!tags || !form.reportValidity()) return true;
+    if (!tags.preview) { tags.preview = true; hooks.render(); return true; }
     await run(async () => {
-      await hooks.command("audio_tags_edit", { ids: [...selected], patch: tagDraft });
-      tagDraft = null; tagPreview = false;
+      await hooks.command("audio_tags_edit", { ids: [...selected], patch: tags.patch });
+      view.tags = null;
       await hooks.refresh();
     });
     return true;

@@ -2,6 +2,8 @@
 
 En **Biblioteca → Audio** puedes alternar entre Música, Podcasts, Audiolibros y Listas. En Música, elige una tarjeta de **Álbumes** para ver sus pistas, ordenadas por disco y número. La estantería usa portadas locales o incrustadas cuando están disponibles. También puedes filtrar por artista, álbum o género. Si un archivo antiguo aparece sin etiquetas, selecciónalo y usa **Leer etiquetas pendientes**.
 
+Al cambiar entre Música, Podcasts y Audiolibros, cada vista recuerda su búsqueda, página y selección mientras nabnab está abierto. El resumen indica cuántas pistas marcadas quedan fuera de la página actual. Las acciones de selección se aplican a la vista activa.
+
 El minirreproductor permanece visible al cambiar de sección. La cola **A continuación** es independiente de Descargas. En música, puedes activar el modo aleatorio y alternar entre repetir toda la cola o repetir una pista. Los controles multimedia de Windows muestran el título, el artista y la carátula disponible. Utilizan la misma cola aunque la ventana principal esté minimizada.
 
 En Música o Podcasts, marca una o varias pistas y pulsa **Reproducir a continuación**. Las pistas se colocan en el orden en que las marcaste, incluidas las que ya estaban en cola. La pista actual sigue sonando y el orden se conserva al reiniciar. La próxima pista aparece junto a la selección y en **A continuación**. Con la cola vacía, la primera pista queda preparada en pausa.
@@ -33,3 +35,5 @@ Con `NABNAB_PLAYBACK_EMBEDDED_BOOK=1`, `tests/native-playback.browser.mjs` impor
 ![Previsualización de etiquetas y creación explícita de copias](audio-tags-preview.png)
 
 ![Selección de audio y próxima pista en una ventana de 900 píxeles](audio-play-next.png)
+
+![Selección de Música con una pista fuera de los resultados visibles](audio-view-selection.png)
