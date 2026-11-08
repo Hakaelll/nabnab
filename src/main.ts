@@ -134,7 +134,7 @@ const translationTool=createTranslationTool({command,snapshot:()=>snapshot,refre
   components:()=>{preferences.section='engines';navigate('settings');}});
 const fileOrganization=createFileOrganization({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t});
 const portable=createPortableCollections({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t});
-const deviceShare=createDeviceShare({command,t,item:id=>snapshot.library.find(item=>item.id===id),afterClose:()=>{renderInspector();libraryFeatures.bind();},package:ids=>{
+const deviceShare=createDeviceShare({command,t,item:id=>snapshot.library.find(item=>item.id===id),refreshLibrary:refresh,afterClose:()=>{renderInspector();libraryFeatures.bind();},package:ids=>{
   localToolModule='portable';navigate('tools');portable.open(ids,true);
 }});
 type CaptureStatus=CaptureState&{shortcutLabel?:string|null;shortcutReason?:string|null};

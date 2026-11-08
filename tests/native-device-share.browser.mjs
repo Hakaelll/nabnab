@@ -7,7 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(import.meta.dirname, "..");
-const base = process.env.NABNAB_DEVICE_SHARE_ARTIFACTS || path.join(root, "artifacts/device-share");
+const base = path.resolve(process.env.NABNAB_DEVICE_SHARE_ARTIFACTS || path.join(root, "artifacts/device-share"));
 await mkdir(base, { recursive: true });
 const data = await mkdtemp(path.join(base, "native-run-"));
 const output = path.join(data, "output");
@@ -17,9 +17,11 @@ const { chromium } = createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODUL
 const endpoint = `http://127.0.0.1:${process.env.NABNAB_DEVICE_SHARE_DEBUG_PORT || 9262}`;
 const file = path.join(data, "Informe ñ.txt");
 const second = path.join(data, "Ficha 02.txt");
+const missing = path.join(data, "Documento ausente.txt");
 const logFile = path.join(data, "cli-arguments.jsonl");
 await writeFile(file, "Contenido local.\n");
 await writeFile(second, "Otro contenido.\n");
+await writeFile(missing, "Se quitará del disco.\n");
 
 let child, browser, page, log = "";
 async function wait(check, timeout = 35_000) {
@@ -70,12 +72,53 @@ try {
   page.on("pageerror", error => errors.push(error.message));
   const initial = await wait(async () => { try { return await rpc("get_snapshot"); } catch { return null; } });
   await rpc("save_settings", { settings: { ...initial.settings, folder: output, language: "es", reducedMotion: true, trayEnabled: false, closeToTray: false } });
-  const imported = await rpc("import_paths", { paths: [file, second] });
+  const imported = await rpc("import_paths", { paths: [file, second, missing] });
   const ids = imported.library.filter(item => [path.basename(file), path.basename(second)].includes(item.name)).map(item => item.id);
   assert.equal(ids.length, 2);
   for (const id of ids) await rpc("update_library", { id, collections: ["Lecturas"], tags: [] });
+  const missingId = imported.library.find(item => item.name === path.basename(missing)).id;
+  await rpc("update_library", { id: missingId, collections: ["Con archivos ausentes"], tags: [] });
+  await rpc("update_library", { id: ids[0], collections: ["Lecturas", "Con archivos ausentes"], tags: [] });
+  await unlink(missing);
   await page.reload();
   await page.locator('[data-page="library"]').click();
+  await page.locator('[data-action="library-section"][data-section="collections"]').click();
+  const missingCollection = page.locator('[data-action="share-collection"][data-collection="Con archivos ausentes"]');
+  await missingCollection.click();
+  await choose();
+  await modal().screenshot({ path: path.join(base, "missing-before-choice-1180.png"), animations: "disabled" });
+  assert.equal(await inShare("review").isDisabled(), true);
+  assert.equal(await inShare("zip").isDisabled(), true);
+  await modal().getByRole("list", { name: "Archivos ausentes" }).getByText(path.basename(missing), { exact: true }).waitFor();
+  await page.setViewportSize({ width: 900, height: 620 });
+  assert.ok(await modal().evaluate(element => element.scrollWidth <= element.clientWidth + 1));
+  await modal().screenshot({ path: path.join(base, "missing-before-choice-900.png"), animations: "disabled" });
+  await inShare("exclude-missing").press("Enter");
+  assert.equal(await inShare("review").evaluate(button => button === document.activeElement), true);
+  assert.equal(await inShare("device").inputValue(), device);
+  await inShare("review").click();
+  await inShare("send").waitFor();
+  const kept = imported.library.find(item => item.id === ids[0]);
+  assert.deepEqual(await modal().locator(".device-share-review li > span").allTextContents(), [kept.name]);
+  assert.equal((await rpc("get_snapshot")).library.find(item => item.id === missingId).missing, true);
+  assert.deepEqual(await calls(), []);
+  await closeShare();
+
+  await writeFile(missing, "Restaurado temporalmente.\n");
+  await page.reload();
+  await page.locator('[data-page="library"]').click();
+  await page.locator('[data-action="library-section"][data-section="collections"]').click();
+  await missingCollection.click();
+  await choose();
+  assert.equal(await inShare("review").isEnabled(), true);
+  await unlink(missing);
+  await inShare("review").click();
+  await modal().getByRole("alert").waitFor();
+  assert.equal(await inShare("review").isDisabled(), true);
+  await modal().getByRole("list", { name: "Archivos ausentes" }).getByText(path.basename(missing), { exact: true }).waitFor();
+  assert.deepEqual(await calls(), []);
+  await closeShare();
+  await page.locator('[data-action="library-section"][data-section="files"]').click();
   await page.locator(`[data-action="inspect-media"][data-id="${ids[0]}"]`).click();
   await page.locator(`[data-action="share-file"][data-id="${ids[0]}"]`).click();
   await choose();
@@ -272,7 +315,7 @@ try {
     clip: { x: box.x - 10, y: box.y, width: box.width + 20, height: box.height } });
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ nativeCliFixture: true, unicodeFile: true, staleFileRejected: true, signedLinkRejected: true, partialHandoffUnconfirmed: true,
-    publicLink: true, textOneArgument: true, ambiguousHandoff: true, replayRejected: true, offlineDeviceRejected: true, collection: true, realPortableZip: true, shareFromExportResult: true, shareFromRealSticker: true, outputSurvivesReload: true, output: data }));
+    publicLink: true, textOneArgument: true, ambiguousHandoff: true, replayRejected: true, offlineDeviceRejected: true, collection: true, missingFiles: true, realPortableZip: true, shareFromExportResult: true, shareFromRealSticker: true, outputSurvivesReload: true, output: data }));
 } catch (error) {
   console.error(log);
   await page?.screenshot({ path: path.join(base, "failure.png"), animations: "disabled" }).catch(() => {});

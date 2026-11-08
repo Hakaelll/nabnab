@@ -13,6 +13,7 @@ type Review = Omit<Preview, "token">;
 interface Hooks {
   command<T>(name: string, args?: Record<string, unknown>): Promise<T>;
   item(id: string): LibraryItem | undefined;
+  refreshLibrary(): Promise<void>;
   package(ids: string[]): void;
   afterClose(): void;
   t: Copy;
@@ -35,8 +36,12 @@ export function createDeviceShare(hooks: Hooks) {
   const textCount = (size: number) => `${size} / ${maxTextBytes} B`;
   const textLimitNote = (size: number) => size > maxTextBytes
     ? t("El texto supera 8 KiB. Acórtalo para continuar.", "The text exceeds 8 KiB. Shorten it to continue.") : "";
+  const isAvailable = (id: string) => {
+    const item = hooks.item(id);
+    return item !== undefined && !item.missing;
+  };
   function selection(): Payload | null {
-    if (mode === "files") return ids.length > 0 && ids.length <= maxFiles ? { kind: "files", ids } : null;
+    if (mode === "files") return ids.length > 0 && ids.length <= maxFiles && ids.every(isAvailable) ? { kind: "files", ids } : null;
     if (mode === "link") return link.trim() ? { kind: "link", url: link.trim() } : null;
     return text.trim() && textBytes() <= maxTextBytes ? { kind: "text", text } : null;
   }
@@ -75,7 +80,11 @@ export function createDeviceShare(hooks: Hooks) {
       <div><span class="field-note">${t("Dispositivo", "Device")}</span><strong>${h(deviceLabel(review.device))}</strong></div>
       <div><span class="field-note">${review.entries.length} ${review.entries.length === 1 ? t("elemento", "item") : t("elementos", "items")}</span><strong>${h(bytesLabel(review.total))}</strong></div>
       ${showEntries ? `<ul aria-label="${t("Contenido revisado", "Reviewed content")}">${review.entries.map(item => `<li><span>${h(item.name)}</span><small>${h(bytesLabel(item.bytes))}</small></li>`).join("")}</ul>` : ""}`;
-    const files = ids.map(hooks.item).filter(item => item !== undefined);
+    const files = mode === "files" ? ids.map(hooks.item).filter(item => item !== undefined) : [];
+    const available = files.filter(item => !item.missing);
+    const missing = files.filter(item => item.missing);
+    const removed = mode === "files" ? ids.length - files.length : 0;
+    const unavailable = missing.length + removed;
     const help = status?.state === "missing" ? t("Instala KDE Connect por separado o selecciona el ejecutable de una instalación existente.", "Install KDE Connect separately or select the executable from an existing installation.")
       : status?.state === "offline" ? t("Abre KDE Connect en Windows y actualiza los dispositivos.", "Open KDE Connect in Windows and refresh the devices.")
       : status?.state === "incompatible" ? t("Esta instalación no expone los comandos de envío de KDE Connect.", "This installation does not expose the KDE Connect share commands.")
@@ -90,9 +99,19 @@ export function createDeviceShare(hooks: Hooks) {
         ${reviewContent(preview, true)}
         <div class="device-share-footer">${button("back", t("Editar envío", "Edit share"), "quiet", Boolean(busy))}${button("send", busy ? t("Entregando a KDE Connect…", "Handing off to KDE Connect…") : t("Confirmar envío", "Confirm share"), "primary", Boolean(busy))}</div></section>` : `<section class="device-share-fields">
         <div class="filter-tabs" role="group" aria-label="${t("Qué quieres enviar", "What to share")}">${([['files', t("Archivos", "Files")], ['link', t("Enlace público", "Public link")], ['text', t("Texto", "Text")]] as const).map(([kind, caption]) => `<button type="button" id="share-${kind}" data-share-action="${kind}" aria-pressed="${mode === kind}" ${busy ? "disabled" : ""}>${h(caption)}</button>`).join("")}</div>
-        ${mode === "files" ? `<div class="device-share-files">${files.length ? `<strong>${files.length} ${t("archivo(s) seleccionado(s)", "selected file(s)")}</strong><ul>${files.slice(0, 5).map(file => `<li>${h(file.name)}</li>`).join("")}</ul>${files.length > 5 ? `<p class="field-note">+${files.length - 5} ${t("más", "more")}</p>` : ""}` : `<p class="field-note">${t("Selecciona archivos en Biblioteca o abre un resultado de Descargas.", "Select files in Library or open an output in Downloads.")}</p>`}
-          ${ids.length > maxFiles ? `<p class="field-note">${t("Para más de 50 archivos, prepara una colección portátil.", "For more than 50 files, prepare a portable collection.")}</p>` : ""}
-          ${ids.length > 1 ? `${button("zip", t("Preparar ZIP de la selección", "Prepare selection ZIP"), "secondary", Boolean(busy))}<p class="field-note">${t("Podrás revisar el envío en Colección portátil cuando el ZIP esté listo.", "You can review the share in Portable collection once the ZIP is ready.")}</p>` : ""}</div>` : mode === "link"
+        ${mode === "files" ? `<div class="device-share-files">
+          ${available.length ? `<strong>${available.length} ${available.length === 1 ? t("archivo disponible", "available file") : t("archivos disponibles", "available files")}</strong>
+            <ul>${available.slice(0, 5).map(file => `<li>${h(file.name)}</li>`).join("")}</ul>
+            ${available.length > 5 ? `<p class="field-note">+${available.length - 5} ${t("más", "more")}</p>` : ""}` : ""}
+          ${!ids.length ? `<p class="field-note">${t("Selecciona archivos en Biblioteca o abre un resultado de Descargas.", "Select files in Library or open an output in Downloads.")}</p>` : ""}
+          ${unavailable ? `<div class="device-share-missing">
+            <strong>${unavailable} ${unavailable === 1 ? t("archivo no disponible", "unavailable file") : t("archivos no disponibles", "unavailable files")}</strong>
+            ${missing.length ? `<ul aria-label="${t("Archivos ausentes", "Missing files")}" ${missing.length > 4 ? 'tabindex="0"' : ""}>${missing.map(file => `<li>${h(file.name)}</li>`).join("")}</ul>` : ""}
+            ${removed ? `<p class="field-note">${removed} ${removed === 1 ? t("ya no está en Biblioteca.", "is no longer in Library.") : t("ya no están en Biblioteca.", "are no longer in Library.")}</p>` : ""}
+            ${button("exclude-missing", t("Quitar del envío", "Remove from share"), "secondary", Boolean(busy))}</div>` : ""}
+          ${ids.length > maxFiles && !unavailable ? `<p class="field-note">${t("Para más de 50 archivos, prepara una colección portátil.", "For more than 50 files, prepare a portable collection.")}</p>` : ""}
+          ${ids.length > 1 ? `<div class="device-share-package">${button("zip", t("Preparar ZIP de la selección", "Prepare selection ZIP"), "secondary", Boolean(busy || unavailable))}
+            ${unavailable ? "" : `<p class="field-note">${t("Podrás revisar el envío en Colección portátil cuando el ZIP esté listo.", "You can review the share in Portable collection once the ZIP is ready.")}</p>`}</div>` : ""}</div>` : mode === "link"
           ? `<label for="share-url">${t("Enlace HTTP o HTTPS", "HTTP or HTTPS link")}<input id="share-url" type="url" maxlength="2048" value="${h(link)}" ${busy ? "disabled" : ""}></label><p class="field-note">${t("Para enlaces privados o con firma, elige el archivo local en Archivos.", "For private or signed links, choose the local file under Files.")}</p>`
           : textField()}
         <label for="share-device">${t("Dispositivo emparejado", "Paired device")}<select id="share-device" ${busy || !devices.length ? "disabled" : ""}>${option("", t("Elige un dispositivo", "Choose a device"), deviceId)}${devices.map(device => option(device.id, deviceLabel(device), deviceId)).join("")}</select></label>
@@ -111,7 +130,12 @@ export function createDeviceShare(hooks: Hooks) {
     const revision = ++generation;
     busy = kind; error = ""; draw();
     try { await work(revision); }
-    catch (cause) { if (revision === generation) error = errorLabel(cause); }
+    catch (cause) {
+      if (revision === generation) {
+        error = errorLabel(cause);
+        if (mode === "files" && kind !== "discover") await hooks.refreshLibrary().catch(() => {});
+      }
+    }
     finally { if (revision === generation) { busy = null; draw(); } }
   }
 
@@ -129,7 +153,15 @@ export function createDeviceShare(hooks: Hooks) {
     if (name === "close" && busy !== "send") { dialog?.close(); return; }
     if (busy) return;
     if (name === "refresh" || name === "choose") { await refresh(name === "choose"); return; }
-    if (name === "zip") { const current = ids.slice(); dialog?.close(); hooks.package(current); return; }
+    if (name === "zip" && ids.length > 1 && ids.every(isAvailable)) { const current = ids.slice(); dialog?.close(); hooks.package(current); return; }
+    if (name === "exclude-missing") {
+      ids = ids.filter(isAvailable); error = ""; draw();
+      for (const id of ["review", "device", "files"]) {
+        const field = dialog?.querySelector<HTMLElement>(`#share-${id}:enabled`);
+        if (field) { field.focus(); break; }
+      }
+      return;
+    }
     if (name === "files" || name === "link" || name === "text") { mode = name; error = ""; draw(); return; }
     if (name === "back") { discard(); error = ""; draw(); return; }
     if (name === "review") {

@@ -10,6 +10,12 @@
 .device-share-text-meta [role="status"] { color: var(--error); }
 .device-share-text-meta output { margin-inline-start: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
 .device-share-files { padding: 10px; border: 1px solid var(--border); border-radius: 8px; overflow-wrap: anywhere; }
+.device-share-missing { padding-inline-start: 10px; border-inline-start: 2px solid var(--error); }
+.device-share-files > ul + .device-share-missing,
+.device-share-files > p + .device-share-missing,
+.device-share-package { margin-top: 10px; }
+.device-share-missing ul { max-height: 6em; overflow: auto; color: var(--muted); }
+.device-share-missing .button { margin-top: 4px; }
 .device-share-review { grid-template-columns: minmax(0, 1fr) auto; }
 .device-share-review strong { display: block; margin-top: 3px; overflow-wrap: anywhere; }
 .device-share-review ul, .device-share-review .device-share-footer { grid-column: 1 / -1; }

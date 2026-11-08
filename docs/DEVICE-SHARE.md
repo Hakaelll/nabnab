@@ -6,6 +6,10 @@ Nabnab usa una instalación existente de KDE Connect para Windows. Empareja el t
 2. Elige un dispositivo emparejado y accesible. Pulsa **Revisar envío** para ver el contenido y el total de bytes. Los archivos se leen desde sus ubicaciones en Biblioteca. Para empaquetar una selección, pulsa **Preparar ZIP de la selección** y revisa su contenido antes de crearlo. Las notas, los metadatos opcionales y el OCR vienen desmarcados. Cuando termine la exportación, **Revisar envío del ZIP** aparece en Colección portátil con el nombre y tamaño reales del archivo. También puedes abrir el trabajo en Descargas.
 3. Confirma el envío. Si un archivo cambia o el dispositivo deja de estar accesible durante la revisión, vuelve a comprobar la selección. Cada revisión permite una sola confirmación y caduca tras cinco minutos.
 
+Si un archivo de la selección falta en el disco, aparece por separado como no disponible. Pulsa **Quitar del envío** para revisar o empaquetar los archivos restantes. La entrada del archivo ausente sigue en Biblioteca.
+
+![Selección con un archivo disponible y otro ausente](device-share-missing.png)
+
 Puedes enviar hasta 50 archivos por solicitud, un enlace público o hasta 8 KiB de texto. El contador mide bytes UTF-8 y **Revisar envío** se habilita cuando el texto cabe. Los enlaces con credenciales, fragmentos, destinos locales o parámetros de acceso se rechazan también cuando aparecen en el texto. Se admite el parámetro público `v` de los enlaces de vídeo de YouTube. Para enlaces privados puedes elegir la copia local.
 
 **Entregado a KDE Connect** indica que la CLI respondió sin errores al pasarle la solicitud. Para archivos, nabnab espera una línea de respuesta por archivo. Consulta KDE Connect para ver el progreso o confirmar la recepción. Si la CLI devuelve una respuesta parcial, emite un diagnóstico o tarda demasiado, nabnab muestra **Entrega a KDE Connect sin confirmar**. El resultado conserva el destino y los archivos revisados. Comprueba ambos dispositivos antes de iniciar otra revisión. [Comandos de la CLI de KDE Connect 26.08.2](https://github.com/KDE/kdeconnect-kde/blob/v26.08.2/cli/kdeconnect-cli.cpp)
