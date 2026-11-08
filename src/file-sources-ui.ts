@@ -103,7 +103,7 @@ export function createFileSources(hooks: FileSourceHooks) {
   let reader = "";
   let chapterLanguage = "";
   let query = "";
-  let zenodoReview = false;
+  let publicSelectionReview = false;
   let busy: "inspect" | "queue" | "connect" | "configure" | "revoke" | null = null;
   let error = "";
   let activeRequest = 0;
@@ -114,8 +114,12 @@ export function createFileSources(hooks: FileSourceHooks) {
   const publicSelected = new Map<string, PublicAsset>();
   const cloudSelected = new Map<string, CloudEntry>();
   const exports = new Map<string, string>();
-  function clearPublicSelection() { publicSelected.clear(); zenodoReview = false; }
+  function clearPublicSelection() { publicSelected.clear(); publicSelectionReview = false; }
   function clearSelection() { clearPublicSelection(); cloudSelected.clear(); exports.clear(); }
+  function canReviewPublicSelection() {
+    return tab === "public" && publicPage !== null && publicPage.assets.length > 0
+      && (publicPage.provider === "zenodo" || publicPage.provider === "librivox");
+  }
   function status(provider: CloudProvider) { return connections?.find(value => value.provider === provider); }
   async function loadConnections() {
     error = "";
@@ -218,21 +222,21 @@ export function createFileSources(hooks: FileSourceHooks) {
       && (!chapterLanguage || language === chapterLanguage)
       && `${asset.filename} ${asset.title} ${asset.mime} ${asset.version ?? ""} ${asset.audiobook?.reader ?? ""} ${language} ${displayLibrivoxLanguage(language)}`.toLowerCase().includes(query.toLowerCase());
   }
-  function readerFilter(assets: PublicAsset[]): string {
+  function readerFilter(assets: PublicAsset[], reviewing: boolean): string {
     const credits = [...new Set(assets.map(asset => asset.audiobook?.reader ?? "").filter(Boolean))];
     if (credits.length < 2) return "";
-    return `<select id="file-source-reader" aria-label="${t("Lectura", "Narration")}">
+    return `<select id="file-source-reader" aria-label="${t("Lectura", "Narration")}" ${reviewing ? "disabled" : ""}>
       ${option("", t("Todas las lecturas", "All narrations"), reader)}
       ${credits.map(credit => option(credit, credit, reader)).join("")}
     </select>`;
   }
-  function chapterLanguageFilter(assets: PublicAsset[]): string {
+  function chapterLanguageFilter(assets: PublicAsset[], reviewing: boolean): string {
     const languages = new Set(assets.map(asset => asset.audiobook?.language ?? ""));
     if (languages.size < 2 && !chapterLanguage) return "";
     const choices = [...languages].filter(Boolean)
       .map(name => ({ name, label: displayLibrivoxLanguage(name) }))
       .sort((a, b) => a.label.localeCompare(b.label));
-    return `<select id="file-source-chapter-language" aria-label="${t("Idioma del capítulo", "Chapter language")}">
+    return `<select id="file-source-chapter-language" aria-label="${t("Idioma del capítulo", "Chapter language")}" ${reviewing ? "disabled" : ""}>
       ${option("", t("Todos los idiomas", "All languages"), chapterLanguage)}
       ${choices.map(({ name, label }) => option(name, label, chapterLanguage)).join("")}
     </select>`;
@@ -253,19 +257,19 @@ export function createFileSources(hooks: FileSourceHooks) {
       t(`Registro ${record.recordId}`, `Record ${record.recordId}`), record.familyId && t(`Familia ${record.familyId}`, `Family ${record.familyId}`)];
     return `<p class="field-note">${h(metadata.filter(Boolean).join(" · "))}</p>`;
   }
-  function publicRows(visible: PublicAsset[]): string {
+  function publicRows(visible: PublicAsset[], reviewing: boolean): string {
     if (isZenodoHistory(publicPage)) return publicPage?.entries.length ? "" : `<p class="file-source-empty">${t("Zenodo no devolvió versiones públicas para esta familia.", "Zenodo returned no public versions for this family.")}</p>`;
     if (!publicPage || !publicPage.assets.length && publicPage.entries.length) return "";
     const { provider, rights } = publicPage;
     const research = provider === "arxiv" || provider === "librivox";
     const copies = provider === "arxiv" ? arxivCopies(hooks.library()) : null;
-    const reviewing = provider === "zenodo" && zenodoReview;
-    const group = provider === "arxiv" ? t("Versiones del PDF", "PDF versions") : provider === "librivox" ? t("Capítulos", "Chapters")
+    const group = provider === "arxiv" ? t("Versiones del PDF", "PDF versions")
+      : provider === "librivox" ? reviewing ? t("Capítulos seleccionados", "Selected chapters") : t("Capítulos", "Chapters")
       : reviewing ? t("Archivos seleccionados", "Selected files") : t("Archivos disponibles", "Available files");
-    const empty = reviewing ? t("No hay archivos seleccionados.", "No files are selected.")
+    const empty = reviewing ? provider === "librivox" ? t("No hay capítulos seleccionados.", "No chapters are selected.") : t("No hay archivos seleccionados.", "No files are selected.")
       : provider === "librivox" ? t("No hay capítulos con estos filtros.", "No chapters match these filters.")
         : t("No hay archivos con este filtro.", "No files match this filter.");
-    const sectionHeading = research ? `<div class="file-source-list-heading"><h3>${group}</h3>${provider === "librivox" && visible.length ? action("file-source-select-chapters", t("Seleccionar capítulos visibles", "Select visible chapters"), "list", "quiet", busy || publicSelected.size >= 199 ? "disabled" : "") : ""}</div>` : "";
+    const sectionHeading = research ? `<div class="file-source-list-heading"><h3>${group}</h3>${provider === "librivox" && !reviewing && visible.length ? action("file-source-select-chapters", t("Seleccionar capítulos visibles", "Select visible chapters"), "list", "quiet", busy || publicSelected.size >= 199 ? "disabled" : "") : ""}</div>` : "";
     return `${sectionHeading}<div class="file-source-list${research ? " file-source-research-list" : ""}" role="group" aria-label="${group}">${visible.map(asset => {
       const chapter = asset.audiobook;
       const version = provider === "arxiv" ? asset.version?.match(/^v(\d+)$/)?.[1] : undefined;
@@ -326,7 +330,8 @@ export function createFileSources(hooks: FileSourceHooks) {
     const languageBrowse = isLibrivoxLanguageBrowse(publicPage);
     const chapters = isPublic && publicPage?.provider === "librivox" ? publicPage.assets : null;
     const zenodoFiles = isPublic && publicPage?.provider === "zenodo" && !zenodoHistory;
-    const reviewing = zenodoFiles && zenodoReview;
+    const canReview = canReviewPublicSelection();
+    const reviewing = canReview && publicSelectionReview;
     const visibleAssets = isPublic ? publicPage?.assets.filter(reviewing ? asset => publicSelected.has(asset.id) : matchesPublicFilter) ?? [] : [];
     const loadedCount = isPublic ? publicPage?.assets.length ?? 0 : cloudPage?.entries.length ?? 0;
     const filterLabel = chapters ? t("Buscar capítulos cargados", "Search loaded chapters")
@@ -354,12 +359,12 @@ export function createFileSources(hooks: FileSourceHooks) {
         ${loadedCount ? `<div class="file-source-filter">
           <label>${icon("search")}<input id="file-source-query" type="search" value="${reviewing ? "" : h(query)}" placeholder="${reviewing ? t("Búsqueda en pausa", "Search paused") : filterLabel}" aria-label="${filterLabel}" ${reviewing ? "disabled" : ""}></label>
           ${isPublic && publicPage?.provider === "archive" ? `<select id="file-source-kind" aria-label="${t("Tipo de archivo", "File type")}">${option("all", t("Originales y derivados", "Originals and derivatives"), filter)}${option("original", t("Solo originales", "Originals only"), filter)}${option("derivative", t("Solo derivados", "Derivatives only"), filter)}</select>` : ""}
-          ${chapters ? chapterLanguageFilter(chapters) + readerFilter(chapters) : ""}
-          ${zenodoFiles ? action("file-source-review", t("Solo seleccionados", "Selected only"), undefined, "quiet", `aria-pressed="${reviewing}" ${busy ? "disabled" : ""}`) : ""}
+          ${chapters ? chapterLanguageFilter(chapters, reviewing) + readerFilter(chapters, reviewing) : ""}
+          ${canReview ? action("file-source-review", t("Solo seleccionados", "Selected only"), undefined, "quiet", `aria-pressed="${reviewing}" ${busy ? "disabled" : ""}`) : ""}
           <span${chapters || zenodoFiles ? ' aria-live="polite"' : ""}>${chapters ? t(`${visibleAssets.length} de ${chapters.length} capítulos cargados`, `${visibleAssets.length} of ${chapters.length} loaded chapters`)
             : zenodoFiles ? t(`${visibleAssets.length} de ${loadedCount} archivos cargados`, `${visibleAssets.length} of ${loadedCount} loaded files`)
               : `${loadedCount} ${t("cargados", "loaded")}`}</span>
-        </div>` : ""}${isPublic ? publicRows(visibleAssets) : cloudRows()}
+        </div>` : ""}${isPublic ? publicRows(visibleAssets, reviewing) : cloudRows()}
         ${cursor ? `<div class="file-source-pagination"><p>${languageBrowse ? t(`Página ${Number(cursor) - 1} · ${publicPage?.entries.length ?? 0} ediciones únicas`, `Page ${Number(cursor) - 1} · ${publicPage?.entries.length ?? 0} unique editions`) : isSearch ? t(`${publicPage?.entries.length ?? 0} resultados cargados.`, `${publicPage?.entries.length ?? 0} results loaded.`) : t("Solo se ha cargado una parte del origen. La selección incluye únicamente archivos revisados.", "Only part of this source has loaded. Selection includes reviewed files only.")}</p>${action("file-source-more", t("Cargar más", "Load more"), "add", "secondary", `data-cursor="${h(cursor)}" ${busy ? "disabled" : ""}`)}</div>` : !isPublic && cloudPage?.partial ? `<p class="field-note">${t("El origen informa de resultados parciales. Revisa los avisos antes de descargar.", "The source reports partial results. Review warnings before downloading.")}</p>` : ""}</div>` : !busy && isPublic && !catalogReturn ? `<div class="file-source-intro">${icon("folder")}<h2>${t("Elige qué conservar", "Choose what to keep")}</h2><p>${t("Consulta versiones y archivos antes de descargar. No se selecciona ningún formato automáticamente.", "Review versions and files before downloading. No format is selected automatically.")}</p><div><span>GitHub</span><small>${t("Versiones y assets publicados", "Versions and published assets")}</small><span>Internet Archive</span><small>${t("Originales, derivados y procedencia", "Originals, derivatives and provenance")}</small><span>Commons</span><small>${t("Imágenes y atribución por archivo", "Images and attribution per file")}</small></div></div>` : ""}${selectionFooter()}<p class="file-source-footnote">${t("Descargar conserva una copia local. No ejecuta archivos, instala programas ni modifica el origen.", "Downloading keeps a local copy. It does not run files, install software or modify the source.")}</p></section>`;
   }
   function handleInput(element: HTMLElement): boolean {
@@ -375,8 +380,8 @@ export function createFileSources(hooks: FileSourceHooks) {
         const asset = publicPage?.assets.find(value => value.id === publicId);
         if (asset) { if (element.checked && publicSelected.size < 199) publicSelected.set(publicId, asset); else publicSelected.delete(publicId); }
         hooks.render();
-        if (asset && publicPage?.provider === "zenodo") {
-          const selector = zenodoReview && !element.checked ? '[data-action="file-source-review"]' : `[data-file-source-select="${CSS.escape(publicId)}"]`;
+        if (asset && canReviewPublicSelection()) {
+          const selector = publicSelectionReview && !element.checked ? '[data-action="file-source-review"]' : `[data-file-source-select="${CSS.escape(publicId)}"]`;
           document.querySelector<HTMLElement>(selector)?.focus();
         }
         return true;
@@ -509,7 +514,7 @@ export function createFileSources(hooks: FileSourceHooks) {
       case "file-source-cloud-root": if (!busy) { folder = null; sharedUrl = null; trail = []; await browseCloud(); } break;
       case "file-source-more": if (tab === "public") { if (publicPage?.nextCursor) await inspectPublic(publicPage.nextCursor); } else if (cloudPage?.nextCursor) await browseCloud(cloudPage.nextCursor); break;
       case "file-source-review":
-        if (!busy && tab === "public" && publicPage?.provider === "zenodo") { zenodoReview = !zenodoReview; hooks.render(); }
+        if (!busy && canReviewPublicSelection()) { publicSelectionReview = !publicSelectionReview; hooks.render(); }
         break;
       case "file-source-clear":
         if (!busy) {
@@ -550,13 +555,13 @@ export function createFileSources(hooks: FileSourceHooks) {
         });
       } break;
       case "file-source-select-chapters": {
-        if (publicPage?.provider === "librivox") {
+        if (!busy && !publicSelectionReview && publicPage?.provider === "librivox") {
           for (const asset of publicPage.assets) {
             if (publicSelected.size >= 199) break;
             if (matchesPublicFilter(asset)) publicSelected.set(asset.id, asset);
           }
           hooks.render();
-          document.querySelector<HTMLElement>('[data-action="file-source-queue"]')?.focus();
+          document.querySelector<HTMLElement>('[data-action="file-source-review"]')?.focus();
         }
       } break;
       case "file-source-search-mode": {

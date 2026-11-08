@@ -8,7 +8,7 @@ import path from "node:path";
 
 const { chromium } = createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODULE || "playwright");
 const root = path.resolve(import.meta.dirname, "..");
-const base = path.join(root, "artifacts/native-research");
+const base = path.resolve(process.env.NABNAB_RESEARCH_ARTIFACTS ?? path.join(root, "artifacts/native-research"));
 await mkdir(base, { recursive: true });
 const data = await mkdtemp(path.join(base, "run-"));
 const output = path.join(data, "output");
@@ -158,11 +158,16 @@ try {
     assert.equal(await checkboxes.first().isChecked(), true);
     await language.selectOption({ label: "Inglés" });
     assert.equal(await page.locator("[data-file-source-select]:checked").count(), 0);
-    await language.selectOption({ label: "Español" });
+    const review = page.getByRole("button", { name: "Solo seleccionados", exact: true });
+    await review.press("Enter");
+    assert.equal(await review.getAttribute("aria-pressed"), "true");
+    assert.equal(await language.inputValue(), "English");
+    assert.equal(await language.isDisabled(), true);
+    assert.deepEqual(await checkboxes.evaluateAll(boxes => boxes.map(box => box.dataset.fileSourceSelect)), [chapter.id]);
     assert.equal(await checkboxes.first().isChecked(), true);
     assert.equal(await page.locator(".file-source-selection-title strong").textContent(), "1 seleccionado");
     await page.locator(".file-source-result-heading").evaluate(heading => heading.scrollIntoView({ block: "start" }));
-    await page.locator(".file-source-results").screenshot({ path: path.join(data, "librivox-chapter-filters.png") });
+    await page.locator(".file-source-results").screenshot({ path: path.join(data, "librivox-chapter-review.png") });
     await page.locator('[data-action="file-source-queue"]').click();
     const result = await wait(async () => {
       const snapshot = await getSnapshot();

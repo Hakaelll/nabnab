@@ -332,6 +332,7 @@ try {
     assert.deepEqual(await page.locator(".file-source-research-list .file-source-file-icon").allTextContents(), ["01", "03"]);
     await page.locator("[data-action='file-source-select-chapters']").click();
     assert.equal(await page.locator("[data-file-source-select]:checked").count(), 2);
+    assert.equal(await review.evaluate(button => button === document.activeElement), true);
     await chapterLanguage.focus();
     await chapterLanguage.selectOption({ label: "Francés" });
     assert.equal(await chapterLanguage.evaluate(select => select === document.activeElement), true);
@@ -340,9 +341,39 @@ try {
     await narration.selectOption("Second Reader");
     assert.deepEqual(await page.locator(".file-source-research-list .file-source-file-icon").allTextContents(), ["02"]);
     assert.equal(await page.locator("[data-file-source-select]:checked").count(), 0);
+    const chapterQuery = page.locator("#file-source-query");
+    await chapterQuery.fill("Second Reader");
+    for (const [width, height] of [[1180, 780], [900, 620]]) {
+      await page.setViewportSize({ width, height });
+      await page.locator(".file-source-filter").scrollIntoViewIfNeeded();
+      await page.screenshot({ path: `${directory}/librivox-selection-filtered-${width}.png` });
+    }
+    await review.press("Enter", { timeout: 2500 });
+    assert.equal(await review.getAttribute("aria-pressed"), "true");
+    assert.equal(await chapterQuery.isDisabled(), true);
+    assert.equal(await chapterLanguage.isDisabled(), true);
+    assert.equal(await narration.isDisabled(), true);
+    assert.equal(await page.locator("[data-action='file-source-select-chapters']").count(), 0);
+    const selectedChapters = page.getByRole("group", { name: "Capítulos seleccionados" });
+    assert.deepEqual(await selectedChapters.locator(".file-source-file-icon").allTextContents(), ["01", "03"]);
+    for (const [width, height] of [[1180, 780], [900, 620]]) {
+      await page.setViewportSize({ width, height });
+      await page.locator(".file-source-filter").scrollIntoViewIfNeeded();
+      await checkNoHorizontalOverflow(`LibriVox selected chapters ${width}`);
+      await page.screenshot({ path: `${directory}/librivox-selection-review-${width}.png` });
+    }
+    await selectedChapters.locator("[data-file-source-select='librivox:52:1']").press("Space");
+    assert.equal(await review.evaluate(button => button === document.activeElement), true);
+    assert.deepEqual(await selectedChapters.locator(".file-source-file-icon").allTextContents(), ["03"]);
+    await review.press("Enter");
+    assert.equal(await chapterQuery.inputValue(), "Second Reader");
+    assert.equal(await chapterLanguage.inputValue(), "French");
+    assert.equal(await narration.inputValue(), "Second Reader");
+    assert.deepEqual(await page.locator(".file-source-research-list .file-source-file-icon").allTextContents(), ["02"]);
+    await chapterQuery.fill("");
     await chapterLanguage.selectOption({ label: "Español" });
     await narration.selectOption("Fixture Reader");
-    assert.equal(await page.locator("[data-file-source-select]:checked").count(), 2);
+    assert.equal(await page.locator("[data-file-source-select]:checked").count(), 1);
     for (const [width, height] of [[1180, 780], [900, 620]]) {
       await page.setViewportSize({ width, height });
       await page.locator(".file-source-list").scrollIntoViewIfNeeded();
@@ -353,14 +384,14 @@ try {
     await page.waitForFunction(() => window.fileSourceFixture.calls.some(call =>
       call.cmd === "queue_public_files" && call.args.sourceUrl.includes("librivox.org")));
     const queuedChapters = await page.evaluate(() => window.fileSourceFixture.calls.filter(call => call.cmd === "queue_public_files").at(-1).args.assetIds);
-    assert.deepEqual(queuedChapters, ["librivox:52:1", "librivox:52:3"]);
+    assert.deepEqual(queuedChapters, ["librivox:52:3"]);
     await page.getByRole("button", { name: "Volver a resultados" }).click();
     await page.getByRole("button", { name: "Seguir idioma" }).click();
     assert.equal(await page.locator("#source-url").inputValue(), "https://librivox.org/search/?language_id=5");
     assert.equal(await page.locator("#source-exploration-limit").getAttribute("step"), "25");
     await page.locator("[data-page='platforms']").click();
     await page.locator("[data-action='open-fileSources']").first().click();
-    report.push("arXiv author search, version selection and keyboard return passed. Zenodo DOI with reviewed volume and LibriVox chapter selection by language and narrator passed.");
+    report.push("arXiv version selection and keyboard return passed. Zenodo file review and LibriVox chapter review across filters passed.");
 
     await inspect("https://github.com/example/empty");
     await page.getByRole("heading", { name: "Empty release", exact: true }).waitFor();
