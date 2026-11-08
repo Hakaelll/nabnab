@@ -1,9 +1,18 @@
-use super::{cancelled, valid_relative, Entry, Stamp};
+use super::{
+    cancelled, valid_relative, Entry, Stamp, WEBDAV_CHANGED as CHANGED, WEBDAV_INTERRUPTED,
+    WEBDAV_INVALID_RANGE as INVALID_RANGE,
+};
+use crate::{direct, model::Progress};
 use quick_xml::{events::Event, name::ResolveResult, NsReader};
 use reqwest::{header, redirect::Policy, Certificate, Client, Method, Response, StatusCode};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashSet, fs::OpenOptions, io::Write, net::IpAddr, path::Path, time::Duration,
+    collections::HashSet,
+    fs,
+    io::Write,
+    net::IpAddr,
+    path::Path,
+    time::{Duration, Instant},
 };
 use tokio::sync::watch;
 use url::Url;
@@ -13,7 +22,7 @@ const MAX_XML: usize = 4 * 1024 * 1024;
 const MAX_CERT_PEM: usize = 8192;
 const MAX_ENTRIES: usize = 2_000;
 const MAX_DOWNLOAD: u64 = 128 * 1024 * 1024 * 1024;
-const CHANGED: &str = "The WebDAV file changed. Refresh the folder and select it again.";
+const INTERRUPTED: &str = "The WebDAV file transfer was interrupted.";
 
 #[derive(Clone, Serialize, Deserialize)]
 pub(super) struct Config {
@@ -242,15 +251,16 @@ fn request(client: &Client, config: &Config, method: Method, url: Url) -> reqwes
         .header("Apply-To-Redirect-Ref", "T")
 }
 
-async fn send(request: reqwest::RequestBuilder, wanted: StatusCode) -> Result<Response, String> {
+async fn send(request: reqwest::RequestBuilder, wanted: &[StatusCode]) -> Result<Response, String> {
     let response = request.send().await.map_err(|_| "Could not connect to the WebDAV server. Check its address, availability and HTTPS certificate.")?;
     let status = response.status();
-    if status == wanted {
+    if wanted.contains(&status) {
         return Ok(response);
     }
     Err(match status {
         StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => "The WebDAV server denied access. Check the username, app password and folder permissions.".into(),
         StatusCode::PRECONDITION_FAILED => CHANGED.into(),
+        StatusCode::RANGE_NOT_SATISFIABLE if wanted.contains(&StatusCode::PARTIAL_CONTENT) => INVALID_RANGE.into(),
         _ if status.is_redirection() => "The WebDAV server redirected the request. Configure its final HTTPS folder URL.".into(),
         _ => format!("The WebDAV server returned HTTP {}.", status.as_u16()),
     })
@@ -570,7 +580,7 @@ async fn properties(
             .header("Depth", if directory { "1" } else { "0" })
             .header(header::CONTENT_TYPE, "application/xml; charset=utf-8")
             .body(DAV_BODY),
-        StatusCode::MULTI_STATUS,
+        &[StatusCode::MULTI_STATUS],
     )
     .await?;
     if response
@@ -623,6 +633,13 @@ fn precondition(stamp: &Stamp) -> Result<(header::HeaderName, &str), String> {
     Err("This WebDAV server supplied no verifiable file version. You can keep a reference or refresh its metadata before copying.".into())
 }
 
+pub(super) fn resume_size(stamp: &Stamp) -> Option<u64> {
+    stamp
+        .size
+        .filter(|size| *size > 0 && *size <= MAX_DOWNLOAD)
+        .filter(|_| precondition(stamp).is_ok_and(|(condition, _)| condition == header::IF_MATCH))
+}
+
 async fn check_version(
     client: &Client,
     config: &Config,
@@ -646,11 +663,7 @@ fn verify_response(
     content_length: Option<u64>,
     expected: &Stamp,
 ) -> Result<(), String> {
-    if headers.contains_key(header::CONTENT_RANGE)
-        || headers
-            .get(header::CONTENT_ENCODING)
-            .is_some_and(|value| !value.as_bytes().eq_ignore_ascii_case(b"identity"))
-    {
+    if headers.contains_key(header::CONTENT_RANGE) {
         return Err("The WebDAV server returned a partial or encoded file response.".into());
     }
     if content_length.is_some_and(|actual| {
@@ -658,10 +671,22 @@ fn verify_response(
     }) {
         return Err(CHANGED.into());
     }
+    verify_representation(headers, expected)
+}
+
+fn verify_representation(headers: &header::HeaderMap, expected: &Stamp) -> Result<(), String> {
+    if headers
+        .get_all(header::CONTENT_ENCODING)
+        .iter()
+        .any(|value| !value.as_bytes().eq_ignore_ascii_case(b"identity"))
+    {
+        return Err("The WebDAV server returned a partial or encoded file response.".into());
+    }
     let (validator, _) = precondition(expected)?;
     if let Some(etag) = &expected.etag {
         let actual = headers.get(header::ETAG);
-        if actual.is_some_and(|actual| actual.as_bytes() != etag.as_bytes())
+        if headers.get_all(header::ETAG).iter().count() > 1
+            || actual.is_some_and(|actual| actual.as_bytes() != etag.as_bytes())
             || actual.is_none() && validator == header::IF_MATCH
         {
             return Err(CHANGED.into());
@@ -679,12 +704,38 @@ fn verify_response(
     Ok(())
 }
 
+fn verify_range(
+    headers: &header::HeaderMap,
+    content_length: Option<u64>,
+    offset: u64,
+    expected: &Stamp,
+) -> Result<(), String> {
+    verify_representation(headers, expected)?;
+    let size = resume_size(expected)
+        .filter(|size| offset > 0 && offset < *size)
+        .ok_or(INVALID_RANGE)?;
+    let mut ranges = headers.get_all(header::CONTENT_RANGE).iter();
+    let range = ranges
+        .next()
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| direct::content_range(value).ok());
+    if ranges.next().is_some()
+        || range != Some((offset, size - 1, Some(size)))
+        || content_length.is_some_and(|length| length != size - offset)
+    {
+        return Err(INVALID_RANGE.into());
+    }
+    Ok(())
+}
+
 pub(super) async fn download(
     config: &Config,
     relative: &[String],
     expected: &Stamp,
     destination: &Path,
     cancel: watch::Receiver<bool>,
+    run_id: u64,
+    emit: impl Fn(Progress),
 ) -> Result<(), String> {
     if relative.is_empty() || !valid_relative(relative) {
         return Err("Select an individual WebDAV file inside the authorized root.".into());
@@ -693,36 +744,90 @@ pub(super) async fn download(
         return Err("The WebDAV file exceeds the 128 GiB copy limit.".into());
     }
     let (condition, validator) = precondition(expected)?;
+    let resumable = resume_size(expected);
+    let mut offset = if let Some(size) = resumable {
+        direct::partial_len(destination)?
+            .filter(|received| *received < size)
+            .unwrap_or(0)
+    } else {
+        0
+    };
+    let progress = |written: u64| {
+        emit(Progress {
+            request_id: run_id,
+            phase: "downloading".into(),
+            percent: expected
+                .size
+                .filter(|size| *size > 0)
+                .map(|size| written as f64 / size as f64 * 100.0),
+            speed: None,
+            downloaded: Some(written as f64),
+            total: expected.size.map(|size| size as f64),
+        })
+    };
     let root = endpoint(&config.root)?;
     let mut url = root.clone();
     append_path(&mut url, relative, false)?;
     let prepare = async {
         let client = client(&root, config).await?;
         check_version(&client, config, &root, relative, expected).await?;
-        let response = send(
-            request(&client, config, Method::GET, url).header(condition, validator),
-            StatusCode::OK,
-        )
-        .await?;
-        verify_response(response.headers(), response.content_length(), expected)?;
+        let mut download = request(&client, config, Method::GET, url).header(condition, validator);
+        if offset > 0 {
+            download = download.header(header::RANGE, format!("bytes={offset}-"));
+        }
+        let response = send(download, &[StatusCode::OK, StatusCode::PARTIAL_CONTENT]).await?;
         Ok::<_, String>((client, response))
     };
-    let (client, mut response) = tokio::select! { biased;
+    let prepared = tokio::select! { biased;
         _ = cancelled(cancel.clone()) => return Err(crate::engine::CANCELLED.into()),
-        result = prepare => result?,
+        result = prepare => result,
     };
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(destination)
-        .map_err(|_| "Could not create the new local WebDAV copy.")?;
+    let (client, mut response) = match prepared {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            if resumable.is_some() && matches!(error.as_str(), CHANGED | INVALID_RANGE) {
+                let _ = fs::remove_file(destination);
+            } else if offset > 0 {
+                progress(offset);
+                return Err(format!("{WEBDAV_INTERRUPTED} {error}"));
+            }
+            return Err(error);
+        }
+    };
+    let validated = if response.status() == StatusCode::PARTIAL_CONTENT {
+        verify_range(
+            response.headers(),
+            response.content_length(),
+            offset,
+            expected,
+        )
+    } else {
+        offset = 0;
+        verify_response(response.headers(), response.content_length(), expected)
+    };
+    if let Err(error) = validated {
+        if resumable.is_some() {
+            let _ = fs::remove_file(destination);
+        }
+        return Err(error);
+    }
+    let mut file = if resumable.is_some() {
+        direct::partial_file(destination, offset)
+            .map_err(|_| "Could not open the local WebDAV copy.")?
+    } else {
+        fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(destination)
+            .map_err(|_| "Could not create the new local WebDAV copy.")?
+    };
+    if offset > 0 {
+        progress(offset);
+    }
+    let mut written = offset;
     let copy = async {
-        let mut written = 0u64;
-        while let Some(chunk) = response
-            .chunk()
-            .await
-            .map_err(|_| "The WebDAV file transfer was interrupted.")?
-        {
+        let mut last = Instant::now();
+        while let Some(chunk) = response.chunk().await.map_err(|_| INTERRUPTED)? {
             written = written
                 .checked_add(chunk.len() as u64)
                 .filter(|length| {
@@ -731,9 +836,13 @@ pub(super) async fn download(
                 .ok_or("The WebDAV file exceeded its inspected size or the copy limit.")?;
             file.write_all(&chunk)
                 .map_err(|_| "Could not write the local WebDAV copy.")?;
+            if last.elapsed() >= Duration::from_millis(200) {
+                progress(written);
+                last = Instant::now();
+            }
         }
         if expected.size.is_some_and(|size| size != written) {
-            return Err(CHANGED.into());
+            return Err(INTERRUPTED.into());
         }
         check_version(&client, config, &root, relative, expected).await?;
         file.sync_all()
@@ -743,9 +852,18 @@ pub(super) async fn download(
         _ = cancelled(cancel) => Err(crate::engine::CANCELLED.into()),
         result = copy => result,
     };
+    let keep = result.as_ref().is_err_and(|error| error == INTERRUPTED)
+        && resumable.is_some_and(|size| written > 0 && written < size)
+        && file.sync_all().is_ok();
     drop(file);
+    if keep {
+        progress(written);
+        return Err(WEBDAV_INTERRUPTED.into());
+    }
     if result.is_err() {
-        let _ = std::fs::remove_file(destination);
+        let _ = fs::remove_file(destination);
+    } else {
+        progress(written);
     }
     result
 }
@@ -756,6 +874,36 @@ mod tests {
 
     const ROOT: &str = "https://files.example.com:8443/dav/My%20Folder/";
     const SELF: &str = r#"<d:response><d:href>https://files.example.com:8443/dav/My%20Folder/</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>"#;
+
+    #[test]
+    fn resume_requires_the_exact_suffix_of_the_reviewed_representation() {
+        let mut expected = Stamp {
+            size: Some(81),
+            modified: None,
+            etag: Some("\"reviewed\"".into()),
+        };
+        let mut headers = header::HeaderMap::new();
+        headers.insert(header::ETAG, "\"reviewed\"".parse().unwrap());
+        headers.insert(header::CONTENT_RANGE, "bytes 30-80/81".parse().unwrap());
+        assert!(verify_range(&headers, Some(51), 30, &expected).is_ok());
+        assert!(verify_range(&headers, Some(50), 30, &expected).is_err());
+        assert!(verify_range(&headers, Some(51), 29, &expected).is_err());
+        assert!(verify_range(&headers, Some(81), 0, &expected).is_err());
+        headers.insert(header::CONTENT_RANGE, "bytes 30-80/*".parse().unwrap());
+        assert!(verify_range(&headers, None, 30, &expected).is_err());
+        headers.insert(header::CONTENT_RANGE, "bytes 30-80/81".parse().unwrap());
+        headers.insert(header::ETAG, "\"new\"".parse().unwrap());
+        assert_eq!(
+            verify_range(&headers, Some(51), 30, &expected).unwrap_err(),
+            CHANGED
+        );
+        headers.insert(header::ETAG, "W/\"reviewed\"".parse().unwrap());
+        expected.etag = Some("W/\"reviewed\"".into());
+        expected.modified = Some("Wed, 21 Oct 2015 07:28:00 GMT".into());
+        assert!(precondition(&expected).is_ok());
+        assert!(resume_size(&expected).is_none());
+        assert!(verify_range(&headers, Some(51), 30, &expected).is_err());
+    }
 
     fn config(root: &str) -> Config {
         Config {

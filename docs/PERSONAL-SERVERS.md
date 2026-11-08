@@ -10,7 +10,9 @@ Abre la conexión, navega por carpetas y marca archivos. **Indexar referencia** 
 
 Desde una referencia, **Revisar en servidor** abre su carpeta y compara los metadatos guardados con los actuales. Si cambia el identificador de versión, el panel lo señala aunque tamaño y fecha coincidan. **Actualizar referencia** guarda los metadatos revisados. **Copiar a mi biblioteca** solicita una copia de la versión seleccionada. Si el archivo desaparece o la carpeta está inaccesible, la referencia sigue disponible para revisarla más tarde.
 
-Las copias verifican los metadatos seleccionados y comprueban el recurso al finalizar. Los reintentos empiezan con una copia nueva. Para WebDAV se exige un ETag fuerte o un tamaño y una fecha de modificación comprobables. SFTP v3 comprueba tamaño y fecha de modificación en el archivo abierto y en la ruta. La precisión de esta última depende del servidor. Un archivo con metadatos insuficientes se puede indexar como referencia.
+Las copias verifican los metadatos seleccionados y comprueban el recurso al finalizar. En WebDAV, si se interrumpe una copia con ETag fuerte y tamaño conocido, **Reanudar** solicita los bytes pendientes de esa versión. **Descartar parcial** elimina los bytes guardados. Si el servidor ignora el rango y devuelve el mismo archivo completo, la copia vuelve a empezar. Si el archivo cambió, nabnab descarta el parcial y pide elegir la versión nueva. Los demás reintentos empiezan con una copia nueva. [Rangos HTTP y combinación de fragmentos](https://www.rfc-editor.org/rfc/rfc9110.html#name-combining-parts)
+
+Para copiar desde WebDAV se exige un ETag fuerte o un tamaño y una fecha de modificación comprobables. SFTP v3 comprueba tamaño y fecha de modificación en el archivo abierto y en la ruta. La precisión de esta última depende del servidor. Un archivo con metadatos insuficientes se puede indexar como referencia.
 
 La exploración consulta una carpeta a la vez y tiene límites de profundidad y tamaño. Las conexiones se limitan a lectura. Desconectar conserva las referencias y copias existentes. El índice de referencias se consulta en la interfaz local.
 
@@ -21,6 +23,10 @@ La exploración consulta una carpeta a la vez y tiene límites de profundidad y 
 La prueba nativa en Windows guardó dos versiones de un archivo en una carpeta montada sintética y dos versiones a través de un servidor WebDAV HTTPS local. En ambos casos rechazó la referencia antigua aunque coincidían tamaño y fecha, y conservó las dos copias tras actualizar la referencia. En WebDAV también comprobó el certificado y el nombre antes de enviar credenciales, el rechazo de rutas fuera de la raíz y el bloqueo de redirecciones. Las huellas SFTP se comprobaron con fixtures. Queda por verificar una transferencia con una instancia Nextcloud, un servidor SFTP o un NAS en red.
 
 Para repetir la prueba nativa, inicia Vite en el puerto 1420 y ejecuta `node tests/native-personal-servers.browser.mjs` con Playwright y el ejecutable de depuración de Windows disponibles. Define `NABNAB_TEST_OPENSSL` con la ruta a OpenSSL 3 para incluir el ensayo WebDAV y generar los certificados efímeros.
+
+La prueba también cortó una copia HTTPS después de 96.000 bytes. Verificó el rango de reanudación, el resultado byte a byte, el reinicio ante una respuesta completa y el descarte de rangos o versiones incompatibles.
+
+![Copia WebDAV interrumpida y acciones de recuperación en Windows, con datos de prueba](personal-server-resume.png)
 
 ![Selección de un archivo remoto y destino de una copia, con datos de prueba](personal-server-selection.png)
 

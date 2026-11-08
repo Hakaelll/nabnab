@@ -253,7 +253,7 @@ fn digits(value: &str) -> Result<u64, String> {
         .map_err(|_| "HTTP range number exceeds its limit.".into())
 }
 
-fn content_range(value: &str) -> Result<(u64, u64, Option<u64>), String> {
+pub(crate) fn content_range(value: &str) -> Result<(u64, u64, Option<u64>), String> {
     let (range, total) = value
         .strip_prefix("bytes ")
         .ok_or("Invalid Content-Range unit.")?
@@ -478,6 +478,10 @@ pub(crate) fn partial_file(path: &Path, offset: u64) -> Result<File, String> {
         return Err("The owned direct partial changed unexpectedly.".into());
     }
     Ok(file)
+}
+
+pub(crate) fn partial_len(path: &Path) -> Result<Option<u64>, String> {
+    Ok(regular(path)?.map(|metadata| metadata.len()))
 }
 
 fn read_resume(staging: &Path, hash: &str) -> Result<Option<Resume>, String> {

@@ -52,6 +52,12 @@ impl Failure {
         let has = |items: &[&str]| items.iter().any(|s| text.contains(s));
         let (code, message, retryable) = if raw == crate::engine::CANCELLED {
             ("cancelled", "Download cancelled.", false)
+        } else if raw.starts_with(crate::personal_servers::WEBDAV_INTERRUPTED) {
+            ("webdav_interrupted", "The WebDAV copy stopped. Retry to continue or discard its partial file.", false)
+        } else if raw == crate::personal_servers::WEBDAV_CHANGED {
+            ("webdav_changed", "The WebDAV file changed. Refresh the folder and select the new version.", false)
+        } else if raw == crate::personal_servers::WEBDAV_INVALID_RANGE {
+            ("webdav_range", "The WebDAV server returned an incompatible byte range. Retry to start a fresh copy.", false)
         } else if raw.starts_with("DUB_TIMING ") {
             ("dubbing_timing", "Some translated cues do not fit. Shorten the indicated cues and generate the voice again.", false)
         } else if raw == "DUB_NO_ORIGINAL" {

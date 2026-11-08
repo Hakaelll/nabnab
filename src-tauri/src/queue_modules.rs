@@ -420,7 +420,7 @@ pub(super) async fn run(app:&AppHandle,state:&Arc<AppState>,job:&Job,staging:&Pa
         },
         Source::PersonalFile {selection} => {
             phase(app, state, &job.id, run_id, JobState::Downloading)?;
-            let file = crate::personal_servers::execute(state, selection, staging, run_id, cancel.clone()).await?;
+            let file = crate::personal_servers::execute(state, selection, staging, run_id, cancel.clone(), emit.clone()).await?;
             Some((file, None, None))
         },
         Source::Attribution {entries} => {

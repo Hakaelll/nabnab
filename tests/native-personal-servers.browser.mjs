@@ -1,8 +1,8 @@
 // Real Tauri and DPAPI with synthetic mounted-folder and HTTPS WebDAV fixtures.
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rename, stat, utimes, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdir, mkdtemp, readdir, readFile, rename, stat, utimes, writeFile } from "node:fs/promises";
 import { createServer } from "node:https";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -38,7 +38,7 @@ await writeFile(path.join(secrets, "personal-servers.bin"), Buffer.concat([Buffe
 
 const port = process.env.NABNAB_PERSONAL_SERVER_DEBUG_PORT || 9258;
 const endpoint = `http://127.0.0.1:${port}`;
-const child = spawn(path.join(root, "src-tauri/target/debug/nabnab.exe"), [], {
+const child = spawn(process.env.NABNAB_PERSONAL_SERVER_TEST_EXE || path.join(root, "src-tauri/target/debug/nabnab.exe"), [], {
   cwd: root, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
   env: { ...process.env, NABNAB_TEST_DATA_DIR: data, WEBVIEW2_USER_DATA_FOLDER: path.join(data, "webview"),
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}` },
@@ -63,11 +63,11 @@ const rpc = (name, args = {}) => page.evaluate(async ({ name, args }) => {
 const button = name => page.getByRole("button", { name, exact: typeof name === "string" });
 const comparison = () => page.locator(".personal-reference-review");
 async function selectReference() { await button(/Cuaderno ñ\.txt.*Remota/).click(); }
-async function job(index, serverId = id) {
+async function job(index, serverId = id, after = 0) {
   return wait(async () => {
     const { jobs } = await rpc("get_snapshot");
     const pending = jobs.filter(job => job.source.kind === "personalFile" && job.source.selection.serverId === serverId)[index];
-    return pending && ["completed", "error"].includes(pending.state) && pending;
+    return pending && pending.runId > after && ["completed", "error"].includes(pending.state) && pending;
   });
 }
 
@@ -89,18 +89,34 @@ async function verifyWebdav(openssl) {
   const password = "local-fixture-only";
   const auth = `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
   let version = 1, redirect = false, outside = false, redirected = 0;
+  let interrupt = false, ignoreRange = false, invalidRange = false;
+  const fixtureContent = () => version <= 2 ? Buffer.from(version === 1 ? original : replacement) : Buffer.alloc(210_000, 48 + version);
   const requests = [];
   const trap = createServer({ key, cert }, (_req, res) => { redirected++; res.writeHead(403).end(); });
   const server = createServer({ key, cert }, (req, res) => {
     req.resume();
-    requests.push({ path: req.url, method: req.method, auth: req.headers.authorization === auth, validator: req.headers["if-match"] });
+    requests.push({ path: req.url, method: req.method, auth: req.headers.authorization === auth, validator: req.headers["if-match"], range: req.headers.range });
     if (req.headers.authorization !== auth) return res.writeHead(401).end();
     if (redirect) return res.writeHead(302, { Location: `https://localhost:${trap.address().port}${folder}` }).end();
-    const content = Buffer.from(version === 1 ? original : replacement);
+    const content = fixtureContent();
     const etag = `"dav-v${version}"`;
     if (req.method === "GET" && req.url === remoteFile) {
       if (req.headers["if-match"] !== etag) return res.writeHead(412).end();
-      return res.writeHead(200, { "Content-Length": content.length, "Content-Type": "text/plain", "Last-Modified": modified, ETag: etag }).end(content);
+      const headers = { "Content-Type": "text/plain", "Last-Modified": modified, ETag: etag };
+      if (interrupt) {
+        interrupt = false;
+        res.writeHead(200, { ...headers, "Content-Length": content.length });
+        res.write(content.subarray(0, 96_000));
+        setTimeout(() => res.destroy(), 300);
+        return;
+      }
+      const range = /^bytes=(\d+)-$/.exec(req.headers.range ?? "");
+      if (range && !ignoreRange) {
+        const start = Number(range[1]) + Number(invalidRange);
+        return res.writeHead(206, { ...headers, "Content-Length": content.length - start,
+          "Content-Range": `bytes ${start}-${content.length - 1}/${content.length}` }).end(content.subarray(start));
+      }
+      return res.writeHead(200, { ...headers, "Content-Length": content.length }).end(content);
     }
     const resource = (href, properties) => `<d:response><d:href>${href}</d:href><d:propstat><d:prop>${properties}</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>`;
     const collection = href => resource(href, "<d:resourcetype><d:collection/></d:resourcetype>");
@@ -196,13 +212,80 @@ async function verifyWebdav(openssl) {
     assert.deepEqual(requests.filter(request => request.method === "GET").map(request => request.validator), ['"dav-v1"', '"dav-v2"']);
     assert.ok(requests.every(request => request.auth && request.path.startsWith(folder)));
 
+    await page.locator('[data-page="downloads"]').click();
+    const parts = async job => (await readdir(path.join(output, ".nabnab-" + job.id)).catch(error => {
+      if (error.code === "ENOENT") return [];
+      throw error;
+    })).filter(name => name.startsWith(".personal-webdav-"));
+    const row = job => page.locator(`.job-row:has([data-select-job="${job.id}"])`);
+    let requestId = 30;
+    const interrupted = async (nextVersion, index) => {
+      version = nextVersion;
+      interrupt = true;
+      const entries = await rpc("personal_server_browse", { serverId: webdavId, path: ["Cuadernos"], requestId: ++requestId });
+      await rpc("personal_server_copy", { serverId: webdavId, paths: [entries.find(entry => !entry.directory).path], referenceId: null, clientRequest: randomUUID() });
+      const failed = await job(index, webdavId);
+      assert.equal(failed.state, "error");
+      assert.equal(failed.error.code, "webdav_interrupted", JSON.stringify(failed.error));
+      assert.deepEqual(failed.outputs, []);
+      assert.equal((await parts(failed)).length, 1);
+      return failed;
+    };
+    const continueCopy = async (failed, index) => {
+      await row(failed).getByRole("button", { name: "Reanudar", exact: true }).click();
+      return job(index, webdavId, failed.runId);
+    };
+    const pausedCopy = await interrupted(3, 3);
+    const [partialName] = await parts(pausedCopy);
+    const received = (await stat(path.join(output, ".nabnab-" + pausedCopy.id, partialName))).size;
+    assert.equal(received, 96_000);
+    assert.equal(pausedCopy.progress.downloaded, received);
+    await row(pausedCopy).getByText(/Copia interrumpida.*guardados/).waitFor();
+    await row(pausedCopy).getByRole("button", { name: "Descartar parcial", exact: true }).waitFor();
+    assert.ok(await row(pausedCopy).evaluate(node => node.scrollWidth <= node.clientWidth + 1));
+    await row(pausedCopy).screenshot({ path: path.join(data, "webdav-resume.png") });
+    const resumed = await continueCopy(pausedCopy, 3);
+    assert.equal(resumed.state, "completed", JSON.stringify(resumed.error));
+    assert.deepEqual(await readFile(resumed.outputs[0]), fixtureContent());
+    assert.ok(requests.some(request => request.validator === '"dav-v3"' && request.range === `bytes=${received}-`));
+    await wait(async () => (await parts(resumed)).length === 0);
+
+    const changedCopy = await interrupted(4, 4);
+    version = 5;
+    const countBeforeChanged = requests.filter(request => request.method === "GET").length;
+    const changed = await continueCopy(changedCopy, 4);
+    assert.equal(changed.error.code, "webdav_changed");
+    assert.deepEqual(changed.outputs, []);
+    assert.deepEqual(await parts(changed), []);
+    assert.equal(requests.filter(request => request.method === "GET").length, countBeforeChanged);
+
+    const ignoredCopy = await interrupted(6, 5);
+    ignoreRange = true;
+    const restarted = await continueCopy(ignoredCopy, 5);
+    assert.equal(restarted.state, "completed", JSON.stringify(restarted.error));
+    assert.deepEqual(await readFile(restarted.outputs[0]), fixtureContent());
+    ignoreRange = false;
+
+    const malformedCopy = await interrupted(7, 6);
+    invalidRange = true;
+    const malformed = await continueCopy(malformedCopy, 6);
+    assert.match(JSON.stringify(malformed.error), /incompatible byte range/);
+    assert.deepEqual(malformed.outputs, []);
+    assert.deepEqual(await parts(malformed), []);
+    invalidRange = false;
+
+    const discard = await interrupted(8, 7);
+    await row(discard).getByRole("button", { name: "Descartar parcial", exact: true }).click();
+    await wait(async () => (await rpc("get_snapshot")).jobs.find(job => job.id === discard.id)?.state === "cancelled");
+    assert.deepEqual(await parts(discard), []);
+
     const browse = requestId => rpc("personal_server_browse", { serverId: webdavId, path: [], requestId });
     outside = true;
     await assert.rejects(browse(1), error => String(error).includes("outside the authorized root"));
     redirect = true;
     await assert.rejects(browse(2), error => String(error).includes("redirected the request"));
     assert.equal(redirected, 0);
-    console.log("Native WebDAV verified private TLS, hostname checks, scope, redirect blocking and two distinct file versions.");
+    console.log("Native WebDAV verified private TLS, scope, redirect blocking, range continuation, changed and invalid ranges, full-response restart and partial discard.");
   } finally {
     await Promise.all([close(server), close(trap)]);
   }

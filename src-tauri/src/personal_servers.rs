@@ -16,6 +16,11 @@ mod nas;
 mod sftp;
 mod webdav;
 
+pub(crate) const WEBDAV_INTERRUPTED: &str =
+    "The WebDAV transfer was interrupted. A verified partial was kept for retry.";
+pub(crate) const WEBDAV_CHANGED: &str = "The WebDAV file changed. Refresh the folder and select it again.";
+pub(crate) const WEBDAV_INVALID_RANGE: &str = "The WebDAV server returned an incompatible byte range. Retry to start a fresh copy.";
+
 const SECRET: &str = "personal-servers";
 const MAX_SERVERS: usize = 12;
 const MAX_REFERENCES: usize = 128;
@@ -137,6 +142,15 @@ impl Selection {
 
     pub fn content_id(&self) -> String {
         format!("personal:{}", fingerprint(self))
+    }
+
+    pub(crate) fn webdav_partial(&self, staging: &Path) -> Option<PathBuf> {
+        self.can_resume_webdav()
+            .then(|| staging.join(format!(".personal-webdav-{}.part", fingerprint(self))))
+    }
+
+    pub(crate) fn can_resume_webdav(&self) -> bool {
+        webdav::resume_size(&self.stamp).is_some()
     }
 }
 
@@ -620,16 +634,35 @@ pub async fn execute(
     staging: &Path,
     run_id: u64,
     cancel: watch::Receiver<bool>,
+    emit: impl Fn(crate::model::Progress),
 ) -> Result<PathBuf, String> {
     let name = selection.filename()?;
     let root = crate::config_root(state)?;
-    let config = {
+    let candidate = selection.webdav_partial(staging);
+    let config = (|| {
         let _guard = state.personal_servers.vault.lock().unwrap();
-        connected(&load(&root)?, &selection.server_id)?
-            .config
-            .clone()
+        Ok::<_, String>(
+            connected(&load(&root)?, &selection.server_id)?
+                .config
+                .clone(),
+        )
+    })();
+    let config = match config {
+        Ok(config) => config,
+        Err(error) => {
+            if let Some(path) = candidate {
+                let _ = fs::remove_file(path);
+            }
+            return Err(error);
+        }
     };
-    let temporary = staging.join(format!(".personal-{run_id}.part"));
+    let partial = match &config {
+        Config::Webdav(_) => candidate,
+        _ => None,
+    };
+    let temporary = partial
+        .clone()
+        .unwrap_or_else(|| staging.join(format!(".personal-{run_id}.part")));
     let result = match &config {
         Config::Webdav(config) => {
             webdav::download(
@@ -638,6 +671,8 @@ pub async fn execute(
                 &selection.stamp,
                 &temporary,
                 cancel.clone(),
+                run_id,
+                emit,
             )
             .await
         }
@@ -663,7 +698,13 @@ pub async fn execute(
         }
     };
     let destination = staging.join(name);
-    let result = result.and_then(|_| {
+    if let Err(error) = result {
+        if partial.is_none() {
+            let _ = fs::remove_file(&temporary);
+        }
+        return Err(error);
+    }
+    let result = (|| {
         if *cancel.borrow() {
             return Err(crate::engine::CANCELLED.into());
         }
@@ -674,7 +715,7 @@ pub async fn execute(
         }
         fs::rename(&temporary, &destination)
             .map_err(|_| "Could not finalize the personal server copy.".into())
-    });
+    })();
     if result.is_err() {
         let _ = fs::remove_file(&temporary);
     }
