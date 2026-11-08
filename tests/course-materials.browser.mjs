@@ -9,7 +9,7 @@ const browser = await chromium.launch({
   ...(process.env.EDGE_EXECUTABLE ? { executablePath: process.env.EDGE_EXECUTABLE } : { channel: "msedge" }),
 });
 const base = process.env.NABNAB_UI_URL || "http://127.0.0.1:1420/";
-const directory = "artifacts/course-materials";
+const directory = process.env.NABNAB_COURSE_ARTIFACTS || "artifacts/course-materials";
 await mkdir(directory, { recursive: true });
 const page = await browser.newPage({ viewport: { width: 1180, height: 780 } });
 const errors = [];
@@ -50,7 +50,9 @@ const setup = `
     if (cmd === "preview_course_materials") {
       if (fixture.cancel) return null;
       const id = fixture.calls.length;
-      fixture.plan = {id, provider:args.provider, title:args.title, url:args.url, folder:args.folder};
+      fixture.plan = {id, provider:args.provider, title:args.title, url:args.url, folder:args.folder, lessonId:args.lessonId};
+      if (args.lessonId) return {id, provider:args.provider, title:args.title, groups:[{title:"Descargas",
+        files:[{id:3,name:"Material de referencia.pdf",kind:"document",size:4096},{id:4,name:"Recursos opcionales.zip",kind:"file",size:8192}]}]};
       if (fixture.many) return {id, provider:args.provider, title:args.title, groups:[{title:"02 Extras",
         files:Array.from({length:24}, (_, i) => ({id:i,name:"Apuntes de la unidad "+(i+1)+".txt",kind:"document",size:1024}))}]};
       return {id, provider:args.provider, title:args.title, groups:args.folder
@@ -65,6 +67,16 @@ const setup = `
       const plan = fixture.plan;
       if (!plan || plan.id !== args.reviewId) throw Error("Fixture review expired.");
       fixture.plan = null;
+      if (plan.lessonId) {
+        const course = fixture.courses.find(course => course.url === plan.url);
+        const lesson = course.sections.flatMap(section => section.lessons).find(lesson => lesson.id === plan.lessonId);
+        if (args.ids.includes(3)) {
+          const item = {...state.library[0],id:"material-reference",name:"Material de referencia.pdf",path:"C:/Downloads/Material de referencia.pdf"};
+          state.library.push(item);
+          lesson.assets.push({...lesson.assets[0],id:"asset-reference",title:item.name,libraryId:item.id});
+        }
+        return structuredClone(course);
+      }
       state.library = [{id:"material-pdf",name:"02 Preparar.pdf",path:"C:/Fixture/01 Fundamentos/02 Preparar.pdf",kind:"document",size:1024,missing:false,collections:[],tags:[]}];
       const asset = {id:"asset-pdf",title:"02 Preparar.pdf",kind:"document",status:"local",libraryId:"material-pdf",urlRef:null,jobIds:[]};
       const lesson = {id:"lesson-1",title:"02 Preparar",learned:true,assets:[asset],notes:[{id:"note-1",text:"Revisar la plantilla",time:null,bookmarkId:null}]};
@@ -154,7 +166,7 @@ try {
   await page.getByRole("button", { name: "Añadir carpeta", exact: true }).click();
   await heading.waitFor();
   assert.equal(await add.isDisabled(), true);
-  await page.getByRole("button", { name: "Seleccionar unidad" }).click();
+  await page.getByRole("button", { name: "Seleccionar grupo" }).click();
   const optional = page.getByRole("checkbox", { name: /^03 Guía opcional/ });
   assert.equal(await optional.isChecked(), true);
   await optional.uncheck();
@@ -172,6 +184,37 @@ try {
   await page.getByText("Materiales añadidos al curso.", { exact: true }).waitFor();
   await page.locator("[data-action='dismiss-message']").click();
   await page.screenshot({ path: `${directory}/study-900x620.png` });
+  const attach = page.getByRole("button", {name:"Añadir adjuntos",exact:true});
+  await attach.press("Enter");
+  await heading.waitFor();
+  assert.match(await page.locator(".course-review").innerText(), /Adjuntos para 02 Preparar/);
+  await page.getByRole("button", {name:"Volver",exact:true}).click();
+  assert.equal(await attach.evaluate(node => node === document.activeElement), true);
+  await attach.press("Enter");
+  await page.getByRole("checkbox", {name:/^Material de referencia.pdf/}).check();
+  assert.ok(await page.locator(".course-review").evaluate(node => node.scrollWidth <= node.clientWidth + 1));
+  await page.screenshot({path:`${directory}/attachment-review-900x620.png`,animations:"disabled"});
+  await page.getByRole("button", {name:"Añadir a la lección",exact:true}).click();
+  await page.getByText("Material de referencia.pdf", {exact:true}).waitFor();
+  await page.waitForFunction(() => document.activeElement.id === "course-materials-heading");
+  const attached = await page.evaluate(() => {
+    const {calls,courses} = window.courseFixture;
+    return {target:calls.filter(call => call.cmd === "preview_course_materials").at(-1).args.lessonId,
+      selected:calls.filter(call => call.cmd === "import_course_materials").at(-1).args.ids,
+      lessons:courses[0].sections.map(section => section.lessons.map(lesson => lesson.id))};
+  });
+  assert.deepEqual(attached,{target:"lesson-1",selected:[3],lessons:[["lesson-1"],["lesson-2"]]});
+  assert.equal(await page.getByText("Revisar la plantilla", {exact:true}).count(), 1);
+  assert.equal(await page.getByText("Recursos opcionales.zip", {exact:true}).count(), 0);
+  await page.getByText("Adjuntos añadidos a la lección.", {exact:true}).waitFor();
+  await page.locator("[data-action='dismiss-message']").click();
+  for (const [width,height] of [[900,620],[1180,780]]) {
+    await page.setViewportSize({width,height});
+    assert.ok(await page.locator(".course-materials-heading").evaluate(node => node.scrollWidth <= node.clientWidth + 1));
+    await page.locator("#main").evaluate(node => { node.scrollTop = 0; });
+    await page.screenshot({path:`${directory}/attachment-study-${width}x${height}.png`,animations:"disabled"});
+  }
+  await page.setViewportSize({width:900,height:620});
   await page.evaluate(() => { window.courseFixture.many = true; });
   await page.getByRole("button", { name: "Añadir carpeta", exact: true }).click();
   await heading.waitFor();
@@ -236,7 +279,7 @@ try {
   await page.getByRole("button", {name:"Plantillas.zip",exact:true}).click();
   assert.equal(await page.getByRole("checkbox", {name:"Seleccionar Plantillas.zip"}).isChecked(), false);
   assert.deepEqual(errors, []);
-  console.log("Browser-assisted import and selective Skillshare attachment review and queueing passed at two widths.");
+  console.log("Browser-assisted import, lesson attachments and selective Skillshare queueing passed at two widths.");
 } finally {
   await browser.close();
 }

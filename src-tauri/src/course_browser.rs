@@ -4,7 +4,7 @@ use super::{
 };
 use crate::{library, queue, AppState};
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
     sync::{
@@ -146,14 +146,23 @@ fn index_material(path: &Path, link: &CourseLink) -> Result<library::LibraryItem
     }
 }
 
-fn material_paths(paths: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
+fn material_paths(paths: &[PathBuf], attachments_only: bool) -> Result<Vec<PathBuf>, String> {
     let mut paths = library::files_for_import(paths, |path| {
-        library::extension_kind(path).is_some() || is_course_attachment(path)
+        let kind = library::extension_kind(path);
+        if attachments_only && matches!(kind, Some("audio" | "video")) {
+            return false;
+        }
+        kind.is_some() || is_course_attachment(path)
     })?;
     paths.sort_unstable();
     paths.dedup();
     if paths.is_empty() || paths.len() > 200 {
-        return Err("Choose between 1 and 200 supported course files.".into());
+        return Err(if attachments_only {
+            "Choose between 1 and 200 documents, captions, images or archives for the lesson."
+        } else {
+            "Choose between 1 and 200 supported course files."
+        }
+        .into());
     }
     Ok(paths)
 }
@@ -191,6 +200,7 @@ struct Plan {
     id: u32,
     link: CourseLink,
     title: String,
+    lesson_id: Option<String>,
     files: Vec<ReviewedFile>,
     created: Instant,
 }
@@ -207,6 +217,7 @@ fn prepare_review(
     title: String,
     paths: &[PathBuf],
     folder: bool,
+    lesson_id: Option<String>,
 ) -> Result<(Review, Plan), String> {
     let root = if folder {
         paths
@@ -218,7 +229,7 @@ fn prepare_review(
     };
     let mut groups = BTreeMap::<PathBuf, ReviewGroup>::new();
     let mut files = Vec::new();
-    for path in material_paths(paths)? {
+    for path in material_paths(paths, lesson_id.is_some())? {
         let metadata = fs::metadata(&path).map_err(|error| error.to_string())?;
         if !metadata.is_file() || metadata.len() == 0 {
             continue;
@@ -290,6 +301,7 @@ fn prepare_review(
             id,
             link,
             title,
+            lesson_id,
             files,
             created: Instant::now(),
         },
@@ -334,7 +346,20 @@ fn path_identity(path: &Path) -> String {
     }
 }
 
-fn material_sections(items: impl IntoIterator<Item = library::LibraryItem>) -> Vec<CourseSection> {
+fn local_asset(item: &library::LibraryItem) -> CourseAsset {
+    CourseAsset {
+        id: format!("asset-{}", item.id),
+        title: label(&item.name, 240),
+        kind: item.kind.clone(),
+        status: "local".into(),
+        restriction: None,
+        library_id: Some(item.id.clone()),
+        url_ref: None,
+        job_ids: Vec::new(),
+    }
+}
+
+fn material_sections(items: Vec<&library::LibraryItem>) -> Vec<CourseSection> {
     let mut sections = BTreeMap::<String, CourseSection>::new();
     for item in items {
         let Some(parent) = item.path.parent() else {
@@ -357,35 +382,58 @@ fn material_sections(items: impl IntoIterator<Item = library::LibraryItem>) -> V
                 ),
                 lessons: Vec::new(),
             });
-        let asset = CourseAsset {
-            id: format!("asset-{}", item.id),
-            title: label(&item.name, 240),
-            kind: item.kind,
-            status: "local".into(),
-            restriction: None,
-            library_id: Some(item.id),
-            url_ref: None,
-            job_ids: Vec::new(),
-        };
         if let Some(lesson) = section
             .lessons
             .iter_mut()
             .find(|lesson| lesson.id == lesson_id)
         {
-            lesson.assets.push(asset);
+            lesson.assets.push(local_asset(item));
         } else {
             section.lessons.push(CourseLesson {
                 id: lesson_id,
                 title: label(title, 240),
                 learned: false,
-                assets: vec![asset],
+                assets: vec![local_asset(item)],
                 notes: Vec::new(),
             });
         }
     }
-    let mut sections: Vec<_> = sections.into_values().collect();
-    sections.sort_by_cached_key(|section| (natural_key(&section.title), section.id.clone()));
-    for section in &mut sections {
+    sections.into_values().collect()
+}
+
+fn merge_material_sections(sections: &mut Vec<CourseSection>, added: Vec<CourseSection>) {
+    for incoming in added {
+        if let Some(section) = sections
+            .iter_mut()
+            .find(|section| section.id == incoming.id)
+        {
+            for new_lesson in incoming.lessons {
+                if let Some(lesson) = section
+                    .lessons
+                    .iter_mut()
+                    .find(|lesson| lesson.id == new_lesson.id)
+                {
+                    lesson.assets.extend(new_lesson.assets);
+                } else {
+                    section.lessons.push(new_lesson);
+                }
+            }
+        } else {
+            sections.push(incoming);
+        }
+    }
+    // Keep provider-specific sections, such as the Skillshare downloads, in their original order.
+    sections.sort_by_cached_key(|section| {
+        let local = section.id.starts_with("section-");
+        (
+            !local,
+            local.then(|| (natural_key(&section.title), section.id.clone())),
+        )
+    });
+    for section in sections
+        .iter_mut()
+        .filter(|section| section.id.starts_with("section-"))
+    {
         section
             .lessons
             .sort_by_cached_key(|lesson| (natural_key(&lesson.title), lesson.id.clone()));
@@ -395,7 +443,6 @@ fn material_sections(items: impl IntoIterator<Item = library::LibraryItem>) -> V
                 .sort_by_cached_key(|asset| (natural_key(&asset.title), asset.id.clone()));
         }
     }
-    sections
 }
 
 fn import_selected(
@@ -403,35 +450,59 @@ fn import_selected(
     link: CourseLink,
     title: String,
     selected: Vec<library::LibraryItem>,
+    lesson_id: Option<&str>,
 ) -> Result<Course, String> {
-    let previous = repo.data.courses.iter().find(|course| course.id == link.id);
-    let prior_ids: HashSet<_> = previous
-        .into_iter()
-        .flat_map(|course| &course.sections)
-        .flat_map(|section| &section.lessons)
-        .flat_map(|lesson| &lesson.assets)
-        .filter_map(|asset| asset.library_id.as_deref())
-        .collect();
-    let mut included = HashSet::new();
-    let items = repo
+    let mut course = repo
         .data
-        .library
+        .courses
         .iter()
-        .filter(|item| prior_ids.contains(item.id.as_str()))
+        .find(|course| course.id == link.id)
         .cloned()
-        .chain(selected.iter().cloned())
-        .filter(|item| included.insert(item.id.clone()));
-    let course = Course {
-        id: link.id,
-        title: previous.map(|course| course.title.clone()).unwrap_or(title),
-        provider: link.provider.into(),
-        url: Some(link.page.to_string()),
-        slug: None,
-        sections: material_sections(items),
-        created_at: previous
-            .map(|course| course.created_at)
-            .unwrap_or_else(queue::now),
-    };
+        .unwrap_or_else(|| Course {
+            id: link.id,
+            title,
+            provider: link.provider.into(),
+            url: None,
+            slug: None,
+            sections: Vec::new(),
+            created_at: queue::now(),
+        });
+    course.url = Some(link.page.to_string());
+    let attached: HashMap<_, _> = course
+        .sections
+        .iter()
+        .flat_map(|section| &section.lessons)
+        .flat_map(|lesson| {
+            lesson
+                .assets
+                .iter()
+                .filter_map(move |asset| Some((asset.library_id.as_deref()?, lesson.id.as_str())))
+        })
+        .collect();
+    if let Some(target) = lesson_id {
+        if selected.iter().any(|item| {
+            attached
+                .get(item.id.as_str())
+                .is_some_and(|other| *other != target)
+        }) {
+            return Err("A selected file already belongs to another lesson in this course.".into());
+        }
+    }
+    let mut included = HashSet::new();
+    let additions: Vec<_> = selected
+        .iter()
+        .filter(|item| {
+            !attached.contains_key(item.id.as_str()) && included.insert(item.id.as_str())
+        })
+        .collect();
+    if let Some(target) = lesson_id {
+        let lesson = course.sections.iter_mut().filter(|section| section.id.starts_with("section-"))
+            .flat_map(|section| &mut section.lessons).find(|lesson| lesson.id == target)
+            .ok_or("This lesson is no longer available. Open the course and choose the attachments again.")?;
+        lesson.assets.extend(additions.into_iter().map(local_asset));
+    } else {
+        merge_material_sections(&mut course.sections, material_sections(additions));
+    }
     let mut known: HashSet<_> = repo
         .data
         .library
@@ -459,12 +530,14 @@ pub async fn preview_course_materials(
     url: String,
     title: String,
     folder: bool,
+    lesson_id: Option<String>,
 ) -> Result<Option<Review>, String> {
     let link = CourseLink::selected(&provider, &url)?;
     let title = label(&title, 240);
     if title.is_empty() {
         return Err("Enter the name to use for this course.".into());
     }
+    let attaching = lesson_id.is_some();
     let picked = tauri::async_runtime::spawn_blocking(move || {
         let dialog = app.dialog().file();
         if folder {
@@ -474,7 +547,11 @@ pub async fn preview_course_materials(
                 .map(|folder| vec![folder])
         } else {
             dialog
-                .set_title("Choose authorized course files")
+                .set_title(if attaching {
+                    "Choose attachments for this lesson"
+                } else {
+                    "Choose authorized course files"
+                })
                 .blocking_pick_files()
         }
     })
@@ -495,7 +572,7 @@ pub async fn preview_course_materials(
         .collect::<Result<Vec<PathBuf>, _>>()?;
     let id = reviews.next.fetch_add(1, Ordering::Relaxed);
     let (review, plan) = tauri::async_runtime::spawn_blocking(move || {
-        prepare_review(id, link, title, &paths, folder)
+        prepare_review(id, link, title, &paths, folder, lesson_id)
     })
     .await
     .map_err(|_| "Course file review failed.")??;
@@ -535,7 +612,13 @@ pub async fn import_course_materials(
     .map_err(|_| "Course file indexing failed.")??;
     let mut guard = state.repository.lock().unwrap();
     let repo = guard.as_mut().ok_or("Open nabnab first.")?;
-    import_selected(repo, plan.link, plan.title, selected)
+    import_selected(
+        repo,
+        plan.link,
+        plan.title,
+        selected,
+        plan.lesson_id.as_deref(),
+    )
 }
 
 #[cfg(test)]
@@ -611,10 +694,11 @@ mod tests {
             "Drawing".into(),
             &[later.clone(), first.clone()],
             false,
+            None,
         )
         .unwrap();
         let selected = selected_files(&plan, &[0, 1]).unwrap();
-        let saved = import_selected(&mut repo, plan.link, plan.title, selected).unwrap();
+        let saved = import_selected(&mut repo, plan.link, plan.title, selected, None).unwrap();
         let lesson = &mut repo.data.courses[0].sections[0].lessons[0];
         assert_eq!(lesson.title, "2 Practice");
         let lesson_id = lesson.id.clone();
@@ -635,7 +719,8 @@ mod tests {
         std::fs::write(nested.join("1 Notes.txt"), b"Course notes").unwrap();
         std::fs::write(nested.join("ignore.exe"), b"Unsupported").unwrap();
         std::fs::write(nested.join("3 Optional.txt"), b"Optional reading").unwrap();
-        let (review, plan) = prepare_review(2, updated, "Dibujo".into(), &[folder], true).unwrap();
+        let (review, plan) =
+            prepare_review(2, updated, "Dibujo".into(), &[folder], true, None).unwrap();
         assert_eq!(plan.files.len(), 5);
         assert_eq!(review.groups[1].title, "11 Extras");
         assert!(repo
@@ -666,7 +751,7 @@ mod tests {
             .unwrap_err()
             .contains("changed after review"));
         let selected = selected_files(&plan, &ids).unwrap();
-        let merged = import_selected(&mut repo, plan.link, plan.title, selected).unwrap();
+        let merged = import_selected(&mut repo, plan.link, plan.title, selected, None).unwrap();
         assert_eq!(merged.id, saved.id);
         assert_eq!(merged.title, "Drawing");
         assert_eq!(merged.sections[0].title, "01 Exercises");
@@ -685,7 +770,77 @@ mod tests {
             .iter()
             .all(|item| item.name != "3 Optional.txt"));
         assert_eq!(repo.data.courses.len(), 1);
+
+        let handout = nested.join("Materials and references.txt");
+        let video = nested.join("Lesson.mp4");
+        std::fs::write(&handout, b"Additional material").unwrap();
+        std::fs::write(&video, b"A lesson is not an attachment").unwrap();
+        let course_url = merged.url.as_deref().unwrap();
+        let link = || CourseLink::selected("domestika", course_url).unwrap();
+        assert!(prepare_review(
+            3,
+            link(),
+            "Drawing".into(),
+            &[video],
+            false,
+            Some(lesson_id.clone())
+        )
+        .is_err());
+        let (review, plan) = prepare_review(
+            3,
+            link(),
+            "Drawing".into(),
+            &[handout],
+            false,
+            Some(lesson_id.clone()),
+        )
+        .unwrap();
+        assert_eq!(review.groups[0].files.len(), 1);
+        let attachments = selected_files(&plan, &[0]).unwrap();
+        assert!(import_selected(
+            &mut repo,
+            link(),
+            "Drawing".into(),
+            attachments.clone(),
+            Some("missing-lesson")
+        )
+        .is_err());
+        assert_eq!(repo.data.library.len(), 4);
+        let with_attachment = import_selected(
+            &mut repo,
+            plan.link,
+            plan.title,
+            attachments.clone(),
+            plan.lesson_id.as_deref(),
+        )
+        .unwrap();
+        let lesson = &with_attachment.sections[0].lessons[0];
+        assert_eq!(lesson.id, lesson_id);
+        assert!(lesson.learned);
+        assert_eq!(lesson.notes[0].text, "Keep this");
+        assert_eq!(lesson.assets.len(), 3);
+        assert_eq!(lesson.assets[2].title, "Materials and references.txt");
+        let other = &with_attachment.sections[1].lessons[0].id;
+        assert!(import_selected(
+            &mut repo,
+            link(),
+            "Drawing".into(),
+            attachments.clone(),
+            Some(other)
+        )
+        .is_err());
+        let repeated =
+            import_selected(&mut repo, link(), "Drawing".into(), attachments, None).unwrap();
+        assert_eq!(repeated.sections[1].lessons.len(), 1);
+        assert_eq!(repeated.sections[0].lessons[0].assets.len(), 3);
+        assert_eq!(repo.data.library.len(), 5);
         drop(repo);
+        let reopened = crate::store::Repository::open(&root, &nested).unwrap();
+        let lesson = &reopened.data.courses[0].sections[0].lessons[0];
+        assert_eq!(lesson.id, lesson_id);
+        assert_eq!(lesson.assets[2].title, "Materials and references.txt");
+        assert_eq!(lesson.notes[0].text, "Keep this");
+        drop(reopened);
         let root = std::fs::canonicalize(&root).unwrap();
         assert!(root.starts_with(std::fs::canonicalize(std::env::temp_dir()).unwrap()));
         std::fs::remove_dir_all(root).unwrap();

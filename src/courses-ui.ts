@@ -66,7 +66,7 @@ export function createCoursesController(hooks: CourseHooks) {
   let query = "";
   let noteText = "";
   let noteTime = "";
-  let review: { plan: MaterialReview; files: Set<number>; trigger: string } | null = null;
+  let review: { plan: MaterialReview; files: Set<number>; trigger: string; lessonTitle?: string } | null = null;
   const selected = new Set<string>();
   const current = () => courses.find(course => course.id === courseId);
   const currentLesson = () => current()?.sections.flatMap(section => section.lessons).find(lesson => lesson.id === lessonId);
@@ -145,11 +145,11 @@ export function createCoursesController(hooks: CourseHooks) {
     }
   }
 
-  async function reviewMaterials(source: BrowserCourseProvider, url: string, title: string, folder = false) {
-    const trigger = folder ? "course-add-folder" : courseId ? "course-add-materials" : "course-browser-import";
+  async function reviewMaterials(source: BrowserCourseProvider, url: string, title: string, folder = false, lesson?: CourseLesson) {
+    const trigger = lesson ? "course-add-attachments" : folder ? "course-add-folder" : courseId ? "course-add-materials" : "course-browser-import";
     await perform(async () => {
-      const plan = await hooks.command<MaterialReview | null>("preview_course_materials", { provider: source, url, title, folder });
-      if (plan) review = { plan, files: new Set(), trigger };
+      const plan = await hooks.command<MaterialReview | null>("preview_course_materials", { provider: source, url, title, folder, lessonId: lesson?.id ?? null });
+      if (plan) review = { plan, files: new Set(), trigger, lessonTitle: lesson?.title };
       return false;
     });
     if (review) focusCourseHeading();
@@ -174,9 +174,12 @@ export function createCoursesController(hooks: CourseHooks) {
       }
       courseId = course.id;
       imported = true;
-      hooks.notify(t("Materiales añadidos al curso.", "Materials added to the course."), "success");
+      hooks.notify(trigger === "course-add-attachments"
+        ? t("Adjuntos añadidos a la lección.", "Attachments added to the lesson.")
+        : t("Materiales añadidos al curso.", "Materials added to the course."), "success");
     });
-    if (imported) focusCourseHeading();
+    if (imported && trigger === "course-add-attachments") document.getElementById("course-materials-heading")?.focus();
+    else if (imported) focusCourseHeading();
     else document.getElementById(trigger)?.focus({ preventScroll: true });
   }
 
@@ -184,12 +187,13 @@ export function createCoursesController(hooks: CourseHooks) {
     return `${count} ${count === 1 ? t("archivo", "file") : t("archivos", "files")}`;
   }
 
-  function reviewView(plan: MaterialReview, files: Set<number>) {
+  function reviewView(plan: MaterialReview, files: Set<number>, lessonTitle?: string) {
     const disabled = busy ? "disabled" : "";
     const total = plan.groups.flatMap(group => group.files).filter(file => files.has(file.id)).reduce((sum, file) => sum + file.size, 0);
     return `<section class="course-review" aria-busy="${busy}">
       <div class="page-heading"><div><h1 id="course-heading" tabindex="-1">${t("Revisar materiales", "Review materials")}</h1>
         <p>${h(plan.title)} · ${h(courseProviderName(plan.provider))}</p></div></div>
+      ${lessonTitle === undefined ? "" : `<p class="course-review-note">${t("Adjuntos para", "Attachments for")} <strong>${h(lessonTitle)}</strong></p>`}
       <p class="course-review-note">${t("Marca los archivos que quieras añadir. Se conservarán en su ubicación actual.", "Select the files to add. They will stay in their current locations.")}</p>
       <div class="course-review-groups">${plan.groups.map((group, index) => {
         const count = group.files.filter(file => files.has(file.id)).length;
@@ -197,7 +201,7 @@ export function createCoursesController(hooks: CourseHooks) {
         return `<details id="course-review-group-${plan.id}-${index}" ${index === 0 ? "open" : ""}>
           <summary><strong>${h(group.title)}</strong><small>${count} / ${fileCount(group.files.length)}</small></summary>
           <div class="course-review-list">
-            ${group.files.length > 1 ? action("course-review-unit", all ? t("Quitar unidad", "Clear unit") : t("Seleccionar unidad", "Select unit"), undefined, "quiet", `id="course-review-unit-${index}" data-index="${index}" ${disabled}`) : ""}
+            ${group.files.length > 1 ? action("course-review-unit", all ? t("Quitar selección del grupo", "Clear group selection") : t("Seleccionar grupo", "Select group"), undefined, "quiet", `id="course-review-unit-${index}" data-index="${index}" ${disabled}`) : ""}
             ${group.files.map(file => `<label class="course-review-file">
               <input id="course-review-file-${file.id}" type="checkbox" data-course-review-file="${file.id}" ${files.has(file.id) ? "checked" : ""} ${disabled}>
               <span>${h(file.name)}<small>${materialKind(file.kind, true)}</small></span><small>${bytesLabel(file.size)}</small>
@@ -208,7 +212,7 @@ export function createCoursesController(hooks: CourseHooks) {
       <footer class="course-review-footer">
         <output>${files.size ? `${fileCount(files.size)} · ${bytesLabel(total)}` : t("Elige al menos un archivo", "Select at least one file")}</output>
         <div class="button-group">${action("course-review-cancel", t("Volver", "Back"), undefined, "quiet", disabled)}
-          ${action("course-review-confirm", t("Añadir al curso", "Add to course"), "add", "primary", busy || !files.size ? "disabled" : "")}</div>
+          ${action("course-review-confirm", lessonTitle === undefined ? t("Añadir al curso", "Add to course") : t("Añadir a la lección", "Add to lesson"), "add", "primary", busy || !files.size ? "disabled" : "")}</div>
       </footer>
     </section>`;
   }
@@ -261,7 +265,7 @@ export function createCoursesController(hooks: CourseHooks) {
   }
 
   function render(): string {
-    if (review) return reviewView(review.plan, review.files);
+    if (review) return reviewView(review.plan, review.files, review.lessonTitle);
     const course = current();
     const platformField = `<label><span id="course-platform-label">${t("Plataforma", "Platform")}</span><select id="course-provider" aria-labelledby="course-platform-label">${courseProviders.map(([id, name]) => option(id, name, provider)).join("")}</select></label>`;
     const linkField = `<label>${t("Enlace del curso", "Course URL")}<input id="course-url" type="url" required value="${h(input)}" placeholder="https://…" autocomplete="off"></label>`;
@@ -286,7 +290,7 @@ export function createCoursesController(hooks: CourseHooks) {
       ${!showQueue ? "" : `<div class="selection-toolbar"><span>${queueable.length === 1 ? t("1 material seleccionado", "1 material selected") : `${queueable.length} ${t("materiales seleccionados", "materials selected")}`}</span>${action("course-queue", t("Añadir a la cola", "Add to queue"), "add", "primary", busy || !queueable.length ? "disabled" : "")}${action("course-clear", t("Quitar selección", "Clear selection"), undefined, "quiet")}</div>`}
       <div class="course-layout${browserAssisted ? " course-layout--browser" : ""}"><nav aria-label="${resourceCount ? t("Lecciones y recursos", "Lessons and resources") : t("Lecciones del curso", "Course lessons")}" class="course-tree"><label class="search-control">${icon("search")}<input id="course-search" type="search" value="${h(query)}" placeholder="${t("Buscar lección", "Find lesson")}" aria-label="${t("Buscar lección", "Find lesson")}"></label>${course.sections.map(section => `<details ${section.lessons.some(lesson => lesson.id === lessonId) || !lessonId ? "open" : ""}><summary>${h(section.id === "skillshare-resources" ? t("Recursos de Skillshare", "Skillshare resources") : section.title)}</summary>${localStudy && !section.lessons.some(lesson => lesson.assets.some(available)) ? "" : action("course-select-section", t("Seleccionar materiales disponibles", "Select available materials"), undefined, "quiet", `data-id="${h(section.id)}"`)}<ul>${section.lessons.filter(lesson => lesson.title.toLocaleLowerCase().includes(query.toLocaleLowerCase())).map(lesson => `<li><button type="button" class="course-lesson" data-action="course-lesson" data-id="${h(lesson.id)}" ${lesson.id === lessonId ? 'aria-current="true"' : ""}><span>${h(lesson.title)}</span>${lesson.learned ? `<small>${t("Aprendida", "Learned")}</small>` : ""}</button></li>`).join("")}</ul></details>`).join("")}</nav><section class="course-study">${lesson ? `<div class="page-heading"><h2>${h(lesson.title)}</h2>${action("course-learned", resourceLesson ? (lesson.learned ? t("Marcar pendiente", "Mark as pending") : t("Marcar revisado", "Mark as reviewed")) : (lesson.learned ? t("Marcar pendiente de aprender", "Mark as not learned") : t("Marcar aprendida", "Mark as learned")), "check", "quiet", `aria-pressed="${lesson.learned}" ${busy ? "disabled" : ""}`)}</div>
       ${item ? lessonPlayback(item) : ""}
-      <h3>${t("Materiales", "Materials")}</h3><div class="source-items">${lesson.assets.map(asset => { const item = local(asset); return `<article class="source-item">${localStudy && asset.status !== "downloadable" ? "" : `<label><input type="checkbox" data-course-asset="${h(asset.id)}" ${selected.has(asset.id) ? "checked" : ""} ${available(asset) ? "" : "disabled"} aria-label="${h(t("Seleccionar ", "Select ") + asset.title)}"></label>`}<div class="source-item-main"><strong>${h(asset.title)}</strong><span>${h(materialKind(asset.kind, localStudy))} · ${h(status(asset))}</span>${asset.restriction ? `<small>${h(asset.restriction)}</small>` : ""}</div>${item ? action("course-open-file", t("Ver en biblioteca", "View in library"), undefined, "quiet", `data-id="${h(item.id)}"`) : ""}</article>`; }).join("")}</div>
+      <div class="course-materials-heading"><h3 id="course-materials-heading" tabindex="-1">${t("Materiales", "Materials")}</h3>${browserAssisted && !resourceLesson ? action("course-add-attachments", t("Añadir adjuntos", "Add attachments"), "add", "quiet", `id="course-add-attachments" ${busy ? "disabled" : ""}`) : ""}</div><div class="source-items">${lesson.assets.map(asset => { const item = local(asset); return `<article class="source-item">${localStudy && asset.status !== "downloadable" ? "" : `<label><input type="checkbox" data-course-asset="${h(asset.id)}" ${selected.has(asset.id) ? "checked" : ""} ${available(asset) ? "" : "disabled"} aria-label="${h(t("Seleccionar ", "Select ") + asset.title)}"></label>`}<div class="source-item-main"><strong>${h(asset.title)}</strong><span>${h(materialKind(asset.kind, localStudy))} · ${h(status(asset))}</span>${asset.restriction ? `<small>${h(asset.restriction)}</small>` : ""}</div>${item ? action("course-open-file", t("Ver en biblioteca", "View in library"), undefined, "quiet", `data-id="${h(item.id)}"`) : ""}</article>`; }).join("")}</div>
       <h3>${resourceLesson ? t("Notas de este adjunto", "Attachment notes") : t("Notas de esta lección", "Lesson notes")}</h3><form id="course-note" class="settings-form"><label>${t("Nota", "Note")}<textarea id="course-note-text" rows="3" maxlength="4000" required>${h(noteText)}</textarea></label><div class="form-grid"><label>${t("Tiempo en segundos, opcional", "Time in seconds, optional")}<input id="course-note-time" type="number" min="0" step="0.1" value="${h(noteTime)}"></label><div class="button-group">${item ? action("course-note-now", t("Usar tiempo actual", "Use current time"), undefined, "quiet", player.current()?.id === item.id ? "" : "disabled") : ""}<button class="button secondary" type="submit" ${busy ? "disabled" : ""}>${t("Guardar nota", "Save note")}</button></div></div></form>
       ${lesson.notes.map(note => `<article class="course-note"><p>${h(note.text)}</p><div class="button-group">${note.time === null ? "" : item ? action("course-note-seek", `${note.time.toFixed(1)} s`, "play", "quiet", `data-time="${note.time}"`) : `<span class="field-note">${note.time.toFixed(1)} s</span>`}${action("course-note-remove", t("Eliminar nota", "Remove note"), "close", "quiet", `data-id="${h(note.id)}" ${busy ? "disabled" : ""}`)}</div></article>`).join("")}` : `<div class="empty-state"><h2>${t("Elige una lección", "Choose a lesson")}</h2><p>${t("Guardado y aprendido son estados independientes.", "Saved and learned are separate states.")}</p></div>`}</section></div>`;
   }
@@ -368,6 +372,9 @@ export function createCoursesController(hooks: CourseHooks) {
       }
       case "course-add-materials":
         if (course?.url && isBrowserProvider(course.provider)) await reviewMaterials(course.provider, course.url, course.title);
+        return true;
+      case "course-add-attachments":
+        if (lesson && course?.url && isBrowserProvider(course.provider)) await reviewMaterials(course.provider, course.url, course.title, false, lesson);
         return true;
       case "course-add-folder":
         if (course?.url && isBrowserProvider(course.provider)) await reviewMaterials(course.provider, course.url, course.title, true);

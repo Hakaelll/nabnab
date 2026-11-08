@@ -24,6 +24,8 @@ Abre **Plataformas → Cursos**, elige el proveedor y pega el enlace del curso. 
 
 Para conservar el orden del curso, guarda cada unidad en una carpeta numerada y numera los nombres de las lecciones. Los archivos con el mismo nombre base en la misma carpeta aparecen juntos, por ejemplo, un vídeo y su subtítulo. Los ZIP, RAR, 7z y archivos de diseño admitidos quedan como adjuntos para consultar en su carpeta. **Añadir carpeta** y **Añadir archivos guardados** amplían el curso existente y conservan las notas, el estado aprendido y la posición asociada a los archivos ya indexados.
 
+Si un documento, subtítulo, imagen o archivo comprimido pertenece a una lección ya importada, ábrela y usa **Materiales → Añadir adjuntos**. La revisión muestra la lección de destino y permite marcar archivos aunque tengan otro nombre o estén en otra carpeta. Al confirmar con **Añadir a la lección**, se vinculan a la lección existente. Repetir la importación conserva la asociación. Los vídeos y audios se incorporan desde **Añadir archivos guardados** o **Añadir carpeta**.
+
 | Plataforma | Vía disponible |
 | --- | --- |
 | Rocketseat | Abre la [formación](https://app.rocketseat.com.br/journey/discover/contents). Importa únicamente archivos que se te haya autorizado a guardar. Sus [condiciones de uso](https://www.rocketseat.com.br/termos-de-uso) prohíben descargar las videoclases. |
@@ -38,6 +40,8 @@ En Rocketseat, Coursera y Domestika, la sesión y la descarga se gestionan en el
 ![Revisión de archivos de una unidad, a 900 × 620 con IPC simulado](course-materials-review.png)
 
 ![Estudio de materiales importados, a 900 × 620 con IPC simulado](course-materials-study.png)
+
+![Revisión de adjuntos para una lección existente, a 900 × 620 con IPC simulado](course-lesson-attachments.png)
 
 ### Adjuntos de Skillshare
 
