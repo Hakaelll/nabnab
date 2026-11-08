@@ -21,7 +21,7 @@ En **Plataformas → Archivos y documentos**, pega un enlace, un identificador o
 ## LibriVox
 
 - Busca por el comienzo del título y, opcionalmente, por idioma tal como aparece en el catálogo. Abre la edición correspondiente. Los capítulos muestran número, lector e idioma cuando están disponibles.
-- Marca capítulos individuales o selecciona los capítulos visibles. Biblioteca los identifica como audiolibro, conserva la edición y crea una colección para reunir sus capítulos. El filtro **Audiolibros** está en el selector de contenido de Biblioteca.
+- Si la edición tiene varios créditos de lectura, usa **Lectura** para ver los capítulos de uno de ellos. Marca capítulos individuales o selecciona los visibles. Cambiar de filtro conserva las marcas anteriores y el resumen muestra todo lo que se enviará a Descargas. Biblioteca identifica los archivos como audiolibro, conserva la edición y crea una colección para reunir sus capítulos. El filtro **Audiolibros** está en el selector de contenido de Biblioteca.
 - El catálogo se consulta de 20 en 20. La aplicación lee el RSS y, para los archivos alojados en Internet Archive, reutiliza las comprobaciones de acceso y las descargas de ese adaptador. La ficha conserva la declaración de dominio público de LibriVox para Estados Unidos. Comprueba la situación en tu país.
 
 [Catálogo oficial](https://librivox.org/api/info) · [Dominio público](https://librivox.org/pages/public-domain/)

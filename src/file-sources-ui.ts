@@ -82,6 +82,7 @@ export function createFileSources(hooks: FileSourceHooks) {
   let connectionEditor: CloudProvider | null = null;
   let collection = "";
   let filter: "all" | "original" | "derivative" = "all";
+  let reader = "";
   let query = "";
   let busy: "inspect" | "queue" | "connect" | "configure" | "revoke" | null = null;
   let error = "";
@@ -119,7 +120,7 @@ export function createFileSources(hooks: FileSourceHooks) {
         const known = new Set(publicPage.assets.map(value => value.id));
         const knownEntries = new Set(publicPage.entries.map(value => value.id));
         publicPage = { ...page, assets: [...publicPage.assets, ...page.assets.filter(value => !known.has(value.id))], entries: [...publicPage.entries, ...page.entries.filter(value => !knownEntries.has(value.id))] };
-      } else { publicPage = page; publicSelected.clear(); query = ""; filter = "all"; }
+      } else { publicPage = page; publicSelected.clear(); query = ""; filter = "all"; reader = ""; }
       url = page.sourceUrl;
     });
   }
@@ -152,7 +153,16 @@ export function createFileSources(hooks: FileSourceHooks) {
   }
   function matchesPublicFilter(asset: PublicAsset): boolean {
     return (filter === "all" || asset.original === (filter === "original"))
+      && (!reader || asset.audiobook?.reader === reader)
       && `${asset.filename} ${asset.title} ${asset.mime} ${asset.version ?? ""} ${asset.audiobook?.reader ?? ""} ${asset.audiobook?.language ?? ""}`.toLowerCase().includes(query.toLowerCase());
+  }
+  function readerFilter(assets: PublicAsset[]): string {
+    const credits = [...new Set(assets.map(asset => asset.audiobook?.reader ?? "").filter(Boolean))];
+    if (credits.length < 2) return "";
+    return `<select id="file-source-reader" aria-label="${t("Lectura", "Narration")}">
+      ${option("", t("Todas las lecturas", "All narrations"), reader)}
+      ${credits.map(credit => option(credit, credit, reader)).join("")}
+    </select>`;
   }
   function publicDescription(): string {
     if (!publicPage?.description) return "";
@@ -226,7 +236,7 @@ export function createFileSources(hooks: FileSourceHooks) {
       ${error ? `<div class="file-source-error" role="alert">${icon("error")}<span>${h(error)}</span></div>` : ""}${busy === "inspect" || busy === "connect" ? `<div class="file-source-progress" role="status"><span>${busy === "connect" ? t("Esperando autorización en el navegador…", "Waiting for browser authorization…") : t("Consultando archivos del origen…", "Reading source files…")}</span>${action("file-source-cancel", t("Cancelar", "Cancel"), "close", "quiet")}</div>` : ""}
       ${hasPage ? `<div class="file-source-results"><div class="file-source-result-heading"><div><span class="file-source-eyebrow">${isPublic ? h(publicPage ? publicNames[publicPage.provider] : "") : h(cloudName(provider))}</span><h2${isPublic && catalogReturn ? ' tabindex="-1"' : ""}>${h(isPublic ? publicPage?.title ?? "" : trail.at(-1)?.name ?? t("Mis archivos", "My files"))}</h2></div>${isPublic && (publicPage?.provider === "github" || isSearch) && hooks.followSource ? action("file-source-follow", isSearch ? t("Seguir búsqueda", "Follow search") : t("Seguir versiones", "Follow releases"), "add", "quiet", busy ? "disabled" : "") : ""}${!isPublic && trail.length ? action("file-source-parent", t("Volver", "Back"), undefined, "quiet", busy ? "disabled" : "") : ""}</div>${isPublic ? publicDescription() : ""}${isPublic && publicPage?.rights ? `<p class="field-note">${t("Derechos indicados por el origen", "Rights stated by the source")}: ${h(publicPage.rights)}</p>` : ""}${warningList(isPublic ? publicPage?.warnings ?? [] : cloudPage?.warnings ?? [])}
         ${isPublic && publicPage?.entries.length ? `<div class="file-source-entries">${publicPage.entries.map(entry => `<button type="button" class="file-source-entry" data-action="file-source-entry" data-id="${h(entry.id)}" ${busy ? "disabled" : ""}><span><strong>${h(entry.title)}</strong><small>${h(entry.publishedAt ?? "")}</small></span>${publicPage?.provider === "github" ? `<span class="file-source-status">${entry.prerelease ? "Prerelease" : t("Estable", "Stable")}</span>` : ""}${icon("arrow")}</button>`).join("")}</div>` : ""}
-        ${(isPublic ? publicPage?.assets.length : cloudPage?.entries.length) ? `<div class="file-source-filter"><label>${icon("search")}<input id="file-source-query" type="search" value="${h(query)}" placeholder="${t("Filtrar archivos cargados", "Filter loaded files")}" aria-label="${t("Filtrar archivos cargados", "Filter loaded files")}"></label>${isPublic && publicPage?.provider === "archive" ? `<select id="file-source-kind" aria-label="${t("Tipo de archivo", "File type")}">${option("all", t("Originales y derivados", "Originals and derivatives"), filter)}${option("original", t("Solo originales", "Originals only"), filter)}${option("derivative", t("Solo derivados", "Derivatives only"), filter)}</select>` : ""}<span>${isPublic ? publicPage?.assets.length ?? 0 : cloudPage?.entries.length ?? 0} ${t("cargados", "loaded")}</span></div>` : ""}${isPublic ? publicRows() : cloudRows()}
+        ${(isPublic ? publicPage?.assets.length : cloudPage?.entries.length) ? `<div class="file-source-filter"><label>${icon("search")}<input id="file-source-query" type="search" value="${h(query)}" placeholder="${t("Filtrar archivos cargados", "Filter loaded files")}" aria-label="${t("Filtrar archivos cargados", "Filter loaded files")}"></label>${isPublic && publicPage?.provider === "archive" ? `<select id="file-source-kind" aria-label="${t("Tipo de archivo", "File type")}">${option("all", t("Originales y derivados", "Originals and derivatives"), filter)}${option("original", t("Solo originales", "Originals only"), filter)}${option("derivative", t("Solo derivados", "Derivatives only"), filter)}</select>` : ""}${isPublic && publicPage?.provider === "librivox" ? readerFilter(publicPage.assets) : ""}<span>${isPublic ? publicPage?.assets.length ?? 0 : cloudPage?.entries.length ?? 0} ${t("cargados", "loaded")}</span></div>` : ""}${isPublic ? publicRows() : cloudRows()}
         ${cursor ? `<div class="file-source-pagination"><p>${t("Solo se ha cargado una parte del origen. La selección incluye únicamente archivos revisados.", "Only part of this source has loaded. Selection includes reviewed files only.")}</p>${action("file-source-more", t("Cargar más", "Load more"), "add", "secondary", busy ? "disabled" : "")}</div>` : !isPublic && cloudPage?.partial ? `<p class="field-note">${t("El origen informa de resultados parciales. Revisa los avisos antes de descargar.", "The source reports partial results. Review warnings before downloading.")}</p>` : ""}</div>` : !busy && isPublic && !catalogReturn ? `<div class="file-source-intro">${icon("folder")}<h2>${t("Elige qué conservar", "Choose what to keep")}</h2><p>${t("Consulta versiones y archivos antes de descargar. No se selecciona ningún formato automáticamente.", "Review versions and files before downloading. No format is selected automatically.")}</p><div><span>GitHub</span><small>${t("Versiones y assets publicados", "Versions and published assets")}</small><span>Internet Archive</span><small>${t("Originales, derivados y procedencia", "Originals, derivatives and provenance")}</small><span>Commons</span><small>${t("Imágenes y atribución por archivo", "Images and attribution per file")}</small></div></div>` : ""}${selectionFooter()}<p class="file-source-footnote">${t("Descargar conserva una copia local. No ejecuta archivos, instala programas ni modifica el origen.", "Downloading keeps a local copy. It does not run files, install software or modify the source.")}</p></section>`;
   }
   function handleInput(element: HTMLElement): boolean {
@@ -253,6 +263,7 @@ export function createFileSources(hooks: FileSourceHooks) {
     if (element instanceof HTMLSelectElement) {
       if (element.id === "file-source-arxiv-field") { arxivField = element.value; return true; }
       if (element.id === "file-source-kind" && (element.value === "all" || element.value === "original" || element.value === "derivative")) { filter = element.value; hooks.render(); return true; }
+      if (element.id === "file-source-reader") { reader = element.value; hooks.render(); return true; }
       if (element.dataset.cloudSourceExport) { exports.set(element.dataset.cloudSourceExport, element.value); return true; }
     }
     return false;
@@ -325,6 +336,7 @@ export function createFileSources(hooks: FileSourceHooks) {
         error = "";
         query = "";
         filter = "all";
+        reader = "";
         publicSelected.clear();
         hooks.render();
         document.querySelector<HTMLElement>(`[data-action="file-source-entry"][data-id="${CSS.escape(entryId)}"]`)?.focus();
