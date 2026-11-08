@@ -438,7 +438,7 @@ function enqueueThumbnail(element: HTMLElement): void {
 }
 function observePlaybackCovers(): void {
   if(!desktop)return;
-  for(const element of document.querySelectorAll<HTMLElement>('#audio-player:not([hidden]) [data-thumbnail-id], #playback-stage:not([hidden]) [data-thumbnail-id]'))enqueueThumbnail(element);
+  for(const element of document.querySelectorAll<HTMLElement>('#audio-player:not([hidden]) [data-thumbnail-id], #playback-stage:not([hidden]) [data-thumbnail-id], #track-wheel:not([hidden]) [data-thumbnail-id]'))enqueueThumbnail(element);
   void pumpThumbnails();
 }
 async function pumpThumbnails(): Promise<void> {

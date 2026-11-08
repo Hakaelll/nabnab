@@ -17,6 +17,7 @@ interface Hooks {
   seek(time: number): void;
   toggle(): void;
   back(): void;
+  mini(): void;
   resume(fromStart: boolean): void;
   mute(): void;
   volume(value: number): void;
@@ -283,6 +284,7 @@ export function createPlaybackStage(host: HTMLElement, media: HTMLVideoElement, 
   }
 
   function reveal() {
+    if (!active) return;
     host.dataset.controls = "visible";
     schedule();
   }
@@ -411,6 +413,7 @@ export function createPlaybackStage(host: HTMLElement, media: HTMLVideoElement, 
         ${music ? `<div class="music-identity"><span class="audio-cover" aria-hidden="true"${current.details?.audioCover || current.details?.audio?.embeddedCover ? ` data-thumbnail-id="${h(current.id)}"` : ""}>${icon("audio")}</span><div>
           <h1 title="${h(title)}">${h(title)}</h1>${current.details?.audio?.artist ? `<p>${h(current.details.audio.artist)}</p>` : ""}</div></div>` : `<h1 title="${h(current.name)}">${h(title)}</h1>`}
         <div class="stage-top-actions">${music ? button("track", t("Información de la pista", "Track information"), "info", 'id="music-track" aria-expanded="false" aria-controls="stage-panel-track"') : ""}
+        ${button("mini", t("Abrir minirreproductor", "Open mini player"), "miniPlayer", 'id="stage-mini"')}
         ${button("options", t("Opciones de reproducción", "Playback options"), "settings", 'id="stage-options" aria-expanded="false" aria-controls="stage-panel-options"')}</div>
       </header>
       ${music ? `<section class="stage-panel stage-options music-track" id="stage-panel-track" data-stage-panel="track" aria-label="${t("Información de la pista", "Track information")}" hidden></section>
@@ -516,6 +519,9 @@ export function createPlaybackStage(host: HTMLElement, media: HTMLVideoElement, 
     feedback.hidden = true;
     panel = null; keyboard = false; dragging = false;
     host.hidden = true;
+    delete host.dataset.kind;
+    delete host.dataset.fit;
+    delete host.dataset.controls;
     document.documentElement.classList.remove("has-playback-stage");
     for (const node of document.querySelectorAll<HTMLElement>(".app-shell, .titlebar")) node.inert = false;
     if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
@@ -591,6 +597,7 @@ export function createPlaybackStage(host: HTMLElement, media: HTMLVideoElement, 
   }
 
   host.addEventListener("pointermove", event => {
+    if (!active) return;
     if (event.movementX || event.movementY || host.dataset.controls === "hidden") reveal();
     const seek = find<HTMLInputElement>("#stage-seek");
     const hover = find("#stage-hover");
@@ -609,11 +616,13 @@ export function createPlaybackStage(host: HTMLElement, media: HTMLVideoElement, 
     } else preview.leave();
   });
   host.addEventListener("pointerleave", () => {
+    if (!active) return;
     const hover = find("#stage-hover");
     if (hover) hover.hidden = true;
     preview.leave();
   });
   host.addEventListener("pointerdown", event => {
+    if (!active) return;
     keyboard = false;
     dragging = event.target instanceof HTMLInputElement && event.target.id === "stage-seek";
     reveal();
@@ -624,6 +633,7 @@ export function createPlaybackStage(host: HTMLElement, media: HTMLVideoElement, 
   host.addEventListener("focusin", reveal);
   host.addEventListener("focusout", () => queueMicrotask(schedule));
   host.addEventListener("click", event => {
+    if (!active) return;
     const target = event.target;
     if (!(target instanceof Element)) return;
     const action = target.closest<HTMLButtonElement>("[data-stage-action]")?.dataset.stageAction;
@@ -633,6 +643,7 @@ export function createPlaybackStage(host: HTMLElement, media: HTMLVideoElement, 
     }
     switch (action) {
       case "back": hooks.back(); break;
+      case "mini": hooks.mini(); break;
       case "toggle": if (resumeAt) hooks.resume(false); else hooks.toggle(); break;
       case "back-ten": hooks.seek(media.currentTime - 10); break;
       case "forward-ten": hooks.seek(media.currentTime + 10); break;

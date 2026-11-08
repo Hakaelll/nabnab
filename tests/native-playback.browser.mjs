@@ -635,6 +635,15 @@ try {
   await wait(async () => { const current = await playing(); return !current.paused && current.time >= 5.25; });
   assert.deepEqual([(await playing()).width, (await playing()).height], [360, 640]);
   assert.equal(await page.locator("audio, video").count(), 1);
+  await clickStage("mini");
+  await page.locator('#playback-stage[data-mini="video"] > video').waitFor();
+  assert.equal(await page.locator(".app-shell").evaluate(shell => shell.inert), false);
+  const miniTime = (await playing()).time;
+  await wait(async () => (await playing()).time > miniTime + 0.25);
+  await stage().screenshot({ path: path.join(output, "mini-video.png"), animations: "disabled" });
+  await page.locator("#mini-expand").click();
+  assert.equal(await original.evaluate(element => element === document.getElementById("audio-engine")), true);
+  await seekVideo(5.5);
   await clickStage("captions");
   await page.locator("#stage-caption-track").selectOption({ label: "es · Local" });
   assert.match(await stage().locator(".stage-captions").textContent(), /Texto local/);
@@ -919,6 +928,46 @@ try {
     }
     console.log(JSON.stringify({ container: path.extname(file), codecs: clip(file).map(stream => stream.codec_name), outcome: "audio" }));
   }
+
+  const selectedTracks = [item(music), ...audioSamples.map(({ file }) => item(file))];
+  for (const track of selectedTracks) await page.locator(`[data-select-media="${track.id}"]`).check();
+  await page.locator('[data-action="play-selection"]').click();
+  const first = (await playing()).id;
+  await page.locator("#audio-mini").click();
+  await page.locator('#playback-stage[data-mini="audio"]').waitFor();
+  await page.locator("#mini-wheel").click();
+  const wheel = page.locator("#track-wheel");
+  const selection = wheel.locator('.track-wheel-card[data-offset="0"]');
+  assert.equal(await selection.getAttribute("aria-current"), "true");
+  await page.keyboard.press("ArrowDown");
+  assert.equal(await selection.getAttribute("data-position"), "1");
+  await page.keyboard.press("Escape");
+  assert.equal((await playing()).id, first);
+  assert.equal(await page.locator("#mini-wheel").evaluate(button => button === document.activeElement), true);
+  await page.mouse.move(440, 240);
+  await page.keyboard.down("Alt");
+  await page.mouse.wheel(0, 120);
+  await selection.waitFor();
+  assert.equal(await selection.getAttribute("data-position"), "1");
+  await page.mouse.wheel(0, 120);
+  await wait(async () => (await selection.getAttribute("data-position")) === "2");
+  assert.equal((await playing()).id, first);
+  const title = await selection.locator("strong").textContent();
+  const chosen = selectedTracks.find(track => (track.details?.audio?.title || path.parse(track.name).name) === title);
+  assert.ok(chosen);
+  const bounds = await wheel.boundingBox();
+  assert.ok(bounds.x > 400 && bounds.y >= 0);
+  await wheel.screenshot({ path: path.join(output, "quick-skip.png"), animations: "disabled" });
+  await page.keyboard.up("Alt");
+  await wheel.waitFor({ state: "hidden" });
+  await wait(async () => { const current = await playing(); return current.id === chosen.id && !current.paused; });
+  assert.equal(await original.evaluate(element => element === document.getElementById("audio-engine")), true);
+  await stage().screenshot({ path: path.join(output, "mini-audio.png"), animations: "disabled" });
+  await page.locator("#mini-dock").click();
+  await stage().waitFor({ state: "hidden" });
+  assert.equal(await page.locator("#audio-mini").evaluate(button => button === document.activeElement), true);
+  await page.locator('[data-action="clear-library-selection"]').click();
+  console.log("Both mini players preserved the media element. Alt + wheel jumped directly to the centered track.");
 
   await play(musicId);
   await wait(async () => { const current = await playing(); return current.id === musicId && !current.paused && current.time > 0.15; });
