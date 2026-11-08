@@ -1,10 +1,27 @@
+use std::cell::Cell;
 use tauri::{
-    AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, Webview, WindowBuilder, WindowEvent,
+    AppHandle, Emitter, EventTarget, LogicalSize, Manager, PhysicalPosition, Rect, Webview,
+    WindowBuilder, WindowEvent,
 };
 
 const MAIN: &str = "main";
 const MINI: &str = "playback-mini";
 const MINI_WIDTH: f64 = 380.;
+
+thread_local! {
+    static SWAPPING: Cell<bool> = const { Cell::new(false) };
+}
+
+fn swap(work: impl FnOnce() -> tauri::Result<()>) -> tauri::Result<bool> {
+    SWAPPING.with(|active| {
+        if active.replace(true) {
+            return Ok(false);
+        }
+        let result = work();
+        active.set(false);
+        result.map(|()| true)
+    })
+}
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -90,13 +107,13 @@ fn detach(app: &AppHandle, video: bool) -> tauri::Result<()> {
         .and_then(|()| mini.show())
         .and_then(|()| mini.set_focus())
     {
-        let _ = restore(app);
+        let _ = restore(app, false);
         return Err(error);
     }
     Ok(())
 }
 
-fn restore(app: &AppHandle) -> tauri::Result<()> {
+fn restore(app: &AppHandle, dock: bool) -> tauri::Result<()> {
     let Some(view) = app.get_webview(MAIN) else {
         return Err(tauri::Error::WebviewNotFound);
     };
@@ -107,13 +124,21 @@ fn restore(app: &AppHandle) -> tauri::Result<()> {
     let Some(main) = app.get_window(MAIN) else {
         return Err(tauri::Error::WindowNotFound);
     };
-    main.show()?;
-    main.unminimize()?;
+    // Attach the view before showing the main host, whose resize events must reach it.
     view.reparent(&main)?;
-    mini.destroy()?;
+    let show = main.unminimize().and_then(|()| main.show()).and_then(|()| {
+        view.set_bounds(Rect {
+            position: PhysicalPosition::new(0, 0).into(),
+            size: main.inner_size()?.into(),
+        })?;
+        view.show()
+    });
+    let close = mini.destroy();
+    app.emit_to(EventTarget::webview(MAIN), "playback-mini-restored", dock)?;
+    show?;
+    close?;
     main.set_focus()?;
-    app.emit("playback-mini-restored", ())?;
-    Ok(())
+    view.set_focus()
 }
 
 #[tauri::command]
@@ -121,7 +146,8 @@ pub async fn playback_mini_window(
     app: AppHandle,
     webview: Webview,
     action: Action,
-) -> Result<(), String> {
+    only_when_minimized: Option<bool>,
+) -> Result<bool, String> {
     if webview.label() != MAIN {
         return Err("Only the nabnab playback view can control this window.".into());
     }
@@ -131,15 +157,19 @@ pub async fn playback_mini_window(
         let host = webview.window();
         let result = match action {
             Action::DetachAudio | Action::DetachVideo => {
-                detach(&task, matches!(action, Action::DetachVideo))
+                if only_when_minimized == Some(true) && !host.is_minimized().unwrap_or(false) {
+                    Ok(false)
+                } else {
+                    swap(|| detach(&task, matches!(action, Action::DetachVideo)))
+                }
             }
-            Action::Restore => restore(&task),
-            Action::Focus if host.label() == MINI => host.set_focus(),
-            Action::Drag if host.label() == MINI => host.start_dragging(),
+            Action::Restore => swap(|| restore(&task, false)),
+            Action::Focus if host.label() == MINI => host.set_focus().map(|()| true),
+            Action::Drag if host.label() == MINI => host.start_dragging().map(|()| true),
             Action::ResizeAudio | Action::ResizeVideo if host.label() == MINI => {
-                resize(&host, matches!(action, Action::ResizeVideo))
+                resize(&host, matches!(action, Action::ResizeVideo)).map(|()| true)
             }
-            _ => Ok(()),
+            _ => Ok(false),
         };
         let _ = send.send(result.map_err(|error| error.to_string()));
     })
@@ -155,13 +185,22 @@ pub fn window_event(app: &AppHandle, label: &str, event: &WindowEvent) {
             api.prevent_close();
             let app = app.clone();
             let _ = app.clone().run_on_main_thread(move || {
-                let _ = restore(&app);
+                let _ = swap(|| restore(&app, true));
             });
         }
-        (MAIN, WindowEvent::Focused(true)) if app.get_window(MINI).is_some() => {
+        (MAIN, WindowEvent::Focused(true) | WindowEvent::Resized(_))
+            if app.get_window(MINI).is_some() =>
+        {
             let app = app.clone();
             let _ = app.clone().run_on_main_thread(move || {
-                let _ = restore(&app);
+                let _ = swap(|| {
+                    if app.get_window(MAIN).is_some_and(|main| {
+                        main.is_visible().unwrap_or(false) && !main.is_minimized().unwrap_or(true)
+                    }) {
+                        restore(&app, true)?;
+                    }
+                    Ok(())
+                });
             });
         }
         (MAIN, WindowEvent::Destroyed) => {

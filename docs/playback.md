@@ -6,7 +6,7 @@ El vídeo abre una vista de borde a borde con ajuste de proporción, subtítulos
 
 Abre el **minirreproductor** desde la barra o la vista grande. Se queda en una esquina mientras navegas por nabnab. El vídeo conserva la imagen y los controles básicos. El audio reúne portada, título, volumen y tiempo con una onda dibujada con la señal real de reproducción. [Referencia del mini de audio](https://spotifast.rocks/winamp/)
 
-Pulsa **Sacar a una ventana** o minimiza nabnab con el mini abierto. La ventana flotante se queda sobre el escritorio y puedes arrastrarla desde el título de la pista. Al volver a nabnab, el mismo WebView2 conserva el archivo, la posición y la cola.
+Pulsa **Sacar a una ventana** o minimiza nabnab con el mini abierto. La ventana flotante se queda sobre el escritorio y puedes arrastrarla desde el título de la pista. Al volver desde la barra de tareas, el reproductor regresa a la barra compacta. El mismo WebView2 conserva el archivo, la posición y la cola. Los títulos largos se muestran con puntos suspensivos y puedes leerlos completos al colocar el puntero encima.
 
 En Windows, pulsa **Ctrl + Mayús + M** para abrir el mini de audio o vídeo con un archivo cargado, aunque nabnab esté minimizado. Si el mini ya está flotando, el atajo le da el foco. Con **Ajustes → General → Mostrar icono en la bandeja** activado, también puedes elegir **Abrir minirreproductor** en el menú del icono junto al reloj.
 
@@ -58,6 +58,8 @@ Con `NABNAB_PLAYBACK_DESKTOP_GESTURE=1`, la prueba usa la rueda y el teclado de 
 Con `NABNAB_PLAYBACK_DESKTOP_TRAY=1`, abre el menú nativo de bandeja con audio y vídeo en reproducción. Comprueba que el mini aparece con la ventana principal minimizada, que conserva el mismo elemento multimedia y que el menú desactiva la acción cuando se cierra la sesión.
 
 Con `NABNAB_PLAYBACK_DESKTOP_MINI_KEY=1` y la bandeja desactivada, envía **Ctrl + Mayús + M** desde Windows y comprueba el mismo recorrido para audio y vídeo.
+
+Con `NABNAB_PLAYBACK_DESKTOP_RESTORE=1`, la prueba usa un MP3 con un título largo y restaura dos veces la ventana principal maximizada con el comando nativo de Windows. Comprueba que todos los controles del mini queden a la vista, que la interfaz y la barra compacta vuelvan y que una solicitud de minimizar obsoleta no vuelva a separar la ventana.
 
 Con `NABNAB_PLAYBACK_WINDOWS_MEDIA=1`, la prueba busca la sesión multimedia de los archivos de prueba y verifica la carátula, la pausa, la reanudación, la búsqueda y los saltos de pista con la ventana minimizada. [Controles multimedia de Windows](https://learn.microsoft.com/en-us/uwp/api/windows.media.control.globalsystemmediatransportcontrolssession)
 

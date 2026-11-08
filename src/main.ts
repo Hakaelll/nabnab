@@ -159,7 +159,7 @@ const audioPlayer=createAudioPlayer({
   item: id => snapshot.library.find(item => item.id === id),
   command, render: renderCurrent, refresh, showError, t,
   fullscreen: enabled => getCurrentWindow().setFullscreen(enabled),
-  miniWindow: desktop ? action => command("playback_mini_window", {action}) : undefined,
+  miniWindow: desktop ? (action,onlyWhenMinimized) => command("playback_mini_window", {action,onlyWhenMinimized}) : undefined,
   desktopPlayback: desktop ? available => {
     if (available === desktopPlaybackAvailable) return;
     desktopPlaybackAvailable = available;
@@ -945,10 +945,10 @@ if(desktop){
   required('#close').addEventListener('click',()=>void Promise.resolve(audioPlayer.persist()).then(()=>nativeWindow.close()).catch(showError));
   const updateMaximize=async()=>{const maximized=await nativeWindow.isMaximized();const button=required('#maximize');button.dataset.maximized=String(maximized);const label=maximized?t("Restaurar", "Restore"):t("Maximizar", "Maximize");button.setAttribute('aria-label',label);button.title=label;};
   try{
-    await listen('playback-mini-restored',audioPlayer.nativeMiniRestored);
+    await listen<boolean>('playback-mini-restored',({payload})=>audioPlayer.nativeMiniRestored(payload),{target:{kind:"Webview",label:"main"}});
     await listen('playback-mini-open',audioPlayer.openFloatingMini,{target:{kind:"Webview",label:"main"}});
     await listen<WheelAction>('quick-skip-action',({payload})=>audioPlayer.wheelAction(payload),{target:{kind:"Webview",label:"main"}});
-    await nativeWindow.onResized(async()=>{if(await nativeWindow.isMinimized())audioPlayer.detachMini();await updateMaximize();});
+    await nativeWindow.onResized(async()=>{if(await nativeWindow.isMinimized())audioPlayer.detachMini(true);await updateMaximize();});
     await updateMaximize();
     await nativeWindow.onDragDropEvent(event=>{if(event.payload.type==='drop')void receivePaths(event.payload.paths).catch(showError);else required('#drop-indicator').hidden=event.payload.type!=='enter'&&event.payload.type!=='over';});
     await listen<CaptureStatus>('capture-update',({payload})=>{const previous=captureStatus?.phase;screenCapture.acceptStatus(payload);if(page==='tools'&&localToolModule==='screenCapture'&&(captureIsActive(payload)||previous!==payload.phase))renderCurrent();if(previous!==payload.phase&&(payload.phase==='interrupted'||payload.phase==='error')){notify(payload.readyCapture?t('La captura se interrumpió. Revisa el archivo parcial en Captura.','Capture was interrupted. Review the partial file in Capture.'):t('No se pudo continuar la captura. Revisa Captura.','Capture could not continue. Review Capture.'),'error',payload.reason??'');if(page==='tools'&&localToolModule==='screenCapture')void screenCapture.open().catch(showError);}});

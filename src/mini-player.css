@@ -20,11 +20,12 @@
   background: #050607;
   cursor: pointer;
 }
-.mini-player { display: grid; gap: 6px; padding: 10px 12px 8px; }
+.mini-player { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; padding: 10px 12px 8px; }
 .mini-header, .mini-identity, .mini-window, .mini-controls { display: flex; align-items: center; }
 .mini-header { gap: 8px; justify-content: space-between; }
-.mini-identity { gap: 10px; min-width: 0; }
+.mini-identity { flex: 1; gap: 10px; min-width: 0; }
 .mini-identity > div { min-width: 0; }
+.mini-art, .mini-window { flex: none; }
 .mini-art .audio-cover { width: 43px; border-radius: 9px; }
 .mini-identity strong, .mini-identity small, .track-wheel-copy :is(strong, small) {
   display: block;

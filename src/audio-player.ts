@@ -27,7 +27,7 @@ interface Hooks {
   windowVisible(): Promise<boolean>;
   refresh(): Promise<void>;
   fullscreen(enabled: boolean): Promise<void>;
-  miniWindow?(action: "detach-audio" | "detach-video" | "restore" | "focus" | "drag" | "resize-audio" | "resize-video"): Promise<void>;
+  miniWindow?(action: "detach-audio" | "detach-video" | "restore" | "focus" | "drag" | "resize-audio" | "resize-video", onlyWhenMinimized?: boolean): Promise<boolean>;
   desktopPlayback?(available: boolean): void;
   desktopWheel?(session: WheelSession | null): void;
   convert(id: string): void;
@@ -210,14 +210,16 @@ export function createAudioPlayer(hooks: Hooks) {
     finally { changingWindow = false; }
   }
 
-  function detachMini(): boolean {
+  function detachMini(onlyWhenMinimized = false): boolean {
     const item = current();
     if (!mini?.active() || !isPlayable(item) || !hooks.miniWindow) return false;
     if (changingWindow || detached) return true;
     changingWindow = true;
     trackWheel?.dismiss();
     setDetached(true);
-    void hooks.miniWindow(item.kind === "video" ? "detach-video" : "detach-audio").catch(error => {
+    void hooks.miniWindow(item.kind === "video" ? "detach-video" : "detach-audio", onlyWhenMinimized).then(moved => {
+      if (moved === false) setDetached(false);
+    }).catch(error => {
       setDetached(false);
       hooks.showError(error);
     }).finally(() => { changingWindow = false; });
@@ -1040,7 +1042,8 @@ export function createAudioPlayer(hooks: Hooks) {
   }
 
   return { mount, render, restore, play, playAt, add, remove, input, click, key, current, nextEntries, seek, persist, detachMini, openFloatingMini,
-    nativeMiniRestored: () => setDetached(false), syncDesktopWheel, wheelAction, isExpanded: () => expanded, isDetached: () => detached,
+    nativeMiniRestored: (dock: boolean) => { setDetached(false); if (dock) dockMini(); },
+    syncDesktopWheel, wheelAction, isExpanded: () => expanded, isDetached: () => detached,
     timeFor: (id: string) => id === currentId() && matchesSource() && media?.readyState ? media.currentTime : undefined,
     time: () => media?.currentTime ?? 0 };
 }

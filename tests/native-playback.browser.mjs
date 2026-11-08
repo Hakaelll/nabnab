@@ -13,8 +13,12 @@ await mkdir(output);
 const desktopGesture = process.env.NABNAB_PLAYBACK_DESKTOP_GESTURE === "1";
 const desktopTray = process.env.NABNAB_PLAYBACK_DESKTOP_TRAY === "1";
 const desktopMiniKey = process.env.NABNAB_PLAYBACK_DESKTOP_MINI_KEY === "1";
+const desktopRestore = process.env.NABNAB_PLAYBACK_DESKTOP_RESTORE === "1";
 const windowsMedia = process.env.NABNAB_PLAYBACK_WINDOWS_MEDIA === "1";
 const fixtureArtist = windowsMedia ? `Laboratorio nabnab · ${path.basename(data)}` : "Laboratorio nabnab";
+const fixtureTitle = desktopRestore
+  ? "Señal para la cola · Grabación completa de prueba para un título largo que debe dejar visibles todos los controles del minirreproductor"
+  : "Señal para la cola";
 const { chromium } = createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODULE || "playwright");
 const port = process.env.NABNAB_PLAYBACK_DEBUG_PORT || 9254;
 const endpoint = `http://127.0.0.1:${port}`;
@@ -47,7 +51,7 @@ encode("-i", video, "-t", "2", "-c", "copy", missing);
 encode("-f", "lavfi", "-i", "color=c=#354551:s=100x100", "-frames:v", "1", picture);
 encode("-f", "lavfi", "-i", "aevalsrc=if(between(t\\,4\\,10)\\,0\\,sin(2*PI*82*t)*(0.14+0.30*pow(0.5+0.5*cos(2*PI*2*t)\\,8))+0.13*sin(2*PI*540*t)+0.08*sin(2*PI*4800*t)*(0.5+0.5*sin(2*PI*1.7*t))):d=50", "-i", picture,
   "-map", "0:a", "-map", "1:v", "-c:a", "libmp3lame", "-c:v", "copy", "-disposition:v", "attached_pic",
-  "-metadata", "title=Señal para la cola", "-metadata", `artist=${fixtureArtist}`, music);
+  "-metadata", `title=${fixtureTitle}`, "-metadata", `artist=${fixtureArtist}`, music);
 encode("-f", "lavfi", "-i", "testsrc2=size=720x248:rate=20:duration=6", "-f", "lavfi",
   "-i", "sine=frequency=550:duration=6", "-c:v", "libvpx-vp9", "-deadline", "realtime", "-c:a", "libopus", "-shortest", webm);
 for (const { file, codec } of audioSamples) encode("-f", "lavfi", "-i", "aevalsrc=(0.1+0.5*pow(0.5+0.5*cos(2*PI*3.5*t)\\,6))*sin(2*PI*550*t):d=10", "-c:a", codec,
@@ -582,6 +586,38 @@ async function openMiniFromDesktop(kind, original, trigger) {
   await wait(async () => (await playing()).paused === before.paused);
   assert.equal(await mainMinimized(), true);
   console.log(`Opened the ${kind} mini player using ${trigger} while the main window stayed minimized.`);
+}
+
+async function restoreFloatingMini(original) {
+  const maximize = page.locator("#maximize");
+  const wasMaximized = await maximize.getAttribute("data-maximized") === "true";
+  if (!wasMaximized) await maximize.click();
+  await wait(async () => (await maximize.getAttribute("data-maximized")) === "true");
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const before = await playing();
+    await page.locator("#audio-mini").click();
+    await stage().locator("#mini-float").click();
+    await wait(async () => await mainMinimized() && await page.evaluate(() => innerWidth <= 400));
+    const dimensions = await stage().evaluate(panel => {
+      const title = panel.querySelector("#mini-title");
+      return { clippedTitle: title.scrollWidth > title.clientWidth, fit: ["#mini-dock", "#mini-wheel", "#mini-duration"]
+        .every(id => panel.querySelector(id).getBoundingClientRect().right <= panel.getBoundingClientRect().right) };
+    });
+    assert.deepEqual(dimensions, { clippedTitle: true, fit: true });
+    if (attempt === 0) await stage().screenshot({ path: path.join(output, "mini-long-title.png"), animations: "disabled" });
+    windowCommand("restore");
+    await wait(async () => !await mainMinimized() && await page.evaluate(() => innerWidth >= 900
+      && !document.documentElement.classList.contains("has-detached-mini")
+      && getComputedStyle(document.querySelector(".app-shell")).display !== "none"));
+    await stage().waitFor({ state: "hidden" });
+    assert.equal(await original.evaluate(element => element === document.getElementById("audio-engine")), true);
+    assert.equal((await playing()).id, before.id);
+    assert.equal((await playing()).paused, before.paused);
+    assert.ok((await playing()).time >= before.time);
+    assert.equal(await rpc("playback_mini_window", { action: "detach-audio", onlyWhenMinimized: true }), false);
+  }
+  if (!wasMaximized) await maximize.click();
+  console.log("Restoring the maximized main window twice docked the mini, retained playback, and ignored a stale minimize request.");
 }
 
 function windowsMediaControl(title, operation = "status") {
@@ -1234,7 +1270,7 @@ try {
   assert.equal(await stage().locator("#stage-volume").inputValue(), "0");
   await stage().locator("#stage-volume").evaluate(range => { range.value = "0.36"; range.dispatchEvent(new Event("input", { bubbles: true })); });
   await clickStage("queue");
-  assert.equal(await stage().locator("#stage-panel-queue [aria-current]").textContent(), "Señal para la cola");
+  assert.equal(await stage().locator("#stage-panel-queue [aria-current]").textContent(), fixtureTitle);
   await page.keyboard.press("Escape");
   await clickStage("immerse");
   assert.equal(await stage().getAttribute("data-controls"), "hidden");
@@ -1386,6 +1422,7 @@ try {
 
   await play(musicId);
   await wait(async () => { const current = await playing(); return current.id === musicId && !current.paused && current.time > 0.15; });
+  if (desktopRestore) await restoreFloatingMini(original);
   if (desktopTray || desktopMiniKey) {
     await openMiniFromDesktop("audio", original, desktopTray ? "tray" : "Ctrl+Shift+M");
     await page.locator("#mini-dock").click();
