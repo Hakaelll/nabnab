@@ -1,44 +1,47 @@
 # nabnab
 
-Aplicación local para Windows para descargar, organizar y transformar multimedia. Tauri 2, Rust y TypeScript. Conserva el emblema y el campo de caracteres de YTNabber.
+nabnab is a Windows desktop app for downloading, organizing, playing, and editing media locally. It uses Tauri 2, Rust, and TypeScript.
 
-[Descargar nabnab 0.2.0 para Windows x64](https://github.com/Hakaelll/nabnab/releases/tag/v0.2.0). La actualización conserva la carpeta y los datos de la instalación anterior de ytnabber. WebView2 es necesario; el instalador no tiene firma digital.
+[Download nabnab 0.2.0 for Windows x64](https://github.com/Hakaelll/nabnab/releases/tag/v0.2.0). The unsigned installer requires WebView2. An upgrade from ytnabber keeps the existing installation folder and application data. The features described below reflect the current source on `main`. See the release notes for the contents of the published installer. [Release notes](docs/releases/0.2.0.md) · [Migration guide](docs/MIGRATION.md)
 
-La ampliación de [productividad local](docs/PRODUCTIVITY.md) añade preparación de lotes, ajustes y reglas, programación, fuentes de YouTube, colecciones inteligentes, subtítulos con búsqueda temporal y una paleta Ctrl+K. La guía incluye capturas y el alcance de las comprobaciones.
+![The nabnab Home screen](docs/home-motion-after.png)
 
-La [ampliación de fuentes y herramientas](docs/EXPANSION.md) añade selección de galerías y adjuntos, RSS, archivos avanzados y BitTorrent, Telegram opcional, cursos y herramientas locales de documentos, imágenes, vídeo, audio y transcripción. La guía distingue capacidades implementadas, componentes necesarios y recorridos pendientes con cuentas autorizadas.
+## Get started
 
-La ampliación de [archivos online y herramientas locales](docs/ONLINE-LOCAL.md) incorpora fuentes públicas, conectores de almacenamiento, archivo web, OCR y edición PDF. Incluye organización de archivos, herramientas de imágenes, captura con repetición, voz local y automatización por CLI y MCP. La guía enlaza los requisitos OAuth, las capturas y las pruebas de cada recorrido.
+1. Paste a link in **Home**, or import a list of links from a `.txt` file. Analysis prepares the available choices.
+2. Choose what to save and select a download profile. Click **Download** or **Add to queue**.
+3. Follow the work in **Downloads**. Verified outputs appear in **Library**.
+4. Import files or folders to index them in place. From **Library**, open a file, play it, find it on disk, or organize it into collections.
+5. Open **Tools** to convert, trim, or process a file. Tool jobs use the same queue and keep the source file.
 
-## Interfaz
+After a restart, interrupted jobs are paused for review. Choose **Retry** to run one again. nabnab creates a separate output if a file already exists. Removing a Library entry leaves the file on disk. [Download profiles and formats](docs/PLATFORMS.md) · [Local tools](docs/TOOLS.md)
 
-El acabado glass integra la navegación con el campo de caracteres original. Incluye preferencias para reducir movimiento y transparencias. Estas capturas muestran la interfaz con datos de prueba; los recorridos nativos y de plataformas se registran por separado.
+## Sources and courses
 
-![Inicio de nabnab](docs/home-motion-after.png)
+- **Research and audiobooks.** Browse versioned PDFs on arXiv, choose files from a Zenodo record or DOI, and select chapters from LibriVox editions. Open saved arXiv copies by exact version. Zenodo shows the combined size of the files you select when their sizes are known. Follow searches or version histories for manual review. [Research and audiobooks](docs/RESEARCH-SOURCES.md)
+- **Media and subscriptions.** Review individual gallery and social attachments, follow podcast RSS feeds, and import or export OPML subscriptions. The BitTorrent workflow offers file selection and requires explicit P2P consent. Telegram attachment selection requires the optional TDLib component and an authorized account. [Sources and tools](docs/EXPANSION.md) · [Podcasts](docs/PODCASTS.md)
+- **Personal servers.** Browse an authorized Nextcloud or WebDAV root, use SFTP with a verified host fingerprint, or select a mounted network folder in Windows. Index a reference for later or queue a local copy. [Personal servers](docs/PERSONAL-SERVERS.md)
+- **Courses.** Study local lessons with notes, progress, and playback position. Udemy, Hotmart, and Kiwify use separate authorized connections. For Rocketseat, Coursera, and Domestika, save authorized materials on the provider's site and import them. Skillshare also lets you review supported direct attachment links and add selected resources to a course or lesson. [Courses and provider limits](docs/COURSES.md)
 
-![Previsualización y opciones](docs/nabnab-preview.png)
+## Library and playback
 
-[Sidebar contraída](docs/nabnab-sidebar.png) · [Biblioteca](docs/nabnab-library.png) · [Referencia anterior](docs/nabnab-before.png)
+- **Audio.** Browse music by artist, album, or genre, then switch to podcasts or audiobooks. Manage a separate playback queue and edit playlists. Import M3U, M3U8, PLS, or CSV and review ambiguous matches against local tracks. Open local LRC lyrics. When listening to an audiobook, resume chapters, rewind a short interval, or set a sleep timer. [Audio Library](docs/AUDIO-LIBRARY.md)
+- **Mini player.** Keep audio or video available while navigating the app. On Windows, use **Ctrl + Shift + M** to open the floating mini player. **Quick Skip** lets you preview the audio queue from the desktop while nabnab is minimized. [Playback and shortcuts](docs/playback.md)
+- **Personal archives.** Import an official Instagram, Facebook, X, Spotify, or LinkedIn export. Browse it by account, category, and date. Contacts and messages require separate selection and reveal. Spotify listening history reports events, listening time, and complete plays separately. [Personal archives](docs/PERSONAL-ARCHIVES.md)
 
-## Uso
+The Home character field and translucent navigation are part of the desktop interface. **Settings → Appearance** offers reduced motion and reduced transparency. [Home and the compact sidebar](docs/nabnab-sidebar.png) · [Library](docs/nabnab-library.png) · [Design reference](docs/design-reference.md)
 
-1. Pega uno o varios enlaces en Inicio, o importa una lista `.txt`. El análisis no inicia descargas.
-2. Elige elementos y perfil, y pulsa Descargar o Añadir a la cola.
-3. Revisa actividad y errores en Descargas. Los resultados verificados aparecen en Biblioteca.
-4. Importa tus archivos o carpetas sin copiarlos. Selecciona un archivo para reproducirlo, abrirlo con Windows, localizarlo u organizar sus colecciones y etiquetas.
-5. En Herramientas puedes convertir, extraer audio, recortar y comprimir. Las operaciones usan la misma cola y conservan los originales.
+## Local tools and device sharing
 
-MP4 compatible comprueba H.264/AAC y convierte las pistas incompatibles cuando hace falta. Calidad original conserva los códecs. Audio original conserva su formato real. Subir el bitrate o convertir audio con pérdida no mejora el original.
+- **Images.** Compare the same crop before and after upscaling, inspect a cutout and its mask at the same zoom, or export a sticker for Telegram or WhatsApp. [Upscaling](docs/IMAGE-UPSCALE.md) · [Background removal](docs/REMOVE-BACKGROUND.md) · [Stickers](docs/STICKERS.md)
+- **Audio and subtitles.** Compare synchronized waveforms for the original audio, vocals, and instrumental. Translate subtitles locally, edit the draft by segment, and export a translated or bilingual track. Use installed Windows voices to create a synchronized WAV or add it to a video copy. [Stem separation](docs/STEMS.md) · [Translation and dubbing](docs/TRANSLATION.md)
+- **Send to device.** Review files, a portable ZIP, a public link, or selected text before handing the request to KDE Connect. Use KDE Connect to follow the transfer and verify receipt. [KDE Connect setup and status](docs/DEVICE-SHARE.md) · [Portable collections](docs/PORTABLE-COLLECTIONS.md)
 
-Al reiniciar, los trabajos interrumpidos quedan pausados para revisión. Reintentar es una acción explícita. Los archivos existentes no se sobrescriben. Quitar de Biblioteca modifica el índice, no borra el archivo.
+Open **Settings → Components** to check requirements, download size, installed size, and licenses before installing an optional component. Once installed, local processing runs on your computer. Under **Settings → Sessions and privacy**, you can inspect and clear the bounded thumbnail cache. [Engines and privacy](docs/NETWORK.md)
 
-Los formatos reproducibles dentro de la app dependen de WebView2. Para otros formatos se ofrece abrir con el reproductor de Windows. Las herramientas y la biblioteca funcionan sin conexión cuando los motores están instalados.
+## Run from source
 
-La guía de reproducción recoge los controles de vídeo, las escenas musicales y los formatos probados en Windows. [Reproducción local](docs/playback.md)
-
-## Ejecutar y empaquetar
-
-Requiere Node.js 24, Rust/MSVC, herramientas C++ de Windows y WebView2. La preparación de FFmpeg utiliza vcpkg; esas herramientas de desarrollo no forman parte de la aplicación instalada.
+On Windows, use Node.js 24, the Rust MSVC toolchain, Visual Studio C++ Build Tools with a Windows SDK, and WebView2. Engine preparation uses vcpkg to build FFmpeg.
 
 ```powershell
 npm ci
@@ -46,7 +49,7 @@ npm run engines:prepare
 npm run desktop:dev
 ```
 
-`npm run engines:prepare` reutiliza los motores instalados si coinciden con el manifiesto, la receta y los hashes. Para reconstruirlos, usa `npm run engines:prepare -- --rebuild`. La compilación limpia los temporales de cada dependencia y la preparación retira sus descargas y archivos intermedios cuando termina o falla. Los motores anteriores se conservan hasta verificar el nuevo conjunto. [Limpieza durante la compilación con vcpkg](https://learn.microsoft.com/es-es/vcpkg/commands/install#--clean-after-build)
+Engine preparation reuses bundles that match the manifest and integrity checks. Use `npm run engines:prepare -- --rebuild` to rebuild the bundle. Preparation clears its temporary downloads and build workspace after the run. [Engine preparation](docs/NETWORK.md)
 
 ```powershell
 npm run check
@@ -55,32 +58,12 @@ npm run test:native
 npm run desktop:build
 ```
 
-El instalador se genera en `src-tauri/target/release/bundle/nsis/`. Los motores fijados se incluyen en el paquete. La app puede abrirse si faltan componentes y muestra su estado en Ajustes > Motores. Su instalación o reparación requiere consentimiento.
+The installer is written to `src-tauri/target/release/bundle/nsis/`. For frontend development, run `npm run dev` to serve the interface in a browser. Launch the desktop app for native operations. [Native test setup](docs/NATIVE-TESTS.md)
 
-`npm run dev` muestra la interfaz en un navegador. Las operaciones nativas necesitan la aplicación de escritorio. Las pruebas de interfaz con IPC simulado no certifican motores ni plataformas.
+## Browser integration and verification
 
-## Navegador y sesiones opcionales
+Pair the Chrome or Edge extension to send a chosen link or tab to the desktop app. You can revoke the pairing in Settings. For a provider that requires an authorized session, import a site-specific Netscape cookie file. nabnab protects stored session data with Windows DPAPI. [Browser extension](docs/BROWSER.md) · [Network and session handling](docs/NETWORK.md)
 
-La [extensión Chrome/Edge](docs/BROWSER.md) envía una pestaña o un enlace a la cola. Requiere emparejamiento explícito y permite revocarlo. No lee cookies ni intercepta la navegación.
+The verification guides distinguish mocked interface tests, Windows tests with local fixtures, and live provider checks. Course accounts still require authorized validation. KDE Connect tests cover the CLI handoff, and receipt on a physical phone remains to be verified. [Verification record](docs/NABNAB-VERIFICATION.md) · [Platform matrix](docs/PLATFORMS.md) · [Research provider checks](docs/RESEARCH-SOURCES.md)
 
-Las sesiones se importan por sitio desde un archivo Netscape elegido por el usuario. Windows DPAPI las protege en disco. No se incluyen en historial ni diagnósticos. No se implementa elusión de DRM o controles de acceso.
-
-## Verificación y límites
-
-- [Pruebas y límites observados](docs/NABNAB-VERIFICATION.md).
-- [Matriz de plataformas](docs/PLATFORMS.md). Que yt-dlp tenga un extractor no certifica cada sitio o contenido.
-- [Arquitectura](docs/IMPLEMENTATION.md), [migración](docs/MIGRATION.md) y [herramientas](docs/TOOLS.md).
-- [HTTP directo](docs/DIRECT.md) y [subtítulos](docs/SUBTITLES.md).
-- [Archivos personales](docs/PERSONAL-ARCHIVES.md) para importar y consultar exportaciones locales por cuenta y categoría.
-- [Stickers](docs/STICKERS.md) para exportar imágenes y clips con los perfiles de Telegram y WhatsApp.
-- [Ampliación de imágenes](docs/IMAGE-UPSCALE.md) con Real-ESRGAN local y comparación del mismo recorte.
-- [Eliminar fondo](docs/REMOVE-BACKGROUND.md) con segmentación local, ajuste de máscara y exportación transparente.
-- [Separar pistas](docs/STEMS.md) con escucha sincronizada y exportación local de voz e instrumental.
-- [Traducir subtítulos y crear doblaje](docs/TRANSLATION.md) con modelos locales, revisión por segmento, exportación bilingüe y voz sincronizada.
-- [Enviar a un dispositivo](docs/DEVICE-SHARE.md) con KDE Connect instalado en Windows.
-- [Red, motores y privacidad](docs/NETWORK.md), [diseño](docs/design-reference.md) y [plan de trabajo](docs/PLAN.md).
-- [Licencias y avisos](THIRD_PARTY_NOTICES.md).
-
-No hay telemetría, fuentes remotas, servicios de extracción intermediarios ni IA en la nube. No hay un servicio nuevo de actualización de nabnab; la actualización de yt-dlp es una operación independiente.
-
-El identificador técnico `com.ytnabber.desktop`, algunas claves de instalación y datos históricos conservan el nombre anterior para mantener compatibilidad. No se renombran los medios existentes. La referencia de arquitectura fue [Omniget en b4c733f](https://github.com/OpenSelena/omniget/tree/b4c733f5a8a699634845e445fc8f162acde547c9), sin copiar su código GPL.
+The Windows application ID `com.ytnabber.desktop` preserves compatibility with earlier installations. [Architecture](docs/IMPLEMENTATION.md) · [Third-party licenses and notices](THIRD_PARTY_NOTICES.md)
