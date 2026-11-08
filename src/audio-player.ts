@@ -945,6 +945,22 @@ export function createAudioPlayer(hooks: Hooks) {
     return true;
   }
 
+  function compareTrack(id: string, group: readonly string[]) {
+    const active = currentId();
+    if (!media || !group.includes(id) || !isPlayable(hooks.item(id)) || (id === active && !issue)) return;
+    const switching = group.includes(active) && !issue;
+    const position = switching ? pendingSeek ?? media.currentTime : 0;
+    const autoplay = !switching || !media.paused;
+    persist();
+    tracks = [id];
+    order = [0];
+    cursor = -1;
+    resumeAudioId = undefined;
+    activate(0, false, false, false);
+    seek(position);
+    if (autoplay) void playMedia();
+  }
+
   function shuffleUpcoming() {
     trackWheel?.dismiss();
     preferences.shuffled = !preferences.shuffled;
@@ -1041,7 +1057,7 @@ export function createAudioPlayer(hooks: Hooks) {
     return true;
   }
 
-  return { mount, render, restore, play, playAt, add, remove, input, click, key, current, nextEntries, seek, persist, detachMini, openFloatingMini,
+  return { mount, render, restore, play, playAt, compareTrack, pause: () => media?.pause(), add, remove, input, click, key, current, nextEntries, seek, persist, detachMini, openFloatingMini,
     nativeMiniRestored: (dock: boolean) => { setDetached(false); if (dock) dockMini(); },
     syncDesktopWheel, wheelAction, isExpanded: () => expanded, isDetached: () => detached,
     timeFor: (id: string) => id === currentId() && matchesSource() && media?.readyState ? media.currentTime : undefined,

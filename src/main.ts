@@ -119,7 +119,8 @@ const imageAssets=createImageAssets({command,snapshot:()=>snapshot,refresh,rende
 const stickerTool=createStickerTool({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t});
 const upscaleTool=createUpscaleTool({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t,components:()=>{preferences.section='engines';navigate('settings');}});
 const backgroundTool=createBackgroundTool({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t,components:()=>{preferences.section='engines';navigate('settings');}});
-const stemsTool=createStemsTool({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t,components:()=>{preferences.section='engines';navigate('settings');}});
+const stemsTool=createStemsTool({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t,components:()=>{preferences.section='engines';navigate('settings');},
+  compare:(id,group)=>audioPlayer.compareTrack(id,group),playingId:()=>audioPlayer.current()?.id,pausePlayback:()=>audioPlayer.pause(),share:ids=>deviceShare.open({ids})});
 const translationTool=createTranslationTool({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t,components:()=>{preferences.section='engines';navigate('settings');}});
 const fileOrganization=createFileOrganization({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t});
 const portable=createPortableCollections({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t});

@@ -18,3 +18,6 @@
 .stems-timeline input { min-height: 28px; margin: 0; padding: 0; accent-color: var(--action); }
 .stems-time { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .stems-empty { margin-top: 12px; }
+.stems-output { display: grid; gap: 10px; margin-top: 16px; }
+.stems-output .section-heading { gap: 8px; flex-wrap: wrap; }
+.stems-output .section-heading h3, .stems-output > p { margin: 0; }

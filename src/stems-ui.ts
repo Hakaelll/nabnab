@@ -1,6 +1,6 @@
 import "./stems.css";
 import { escapeHtml as h, type Copy, type Snapshot } from "./contracts";
-import { durationLabel, isCancelled } from "./presentation";
+import { bytesLabel, durationLabel, isCancelled } from "./presentation";
 import { action, icon, option } from "./views-common";
 
 interface Component { id: string; installed: boolean; enabled: boolean; available: boolean; size: number; installedSize?: number }
@@ -12,6 +12,10 @@ interface Hooks {
   refresh(): Promise<void>;
   notify(message: string): void;
   components(): void;
+  compare(id: string, group: readonly string[]): void;
+  playingId(): string | undefined;
+  pausePlayback(): void;
+  share(ids: string[]): void;
   t: Copy;
 }
 
@@ -29,6 +33,45 @@ export function createStemsTool(hooks: Hooks) {
   const selected = () => sources().find(item => item.id === libraryId);
   const ready = () => component?.installed && component.enabled && component.available;
   const disabled = () => busy ? "disabled" : "";
+
+  function publishedSet() {
+    if (!libraryId) return;
+    const { jobs, library } = hooks.snapshot();
+    const job = jobs.filter(job => job.source.kind === "stems" && job.source.selection.libraryId === libraryId && job.state === "completed")
+      .sort((a, b) => b.createdAt - a.createdAt)[0];
+    if (!job) return;
+    const files = (["Vocals", "Instrumental"] as const).flatMap(role => {
+      const item = library.find(item => !item.missing && item.kind === "audio" && item.parentId === libraryId
+        && item.details?.stems?.setId === job.id && item.details.stems.role === role && job.outputs.includes(item.path));
+      return item ? [{ role, item }] : [];
+    });
+    return files;
+  }
+
+  function resultGroup() {
+    const source = selected();
+    return [...(source ? [source.id] : []), ...(publishedSet()?.map(({ item }) => item.id) ?? [])];
+  }
+
+  function results() {
+    const files = publishedSet();
+    if (!files?.length) return "";
+    const current = hooks.playingId();
+    const listen = (id: string, label: string) => action("stems-compare", label, "audio", current === id ? "secondary" : "quiet",
+      `id="stems-listen-${h(id)}" data-id="${h(id)}" aria-pressed="${current === id}"`);
+    const source = selected();
+    const [original, vocals, instrumental] = labels();
+    return `<section class="asset-review stems-output" aria-labelledby="stems-output-title">
+      <div class="section-heading"><h3 id="stems-output-title">${t("Pistas completas", "Full-length stems")}</h3><span>FLAC · ${bytesLabel(files.reduce((total, { item }) => total + item.size, 0))}</span></div>
+      <div class="button-group stems-tracks" role="group" aria-label="${t("Comparar pistas completas", "Compare full-length stems")}">
+        ${source ? listen(source.id, original) : ""}${files.map(({ role, item }) => listen(item.id, role === "Vocals" ? vocals : instrumental)).join("")}
+      </div>
+      <p class="field-note">${t("Cambia de pista en el mismo punto. Usa la barra inferior para pausar o buscar.", "Switch tracks at the same position. Use the player below to pause or seek.")}</p>
+      ${files.length === 1 ? `<p class="field-note">${t("Solo queda una pista disponible de esta exportación.", "One stem from this export is available.")}</p>` : ""}
+      <div class="button-group stems-tracks">${action("stems-share", files.length === 2 ? t("Enviar las dos pistas", "Send both stems")
+        : t("Enviar pista disponible", "Send available stem"), "arrow", "secondary")}</div>
+    </section>`;
+  }
 
   async function load() {
     try { component = (await hooks.command<Component[]>("optional_components")).find(entry => entry.id === "stems") ?? null; }
@@ -153,7 +196,7 @@ export function createStemsTool(hooks: Hooks) {
           ${action("choose-folder", t("Cambiar carpeta", "Change folder"), "folder", "quiet", disabled())}</div>
         <div class="asset-submit"><p class="field-note">${t("Dos pistas FLAC vinculadas al original · hasta 30 min por archivo. La separación es estimada y puede dejar filtraciones o artefactos.", "Two FLAC stems linked to the original · up to 30 min per file. Separation is estimated and may leave bleed or artifacts.")}</p>
           <button type="submit" class="button primary" ${!preview || busy || !ready() || !selected() ? "disabled" : ""}>${t("Exportar pistas", "Export stems")}</button></div>
-      </form>
+      </form>${results()}
     </section>`;
   }
 
@@ -207,10 +250,31 @@ export function createStemsTool(hooks: Hooks) {
         return true;
       case "stems-play":
         if (nodes.length) stop();
-        else if (context) { await context.resume(); play(); }
+        else if (context) {
+          const current = hooks.playingId();
+          if (current && resultGroup().includes(current)) hooks.pausePlayback();
+          await context.resume(); play();
+        }
         hooks.render();
         document.getElementById("stems-play")?.focus({ preventScroll: true });
         return true;
+      case "stems-compare": {
+        const id = button.dataset.id;
+        const group = resultGroup();
+        if (id && group.includes(id)) {
+          const stoppedSample = nodes.length > 0;
+          stop();
+          hooks.compare(id, group);
+          if (stoppedSample) hooks.render();
+          document.getElementById(`stems-listen-${id}`)?.focus({ preventScroll: true });
+        }
+        return true;
+      }
+      case "stems-share": {
+        const ids = publishedSet()?.map(({ item }) => item.id);
+        if (ids?.length) hooks.share(ids);
+        return true;
+      }
       default: return false;
     }
   }
