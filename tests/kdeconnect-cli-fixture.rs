@@ -16,11 +16,32 @@ fn main() {
         } else {
             println!("paired-device-123");
         }
-    } else if args.iter().any(|arg| arg.starts_with("--share=") || arg.starts_with("--share-text=")) {
-        let mut log = OpenOptions::new().create(true).append(true).open(root.join("cli-arguments.jsonl")).unwrap();
+    } else if args
+        .iter()
+        .any(|arg| arg.starts_with("--share=") || arg.starts_with("--share-text="))
+    {
+        let mut log = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(root.join("cli-arguments.jsonl"))
+            .unwrap();
         writeln!(log, "{args:?}").unwrap();
-        if root.join("cli-warning").is_file() { eprintln!("D-Bus share interface unavailable"); }
-        println!("Shared");
+        if root.join("cli-warning").is_file() {
+            eprintln!("D-Bus share interface unavailable");
+        }
+        if let Some(text) = args
+            .iter()
+            .find_map(|arg| arg.strip_prefix("--share-text="))
+        {
+            println!("Shared text: {text}");
+        } else if let Some(url) = args.iter().find_map(|arg| arg.strip_prefix("--share=")) {
+            println!("Shared {url}");
+            if !root.join("cli-first-file-only").is_file() {
+                for url in args.iter().skip_while(|arg| *arg != "--").skip(1) {
+                    println!("Shared {url}");
+                }
+            }
+        }
     } else {
         std::process::exit(1);
     }

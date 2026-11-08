@@ -16,5 +16,9 @@
 .device-share-review small { color: var(--muted); white-space: nowrap; }
 .device-share-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; }
 .device-share-result { padding: 12px; border: 1px solid var(--border); border-radius: 8px; }
+.device-share-result h3 { margin: 0; border-radius: 4px; font-size: 16px; }
+.device-share-result h3:focus-visible { outline-offset: 3px; }
+.device-share-result p { color: var(--muted); }
+.device-share-result .device-share-review { margin-top: 14px; }
 .device-share-error { padding: 8px; }
 .collection-list .collection-row > .media-open { flex: 1 1 190px; width: auto; min-width: 0; }

@@ -572,11 +572,19 @@ pub async fn device_share_send(
             return Err("One selected file changed. Review the files again before sending.".into());
         }
     }
+    let file_count = plan.files.len();
     match run(&plan.cli.path, plan.args).await {
         Ok(reply)
             if reply.success
                 && reply.stderr.trim().is_empty()
-                && !reply.stdout.trim().is_empty() =>
+                && !reply.stdout.trim().is_empty()
+                && (file_count == 0
+                    || reply
+                        .stdout
+                        .lines()
+                        .filter(|line| !line.trim().is_empty())
+                        .count()
+                        == file_count) =>
         {
             Ok(Receipt::HandedOff)
         }

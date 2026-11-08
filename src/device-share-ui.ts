@@ -8,6 +8,8 @@ type Payload = { kind: "files"; ids: string[] } | { kind: "link"; url: string } 
 interface Device { id: string; name: string }
 interface Status { state: "ready" | "missing" | "offline" | "incompatible" | "unsupported"; devices: Device[]; share: boolean; shareText: boolean }
 interface Preview { token: string; device: Device; entries: { name: string; bytes: number }[]; total: number }
+type Receipt = "handedOff" | "unconfirmed";
+type Review = Omit<Preview, "token">;
 interface Hooks {
   command<T>(name: string, args?: Record<string, unknown>): Promise<T>;
   item(id: string): LibraryItem | undefined;
@@ -24,7 +26,7 @@ export function createDeviceShare(hooks: Hooks) {
   let status: Status | null = null, preview: Preview | null = null;
   let mode: Mode = "files", ids: string[] = [], link = "", text = "", label = "", deviceId = "";
   let busy: "discover" | "review" | "send" | null = null, generation = 0, error = "";
-  let receipt: "handedOff" | "unconfirmed" | null = null;
+  let result: { receipt: Receipt; review: Review } | null = null;
 
   const supported = () => mode === "text" ? status?.shareText : status?.share;
   function selection(): Payload | null {
@@ -44,6 +46,10 @@ export function createDeviceShare(hooks: Hooks) {
     const devices = status?.devices ?? [];
     const deviceLabel = (device: Device) => devices.some(other => other.id !== device.id && other.name === device.name)
       ? `${device.name} · ${device.id.slice(-8)}` : device.name;
+    const reviewContent = (review: Review, showEntries: boolean) => `
+      <div><span class="field-note">${t("Dispositivo", "Device")}</span><strong>${h(deviceLabel(review.device))}</strong></div>
+      <div><span class="field-note">${review.entries.length} ${review.entries.length === 1 ? t("elemento", "item") : t("elementos", "items")}</span><strong>${h(bytesLabel(review.total))}</strong></div>
+      ${showEntries ? `<ul aria-label="${t("Contenido revisado", "Reviewed content")}">${review.entries.map(item => `<li><span>${h(item.name)}</span><small>${h(bytesLabel(item.bytes))}</small></li>`).join("")}</ul>` : ""}`;
     const files = ids.map(hooks.item).filter(item => item !== undefined);
     const help = status?.state === "missing" ? t("Instala KDE Connect por separado o selecciona el ejecutable de una instalación existente.", "Install KDE Connect separately or select the executable from an existing installation.")
       : status?.state === "offline" ? t("Abre KDE Connect en Windows y actualiza los dispositivos.", "Open KDE Connect in Windows and refresh the devices.")
@@ -53,11 +59,10 @@ export function createDeviceShare(hooks: Hooks) {
     const button = (id: string, caption: string, style = "quiet", disabled = false) => `<button type="button" id="share-${id}" class="button ${style}" data-share-action="${id}" ${disabled ? "disabled" : ""}>${h(caption)}</button>`;
     dialog.innerHTML = `<header class="device-share-head"><div><p class="eyebrow">KDE Connect</p><h2 id="device-share-title">${t("Enviar a dispositivo", "Send to device")}</h2>${label ? `<p class="field-note">${h(label)}</p>` : ""}</div>
       <button type="button" id="share-close" class="icon-button" data-share-action="close" aria-label="${t("Cerrar", "Close")}" ${busy === "send" ? "disabled" : ""}>${icon("close")}</button></header>
-      ${receipt ? `<section class="device-share-result" role="status"><strong>${receipt === "handedOff" ? t("Entregado a KDE Connect", "Handed off to KDE Connect") : t("Entrega a KDE Connect sin confirmar", "KDE Connect handoff unconfirmed")}</strong>
-        <p>${receipt === "handedOff" ? t("Consulta KDE Connect para seguir la transferencia y confirmar la recepción.", "Check KDE Connect for transfer progress and receipt.") : t("Comprueba KDE Connect y el dispositivo antes de volver a enviar.", "Check KDE Connect and the device before sending again.")}</p></section>` : preview ? `<section class="device-share-review">
-        <div><span class="field-note">${t("Dispositivo", "Device")}</span><strong>${h(deviceLabel(preview.device))}</strong></div>
-        <div><span class="field-note">${preview.entries.length} ${t("elemento(s)", "item(s)")}</span><strong>${h(bytesLabel(preview.total))}</strong></div>
-        <ul aria-label="${t("Contenido a enviar", "Content to send")}">${preview.entries.map(item => `<li><span>${h(item.name)}</span><small>${h(bytesLabel(item.bytes))}</small></li>`).join("")}</ul>
+      ${result ? `<section class="device-share-result" aria-labelledby="share-result-status"><h3 id="share-result-status" tabindex="-1" aria-describedby="share-result-note">${result.receipt === "handedOff" ? t("Entregado a KDE Connect", "Handed off to KDE Connect") : t("Entrega a KDE Connect sin confirmar", "KDE Connect handoff unconfirmed")}</h3>
+        <p id="share-result-note">${result.receipt === "handedOff" ? t("Consulta KDE Connect para seguir la transferencia y confirmar la recepción.", "Check KDE Connect for transfer progress and receipt.") : t("Comprueba KDE Connect y el dispositivo antes de volver a enviar.", "Check KDE Connect and the device before sending again.")}</p>
+        <div class="device-share-review">${reviewContent(result.review, mode === "files")}</div></section>` : preview ? `<section class="device-share-review">
+        ${reviewContent(preview, true)}
         <div class="device-share-footer">${button("back", t("Editar envío", "Edit share"), "quiet", Boolean(busy))}${button("send", busy ? t("Entregando a KDE Connect…", "Handing off to KDE Connect…") : t("Confirmar envío", "Confirm share"), "primary", Boolean(busy))}</div></section>` : `<section class="device-share-fields">
         <div class="filter-tabs" role="group" aria-label="${t("Qué quieres enviar", "What to share")}">${([['files', t("Archivos", "Files")], ['link', t("Enlace público", "Public link")], ['text', t("Texto", "Text")]] as const).map(([kind, caption]) => `<button type="button" id="share-${kind}" data-share-action="${kind}" aria-pressed="${mode === kind}" ${busy ? "disabled" : ""}>${h(caption)}</button>`).join("")}</div>
         ${mode === "files" ? `<div class="device-share-files">${files.length ? `<strong>${files.length} ${t("archivo(s) seleccionado(s)", "selected file(s)")}</strong><ul>${files.slice(0, 5).map(file => `<li>${h(file.name)}</li>`).join("")}</ul>${files.length > 5 ? `<p class="field-note">+${files.length - 5} ${t("más", "more")}</p>` : ""}` : `<p class="field-note">${t("Selecciona archivos en Biblioteca o abre un resultado de Descargas.", "Select files in Library or open an output in Downloads.")}</p>`}
@@ -72,7 +77,7 @@ export function createDeviceShare(hooks: Hooks) {
         <div class="device-share-footer">${button("refresh", t("Actualizar dispositivos", "Refresh devices"), "quiet", Boolean(busy))}
           ${status && ["missing", "offline", "incompatible"].includes(status.state) ? button("choose", t("Seleccionar ejecutable", "Choose executable"), "secondary", Boolean(busy)) : ""}
           ${button("review", busy === "review" ? t("Preparando revisión…", "Preparing review…") : t("Revisar envío", "Review share"), "primary", Boolean(busy || !deviceId || !supported() || !selection()))}</div></section>`}
-      ${error ? `<p class="notice error device-share-error" role="alert">${h(error)}</p>` : ""}`;
+      ${error ? `<p class="notice error device-share-error" role="alert" tabindex="-1">${h(error)}</p>` : ""}`;
     if (previous) dialog.querySelector<HTMLElement>(`#${CSS.escape(previous)}`)?.focus({ preventScroll: true });
   }
 
@@ -112,12 +117,13 @@ export function createDeviceShare(hooks: Hooks) {
       });
       dialog?.querySelector<HTMLElement>(preview ? "#share-send" : ".device-share-error")?.focus({ preventScroll: true });
     } else if (name === "send" && preview) {
-      const token = preview.token;
+      const { token, ...review } = preview;
       await perform("send", async () => {
         preview = null;
-        receipt = await hooks.command<typeof receipt>("device_share_send", { token });
+        const receipt = await hooks.command<Receipt>("device_share_send", { token });
+        result = { receipt, review };
       });
-      dialog?.querySelector<HTMLElement>("#share-close")?.focus({ preventScroll: true });
+      dialog?.querySelector<HTMLElement>(result ? "#share-result-status" : ".device-share-error")?.focus();
     }
   }
 
@@ -129,7 +135,7 @@ export function createDeviceShare(hooks: Hooks) {
       dialog.addEventListener("cancel", event => { if (busy === "send") event.preventDefault(); });
       dialog.addEventListener("close", () => {
         if (dialog?.open) return;
-        generation++; busy = null; discard(); text = link = "";
+        generation++; busy = null; result = null; discard(); text = link = "";
         hooks.afterClose();
       });
       dialog.addEventListener("click", event => {
@@ -151,7 +157,7 @@ export function createDeviceShare(hooks: Hooks) {
     if (dialog.open) return;
     ids = [...new Set(input.ids ?? [])]; label = input.label ?? ""; link = input.url ?? ""; text = input.text ?? "";
     mode = input.text !== undefined ? "text" : input.url !== undefined || !ids.length ? "link" : "files";
-    deviceId = ""; receipt = null; error = ""; status = null; busy = null; discard();
+    deviceId = ""; result = null; error = ""; status = null; busy = null; discard();
     draw(); dialog.showModal();
     void refresh();
   }

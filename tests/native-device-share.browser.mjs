@@ -7,7 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(import.meta.dirname, "..");
-const base = path.join(root, "artifacts/device-share");
+const base = process.env.NABNAB_DEVICE_SHARE_ARTIFACTS || path.join(root, "artifacts/device-share");
 await mkdir(base, { recursive: true });
 const data = await mkdtemp(path.join(base, "native-run-"));
 const output = path.join(data, "output");
@@ -55,7 +55,7 @@ async function choose() {
 async function closeShare() { await inShare("close").click(); await modal().waitFor({ state: "hidden" }); }
 
 try {
-  child = spawn(path.join(root, "src-tauri/target/debug/nabnab.exe"), [], { cwd: root, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
+  child = spawn(process.env.NABNAB_DEVICE_SHARE_TEST_EXE || path.join(root, "src-tauri/target/debug/nabnab.exe"), [], { cwd: root, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
     env: { ...process.env, Path: `${data}${path.delimiter}${process.env.Path ?? process.env.PATH ?? ""}`, NABNAB_TEST_DATA_DIR: data,
       WEBVIEW2_USER_DATA_FOLDER: path.join(data, "webview"), WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${new URL(endpoint).port}` } });
   for (const stream of [child.stdout, child.stderr]) stream.on("data", chunk => { log = (log + chunk).slice(-5000); });
@@ -130,11 +130,14 @@ try {
   assert.equal(afterText.length, 3);
   assert.deepEqual(afterText.at(-1), [`--device=${device}`, `--share-text=${text}`]);
   await unlink(path.join(data, "cli-warning"));
+  const textAgain = await rpc("device_share_prepare", { deviceId: device, selection: { kind: "text", text } });
+  assert.equal(await rpc("device_share_send", { token: textAgain.token }), "handedOff");
+  assert.deepEqual(await calls(), [...afterText, afterText.at(-1)]);
 
   const stale = await rpc("device_share_prepare", { deviceId: device, selection: { kind: "files", ids } });
   await writeFile(path.join(data, "unreachable"), "1");
   await assert.rejects(rpc("device_share_send", { token: stale.token }), /no longer reachable/);
-  assert.equal((await calls()).length, 3);
+  assert.equal((await calls()).length, afterText.length + 1);
   assert.deepEqual((await rpc("device_share_status")).devices, []);
   await unlink(path.join(data, "unreachable"));
 
@@ -149,6 +152,35 @@ try {
   assert.equal(multi.length, 4);
   assert.equal(multi[2], "--");
   assert.match(multi[3], /^file:\/\/\//);
+  await closeShare();
+  await page.locator('[data-action="share-collection"][data-collection="Lecturas"]').click();
+  await choose();
+  await inShare("review").click();
+  await inShare("send").waitFor();
+  const beforePartial = await calls();
+  const names = await modal().locator(".device-share-review li > span").allTextContents();
+  assert.equal(names.length, 2);
+  const reviewedSize = await modal().locator(".device-share-review > div:nth-child(2) strong").innerText();
+  const partialFlag = path.join(data, "cli-first-file-only");
+  await writeFile(partialFlag, "1");
+  await inShare("send").press("Enter");
+  await modal().locator(".device-share-result").waitFor();
+  assert.equal(await modal().getByText("Entrega a KDE Connect sin confirmar", { exact: true }).count(), 1,
+    "One CLI acknowledgement must not confirm a two-file request");
+  const partial = modal().getByRole("heading", { name: "Entrega a KDE Connect sin confirmar", exact: true });
+  await partial.waitFor();
+  assert.equal(await partial.evaluate(node => node === document.activeElement), true);
+  assert.equal(await modal().getByText("Teléfono de prueba ñ", { exact: true }).count(), 1);
+  assert.equal(await modal().getByText(reviewedSize, { exact: true }).count(), 1);
+  assert.deepEqual(await modal().locator(".device-share-result li > span").allTextContents(), names);
+  assert.equal(await inShare("send").count(), 0);
+  assert.deepEqual(await calls(), [...beforePartial, multi]);
+  for (const [width, height] of [[900, 620], [1180, 780]]) {
+    await page.setViewportSize({ width, height });
+    assert.ok(await modal().evaluate(element => element.scrollWidth <= element.clientWidth + 1));
+    await modal().screenshot({ path: path.join(base, `unconfirmed-${width}.png`), animations: "disabled" });
+  }
+  await unlink(partialFlag);
   await closeShare();
   await page.locator('[data-action="share-collection"][data-collection="Lecturas"]').click();
   await inShare("zip").waitFor();
@@ -239,7 +271,7 @@ try {
   await page.screenshot({ path: path.join(data, "sticker-export.png"), animations: "disabled",
     clip: { x: box.x - 10, y: box.y, width: box.width + 20, height: box.height } });
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ nativeCliFixture: true, unicodeFile: true, staleFileRejected: true, signedLinkRejected: true,
+  console.log(JSON.stringify({ nativeCliFixture: true, unicodeFile: true, staleFileRejected: true, signedLinkRejected: true, partialHandoffUnconfirmed: true,
     publicLink: true, textOneArgument: true, ambiguousHandoff: true, replayRejected: true, offlineDeviceRejected: true, collection: true, realPortableZip: true, shareFromExportResult: true, shareFromRealSticker: true, outputSurvivesReload: true, output: data }));
 } catch (error) {
   console.error(log);
