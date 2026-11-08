@@ -14,9 +14,9 @@ export function settingsView(snapshot: Snapshot, view: SettingsView, t: Copy, de
   const playbackShortcuts = desktop ? `<div class="preference-group">
     <h3>${t("Reproducción desde el escritorio", "Desktop playback")}</h3>
     <div class="setting-row"><div><strong>${t("Abrir minirreproductor", "Open mini player")}</strong>
-      <p>${t("Abre el audio o vídeo cargado, incluso con nabnab minimizado.", "Open the loaded audio or video, even when nabnab is minimized.")}</p></div><kbd>${t("Ctrl + Mayús + M", "Ctrl + Shift + M")}</kbd></div>
+      <p>${t("Abre el audio o vídeo cargado, incluso con nabnab minimizado. Si activas el icono de la bandeja, también puedes abrirlo desde su menú.", "Open the loaded audio or video, even when nabnab is minimized. If the tray icon is enabled, you can also open it from its menu.")}</p></div><kbd>${t("Ctrl + Mayús + M", "Ctrl + Shift + M")}</kbd></div>
     <div class="setting-row"><div><strong>${t("Salto rápido", "Quick skip")}</strong>
-      <p>${t("Recorre la cola de audio junto al cursor. Suelta Alt para reproducir la selección.", "Browse the audio queue at the pointer. Release Alt to play the selection.")}</p></div><kbd>${t("Alt + rueda", "Alt + scroll")}</kbd></div>
+      <p>${t("Recorre la cola de audio junto al cursor, incluso con nabnab minimizado. Suelta Alt para reproducir la selección.", "Browse the audio queue at the pointer, even when nabnab is minimized. Release Alt to play the selection.")}</p></div><kbd>${t("Alt + rueda", "Alt + scroll")}</kbd></div>
   </div>` : "";
   let content="";
   switch(view.section) {

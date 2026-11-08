@@ -459,6 +459,7 @@ export function createAudioPlayer(hooks: Hooks) {
       <div class="audio-volume">${button("mute", t("Silenciar", "Mute"), "volume")}<input id="audio-volume" type="range" min="0" max="1" step="0.01" value="${preferences.volume}" aria-label="${t("Volumen", "Volume")}"></div>
       ${item.kind === "audio" ? `<button type="button" class="icon-button audio-visualize" data-action="audio-player-open" aria-label="${t("Abrir visualización", "Open visualization")}" title="${t("Abrir visualización", "Open visualization")}">${icon("wave")}</button>` : ""}
       ${button("mini", t("Abrir minirreproductor", "Open mini player"), "miniPlayer")}
+      ${item.kind === "audio" ? button("wheel", t("Salto rápido · Alt + rueda", "Quick skip · Alt + scroll"), "trackWheel", 'aria-expanded="false" aria-controls="track-wheel"') : ""}
       ${button("queue", t("Cola de reproducción", "Playback queue"), "list", `aria-expanded="${queueOpen}" aria-controls="audio-queue-panel"`)}
       ${button("close", t("Detener y cerrar", "Stop and close"), "close")}</div>
       ${issue && !expanded ? `<div class="audio-player-issue" role="alert"><span>${h(issue)}</span><div class="button-group">
@@ -607,7 +608,7 @@ export function createAudioPlayer(hooks: Hooks) {
     const item = id ? hooks.item(id) : undefined;
     if (!media || !isPlayable(item)) return;
     if (detached && item.kind !== current()?.kind) void hooks.miniWindow?.(item.kind === "video" ? "resize-video" : "resize-audio").catch(hooks.showError);
-    trackWheel?.dismiss();
+    trackWheel?.dismiss(true);
     cancelAudioChange();
     persist();
     media.pause();
@@ -1051,6 +1052,9 @@ export function createAudioPlayer(hooks: Hooks) {
         showStage(); hooks.render();
         break;
       case "audio-player-mini": showMini(); break;
+      case "audio-player-wheel":
+        if (control instanceof HTMLButtonElement) trackWheel?.toggle(control);
+        break;
       case "audio-player-close": close(); break;
       default: return false;
     }

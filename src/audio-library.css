@@ -118,7 +118,7 @@
 .has-audio-player .capture-indicator { bottom: calc(20px + var(--audio-player-height, 0px)); }
 .audio-playback-options { justify-content: end; flex-wrap: wrap; gap: 4px; }
 .audio-playback-options .icon-button { width: 40px; height: 40px; }
-.audio-playback-options [aria-pressed="true"] { background: var(--hover); color: var(--text); border-color: var(--border); }
+.audio-playback-options :is([aria-pressed="true"], #audio-wheel[aria-expanded="true"]) { background: var(--hover); color: var(--text); border-color: var(--border); }
 .audio-player-issue { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; margin: 0; color: var(--error); }
 .audio-volume { display: flex; align-items: center; gap: 4px; }
 .audio-volume input { width: 62px; min-height: 24px; padding: 0; border: 0; background: none; box-shadow: none; accent-color: var(--action); }
