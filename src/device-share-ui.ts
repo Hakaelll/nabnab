@@ -19,6 +19,8 @@ interface Hooks {
 }
 
 const maxFiles = 50;
+const maxTextBytes = 8192;
+const utf8 = new TextEncoder();
 
 export function createDeviceShare(hooks: Hooks) {
   const { t } = hooks;
@@ -29,15 +31,38 @@ export function createDeviceShare(hooks: Hooks) {
   let result: { receipt: Receipt; review: Review } | null = null;
 
   const supported = () => mode === "text" ? status?.shareText : status?.share;
+  const textBytes = () => utf8.encode(text).byteLength;
+  const textCount = (size: number) => `${size} / ${maxTextBytes} B`;
+  const textLimitNote = (size: number) => size > maxTextBytes
+    ? t("El texto supera 8 KiB. Acórtalo para continuar.", "The text exceeds 8 KiB. Shorten it to continue.") : "";
   function selection(): Payload | null {
     if (mode === "files") return ids.length > 0 && ids.length <= maxFiles ? { kind: "files", ids } : null;
     if (mode === "link") return link.trim() ? { kind: "link", url: link.trim() } : null;
-    return text.trim() ? { kind: "text", text } : null;
+    return text.trim() && textBytes() <= maxTextBytes ? { kind: "text", text } : null;
   }
 
   function discard() {
     if (preview) void hooks.command("device_share_discard", { token: preview.token }).catch(() => {});
     preview = null;
+  }
+
+  function textField() {
+    const size = textBytes();
+    return `<div class="device-share-text"><label for="share-text-value">${t("Texto para el dispositivo", "Text for the device")}
+      <textarea id="share-text-value" rows="4" maxlength="${maxTextBytes}" aria-describedby="share-text-limit share-text-bytes"
+        aria-invalid="${size > maxTextBytes}" ${busy ? "disabled" : ""}>${h(text)}</textarea></label>
+      <div class="device-share-text-meta"><span id="share-text-limit" role="status">${textLimitNote(size)}</span>
+        <output id="share-text-bytes" for="share-text-value" aria-live="off">${textCount(size)}</output></div></div>`;
+  }
+
+  function syncTextField(field: HTMLElement) {
+    const size = textBytes();
+    field.setAttribute("aria-invalid", String(size > maxTextBytes));
+    const limit = dialog?.querySelector("#share-text-limit");
+    const count = dialog?.querySelector("#share-text-bytes");
+    const note = textLimitNote(size);
+    if (limit && limit.textContent !== note) limit.textContent = note;
+    if (count) count.textContent = textCount(size);
   }
 
   function draw() {
@@ -69,7 +94,7 @@ export function createDeviceShare(hooks: Hooks) {
           ${ids.length > maxFiles ? `<p class="field-note">${t("Para más de 50 archivos, prepara una colección portátil.", "For more than 50 files, prepare a portable collection.")}</p>` : ""}
           ${ids.length > 1 ? `${button("zip", t("Preparar ZIP de la selección", "Prepare selection ZIP"), "secondary", Boolean(busy))}<p class="field-note">${t("Podrás revisar el envío en Colección portátil cuando el ZIP esté listo.", "You can review the share in Portable collection once the ZIP is ready.")}</p>` : ""}</div>` : mode === "link"
           ? `<label for="share-url">${t("Enlace HTTP o HTTPS", "HTTP or HTTPS link")}<input id="share-url" type="url" maxlength="2048" value="${h(link)}" ${busy ? "disabled" : ""}></label><p class="field-note">${t("Para enlaces privados o con firma, elige el archivo local en Archivos.", "For private or signed links, choose the local file under Files.")}</p>`
-          : `<label for="share-text-value">${t("Texto para el dispositivo", "Text for the device")}<textarea id="share-text-value" rows="4" maxlength="8192" ${busy ? "disabled" : ""}>${h(text)}</textarea></label>`}
+          : textField()}
         <label for="share-device">${t("Dispositivo emparejado", "Paired device")}<select id="share-device" ${busy || !devices.length ? "disabled" : ""}>${option("", t("Elige un dispositivo", "Choose a device"), deviceId)}${devices.map(device => option(device.id, deviceLabel(device), deviceId)).join("")}</select></label>
         ${help ? `<p class="field-note" role="status">${h(help)}</p>` : ""}
         ${status?.state === "ready" && !supported() ? `<p class="field-note">${t("Esta instalación de KDE Connect no admite este tipo de envío.", "This KDE Connect installation does not support this share type.")}</p>` : ""}
@@ -147,7 +172,7 @@ export function createDeviceShare(hooks: Hooks) {
         const element = event.target;
         if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement)) return;
         if (element.id === "share-url") link = element.value;
-        else if (element.id === "share-text-value") text = element.value;
+        else if (element.id === "share-text-value") { text = element.value; syncTextField(element); }
         else if (element.id === "share-device") deviceId = element.value;
         const review = dialog?.querySelector<HTMLButtonElement>("#share-review");
         if (review) review.disabled = Boolean(busy || !deviceId || !supported() || !selection());

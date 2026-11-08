@@ -6,6 +6,9 @@
 .device-share-fields, .device-share-review { display: grid; gap: 12px; }
 .device-share .filter-tabs { width: fit-content; flex-wrap: wrap; }
 .device-share .filter-tabs [aria-pressed="true"] { background: var(--hover); color: var(--text); }
+.device-share-text-meta { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 4px 10px; margin-top: 6px; font-size: 12px; }
+.device-share-text-meta [role="status"] { color: var(--error); }
+.device-share-text-meta output { margin-inline-start: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
 .device-share-files { padding: 10px; border: 1px solid var(--border); border-radius: 8px; overflow-wrap: anywhere; }
 .device-share-review { grid-template-columns: minmax(0, 1fr) auto; }
 .device-share-review strong { display: block; margin-top: 3px; overflow-wrap: anywhere; }
