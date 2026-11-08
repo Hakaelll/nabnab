@@ -23,6 +23,8 @@ function jobErrorLabel(job: Job, t: Copy): string {
     case "mounted_changed":
     case "webdav_changed": return t("El archivo cambió en el servidor. Actualiza la carpeta y elige la nueva versión.", "The file changed on the server. Refresh the folder and select the new version.");
     case "webdav_range": return t("El servidor devolvió un tramo incompatible. Reintenta para copiar desde el principio.", "The server returned an incompatible byte range. Retry to copy from the beginning.");
+    case "sftp_disconnected": return t("La conexión SFTP se cortó. Reintenta para copiar desde el principio.", "The SFTP connection closed. Retry to copy from the beginning.");
+    case "sftp_changed": return t("El archivo SFTP cambió o no se pudo verificar. Actualiza la carpeta y vuelve a revisarlo.", "The SFTP file changed or could not be verified. Refresh the folder and review the file again.");
     default: return job.error?.message ?? "";
   }
 }
@@ -98,7 +100,10 @@ export function downloadsView(snapshot: Snapshot, view: DownloadView, t: Copy): 
       const percent = transferring ? job.progress?.percent ?? null : null;
       const selected = view.detailId === job.id;
       const size = job.state === "completed" || interruptedCopy(job) ? null : job.progress?.total;
+      const received = job.progress?.downloaded;
       const metric = transferring && job.progress?.speed ? bytesLabel(job.progress.speed) + "/s"
+        : transferring && job.source.kind === "personalFile" && typeof received === "number" && typeof size === "number"
+          ? `${bytesLabel(received)} / ${bytesLabel(size)}`
         : size ? bytesLabel(size)
         : job.state !== "completed" ? ""
         : job.source.kind === "captionTranslation" ? t("Borrador", "Draft")

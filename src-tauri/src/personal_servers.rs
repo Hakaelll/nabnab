@@ -1,4 +1,4 @@
-use crate::{file_sources, queue, sessions, AppState};
+use crate::{file_sources, model::Progress, queue, sessions, AppState};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -23,9 +23,23 @@ pub(crate) const WEBDAV_INVALID_RANGE: &str = "The WebDAV server returned an inc
 pub(crate) const MOUNTED_INTERRUPTED: &str =
     "The mounted transfer was interrupted. A verified partial was kept for retry.";
 pub(crate) const MOUNTED_CHANGED: &str = "The mounted file changed. Refresh the folder and select it again.";
+pub(crate) const SFTP_DISCONNECTED: &str = "The SFTP server closed the connection.";
+pub(crate) const SFTP_CHANGED: &str =
+    "The SFTP file changed or its version cannot be checked. Inspect it again before copying.";
 
 pub(crate) fn interrupted(error: &str) -> bool {
     error.starts_with(WEBDAV_INTERRUPTED) || error.starts_with(MOUNTED_INTERRUPTED)
+}
+
+fn copy_progress(run_id: u64, total: u64, written: u64) -> Progress {
+    Progress {
+        request_id: run_id,
+        phase: "downloading".into(),
+        percent: (total > 0).then(|| written as f64 / total as f64 * 100.0),
+        speed: None,
+        downloaded: Some(written as f64),
+        total: Some(total as f64),
+    }
 }
 
 const SECRET: &str = "personal-servers";
@@ -171,7 +185,7 @@ impl Selection {
         let path = self.partial_path(staging)?;
         let written = crate::direct::partial_len(&path).ok().flatten()
             .filter(|length| *length > 0 && *length < total)?;
-        Some(nas::copy_progress(run_id, total, written))
+        Some(copy_progress(run_id, total, written))
     }
 }
 
@@ -705,6 +719,8 @@ pub async fn execute(
                 &selection.stamp,
                 &temporary,
                 cancel.clone(),
+                run_id,
+                emit,
             )
             .await
         }

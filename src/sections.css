@@ -357,6 +357,7 @@ body[data-page="platforms"] #page-content .platform-filters { position: sticky; 
 }
 @media (min-width: 941px) {
   body[data-page="downloads"] .job-row { grid-template-columns: 18px 72px minmax(0,1fr) 100px 60px 76px; }
+  body[data-page="downloads"] .job-row.is-transferring { grid-template-columns: 18px 72px minmax(0,1fr) 100px minmax(60px, auto) 76px; }
 }
 @media (max-width: 760px) {
   body[data-page="tools"] .tool-catalog-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }

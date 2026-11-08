@@ -1,4 +1,4 @@
-// Real Tauri and DPAPI with synthetic mounted-folder and HTTPS WebDAV fixtures.
+// Real Tauri and DPAPI with synthetic mounted-folder, HTTPS WebDAV and SFTP fixtures.
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
@@ -6,18 +6,21 @@ import { mkdir, mkdtemp, readdir, readFile, rename, stat, utimes, writeFile } fr
 import { createServer } from "node:https";
 import { createRequire } from "node:module";
 import path from "node:path";
+import { openSftpFixture } from "./native-sftp-fixture.mjs";
 
 const { chromium } = createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODULE || "playwright");
 const root = path.resolve(import.meta.dirname, "..");
 const artifacts = path.join(root, "artifacts/native-personal-servers");
 await mkdir(artifacts, { recursive: true });
 const data = await mkdtemp(path.join(artifacts, "run-"));
+const sftpIdentity = path.join(data, "SFTP fixture key");
 const mount = path.join(data, "mount");
 const offline = path.join(data, "offline");
 const docs = path.join(mount, "Lecturas");
 const output = path.join(data, "output");
 const secrets = path.join(data, "module-secrets");
-await Promise.all([mkdir(docs, { recursive: true }), mkdir(output), mkdir(secrets)]);
+const temporary = path.join(data, "tmp");
+await Promise.all([mkdir(docs, { recursive: true }), mkdir(output), mkdir(secrets), mkdir(temporary)]);
 const file = "Cuaderno ñ.txt";
 const remote = path.join(docs, file);
 const original = "Edición A\n" + "a".repeat(210_000);
@@ -41,6 +44,7 @@ const endpoint = `http://127.0.0.1:${port}`;
 const child = spawn(process.env.NABNAB_PERSONAL_SERVER_TEST_EXE || path.join(root, "src-tauri/target/debug/nabnab.exe"), [], {
   cwd: root, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
   env: { ...process.env, NABNAB_TEST_DATA_DIR: data, WEBVIEW2_USER_DATA_FOLDER: path.join(data, "webview"),
+    TEMP: temporary, TMP: temporary,
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}` },
 });
 let browser, page, log = "";
@@ -291,6 +295,114 @@ async function verifyWebdav(openssl) {
   }
 }
 
+async function verifySftp(module) {
+  const server = await openSftpFixture(module, sftpIdentity);
+  const savedName = "Servidor SFTP de prueba";
+  try {
+    await button("Ajustes").click();
+    await page.locator('[data-action="settings-section"][data-section="connections"]').click();
+    await page.locator('[data-action="personal-add"][data-kind="sftp"]').click();
+    await page.locator("#personal-name").fill(savedName);
+    await page.locator("#personal-host").fill(server.hostname);
+    await page.locator("#personal-port").fill(String(server.port));
+    await page.locator("#personal-username").fill(server.username);
+    await page.locator("#personal-root").fill(server.root);
+    await button("Elegir clave").click();
+    await button("Comprobar huella").click();
+    const trust = page.locator(".personal-trust");
+    await trust.getByText(server.fingerprint, { exact: true }).waitFor();
+    assert.equal(server.authenticationRequests, 0);
+    assert.ok(!(await rpc("personal_servers_status")).servers.some(item => item.name === savedName));
+    await trust.screenshot({ path: path.join(data, "sftp-fingerprint.png") });
+    await button("Confiar y guardar").click();
+    const serverButton = page.locator('[data-action="personal-browse"]').filter({ hasText: savedName });
+    await serverButton.waitFor();
+    const serverId = await serverButton.getAttribute("data-id");
+    await serverButton.click();
+    await button("Lecturas").waitFor();
+    assert.equal(await button("Atajo").count(), 0);
+    const browse = relative => rpc("personal_server_browse", { serverId, path: relative, requestId: Date.now() * 1000 + 310 });
+    const activityBefore = server.activity.length;
+    await assert.rejects(browse([".."]), /saved root/);
+    assert.equal(server.activity.length, activityBefore);
+    await assert.rejects(browse(["Atajo"]), /link, special file/);
+    assert.ok(!server.activity.some(([verb, file]) => verb === "REALPATH" && file.endsWith("/Atajo")));
+    await button("Lecturas").click();
+    const selectedFile = page.getByRole("checkbox", { name: new RegExp(server.name) });
+    await selectedFile.check();
+    await page.locator(".personal-review").getByText("Destino local", { exact: true }).waitFor();
+    await button("Indexar referencia").click();
+    const saved = await wait(async () => (await rpc("personal_servers_status")).references.find(item => item.selection.serverId === serverId));
+    assert.equal(saved.selection.stamp.size, server.data.length);
+    assert.deepEqual(saved.selection.path, ["Lecturas", server.name]);
+    assert.ok(!server.activity.some(([verb]) => verb === "OPEN"));
+    assert.equal((await rpc("get_snapshot")).jobs.filter(item => item.source.selection?.serverId === serverId).length, 0);
+    await button("Referencias guardadas").click();
+    const savedReference = page.locator('[data-action="personal-reference"]').filter({ hasText: savedName });
+    await savedReference.click();
+    server.interruptNextCopy();
+    await button("Obtener copia local").click();
+    const interrupted = await job(0, serverId);
+    assert.equal(interrupted.state, "error");
+    assert.equal(interrupted.error?.code, "sftp_disconnected");
+    assert.match(JSON.stringify(interrupted.error), /SFTP server closed the connection/);
+    assert.deepEqual(interrupted.outputs, []);
+    const staging = path.join(output, `.nabnab-${interrupted.id}`);
+    assert.ok((await readdir(staging).catch(() => [])).every(name => !name.endsWith(".part")));
+
+    const after = server.activity.length;
+    await page.locator('[data-page="downloads"]').click();
+    const row = page.locator(`.job-row:has([data-action="inspect-job"][data-id="${interrupted.id}"])`);
+    await row.getByText("La conexión SFTP se cortó. Reintenta para copiar desde el principio.", { exact: true }).waitFor();
+    const gate = Promise.withResolvers();
+    server.holdAfterFirstChunk(gate.promise);
+    try {
+      await row.getByRole("button", { name: "Reintentar", exact: true }).click();
+      const active = await wait(async () => {
+        const item = (await rpc("get_snapshot")).jobs.find(job => job.id === interrupted.id);
+        return item?.runId > interrupted.runId && item.state === "downloading" && item.progress?.downloaded > 0 && item;
+      }, 10_000);
+      assert.equal(active.progress.total, server.data.length);
+      assert.ok(active.progress.downloaded < active.progress.total);
+      const bar = row.getByRole("progressbar");
+      const percent = (active.progress.downloaded / active.progress.total * 100).toFixed(1);
+      await wait(async () => await bar.getAttribute("aria-valuenow") === percent, 5000);
+      await row.getByText("128 KB / 259 KB", { exact: true }).waitFor();
+      assert.equal(await row.getByRole("button", { name: "Reanudar", exact: true }).count(), 0);
+      await row.screenshot({ path: path.join(data, "sftp-transfer.png") });
+      await page.setViewportSize({ width: 900, height: 620 });
+      assert.ok(await row.evaluate(node => node.scrollWidth <= node.clientWidth + 1));
+      await row.screenshot({ path: path.join(data, "sftp-transfer-900.png") });
+      await page.setViewportSize({ width: 1180, height: 780 });
+      assert.equal(server.activity.slice(after).find(([verb]) => verb === "READ")[1], 0);
+    } finally { gate.resolve(); }
+    const completed = await job(0, serverId, interrupted.runId);
+    assert.equal(completed.state, "completed", JSON.stringify(completed.error));
+    const firstBytes = await readFile(completed.outputs[0]);
+    assert.deepEqual(firstBytes, server.data);
+    assert.ok(server.activity.filter(([verb]) => verb === "READ").length >= 3);
+    assert.ok(server.activity.filter(([verb]) => verb === "OPEN").every(([, , flags]) => flags === 1));
+    assert.ok(server.activity.every(([verb]) => !["EXEC", "SHELL"].includes(verb)));
+    server.replace();
+    await page.locator('[data-page="library"]').click();
+    await savedReference.click();
+    await button("Obtener copia local").click();
+    const stale = await job(1, serverId);
+    assert.equal(stale.state, "error");
+    assert.equal(stale.error?.code, "sftp_changed");
+    assert.match(JSON.stringify(stale.error), /SFTP file changed/);
+    assert.deepEqual(stale.outputs, []);
+    assert.deepEqual(await readFile(completed.outputs[0]), firstBytes);
+    const oldFingerprint = server.fingerprint, count = server.authenticationRequests;
+    await server.rotateHostKey();
+    assert.notEqual(server.fingerprint, oldFingerprint);
+    await assert.rejects(browse([]), /SFTP host key differs/);
+    assert.equal(server.authenticationRequests, count);
+    assert.ok((await readdir(temporary)).every(name => !name.startsWith("nabnab-known-host-")));
+    console.log(`Native Windows SFTP verified key trust, root scope, live progress, retry from byte zero, ${firstBytes.length} copied bytes, stale version rejection and host key rotation.`);
+  } finally { await server.close(); }
+}
+
 try {
   browser = await wait(async () => {
     try {
@@ -303,6 +415,15 @@ try {
   page = await wait(() => browser.contexts()[0]?.pages().find(tab => /:1420/.test(tab.url())));
   const initial = await wait(async () => { try { return await rpc("get_snapshot"); } catch { return null; } });
   await rpc("save_settings", { settings: { ...initial.settings, language: "es", folder: output, reducedMotion: true, trayEnabled: false, closeToTray: false } });
+  if (process.env.NABNAB_TEST_SSH2_MODULE) {
+    await page.route(/\/src\/personal-servers-ui\.ts(?:\?.*)?$/, async route => {
+      const response = await route.fetch();
+      const source = await response.text();
+      const picker = 'await hooks.command("personal_server_choose_key")';
+      assert.ok(source.includes(picker), "Could not inject the fixture's selected key path.");
+      await route.fulfill({ response, body: source.replace(picker, JSON.stringify(sftpIdentity)) });
+    });
+  }
   await page.reload();
   await page.locator('[data-page="platforms"]').click();
   await button("Buscar en nabnab").click();
@@ -334,7 +455,7 @@ try {
   await rename(offline, mount);
   await button("Actualizar").click();
   await comparison().getByRole("status").filter({ hasText: "El identificador de versión es distinto." }).waitFor();
-  await comparison().screenshot({ path: path.join(artifacts, "reference-reconnected.png") });
+  await comparison().screenshot({ path: path.join(data, "reference-reconnected.png") });
   await button("Volver a referencias").click();
   await selectReference();
   await button("Obtener copia local").click();
@@ -392,6 +513,7 @@ try {
   await wait(async () => (await readdir(stage).catch(() => [])).every(name => !name.endsWith(".part")));
   console.log("Native mounted-folder retry retained the owned prefix offline and published the verified file after reconnecting.");
   if (process.env.NABNAB_TEST_OPENSSL) await verifyWebdav(process.env.NABNAB_TEST_OPENSSL);
+  if (process.env.NABNAB_TEST_SSH2_MODULE) await verifySftp(process.env.NABNAB_TEST_SSH2_MODULE);
 } catch (error) {
   console.error(log);
   console.error(await page?.locator("#page-content").innerText().catch(() => ""));

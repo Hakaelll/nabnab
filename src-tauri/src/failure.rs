@@ -62,6 +62,10 @@ impl Failure {
             ("webdav_changed", "The WebDAV file changed. Refresh the folder and select the new version.", false)
         } else if raw == crate::personal_servers::WEBDAV_INVALID_RANGE {
             ("webdav_range", "The WebDAV server returned an incompatible byte range. Retry to start a fresh copy.", false)
+        } else if raw == crate::personal_servers::SFTP_DISCONNECTED {
+            ("sftp_disconnected", "The SFTP connection closed. Retry to copy from the beginning.", false)
+        } else if raw == crate::personal_servers::SFTP_CHANGED {
+            ("sftp_changed", "The SFTP file changed or could not be verified. Refresh the folder and review the file again.", false)
         } else if raw.starts_with("DUB_TIMING ") {
             ("dubbing_timing", "Some translated cues do not fit. Shorten the indicated cues and generate the voice again.", false)
         } else if raw == "DUB_NO_ORIGINAL" {

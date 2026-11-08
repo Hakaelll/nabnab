@@ -1,4 +1,5 @@
-use super::{Entry, Stamp};
+use super::{copy_progress, Entry, Stamp, SFTP_CHANGED as CHANGED, SFTP_DISCONNECTED};
+use crate::model::Progress;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -10,7 +11,7 @@ use std::{
     path::{Component, Path, PathBuf},
     process::Stdio,
     sync::atomic::{AtomicU64, Ordering},
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -27,8 +28,6 @@ const MAX_PATH: usize = 4096;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 const CHECK_TIMEOUT: Duration = Duration::from_secs(60);
 const INVALID_PACKET: &str = "The SFTP server sent an invalid or unsupported response.";
-const CHANGED: &str =
-    "The SFTP file changed or its version cannot be checked. Inspect it again before copying.";
 
 const INIT: u8 = 1;
 const VERSION: u8 = 2;
@@ -767,17 +766,20 @@ impl Session {
 
     async fn exchange(&mut self, packet: &[u8]) -> Result<Vec<u8>, String> {
         bounded(self.cancel.clone(), REQUEST_TIMEOUT, async {
-            let write_error = "The SFTP server closed the connection.";
             self.stdin
                 .write_all(&(packet.len() as u32).to_be_bytes())
                 .await
-                .map_err(|_| write_error)?;
+                .map_err(|_| SFTP_DISCONNECTED)?;
             self.stdin
                 .write_all(packet)
                 .await
-                .map_err(|_| write_error)?;
-            self.stdin.flush().await.map_err(|_| write_error)?;
-            let len = self.stdout.read_u32().await.map_err(|_| write_error)? as usize;
+                .map_err(|_| SFTP_DISCONNECTED)?;
+            self.stdin.flush().await.map_err(|_| SFTP_DISCONNECTED)?;
+            let len = self
+                .stdout
+                .read_u32()
+                .await
+                .map_err(|_| SFTP_DISCONNECTED)? as usize;
             if len == 0 || len > MAX_PACKET {
                 return Err(INVALID_PACKET.into());
             }
@@ -785,7 +787,7 @@ impl Session {
             self.stdout
                 .read_exact(&mut response)
                 .await
-                .map_err(|_| write_error)?;
+                .map_err(|_| SFTP_DISCONNECTED)?;
             Ok(response)
         })
         .await
@@ -989,6 +991,8 @@ pub(super) async fn download(
     expected: &Stamp,
     destination: &Path,
     cancel: watch::Receiver<bool>,
+    run_id: u64,
+    emit: impl Fn(Progress),
 ) -> Result<(), String> {
     let config = normalize(config.clone())?;
     if relative.is_empty() {
@@ -1027,15 +1031,23 @@ pub(super) async fn download(
         .create_new(true)
         .open(destination)
         .map_err(|_| "Could not create a new staged SFTP copy.")?;
+    let progress = |written| emit(copy_progress(run_id, size, written));
+    progress(0);
     let result = async {
         let mut offset = 0;
+        let mut last_report = Instant::now();
         while offset < size {
             let count = (size - offset).min(MAX_READ as u64) as usize;
             let bytes = session.read(&handle, offset, count).await?.ok_or(CHANGED)?;
             output
                 .write_all(&bytes)
                 .map_err(|_| "Could not write the staged SFTP copy.")?;
+            let first = offset == 0;
             offset += bytes.len() as u64;
+            if offset < size && (first || last_report.elapsed() >= Duration::from_millis(200)) {
+                progress(offset);
+                last_report = Instant::now();
+            }
         }
         if session.read(&handle, offset, 1).await?.is_some()
             || !matches_stamp(&session.attrs(FSTAT, &handle).await?, expected)
@@ -1063,6 +1075,8 @@ pub(super) async fn download(
     drop(output);
     if result.is_err() {
         let _ = fs::remove_file(destination);
+    } else {
+        progress(size);
     }
     result
 }

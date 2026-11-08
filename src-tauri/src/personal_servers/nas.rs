@@ -11,17 +11,6 @@ pub(super) fn resume_size(stamp: &Stamp) -> Option<u64> {
     })
 }
 
-pub(super) fn copy_progress(run_id: u64, total: u64, written: u64) -> Progress {
-    Progress {
-        request_id: run_id,
-        phase: "downloading".into(),
-        percent: (total > 0).then(|| written as f64 / total as f64 * 100.0),
-        speed: None,
-        downloaded: Some(written as f64),
-        total: Some(total as f64),
-    }
-}
-
 #[cfg(all(test, windows))]
 mod tests {
     use super::*;
@@ -253,7 +242,7 @@ mod windows {
     use crate::{
         direct,
         engine::CANCELLED,
-        personal_servers::{MOUNTED_CHANGED as CHANGED, MOUNTED_INTERRUPTED},
+        personal_servers::{copy_progress, MOUNTED_CHANGED as CHANGED, MOUNTED_INTERRUPTED},
     };
     use sha2::{Digest, Sha256};
     use std::{
