@@ -23,6 +23,8 @@ const broken = path.join(data, "05 · Archivo dañado.mp4");
 const picture = path.join(data, "cover.png");
 const captions = path.join(data, "Subtítulos ñ.vtt");
 const subtitles = path.join(data, "Subtítulos de prueba.srt");
+const styledAss = path.join(data, "Estilos ñ.ass");
+const styledSsa = path.join(data, "Estilos clásicos.ssa");
 const missing = path.join(data, "06 · Archivo desplazado.mp4");
 const handout = path.join(data, "Apuntes de la lección.txt");
 const audioSamples = [[".wav", "pcm_s16le"], [".m4a", "aac"], [".opus", "libopus"], [".flac", "flac"]]
@@ -47,6 +49,21 @@ for (const { file, codec } of audioSamples) encode("-f", "lavfi", "-i", "aevalsr
 await writeFile(broken, "Archivo de prueba sin contenedor de vídeo.");
 await writeFile(captions, "WEBVTT\n\n00:00:04.000 --> 00:00:09.000\nTexto local &lt;b&gt;seguro&lt;/b&gt;\n");
 await writeFile(subtitles, "1\n00:00:04,000 --> 00:00:09,000\nSecond local track\n");
+await writeFile(styledAss, [
+  "[Script Info]", "ScriptType: v4.00+", "PlayResX: 360", "PlayResY: 640", "ScaledBorderAndShadow: yes", "",
+  "[V4+ Styles]", "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+  "Style: Default,Arial,30,&H0000F5FF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,3,0,2,10,10,10,1", "",
+  "[Events]", "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+  "Dialogue: 0,0:00:04.00,0:00:08.00,Default,,0,0,0,,{\\an7\\move(20,150,165,150,0,3500)}Texto ASS",
+  "Dialogue: 1,0:00:04.00,0:00:08.00,Default,,0,0,0,,{\\an7\\pos(40,310)\\1c&HFFFF00&}Otra capa",
+].join("\n"));
+await writeFile(styledSsa, [
+  "[Script Info]", "ScriptType: v4.00", "PlayResX: 360", "PlayResY: 640", "",
+  "[V4 Styles]", "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, TertiaryColour, BackColour, Bold, Italic, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, AlphaLevel, Encoding",
+  "Style: Default,Arial,32,16711935,16711935,0,0,-1,0,1,3,0,2,10,10,10,0,1", "",
+  "[Events]", "Format: Marked, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+  "Dialogue: Marked=0,0:00:04.00,0:00:08.00,Default,,0,0,0,,Texto SSA",
+].join("\n"));
 await writeFile(handout, "Material de estudio de prueba.\n");
 
 let child, browser, page, nativeHandle, log = "";
@@ -115,6 +132,66 @@ const stage = () => page.locator("#playback-stage");
 const play = id => page.locator(`.media-play[data-id="${id}"]`).click();
 const clickStage = action => stage().locator(`[data-stage-action="${action}"]`).click();
 const clip = file => JSON.parse(execFileSync(ffprobe, ["-v", "error", "-show_streams", "-of", "json", file], { windowsHide: true })).streams;
+
+async function verifyStyledCaptions(engine) {
+  const canvas = stage().locator(".stage-styled-captions");
+  const select = page.locator("#stage-caption-track");
+  const seek = position => stage().locator("#stage-seek").evaluate((slider, position) => {
+    slider.value = String(position);
+    slider.dispatchEvent(new Event("input", { bubbles: true }));
+  }, position);
+  const load = async file => {
+    await page.evaluate(file => { window.nabnabStyledFixture = file; }, file);
+    await clickStage("import-styled");
+    await select.locator('option[value="styled"]').filter({ hasText: path.basename(file) }).waitFor({ state: "attached" });
+    assert.equal(await select.inputValue(), "styled");
+  };
+  const pixels = () => canvas.evaluate(canvas => {
+    const result = { yellow: 0, cyan: 0, magenta: 0, left: canvas.width };
+    if (canvas.hidden) return result;
+    const { data } = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height);
+    for (let offset = 0; offset < data.length; offset += 4) {
+      const [red, green, blue, alpha] = data.subarray(offset, offset + 4);
+      if (alpha < 200) continue;
+      if (red > 190 && green > 190 && blue < 80) {
+        result.yellow++;
+        result.left = Math.min(result.left, (offset / 4) % canvas.width);
+      }
+      if (red < 80 && green > 190 && blue > 190) result.cyan++;
+      if (red > 190 && green < 80 && blue > 190) result.magenta++;
+    }
+    return result;
+  });
+  await clickStage("toggle");
+  await wait(async () => (await playing()).paused);
+  await seek(5);
+  await load(styledAss);
+  const first = await wait(async () => {
+    const painted = await pixels();
+    return painted.yellow > 100 && painted.cyan > 100 && painted;
+  });
+  assert.equal(await stage().locator(".stage-captions").isVisible(), false);
+  await seek(6.5);
+  await wait(async () => (await pixels()).left > first.left + 20 && (await pixels()).yellow > 100);
+  const box = await canvas.boundingBox();
+  assert.ok(Math.abs(box.width / box.height - 360 / 640) < 0.01);
+  await page.screenshot({ path: path.join(base, "video-ass.png"), animations: "disabled" });
+  const offset = page.locator("#stage-caption-offset");
+  await offset.fill("3");
+  await offset.press("Tab");
+  await canvas.waitFor({ state: "hidden" });
+  await offset.fill("0");
+  await offset.press("Tab");
+  await canvas.waitFor({ state: "visible" });
+  await load(styledSsa);
+  await wait(async () => (await pixels()).magenta > 100);
+  await select.selectOption({ label: "es · Local" });
+  await canvas.waitFor({ state: "hidden" });
+  await seek(5.25);
+  assert.equal(await engine.evaluate(video => video === document.getElementById("audio-engine")), true);
+  await clickStage("toggle");
+  console.log("Native libass preserved overlapping colors and moving ASS text, rendered SSA and respected the subtitle offset without replacing the video engine.");
+}
 
 async function seedCourse(videoId, audioId, handoutId) {
   const stateFile = path.join(data, "state-v1.json");
@@ -341,6 +418,13 @@ try {
     unexpectedNetwork.push(new URL(route.request().url()).origin);
     return route.abort("internetdisconnected");
   });
+  await page.route(/\/src\/styled-captions\.ts(?:\?.*)?$/, async route => {
+    const response = await route.fetch();
+    const script = await response.text();
+    assert.ok(script.includes("path: null"));
+    // Provide the selected file in place of the system file picker. Rendering still runs through native IPC.
+    await route.fulfill({ response, body: script.replace("path: null", "path: window.nabnabStyledFixture") });
+  });
   page.on("pageerror", error => errors.push(error.message));
   const av1 = await av1Fixture();
   await page.addInitScript(() => {
@@ -397,7 +481,7 @@ try {
   assert.equal(await stage().locator(".stage-captions b").count(), 0);
   await page.locator("#stage-caption-track").selectOption({ label: "en · Local" });
   assert.match(await stage().locator(".stage-captions").textContent(), /Second local track/);
-  await page.locator("#stage-caption-track").selectOption({ label: "es · Local" });
+  await verifyStyledCaptions(original);
   await clickStage("captions");
   await page.mouse.move(200, 230);
   await page.screenshot({ path: path.join(base, "video-controls.png"), animations: "disabled" });
@@ -479,6 +563,15 @@ try {
     .catch(async error => { throw Error(`Native resize returned ${await page.evaluate(() => [innerWidth, innerHeight, devicePixelRatio])}`, { cause: error }); });
   assert.ok(await stage().locator(".stage-toolbar").evaluate(bar => bar.scrollWidth <= bar.clientWidth + 1));
   await page.screenshot({ path: path.join(base, "video-900.png"), animations: "disabled" });
+  await clickStage("captions");
+  assert.equal(await stage().locator('#stage-caption-track option[value="styled"]').count(), 0);
+  assert.ok(await stage().locator("#stage-panel-captions").evaluate(panel => {
+    const bounds = panel.getBoundingClientRect();
+    const contrast = panel.querySelector(".stage-caption-contrast");
+    return bounds.left >= 0 && bounds.top >= 0 && bounds.right <= innerWidth && bounds.bottom <= innerHeight
+      && panel.scrollWidth <= panel.clientWidth + 1 && getComputedStyle(contrast).flexDirection === "row";
+  }));
+  await clickStage("captions");
   await clickStage("back");
   await page.locator("#audio-close").click();
   await play(musicId);

@@ -77,12 +77,22 @@
 .stage-panel, .stage-prompt, .stage-error { position: absolute; padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--secondary); pointer-events: auto; }
 .stage-panel { display: grid; gap: 10px; width: min(330px, calc(100vw - 32px)); max-height: calc(100vh - 140px); overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .stage-options { top: 62px; right: var(--stage-gutter); }
-.stage-caption-panel { bottom: 88px; right: var(--stage-gutter); }
+.stage-caption-panel { bottom: 88px; right: var(--stage-gutter); width: min(342px, calc(100vw - 2 * var(--stage-gutter))); border-radius: 16px; }
+.stage-caption-heading { display: flex; align-items: center; gap: 9px; font-size: 15px; }
+.stage-caption-heading > span { display: grid; place-items: center; width: 32px; height: 32px; border: 1px solid var(--edge-quiet); border-radius: 9px; background: var(--surface); }
+.stage-caption-heading svg { width: 18px; height: 18px; }
+.stage-caption-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.stage-caption-panel .stage-caption-contrast { flex-direction: row; align-items: center; gap: 8px; min-height: 32px; }
+.stage-caption-contrast input { margin: 0; }
+.stage-caption-files { display: grid; gap: 8px; padding-top: 10px; border-top: 1px solid var(--edge-quiet); }
+.stage-caption-files > strong { font-size: 13px; font-weight: 600; }
+.stage-caption-files > .stage-button { justify-self: stretch; }
+#stage-styled-status { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.4; }
 .stage-caption-import { display: flex; align-items: end; gap: 6px; }
 .stage-caption-import label { flex: 1; min-width: 0; }
 .stage-prompt, .stage-error { top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(440px, calc(100vw - 32px)); }
 .stage-prompt .button-group, .stage-error .button-group { justify-content: flex-start; margin-top: 6px; }
-.stage-prompt .stage-button, .stage-error .stage-button, .stage-caption-import .stage-button { background: var(--hover); border-color: var(--border); }
+.stage-prompt .stage-button, .stage-error .stage-button, .stage-caption-files .stage-button { background: var(--hover); border-color: var(--border); }
 .stage-error p { margin: 0; }
 .stage-captions {
   position: absolute;
@@ -107,6 +117,8 @@
 .playback-stage[data-caption-size="small"] .stage-captions { font-size: clamp(15px, 1.8vw, 23px); }
 .playback-stage[data-caption-size="large"] .stage-captions { font-size: clamp(25px, 3.1vw, 42px); }
 .playback-stage[data-caption-contrast="false"] .stage-captions { background: rgb(0 0 0 / 36%); text-shadow: 0 1px 3px #000, 0 0 8px #000; }
+.stage-styled-captions { position: absolute; z-index: 1; left: 50%; top: 50%; transform: translate(-50%, -50%); pointer-events: none; }
+.playback-stage[data-caption-contrast="true"] .stage-styled-captions { filter: drop-shadow(0 1px 2px #000); }
 .stage-hud { z-index: 2; }
 .stage-feedback { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); display: grid; place-items: center; width: 62px; height: 62px; border-radius: 50%; background: rgb(0 0 0 / 58%); pointer-events: none; }
 .stage-feedback svg { width: 24px; height: 24px; }

@@ -3,6 +3,7 @@ import { escapeHtml as h, type Copy, type LibraryItem } from "./contracts";
 import { durationLabel } from "./presentation";
 import { createPlaybackPreview } from "./playback-preview";
 import { playbackRates, type PlaybackPreferences } from "./playback-preferences";
+import { createStyledCaptions } from "./styled-captions";
 import { icon, option, type Icon } from "./views-common";
 
 interface AudioTrack { label: string; language: string; enabled: boolean }
@@ -81,12 +82,57 @@ export function createPlaybackStage(host: HTMLElement, media: HTMLVideoElement, 
   let previousFocus: HTMLElement | null = null;
   let fullscreen = false;
   let importingCaption = false;
+  let importingStyled = false;
+  let styledStatus = "";
+  let captionSize: PlaybackPreferences["captionSize"] = "normal";
   let language = "und";
 
   const find = <T extends HTMLElement = HTMLElement>(selector: string) => controls.querySelector<T>(selector);
   const audioTracks = () => Array.from((media as MediaTracks).audioTracks ?? []);
   const nativeCaptions = () => Array.from(media.textTracks).filter(track => track.kind === "subtitles" || track.kind === "captions");
   const localCaptions = () => item?.details?.tracks ?? [];
+  const styled = createStyledCaptions(host, media, hooks.command, () => {
+    setStyledStatus(t("No se pudo dibujar la pista ASS/SSA.", "The ASS/SSA track could not be rendered."));
+  });
+
+  function setStyledStatus(message: string) {
+    styledStatus = message;
+    const status = find("#stage-styled-status");
+    if (status) { status.textContent = message; status.hidden = !message; }
+  }
+
+  function closeStyled() {
+    styled.close();
+    styledStatus = "";
+    if (caption === "styled") caption = "";
+    if (lastCaption === "styled") lastCaption = "";
+  }
+
+  async function loadStyled() {
+    if (importingStyled) return;
+    const videoId = item?.id;
+    importingStyled = true;
+    const control = find<HTMLButtonElement>("[data-stage-action='import-styled']");
+    if (control) control.disabled = true;
+    setStyledStatus(t("Abriendo pista ASS/SSA…", "Opening ASS/SSA track…"));
+    try {
+      const loaded = await styled.load();
+      if (!loaded || !active) return;
+      const select = find<HTMLSelectElement>("#stage-caption-track");
+      select?.querySelector('option[value="styled"]')?.remove();
+      const title = styled.title();
+      if (title) select?.add(new Option(title, "styled"));
+      selectCaption("styled");
+      setStyledStatus(t("Pista con estilos abierta para este vídeo.", "Styled track opened for this video."));
+    } catch {
+      if (active && item?.id === videoId) setStyledStatus(t("No se pudo abrir la pista. Elige un archivo ASS o SSA en UTF-8.", "Could not open the track. Choose a UTF-8 ASS or SSA file."));
+    } finally {
+      importingStyled = false;
+      const next = find<HTMLButtonElement>("[data-stage-action='import-styled']");
+      if (next) next.disabled = false;
+      if (styledStatus === t("Abriendo pista ASS/SSA…", "Opening ASS/SSA track…")) setStyledStatus("");
+    }
+  }
 
   function schedule() {
     clearTimeout(timer);
@@ -120,6 +166,9 @@ export function createPlaybackStage(host: HTMLElement, media: HTMLVideoElement, 
 
   function paintCaption() {
     if (!active) return;
+    const styledSelected = caption === "styled";
+    styled.update(styledSelected, offset, captionSize);
+    if (styledSelected) { captions.hidden = true; return; }
     const time = media.currentTime - offset;
     const local = localCaptions().find(track => track.id === caption);
     const native = nativeCaptions()[Number(caption.replace("native-", ""))];
@@ -192,11 +241,12 @@ export function createPlaybackStage(host: HTMLElement, media: HTMLVideoElement, 
     const title = music ? hooks.musicTitle(current) : current.name.replace(/\.[^.]+$/, "");
     host.dataset.kind = music ? "music" : "video";
     resumeAt = progress;
-    if (fresh) { caption = ""; lastCaption = ""; offset = 0; language = "und"; panel = null; }
+    if (fresh) { closeStyled(); caption = ""; lastCaption = ""; offset = 0; language = "und"; panel = null; }
     const chapterOptions = (item.details?.chapters ?? []).map(chapter => option(String(chapter.start),
       `${durationLabel(chapter.start)} · ${chapter.title}`, ""));
     const captionOptions = localCaptions().map(track => option(track.id,
       `${track.language} · ${track.origin === "machineTranslation" ? t("Traducción automática", "Machine translation") : t("Local", "Local")}`, caption));
+    const styledTitle = styled.title();
     const audio = audioTracks();
     const chosen = document.activeElement instanceof HTMLElement ? document.activeElement.id : "";
     const elapsed = '<span data-stage-elapsed>0:00</span>';
@@ -251,18 +301,24 @@ export function createPlaybackStage(host: HTMLElement, media: HTMLVideoElement, 
             ${button("captions", t("Subtítulos", "Subtitles"), "captions", 'id="stage-caption-button" aria-expanded="false" aria-controls="stage-panel-captions"')}
             ${fullscreenButton}`}
         </div>
-        ${music ? "" : `<div class="stage-panel stage-caption-panel" id="stage-panel-captions" data-stage-panel="captions" hidden>
+        ${music ? "" : `<div class="stage-panel stage-caption-panel" id="stage-panel-captions" data-stage-panel="captions" role="group" aria-label="${t("Subtítulos", "Subtitles")}" hidden>
+          <div class="stage-caption-heading"><span>${icon("captions")}</span><strong>${t("Subtítulos", "Subtitles")}</strong></div>
           <label for="stage-caption-track">${t("Pista", "Track")}<select id="stage-caption-track">${option("", t("Desactivados", "Off"), caption)}
-            ${captionOptions.join("")}${nativeCaptions().map((track, index) => option(`native-${index}`, [track.label, track.language].filter(Boolean).join(" · ") || `${t("Integrada", "Embedded")} ${index + 1}`, caption)).join("")}</select></label>
-          <label for="stage-caption-size">${t("Tamaño", "Size")}<select id="stage-caption-size">${["small", "normal", "large"].map((size, index) => option(size,
+            ${captionOptions.join("")}${styledTitle ? option("styled", styledTitle, caption) : ""}${nativeCaptions().map((track, index) => option(`native-${index}`, [track.label, track.language].filter(Boolean).join(" · ") || `${t("Integrada", "Embedded")} ${index + 1}`, caption)).join("")}</select></label>
+          <div class="stage-caption-grid"><label for="stage-caption-size">${t("Tamaño", "Size")}<select id="stage-caption-size">${["small", "normal", "large"].map((size, index) => option(size,
             [t("Pequeño", "Small"), "Normal", t("Grande", "Large")][index], preferences.captionSize)).join("")}</select></label>
-          <label for="stage-caption-offset">${t("Desfase (s)", "Offset (s)")}<input id="stage-caption-offset" type="number" step="0.25" min="-120" max="120" value="${offset}"></label>
-          <label class="toggle"><input id="stage-caption-contrast" type="checkbox" ${preferences.captionContrast ? "checked" : ""}>${t("Fondo de alto contraste", "High-contrast background")}</label>
-          <div class="stage-caption-import"><label for="stage-caption-language">${t("Idioma del archivo", "File language")}<input id="stage-caption-language" value="${h(language)}" maxlength="24"></label>
-            ${button("import-caption", t("Cargar SRT o VTT", "Load SRT or VTT"), undefined, importingCaption ? "disabled" : "")}</div>
+          <label for="stage-caption-offset">${t("Desfase (s)", "Offset (s)")}<input id="stage-caption-offset" type="number" step="0.25" min="-120" max="120" value="${offset}"></label></div>
+          <label class="stage-caption-contrast"><input id="stage-caption-contrast" type="checkbox" ${preferences.captionContrast ? "checked" : ""}>${t("Contraste reforzado", "Enhanced contrast")}</label>
+          <div class="stage-caption-files"><strong>${t("Añadir desde el equipo", "Add from this device")}</strong>
+            <div class="stage-caption-import"><label for="stage-caption-language">${t("Idioma SRT / VTT", "SRT / VTT language")}<input id="stage-caption-language" value="${h(language)}" maxlength="24"></label>
+              ${button("import-caption", t("Cargar SRT o VTT", "Load SRT or VTT"), undefined, importingCaption ? "disabled" : "")}</div>
+            ${button("import-styled", t("Cargar ASS o SSA con estilos", "Load ASS or SSA with styling"), undefined, importingStyled ? "disabled" : "")}
+            <p id="stage-styled-status" role="status" ${styledStatus ? "" : "hidden"}>${h(styledStatus)}</p>
+          </div>
         </div>`}
       </footer>`;
     host.dataset.fit = preferences.fill ? "cover" : "contain";
+    captionSize = preferences.captionSize;
     host.dataset.captionSize = preferences.captionSize;
     host.dataset.captionContrast = String(preferences.captionContrast);
     selectCaption(caption);
@@ -300,6 +356,7 @@ export function createPlaybackStage(host: HTMLElement, media: HTMLVideoElement, 
     clearTimeout(timer);
     clearTimeout(feedbackTimer);
     preview.leave();
+    closeStyled();
     feedback.hidden = true;
     panel = null; keyboard = false; dragging = false;
     host.hidden = true;
@@ -320,7 +377,7 @@ export function createPlaybackStage(host: HTMLElement, media: HTMLVideoElement, 
   }
 
   function toggleCaptions() {
-    selectCaption(caption ? "" : lastCaption || localCaptions()[0]?.id || (nativeCaptions().length ? "native-0" : ""));
+    selectCaption(caption ? "" : lastCaption || localCaptions()[0]?.id || (styled.title() ? "styled" : "") || (nativeCaptions().length ? "native-0" : ""));
   }
 
   function syncMusic() {
@@ -430,6 +487,7 @@ export function createPlaybackStage(host: HTMLElement, media: HTMLVideoElement, 
           void hooks.importCaption(language).finally(() => { importingCaption = false; });
         }
         break;
+      case "import-styled": void loadStyled(); break;
     }
     reveal();
   });
@@ -445,9 +503,13 @@ export function createPlaybackStage(host: HTMLElement, media: HTMLVideoElement, 
     if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) return;
     switch (target.id) {
       case "stage-rate": hooks.rate(Number(target.value)); break;
-      case "stage-fit": hooks.preference("fill", target.value === "cover"); host.dataset.fit = target.value; break;
+      case "stage-fit": hooks.preference("fill", target.value === "cover"); host.dataset.fit = target.value; paintCaption(); break;
       case "stage-caption-track": selectCaption(target.value); break;
-      case "stage-caption-size": hooks.captionSize(target.value as PlaybackPreferences["captionSize"]); host.dataset.captionSize = target.value; break;
+      case "stage-caption-size":
+        if (target.value === "small" || target.value === "normal" || target.value === "large") {
+          captionSize = target.value; hooks.captionSize(captionSize); host.dataset.captionSize = captionSize; paintCaption();
+        }
+        break;
       case "stage-caption-offset":
         if (!(target instanceof HTMLInputElement)) break;
         offset = Number.isFinite(target.valueAsNumber) ? Math.max(-120, Math.min(120, target.valueAsNumber)) : 0;

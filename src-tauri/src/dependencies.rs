@@ -111,7 +111,7 @@ fn managed_root(app: &AppHandle) -> Result<PathBuf, String> {
         .map_err(|e| e.to_string())
 }
 
-fn bundled_root(app: &AppHandle) -> Result<PathBuf, String> {
+pub(crate) fn bundled_root(app: &AppHandle) -> Result<PathBuf, String> {
     let resource = app
         .path()
         .resource_dir()

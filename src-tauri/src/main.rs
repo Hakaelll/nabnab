@@ -65,6 +65,7 @@ mod personal_archive;
 mod delimited;
 mod local_media;
 mod playback_preview;
+mod styled_captions;
 mod media;
 mod model;
 mod options;
@@ -1274,6 +1275,9 @@ fn main() {
             thumbnail,
             playback_preview::playback_preview_frame,
             playback_preview::playback_preview_cancel,
+            styled_captions::styled_caption_open,
+            styled_captions::styled_caption_frame,
+            styled_captions::styled_caption_close,
             cache_status,
             clear_cache,
             export_diagnostics,

@@ -15,7 +15,11 @@ El vídeo abre una vista de borde a borde con ajuste de proporción, subtítulos
 | MP4 dañado | Error recuperable con conversión explícita o apertura en Windows |
 | MP4 movido tras importarlo | Aviso de archivo no disponible |
 
-La matriz corresponde a archivos reales. El MP4 de prueba incluía dos pistas AAC, en español e inglés. El WebView2 probado no expuso `audioTracks`, por lo que en ese equipo no apareció el selector de pistas integradas. Los subtítulos SRT y VTT locales se renderizan como texto, con ajuste de tamaño, contraste y desfase. ASS/SSA conserva las limitaciones del motor para estilos integrados.
+La matriz corresponde a archivos reales. El MP4 de prueba incluía dos pistas AAC, en español e inglés. El WebView2 probado no expuso `audioTracks`, por lo que en ese equipo no apareció el selector de pistas integradas. Los subtítulos SRT y VTT locales se renderizan como texto, con ajuste de tamaño, contraste y desfase.
+
+En Windows, **Subtítulos → Cargar ASS o SSA con estilos** abre un archivo local en UTF-8 de hasta 2 MiB. El libass incluido con FFmpeg dibuja posiciones, colores, capas y animaciones sobre el vídeo. El tamaño y el desfase se ajustan en el mismo panel. Las líneas de diálogo pueden subir al mostrar los controles, mientras las posiciones explícitas conservan el encuadre del autor. Se usan las fuentes disponibles en el equipo. La pista con estilos se libera al salir de la vista de vídeo. Esta ruta admite archivos externos. Las pistas integradas siguen sujetas a lo que WebView2 exponga. [Interfaz de libass](https://raw.githubusercontent.com/libass/libass/0.17.4/libass/ass.h)
+
+El renderizado usa un hilo dedicado, un lienzo de hasta 480.000 píxeles y una solicitud de imagen a la vez desde el reproductor. El puente transmite el rectángulo de subtítulos solo cuando cambia. Los fotogramas se mantienen en memoria durante la vista activa.
 
 Al detener el puntero sobre el progreso, FFmpeg extrae un fotograma del vídeo en el equipo. La petición anterior se cancela al mover el puntero o cambiar de archivo. La caché conserva hasta 28 JPEG de 48 KiB como máximo por fotograma, en memoria durante la sesión. El tiempo se muestra aunque el archivo tarde en producir una miniatura.
 
@@ -31,7 +35,7 @@ El lenguaje gráfico toma como referencia las estelas, deformaciones y simetría
 
 ## Verificación
 
-La prueba `tests/native-playback.browser.mjs` genera las muestras con FFmpeg y, cuando está disponible, WebCodecs para AV1. Abre la aplicación con un perfil aislado y comprueba vídeo, subtítulos, búsquedas rápidas en pausa, cambio de archivo durante la carga, pantalla completa y reanudación tras reiniciar. En música verifica tres cambios entre vistas con el mismo elemento, etiquetas ausentes, respuesta a ritmos distintos, silencio real, señal antes del volumen maestro, minimización y pérdida y recuperación del contexto gráfico. El reproductor y las escenas se probaron bloqueando peticiones externas del WebView. El codificador Media Foundation de HEVC no estaba disponible en el equipo de pruebas.
+La prueba `tests/native-playback.browser.mjs` genera las muestras con FFmpeg y, cuando está disponible, WebCodecs para AV1. Abre la aplicación con un perfil aislado y comprueba vídeo, subtítulos, búsquedas rápidas en pausa, cambio de archivo durante la carga, pantalla completa y reanudación tras reiniciar. Para ASS/SSA entrega una ruta de prueba en lugar de abrir el diálogo del sistema y usa el renderizador real. Comprueba el color de dos capas simultáneas, el desplazamiento de un rótulo, una pista SSA, el desfase y la conservación del mismo elemento de vídeo. En música verifica tres cambios entre vistas con el mismo elemento, etiquetas ausentes, respuesta a ritmos distintos, silencio real, señal antes del volumen maestro, minimización y pérdida y recuperación del contexto gráfico. El reproductor y las escenas se probaron bloqueando peticiones externas del WebView. El codificador Media Foundation de HEVC no estaba disponible en el equipo de pruebas.
 
 Con `NABNAB_PLAYBACK_LIVE_DOWNLOAD=1`, la misma prueba descarga una muestra pública a través de la cola nativa mientras suena un archivo local. Con la pila normal de Windows se guardaron 1.128.375 bytes y la pista avanzó 1,74 segundos entre el inicio de la transferencia y su final, sin cambiar de archivo ni pasar a pausa. [Muestra de vídeo de MDN](https://developer.mozilla.org/shared-assets/videos/flower.mp4)
 
@@ -41,4 +45,4 @@ El frontend de producción ocupa 2.221.082 bytes, 7.602 menos que `e191ff3` con 
 
 Las pruebas de navegador de audio y biblioteca cubren las listas, los capítulos, los marcadores y la búsqueda de subtítulos.
 
-[Vídeo con controles](playback/video-controls.png) · [Vídeo con los controles ocultos](playback/video-clean.png) · [Previsualización al buscar](playback/video-seek.png) · [Música a 900 px](playback/music.png) · [Selector de escenas](playback/scenes.png) · [Barra compacta a 900 px](playback/compact.png)
+[Vídeo con controles](playback/video-controls.png) · [Vídeo con los controles ocultos](playback/video-clean.png) · [Subtítulos ASS con estilos](playback/video-ass.png) · [Previsualización al buscar](playback/video-seek.png) · [Música a 900 px](playback/music.png) · [Selector de escenas](playback/scenes.png) · [Barra compacta a 900 px](playback/compact.png)
