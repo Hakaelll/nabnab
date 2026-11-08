@@ -23,7 +23,8 @@ En **Plataformas → Archivos y documentos**, pega un enlace, un identificador o
 
 - Elige un idioma y deja el título vacío para explorar las ediciones recientes en ese idioma. Usa **Cargar más** para pasar de una página a la siguiente. Cada página consulta hasta 25 posiciones y agrupa las fichas repetidas. **Seguir idioma** guarda el catálogo para revisarlo manualmente en Biblioteca → Fuentes.
 - También puedes buscar por el comienzo del título y filtrar por idioma. Abre la edición correspondiente. Los capítulos muestran número, lector e idioma cuando están disponibles.
-- Si la edición tiene varios créditos de lectura, usa **Lectura** para ver los capítulos de uno de ellos. Marca capítulos individuales o selecciona los visibles. Cambiar de filtro conserva las marcas anteriores y el resumen muestra todo lo que se enviará a Descargas. Biblioteca identifica los archivos como audiolibro, conserva la edición y crea una colección para reunir sus capítulos. El filtro **Audiolibros** está en el selector de contenido de Biblioteca.
+- Puedes combinar **Idioma del capítulo**, **Lectura** y la búsqueda de texto. La ficha muestra cuántos capítulos coinciden de los que ya se cargaron. Al entrar desde un catálogo por idioma, la ficha selecciona ese idioma si figura en los capítulos cargados.
+- Marca capítulos individuales o selecciona los visibles. Cambiar de filtro conserva las marcas anteriores y el resumen muestra todo lo que se enviará a Descargas. Biblioteca identifica los archivos como audiolibro, conserva la edición y crea una colección para reunir sus capítulos. El filtro **Audiolibros** está en el selector de contenido de Biblioteca.
 - La búsqueda por título usa la API de audiolibros de 20 en 20. La exploración por idioma usa la lista y la paginación de la [búsqueda pública de LibriVox](https://librivox.org/search). Al abrir una edición, la aplicación lee el RSS y, para los archivos alojados en Internet Archive, reutiliza las comprobaciones de acceso y las descargas de ese adaptador. La ficha conserva la declaración de dominio público de LibriVox para Estados Unidos. Comprueba la situación en tu país.
 
 [Catálogo oficial](https://librivox.org/api/info) · [Dominio público](https://librivox.org/pages/public-domain/)
@@ -34,7 +35,7 @@ El flujo de Rocketseat, Coursera, Domestika y Skillshare utiliza el sitio oficia
 
 ## Comprobaciones
 
-Las capturas usan datos de prueba. La prueba de interfaz recorre la selección por versión, el retorno con teclado tras paginar o encontrar un error, y la selección de capítulos en ventanas de 1180 × 780 y 900 × 620. Las pruebas Rust cubren identidad por versión, lectura de metadatos, capítulos ordenados y seguimiento manual.
+La prueba de interfaz usa datos simulados. Recorre la selección por versión, el retorno con teclado tras paginar o encontrar un error, y la selección de capítulos en ventanas de 1180 × 780 y 900 × 620. Las pruebas Rust cubren identidad por versión, lectura de metadatos, capítulos ordenados y seguimiento manual.
 
 La prueba nativa descargó dos versiones distintas del mismo PDF de arXiv y comprobó que ambas se conservan. Descargó un CSV de Zenodo de 450 bytes y verificó el MD5 publicado. Descargó dos capítulos de LibriVox en orden inverso y comprobó el orden de lectura en Biblioteca. [Artículo de arXiv](https://arxiv.org/abs/2506.08399) · [Registro de Zenodo](https://zenodo.org/records/14634897) · [Edición de LibriVox](https://librivox.org/aesops-fables-volume-1-fables-1-25/)
 
@@ -44,6 +45,8 @@ Para repetir la prueba nativa, inicia Vite en el puerto 1420 y ejecuta `node tes
 
 Con `NABNAB_RESEARCH_LANGUAGE_ONLY=1` la prueba se limita a consultar el catálogo de LibriVox, abrir una edición y guardar un seguimiento manual con un límite de 25 posiciones.
 
+Con `NABNAB_RESEARCH_CHAPTER_FILTERS_ONLY=1` la prueba combina idioma y lectura en una edición multilingüe, cambia el filtro y verifica que la selección se conserva. La cola descargó únicamente el capítulo 3, leído en español por Alexandria Adair, con 1.048.675 bytes. Biblioteca conservó los datos de ese capítulo y su edición. [Edición multilingüe en LibriVox](https://librivox.org/mini-multilingual-bedtime-stories-2-by-aesop/)
+
 ![Selección de PDF por versión de arXiv](arxiv-versions.png)
 
 ![Volumen y checksum antes de descargar un archivo de Zenodo](zenodo-selection.png)
@@ -51,3 +54,5 @@ Con `NABNAB_RESEARCH_LANGUAGE_ONLY=1` la prueba se limita a consultar el catálo
 ![Capítulos seleccionados de una edición de LibriVox](librivox-chapters.png)
 
 ![Exploración del catálogo oficial de LibriVox por idioma en Windows](librivox-language.png)
+
+![Filtros por idioma y lectura en una edición multilingüe de LibriVox](librivox-chapter-filters.png)

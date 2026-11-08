@@ -75,7 +75,7 @@ const setup = `
       if(args.url===historyUrl)return sourcePage(historyUrl,{provider:"zenodo",title:"Fixture dataset",
         entries:[{id:"zenodo:1236",title:"v2 · Fixture dataset",url:"https://zenodo.org/records/1236",prerelease:false,publishedAt:"2024-02-02"},{id:"zenodo:1235",title:"v1 · Fixture dataset",url:"https://zenodo.org/records/1235",prerelease:false,publishedAt:"2024-01-02"}]});
       if(args.url==="https://zenodo.org/records/1235")return dataset(args.url,1235,"v1");
-      if(args.url==="https://librivox.org/cuentos/"||args.url.includes("librivox.org/api/feed/audiobooks/id/"))return sourcePage("https://librivox.org/api/feed/audiobooks/id/52",{provider:"librivox",title:"Fixture audiobook",assets:[1,2,3].map(chapter=>asset("librivox:52:"+chapter,"chapter-"+chapter+".mp3",{mime:"audio/mpeg",title:"Chapter title",audiobook:{bookId:"librivox:52",bookTitle:"Fixture audiobook",chapter,reader:chapter===2?"Second Reader":"Fixture Reader",language:"Spanish"}}))});
+      if(args.url==="https://librivox.org/cuentos/"||args.url.includes("librivox.org/api/feed/audiobooks/id/"))return sourcePage("https://librivox.org/api/feed/audiobooks/id/52",{provider:"librivox",title:"Fixture audiobook",assets:[1,2,3].map(chapter=>asset("librivox:52:"+chapter,"chapter-"+chapter+".mp3",{mime:"audio/mpeg",title:"Chapter title",audiobook:{bookId:"librivox:52",bookTitle:"Fixture audiobook",chapter,reader:chapter===2?"Second Reader":"Fixture Reader",language:chapter===2?"French":"Spanish"}}))});
       if(args.url.includes("/slow"))return await new Promise(resolve=>{fixture.pending=()=>resolve(sourcePage(args.url,{title:"Stale result must not appear"}));});
       if(args.url.includes("/empty"))return sourcePage(args.url,{title:"Empty release"});
       if(args.url.includes("archive.org"))return sourcePage(args.url,{provider:"archive",title:"A sample archive item",rights:"Rights supplied by uploader, permission must be checked.",assets:[asset("ia:original","scan.pdf",{mime:"application/pdf"}),asset("ia:derived","scan_text.txt",{mime:"text/plain",original:false})]});
@@ -242,15 +242,18 @@ try {
       await page.screenshot({ path: `${directory}/librivox-language-${width}x${height}-fixture.png` });
     }
     await edition.press("Enter");
-    await page.locator("[data-file-source-select='librivox:52:2']").waitFor();
+    await page.locator("[data-file-source-select='librivox:52:1']").waitFor();
     await page.getByRole("button", { name: "Volver a resultados" }).click();
     assert.equal(await edition.evaluate(node => node === document.activeElement), true);
     await edition.press("Enter");
-    await page.locator("[data-file-source-select='librivox:52:2']").waitFor();
-    assert.deepEqual(await page.locator(".file-source-research-list .file-source-file-icon").allTextContents(), ["01", "02", "03"]);
+    await page.locator("[data-file-source-select='librivox:52:1']").waitFor();
+    const chapterLanguage = page.getByRole("combobox", { name: "Idioma del capítulo", exact: true });
+    assert.equal(await chapterLanguage.inputValue(), "Spanish");
+    assert.deepEqual(await page.locator(".file-source-research-list .file-source-file-icon").allTextContents(), ["01", "03"]);
+    assert.equal(await page.locator(".file-source-filter [aria-live]").textContent(), "2 de 3 capítulos cargados");
     assert.equal(await page.getByRole("checkbox", { name: "Capítulo 1 · Chapter title", exact: true }).count(), 1);
-    assert.equal(await page.getByRole("checkbox", { name: "Capítulo 2 · Chapter title", exact: true }).count(), 1);
-    assert.match(await page.locator(".file-source-list").innerText(), /Fixture Reader · Spanish/);
+    assert.equal(await page.getByRole("checkbox", { name: "Capítulo 2 · Chapter title", exact: true }).count(), 0);
+    assert.match(await page.locator(".file-source-list").innerText(), /Fixture Reader · Español/);
     const narration = page.getByRole("combobox", { name: "Lectura" });
     await narration.focus();
     await narration.selectOption("Fixture Reader");
@@ -258,10 +261,17 @@ try {
     assert.deepEqual(await page.locator(".file-source-research-list .file-source-file-icon").allTextContents(), ["01", "03"]);
     await page.locator("[data-action='file-source-select-chapters']").click();
     assert.equal(await page.locator("[data-file-source-select]:checked").count(), 2);
+    await chapterLanguage.focus();
+    await chapterLanguage.selectOption({ label: "Francés" });
+    assert.equal(await chapterLanguage.evaluate(select => select === document.activeElement), true);
+    await page.getByText("No hay capítulos con estos filtros.", { exact: true }).waitFor();
+    assert.equal(await page.locator(".file-source-filter [aria-live]").textContent(), "0 de 3 capítulos cargados");
     await narration.selectOption("Second Reader");
     assert.deepEqual(await page.locator(".file-source-research-list .file-source-file-icon").allTextContents(), ["02"]);
     assert.equal(await page.locator("[data-file-source-select]:checked").count(), 0);
+    await chapterLanguage.selectOption({ label: "Español" });
     await narration.selectOption("Fixture Reader");
+    assert.equal(await page.locator("[data-file-source-select]:checked").count(), 2);
     for (const [width, height] of [[1180, 780], [900, 620]]) {
       await page.setViewportSize({ width, height });
       await page.locator(".file-source-list").scrollIntoViewIfNeeded();
@@ -279,7 +289,7 @@ try {
     assert.equal(await page.locator("#source-exploration-limit").getAttribute("step"), "25");
     await page.locator("[data-page='platforms']").click();
     await page.locator("[data-action='open-fileSources']").first().click();
-    report.push("arXiv author search, version selection and keyboard return after pagination or error passed. Zenodo DOI with reviewed volume and LibriVox chapter selection by narrator passed.");
+    report.push("arXiv author search, version selection and keyboard return passed. Zenodo DOI with reviewed volume and LibriVox chapter selection by language and narrator passed.");
 
     await inspect("https://github.com/example/empty");
     await page.getByRole("heading", { name: "Empty release", exact: true }).waitFor();

@@ -47,6 +47,9 @@ const providers: { id: CloudProvider; name: string }[] = [
 function isZenodoHistory(page: PublicPage | null): boolean {
   return page?.provider === "zenodo" && page.sourceUrl.startsWith("https://zenodo.org/api/records?");
 }
+function isLibrivoxLanguageBrowse(page: PublicPage | null): boolean {
+  return page?.provider === "librivox" && page.sourceUrl.startsWith("https://librivox.org/search/?language_id=");
+}
 function isCatalogSearch(page: PublicPage | null): boolean {
   return isZenodoHistory(page) || Boolean(page && (page.provider === "arxiv" || page.provider === "librivox")
     && page.sourceUrl.startsWith(`https://${page.provider}.org/search/?`));
@@ -96,6 +99,7 @@ export function createFileSources(hooks: FileSourceHooks) {
   let collection = "";
   let filter: "all" | "original" | "derivative" = "all";
   let reader = "";
+  let chapterLanguage = "";
   let query = "";
   let busy: "inspect" | "queue" | "connect" | "configure" | "revoke" | null = null;
   let error = "";
@@ -133,7 +137,16 @@ export function createFileSources(hooks: FileSourceHooks) {
         const known = new Set(publicPage.assets.map(value => value.id));
         const knownEntries = new Set(publicPage.entries.map(value => value.id));
         publicPage = { ...page, assets: [...publicPage.assets, ...page.assets.filter(value => !known.has(value.id))], entries: [...publicPage.entries, ...page.entries.filter(value => !knownEntries.has(value.id))] };
-      } else { publicPage = page; publicSelected.clear(); query = ""; filter = "all"; reader = ""; }
+      } else {
+        publicPage = page;
+        publicSelected.clear();
+        query = ""; filter = "all"; reader = ""; chapterLanguage = "";
+        const catalog = catalogReturn?.page ?? null;
+        if (page.provider === "librivox" && catalog && isLibrivoxLanguageBrowse(catalog)) {
+          const language = catalog.title.replace(/^LibriVox · /, "");
+          if (page.assets.some(asset => asset.audiobook?.language === language)) chapterLanguage = language;
+        }
+      }
       url = page.sourceUrl;
     });
   }
@@ -195,9 +208,11 @@ export function createFileSources(hooks: FileSourceHooks) {
     </form>${searchMode === "librivox" && languages.length ? `<p class="field-note">${t("Deja el título vacío para explorar las ediciones recientes de un idioma.", "Leave the title blank to browse recent editions in one language.")}</p>` : ""}` : `<div id="file-source-catalog-form" hidden></div>`}</div>`;
   }
   function matchesPublicFilter(asset: PublicAsset): boolean {
+    const language = asset.audiobook?.language ?? "";
     return (filter === "all" || asset.original === (filter === "original"))
       && (!reader || asset.audiobook?.reader === reader)
-      && `${asset.filename} ${asset.title} ${asset.mime} ${asset.version ?? ""} ${asset.audiobook?.reader ?? ""} ${asset.audiobook?.language ?? ""}`.toLowerCase().includes(query.toLowerCase());
+      && (!chapterLanguage || language === chapterLanguage)
+      && `${asset.filename} ${asset.title} ${asset.mime} ${asset.version ?? ""} ${asset.audiobook?.reader ?? ""} ${language} ${displayLibrivoxLanguage(language)}`.toLowerCase().includes(query.toLowerCase());
   }
   function readerFilter(assets: PublicAsset[]): string {
     const credits = [...new Set(assets.map(asset => asset.audiobook?.reader ?? "").filter(Boolean))];
@@ -205,6 +220,17 @@ export function createFileSources(hooks: FileSourceHooks) {
     return `<select id="file-source-reader" aria-label="${t("Lectura", "Narration")}">
       ${option("", t("Todas las lecturas", "All narrations"), reader)}
       ${credits.map(credit => option(credit, credit, reader)).join("")}
+    </select>`;
+  }
+  function chapterLanguageFilter(assets: PublicAsset[]): string {
+    const languages = new Set(assets.map(asset => asset.audiobook?.language ?? ""));
+    if (languages.size < 2 && !chapterLanguage) return "";
+    const choices = [...languages].filter(Boolean)
+      .map(name => ({ name, label: displayLibrivoxLanguage(name) }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+    return `<select id="file-source-chapter-language" aria-label="${t("Idioma del capítulo", "Chapter language")}">
+      ${option("", t("Todos los idiomas", "All languages"), chapterLanguage)}
+      ${choices.map(({ name, label }) => option(name, label, chapterLanguage)).join("")}
     </select>`;
   }
   function publicDescription(): string {
@@ -223,12 +249,11 @@ export function createFileSources(hooks: FileSourceHooks) {
       t(`Registro ${record.recordId}`, `Record ${record.recordId}`), record.familyId && t(`Familia ${record.familyId}`, `Family ${record.familyId}`)];
     return `<p class="field-note">${h(metadata.filter(Boolean).join(" · "))}</p>`;
   }
-  function publicRows(): string {
+  function publicRows(visible: PublicAsset[]): string {
     if (isZenodoHistory(publicPage)) return publicPage?.entries.length ? "" : `<p class="file-source-empty">${t("Zenodo no devolvió versiones públicas para esta familia.", "Zenodo returned no public versions for this family.")}</p>`;
     if (!publicPage || !publicPage.assets.length && publicPage.entries.length) return "";
     const { provider, rights } = publicPage;
     const research = provider === "arxiv" || provider === "librivox";
-    const visible = publicPage.assets.filter(matchesPublicFilter);
     const group = provider === "arxiv" ? t("Versiones del PDF", "PDF versions") : provider === "librivox" ? t("Capítulos", "Chapters") : t("Archivos disponibles", "Available files");
     const sectionHeading = research ? `<div class="file-source-list-heading"><h3>${group}</h3>${provider === "librivox" && visible.length ? action("file-source-select-chapters", t("Seleccionar capítulos visibles", "Select visible chapters"), "list", "quiet", busy || publicSelected.size >= 199 ? "disabled" : "") : ""}</div>` : "";
     return `${sectionHeading}<div class="file-source-list${research ? " file-source-research-list" : ""}" role="group" aria-label="${group}">${visible.map(asset => {
@@ -236,7 +261,7 @@ export function createFileSources(hooks: FileSourceHooks) {
       const version = provider === "arxiv" ? asset.version?.match(/^v(\d+)$/)?.[1] : undefined;
       const title = chapter ? asset.title : version ? `${t("Versión", "Version")} ${version}` : asset.filename;
       const name = chapter ? `${t("Capítulo", "Chapter")} ${chapter.chapter} · ${title}` : version ? `${title} · ${asset.filename}` : "";
-      const metadata = [version ? asset.filename : chapter ? null : asset.mime, chapter || version ? null : asset.version, asset.publishedAt, chapter?.reader, chapter?.language, asset.platform, asset.architecture].filter(Boolean).join(" · ");
+      const metadata = [version ? asset.filename : chapter ? null : asset.mime, chapter || version ? null : asset.version, asset.publishedAt, chapter?.reader, chapter?.language && displayLibrivoxLanguage(chapter.language), asset.platform, asset.architecture].filter(Boolean).join(" · ");
       const attribution = [asset.author, research && rights === asset.license ? null : asset.license].filter(Boolean).join(" · ");
       const checked = publicSelected.has(asset.id);
       return `<label class="file-source-row ${checked ? "is-selected" : ""}">
@@ -244,7 +269,7 @@ export function createFileSources(hooks: FileSourceHooks) {
         <span class="file-source-file-icon" aria-hidden="true">${chapter ? String(chapter.chapter).padStart(2, "0") : icon(asset.mime.startsWith("image/") ? "image" : asset.mime.startsWith("audio/") ? "audio" : "file")}</span>
         <span class="file-source-row-main"><strong>${h(title)}</strong>${metadata ? `<small>${h(metadata)}</small>` : ""}${provider === "archive" ? `<small>${asset.original ? t("Original", "Original") : t("Derivado", "Derivative")}</small>` : ""}${attribution ? `<small>${h(attribution)}</small>` : ""}${asset.checksum || asset.sha256 ? `<small class="file-source-checksum" title="${h(asset.checksum ?? asset.sha256 ?? "")}">${h(asset.checksum ?? `sha256:${asset.sha256}`)}</small>` : ""}</span>
         <span class="file-source-size">${h(fileSize(asset.size, t))}</span></label>`;
-    }).join("") || `<p class="file-source-empty">${t("No hay archivos con este filtro.", "No files match this filter.")}</p>`}</div>`;
+    }).join("") || `<p class="file-source-empty">${provider === "librivox" ? t("No hay capítulos con estos filtros.", "No chapters match these filters.") : t("No hay archivos con este filtro.", "No files match this filter.")}</p>`}</div>`;
   }
   function cloudRows(): string {
     if (!cloudPage) return "";
@@ -263,7 +288,7 @@ export function createFileSources(hooks: FileSourceHooks) {
     const knownSize = selected.reduce((sum, item) => sum + (item.size ?? 0), 0);
     const unknown = selected.some(item => item.size === null);
     const total = unknown && knownSize === 0 ? fileSize(null, t) : fileSize(knownSize, t) + (unknown ? ` + ${t("tamaño pendiente", "unknown size")}` : "");
-    return `<div class="file-source-selection"><div class="file-source-selection-title"><strong>${selected.length} ${t("seleccionados", "selected")}</strong><span>${selected.length ? h(total) : t("Selecciona los archivos que quieras conservar", "Select the files you want to keep")}</span>${selected.length ? action("file-source-clear", t("Quitar selección", "Clear selection"), undefined, "quiet", busy ? "disabled" : "") : ""}</div><label>${t("Colección, opcional", "Collection, optional")}<input id="file-source-collection" value="${h(collection)}" maxlength="120" placeholder="${t("Sin colección", "No collection")}" ${busy ? "disabled" : ""}></label><div class="file-source-destination"><span>${t("Destino", "Destination")}</span><strong title="${h(hooks.folder())}">${h(hooks.folder())}</strong>${hooks.chooseFolder ? action("file-source-destination", t("Cambiar", "Change"), "folder", "quiet", busy ? "disabled" : "") : ""}</div>${action("file-source-queue", busy === "queue" ? t("Añadiendo…", "Adding…") : t("Añadir a Descargas", "Add to Downloads"), "downloads", "primary", busy || !selected.length ? "disabled" : "")}</div>`;
+    return `<div class="file-source-selection"><div class="file-source-selection-title"><strong>${selected.length} ${t(selected.length === 1 ? "seleccionado" : "seleccionados", "selected")}</strong><span>${selected.length ? h(total) : t("Selecciona los archivos que quieras conservar", "Select the files you want to keep")}</span>${selected.length ? action("file-source-clear", t("Quitar selección", "Clear selection"), undefined, "quiet", busy ? "disabled" : "") : ""}</div><label>${t("Colección, opcional", "Collection, optional")}<input id="file-source-collection" value="${h(collection)}" maxlength="120" placeholder="${t("Sin colección", "No collection")}" ${busy ? "disabled" : ""}></label><div class="file-source-destination"><span>${t("Destino", "Destination")}</span><strong title="${h(hooks.folder())}">${h(hooks.folder())}</strong>${hooks.chooseFolder ? action("file-source-destination", t("Cambiar", "Change"), "folder", "quiet", busy ? "disabled" : "") : ""}</div>${action("file-source-queue", busy === "queue" ? t("Añadiendo…", "Adding…") : t("Añadir a Descargas", "Add to Downloads"), "downloads", "primary", busy || !selected.length ? "disabled" : "")}</div>`;
   }
   function connectionCard(provider: CloudProvider): string {
     const connection = status(provider);
@@ -281,7 +306,11 @@ export function createFileSources(hooks: FileSourceHooks) {
     const provider: CloudProvider = tab === "public" ? "drive" : tab;
     const isSearch = isCatalogSearch(publicPage);
     const zenodoHistory = isZenodoHistory(publicPage);
-    const languageBrowse = publicPage?.sourceUrl.startsWith("https://librivox.org/search/?language_id=");
+    const languageBrowse = isLibrivoxLanguageBrowse(publicPage);
+    const chapters = isPublic && publicPage?.provider === "librivox" ? publicPage.assets : null;
+    const visibleAssets = isPublic ? publicPage?.assets.filter(matchesPublicFilter) ?? [] : [];
+    const filterLabel = chapters ? t("Buscar capítulos cargados", "Search loaded chapters")
+      : t("Filtrar archivos cargados", "Filter loaded files");
     const publicTitle = languageBrowse && publicPage
       ? `LibriVox · ${displayLibrivoxLanguage(publicPage.title.replace(/^LibriVox · /, ""))}`
       : publicPage?.title ?? "";
@@ -302,7 +331,7 @@ export function createFileSources(hooks: FileSourceHooks) {
         ${isPublic && (publicPage?.provider === "github" || isSearch) && hooks.followSource ? action("file-source-follow", followLabel, "add", "quiet", busy ? "disabled" : "") : ""}
         ${!isPublic && trail.length ? action("file-source-parent", t("Volver", "Back"), undefined, "quiet", busy ? "disabled" : "") : ""}</div>${isPublic ? publicDescription() : ""}${isPublic && publicPage?.rights ? `<p class="field-note">${t("Derechos indicados por el origen", "Rights stated by the source")}: ${h(publicPage.rights)}</p>` : ""}${warningList(isPublic ? publicPage?.warnings ?? [] : cloudPage?.warnings ?? [])}
         ${isPublic && publicPage?.entries.length ? `<div class="file-source-entries">${publicPage.entries.map(entry => `<button type="button" class="file-source-entry" data-action="file-source-entry" data-id="${h(entry.id)}" ${busy ? "disabled" : ""}><span><strong>${h(entry.title)}</strong><small>${h(entry.publishedAt ?? "")}</small></span>${publicPage?.provider === "github" ? `<span class="file-source-status">${entry.prerelease ? "Prerelease" : t("Estable", "Stable")}</span>` : ""}${icon("arrow")}</button>`).join("")}</div>` : ""}
-        ${(isPublic ? publicPage?.assets.length : cloudPage?.entries.length) ? `<div class="file-source-filter"><label>${icon("search")}<input id="file-source-query" type="search" value="${h(query)}" placeholder="${t("Filtrar archivos cargados", "Filter loaded files")}" aria-label="${t("Filtrar archivos cargados", "Filter loaded files")}"></label>${isPublic && publicPage?.provider === "archive" ? `<select id="file-source-kind" aria-label="${t("Tipo de archivo", "File type")}">${option("all", t("Originales y derivados", "Originals and derivatives"), filter)}${option("original", t("Solo originales", "Originals only"), filter)}${option("derivative", t("Solo derivados", "Derivatives only"), filter)}</select>` : ""}${isPublic && publicPage?.provider === "librivox" ? readerFilter(publicPage.assets) : ""}<span>${isPublic ? publicPage?.assets.length ?? 0 : cloudPage?.entries.length ?? 0} ${t("cargados", "loaded")}</span></div>` : ""}${isPublic ? publicRows() : cloudRows()}
+        ${(isPublic ? publicPage?.assets.length : cloudPage?.entries.length) ? `<div class="file-source-filter"><label>${icon("search")}<input id="file-source-query" type="search" value="${h(query)}" placeholder="${filterLabel}" aria-label="${filterLabel}"></label>${isPublic && publicPage?.provider === "archive" ? `<select id="file-source-kind" aria-label="${t("Tipo de archivo", "File type")}">${option("all", t("Originales y derivados", "Originals and derivatives"), filter)}${option("original", t("Solo originales", "Originals only"), filter)}${option("derivative", t("Solo derivados", "Derivatives only"), filter)}</select>` : ""}${chapters ? chapterLanguageFilter(chapters) + readerFilter(chapters) : ""}<span${chapters ? ' aria-live="polite"' : ""}>${chapters ? t(`${visibleAssets.length} de ${chapters.length} capítulos cargados`, `${visibleAssets.length} of ${chapters.length} loaded chapters`) : `${isPublic ? publicPage?.assets.length ?? 0 : cloudPage?.entries.length ?? 0} ${t("cargados", "loaded")}`}</span></div>` : ""}${isPublic ? publicRows(visibleAssets) : cloudRows()}
         ${cursor ? `<div class="file-source-pagination"><p>${languageBrowse ? t(`Página ${Number(cursor) - 1} · ${publicPage?.entries.length ?? 0} ediciones únicas`, `Page ${Number(cursor) - 1} · ${publicPage?.entries.length ?? 0} unique editions`) : isSearch ? t(`${publicPage?.entries.length ?? 0} resultados cargados.`, `${publicPage?.entries.length ?? 0} results loaded.`) : t("Solo se ha cargado una parte del origen. La selección incluye únicamente archivos revisados.", "Only part of this source has loaded. Selection includes reviewed files only.")}</p>${action("file-source-more", t("Cargar más", "Load more"), "add", "secondary", `data-cursor="${h(cursor)}" ${busy ? "disabled" : ""}`)}</div>` : !isPublic && cloudPage?.partial ? `<p class="field-note">${t("El origen informa de resultados parciales. Revisa los avisos antes de descargar.", "The source reports partial results. Review warnings before downloading.")}</p>` : ""}</div>` : !busy && isPublic && !catalogReturn ? `<div class="file-source-intro">${icon("folder")}<h2>${t("Elige qué conservar", "Choose what to keep")}</h2><p>${t("Consulta versiones y archivos antes de descargar. No se selecciona ningún formato automáticamente.", "Review versions and files before downloading. No format is selected automatically.")}</p><div><span>GitHub</span><small>${t("Versiones y assets publicados", "Versions and published assets")}</small><span>Internet Archive</span><small>${t("Originales, derivados y procedencia", "Originals, derivatives and provenance")}</small><span>Commons</span><small>${t("Imágenes y atribución por archivo", "Images and attribution per file")}</small></div></div>` : ""}${selectionFooter()}<p class="file-source-footnote">${t("Descargar conserva una copia local. No ejecuta archivos, instala programas ni modifica el origen.", "Downloading keeps a local copy. It does not run files, install software or modify the source.")}</p></section>`;
   }
   function handleInput(element: HTMLElement): boolean {
@@ -331,6 +360,7 @@ export function createFileSources(hooks: FileSourceHooks) {
       if (element.id === "file-source-arxiv-field") { arxivField = element.value; return true; }
       if (element.id === "file-source-kind" && (element.value === "all" || element.value === "original" || element.value === "derivative")) { filter = element.value; hooks.render(); return true; }
       if (element.id === "file-source-reader") { reader = element.value; hooks.render(); return true; }
+      if (element.id === "file-source-chapter-language") { chapterLanguage = element.value; hooks.render(); return true; }
       if (element.dataset.cloudSourceExport) { exports.set(element.dataset.cloudSourceExport, element.value); return true; }
     }
     return false;
@@ -396,7 +426,7 @@ export function createFileSources(hooks: FileSourceHooks) {
           const history = await hooks.command<PublicPage>("public_source_inspect", { url: versions, cursor: null, requestId });
           if (activeRequest !== requestId) return;
           publicPage = history; url = history.sourceUrl; searchMode = null;
-          publicSelected.clear(); query = ""; filter = "all"; reader = "";
+          publicSelected.clear(); query = ""; filter = "all"; reader = ""; chapterLanguage = "";
         });
         document.querySelector<HTMLElement>(isZenodoHistory(publicPage) ? ".file-source-result-heading h2" : '[data-action="file-source-versions"]')?.focus();
       } break;
@@ -425,6 +455,7 @@ export function createFileSources(hooks: FileSourceHooks) {
         query = "";
         filter = "all";
         reader = "";
+        chapterLanguage = "";
         publicSelected.clear();
         hooks.render();
         document.querySelector<HTMLElement>(`[data-action="file-source-entry"][data-id="${CSS.escape(entryId)}"]`)?.focus();

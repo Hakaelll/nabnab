@@ -14,6 +14,7 @@ const data = await mkdtemp(path.join(base, "run-"));
 const output = path.join(data, "output");
 await mkdir(output);
 const languageOnly = process.env.NABNAB_RESEARCH_LANGUAGE_ONLY === "1";
+const chaptersOnly = process.env.NABNAB_RESEARCH_CHAPTER_FILTERS_ONLY === "1";
 const port = process.env.NABNAB_RESEARCH_DEBUG_PORT || 9259;
 const endpoint = `http://127.0.0.1:${port}`;
 const child = spawn(process.env.NABNAB_RESEARCH_TEST_EXE ?? path.join(root, "src-tauri/target/debug/nabnab.exe"), [], {
@@ -95,7 +96,7 @@ try {
   await rpc("save_settings", { settings: { ...initial.settings, language: "es", folder: output, reducedMotion: true, trayEnabled: false, closeToTray: false } });
   await page.reload();
 
-  await verify("LibriVox language", async () => {
+  if (!chaptersOnly) await verify("LibriVox language", async () => {
     await page.locator('[data-page="platforms"]').click();
     await page.locator('[data-action="open-fileSources"][data-id="librivox"]').click();
     await page.getByRole("combobox", { name: "Idioma", exact: true }).selectOption({ label: "Español" });
@@ -136,7 +137,48 @@ try {
     return { firstPage: count, loaded: total, first, followed: followed.items.length };
   });
 
-  if (!languageOnly) await verify("arXiv", async () => {
+  if (chaptersOnly) await verify("LibriVox chapter filters", async () => {
+    const editionUrl = "https://librivox.org/mini-multilingual-bedtime-stories-2-by-aesop/";
+    const source = await inspect(editionUrl);
+    const chapter = source.assets.find(asset => asset.audiobook?.chapter === 3);
+    assert.equal(chapter.audiobook.language, "Spanish");
+    assert.equal(chapter.audiobook.reader, "Alexandria Adair");
+    assert.ok(chapter.size > 0 && chapter.size <= 2 * 1024 * 1024);
+    await page.locator('[data-page="platforms"]').click();
+    await page.locator('[data-action="open-fileSources"][data-id="librivox"]').click();
+    await page.locator("#file-source-url").fill(editionUrl);
+    await page.locator("#file-source-form button[type=submit]").click();
+    const language = page.getByRole("combobox", { name: "Idioma del capítulo" });
+    const narration = page.getByRole("combobox", { name: "Lectura" });
+    await language.selectOption({ label: "Español" });
+    await narration.selectOption(chapter.audiobook.reader);
+    const checkboxes = page.locator("[data-file-source-select]");
+    assert.deepEqual(await checkboxes.evaluateAll(boxes => boxes.map(box => box.dataset.fileSourceSelect)), [chapter.id]);
+    await page.locator('[data-action="file-source-select-chapters"]').click();
+    assert.equal(await checkboxes.first().isChecked(), true);
+    await language.selectOption({ label: "Inglés" });
+    assert.equal(await page.locator("[data-file-source-select]:checked").count(), 0);
+    await language.selectOption({ label: "Español" });
+    assert.equal(await checkboxes.first().isChecked(), true);
+    assert.equal(await page.locator(".file-source-selection-title strong").textContent(), "1 seleccionado");
+    await page.locator(".file-source-result-heading").evaluate(heading => heading.scrollIntoView({ block: "start" }));
+    await page.locator(".file-source-results").screenshot({ path: path.join(data, "librivox-chapter-filters.png") });
+    await page.locator('[data-action="file-source-queue"]').click();
+    const result = await wait(async () => {
+      const snapshot = await getSnapshot();
+      const job = snapshot.jobs[0];
+      if (job?.state === "error") throw Error(job.error?.message ?? "The selected chapter could not be downloaded.");
+      if (job?.state !== "completed") return null;
+      return { jobs: snapshot.jobs, item: snapshot.library.find(item => item.path === job.outputs[0]) };
+    }, 75_000);
+    assert.equal(result.jobs.length, 1);
+    assert.equal(result.item.kind, "audio");
+    assert.deepEqual(result.item.details.audiobook, chapter.audiobook);
+    assert.equal((await readFile(result.item.path)).length, chapter.size);
+    return { chapter: chapter.audiobook.chapter, language: chapter.audiobook.language, reader: chapter.audiobook.reader, bytes: chapter.size };
+  });
+
+  if (!languageOnly && !chaptersOnly) await verify("arXiv", async () => {
     const paper = "2506.08399";
     const source = await inspect(`https://arxiv.org/abs/${paper}`);
     assert.deepEqual(source.assets.map(asset => asset.version), ["v2", "v1"]);
@@ -156,7 +198,7 @@ try {
     return { versions: saved.map(value => value.item.name), bytes: saved.map(value => value.bytes.length) };
   });
 
-  if (!languageOnly) await verify("Zenodo", async () => {
+  if (!languageOnly && !chaptersOnly) await verify("Zenodo", async () => {
     const family = await inspect("14634896");
     assert.equal(family.zenodo.recordId, "14634897");
     assert.equal(family.zenodo.familyId, "14634896");
@@ -175,7 +217,7 @@ try {
     return { family: family.zenodo.familyId, record: source.zenodo.recordId, filename: item.name, bytes: item.size, checksum: asset.checksum };
   });
 
-  if (!languageOnly) await verify("LibriVox", async () => {
+  if (!languageOnly && !chaptersOnly) await verify("LibriVox", async () => {
     const source = await inspect("https://librivox.org/rss/353");
     const chapters = source.assets.map(asset => asset.audiobook?.chapter);
     assert.ok(chapters.length > 2);
@@ -193,7 +235,9 @@ try {
     assert.deepEqual(shown, assets.map(asset => `Cap. ${asset.audiobook.chapter}`));
     return { chapters: assets.map(asset => asset.audiobook.chapter), bytes: assets.map(asset => asset.size) };
   });
-  assert.deepEqual(results, languageOnly ? ["LibriVox language"] : ["LibriVox language", "arXiv", "Zenodo", "LibriVox"], errors.map(String).join("\n"));
+  const expected = chaptersOnly ? ["LibriVox chapter filters"] : languageOnly ? ["LibriVox language"]
+    : ["LibriVox language", "arXiv", "Zenodo", "LibriVox"];
+  assert.deepEqual(results, expected, errors.map(String).join("\n"));
 } catch (error) {
   console.error(log);
   throw error;
