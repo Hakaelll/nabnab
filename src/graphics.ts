@@ -49,7 +49,7 @@ export function startGraphics(background: HTMLCanvasElement, emblem: HTMLCanvasE
   // Preblend glyph ink once; a frame needs two canvas uploads instead of thousands of draw calls.
   const colors = new Uint32Array(64 * 16);
   for (let level = 0; level < 64; level++) for (let coverage = 0; coverage < 16; coverage++) {
-    const alpha = level / 128 * coverage / 15;
+    const alpha = level / 108 * coverage / 15;
     const ink = Math.round(210 * alpha);
     colors[level * 16 + coverage] = (255 << 24) | ((12 + ink) << 16) | ((10 + ink) << 8) | (9 + ink);
   }
@@ -90,9 +90,9 @@ export function startGraphics(background: HTMLCanvasElement, emblem: HTMLCanvasE
     const drift = time * 0.16;
     for (const g of glyphs) {
       const u = (g.x - width * 0.5) / span, v = (g.y - height * 0.48) / span;
-      const first = u * 0.62 + Math.sin(u * 2.3 + drift * 0.35) * 0.16 + Math.cos(time * 0.027) * 0.13 - 0.5;
-      const second = -u * 0.28 + Math.sin(u * 2.4 - drift * 0.3) * 0.12 + 0.49;
-      const third = .14 + Math.sin(u * 2.8 + drift * .46) * .21 - .39 * u;
+      const first = u * 0.62 + Math.sin(u * 2.3 + drift * 0.75) * 0.16 + Math.cos(time * 0.04) * 0.13 - 0.5;
+      const second = -u * 0.28 + Math.sin(u * 2.4 - drift * 0.55) * 0.16 + 0.49;
+      const third = .14 + Math.sin(u * 2.8 + drift * .8) * .21 - .39 * u;
       const ribbon = Math.max(Math.exp(-Math.pow((v - first) * 4.1, 2)), Math.exp(-Math.pow((v - second) * 4.7, 2)),
         .44 * Math.exp(-Math.pow((v - third) * 5.8, 2)));
       const filament = Math.max(Math.exp(-Math.pow(v - first, 2) * 370), Math.exp(-Math.pow(v - second, 2) * 470),
@@ -115,17 +115,27 @@ export function startGraphics(background: HTMLCanvasElement, emblem: HTMLCanvasE
       const breathe = .81 + Math.sin(time * .22 + u * 4.8 - v * 2.7) * .19;
       const twinkle = .5 + .5 * Math.sin(g.phase + time * .63 + u * .9);
       const crest = Math.pow(.5 + .5 * Math.cos(v * 7 - u * 4 + time * .41), 4);
-      const eddyA = Math.hypot(u + .92, (v - .48) * 1.22), eddyB = Math.hypot(u - .88, (v + .44) * 1.16);
+      const eddyA = Math.hypot(u + .92 + .12 * Math.sin(drift), (v - .48) * 1.22);
+      const eddyB = Math.hypot(u - .88 + .14 * Math.cos(drift * .8), (v + .44) * 1.16);
       const etch = Math.pow(.5 + .5 * Math.cos(eddyA * 25 - time * .74 + .83 * Math.sin(eddyB * 11 + drift)), 12) * Math.exp(-eddyA * 1.65)
         + Math.pow(.5 + .5 * Math.cos(eddyB * 30 + time * .67 + .71 * Math.sin(eddyA * 9 - drift)), 16) * Math.exp(-eddyB * 1.55);
-      const quiet = 1 - .79 * Math.exp(-Math.pow((x - width * .56) / (readingWidth * .68), 4) - Math.pow((y - height * .50) / (height * .31), 4));
-      const opacity = Math.min(.57, ((.025 + ribbon * (.32 + .08 * crest) + filament * .15) * depth * breathe * (.86 + .24 * twinkle) + light * .14 + etch * .33) * quiet);
+      const fold = Math.sin(u * 4.4 - v * 2.6 + drift * 1.4) + .7 * Math.sin(v * 5.6 + u * 2.7 - drift);
+      const lattice = Math.pow(.5 + .5 * Math.cos(fold * 9 + drift * 1.6), 14);
+      const sweep = Math.pow(.5 + .5 * Math.cos(u * 4.8 + v * 2.4 - time * .67), 5);
+      const glints = filament * lattice * (.35 + .65 * sweep);
+      const quiet = 1 - .83 * Math.exp(-Math.pow((x - width * .56) / (readingWidth * .68), 4) - Math.pow((y - height * .50) / (height * .31), 4));
+      const opacity = Math.min(.58, ((.027 + ribbon * (.39 + .12 * crest) + filament * .17) * depth * breathe
+        * (.86 + .24 * twinkle) + light * .19 + etch * .35 + glints * .15) * quiet);
       if (opacity < 0.025) continue;
-      const level = Math.min(63, Math.round(opacity * 128));
+      const level = Math.round(opacity * 108);
       const palette = level * 16;
-      const spectrum = fullColor||(!reducedMotion&&waves.length)?spectrumAt(time,x,y,width,height,waves,fullColor,reducedMotion):null;
-      const tinted = spectrum!==null&&spectrum.saturation>.001;
-      const tint = spectrum&&tinted?tintPacked(spectrum.hue,spectrum.saturation):0xffffff;
+      const spectrum = spectrumAt(time, x, y, width, height, waves, fullColor, reducedMotion);
+      const ambient = (.09 + .30 * sweep) * Math.max(ribbon, etch);
+      const saturation = fullColor ? Math.max(.19 + ambient, Math.min(.85, spectrum.saturation / .9))
+        : Math.max(ambient, Math.min(.72, spectrum.saturation * .87 / .72));
+      const tinted = saturation > .001;
+      const hue = spectrum.hue + .075 * fold + (fullColor ? 0 : time / 120);
+      const tint = tinted ? tintPacked(hue, saturation) : 0xffffff;
       const redInk=(tint&255)/255,greenInk=((tint>>>8)&255)/255,blueInk=((tint>>>16)&255)/255;
       const mask = masks[g.glyph + (g.depth > 0.55 ? alphabet.length : 0)];
       const left = Math.round(x * ratio), top = Math.round(y * ratio);

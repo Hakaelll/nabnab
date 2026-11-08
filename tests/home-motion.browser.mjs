@@ -36,6 +36,24 @@ try{
     }), [72, 72, "none"], "Home retains the original emblem and its size.");
     await page.screenshot({path:`${directory}/home-${label}-${width}x${height}.png`,animations:"disabled"});
     const initial=await page.locator('#field').evaluate(canvas=>canvas.toDataURL());await page.evaluate(()=>window.stepMotion(180));const moved=await page.locator('#field').evaluate(canvas=>canvas.toDataURL());assert.notEqual(moved,initial,"Ambient current must actually change its pixels.");
+    if (!before) {
+      const colored = await page.locator("#field").evaluate(canvas => {
+        const sample = document.createElement("canvas");
+        sample.width = canvas.width;
+        sample.height = canvas.height;
+        const ctx = sample.getContext("2d");
+        ctx.drawImage(canvas, 0, 0);
+        const { data } = ctx.getImageData(0, 0, sample.width, sample.height);
+        let count = 0;
+        for (let i = 0; i < data.length; i += 4) {
+          const brightest = Math.max(data[i], data[i + 1], data[i + 2]);
+          const darkest = Math.min(data[i], data[i + 1], data[i + 2]);
+          if (brightest > 24 && brightest - darkest > 7) count++;
+        }
+        return count;
+      });
+      assert.ok(colored > 100, `The default field should show the traveling color without enabling full color (${colored} colored pixels).`);
+    }
     await page.screenshot({path:`${directory}/home-${label}-moving-${width}x${height}.png`,animations:"disabled"});
     await page.locator('[data-page="tools"]').click();await page.locator('.tool-workspace').waitFor();assert.equal(await page.evaluate(()=>window.stepMotion(3)),0,"Leaving Home must release the animation loop.");
     assert.deepEqual(await shell(), homeShell, "Tools uses the same window and navigation geometry as Home.");
