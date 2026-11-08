@@ -19,6 +19,30 @@ interface Hooks {
   t: Copy;
 }
 
+const waveColumns = 88;
+
+function sampleWaveforms(samples: AudioBuffer[]): string[] {
+  const envelopes = samples.map(buffer => {
+    const peaks = Array<number>(waveColumns).fill(0);
+    for (let channel = 0; channel < buffer.numberOfChannels; channel++) {
+      const data = buffer.getChannelData(channel);
+      for (let column = 0; column < waveColumns; column++) {
+        const first = Math.floor(column * data.length / waveColumns);
+        const end = Math.floor((column + 1) * data.length / waveColumns);
+        let peak = peaks[column];
+        for (let index = first; index < end; index++) peak = Math.max(peak, Math.abs(data[index]));
+        peaks[column] = peak;
+      }
+    }
+    return peaks;
+  });
+  const scale = Math.max(0.001, ...envelopes.flat());
+  return envelopes.map(peaks => peaks.map((peak, column) => {
+    const height = Math.max(0.15, 11 * peak / scale);
+    return `M${column + 0.5},${(12 - height).toFixed(2)}V${(12 + height).toFixed(2)}`;
+  }).join(" "));
+}
+
 export function createStemsTool(hooks: Hooks) {
   const { t } = hooks;
   let component: Component | null = null;
@@ -27,6 +51,7 @@ export function createStemsTool(hooks: Hooks) {
   let busy = false, error = "", requestId = 0, revision = 0;
   let context: AudioContext | null = null;
   let buffers: AudioBuffer[] = [], gains: GainNode[] = [], nodes: AudioBufferSourceNode[] = [];
+  let waveforms: string[] = [];
   let chosen = 0, position = 0, began = 0, frame = 0;
   const labels = () => [t("Original", "Original"), t("Voz", "Vocals"), t("Instrumental", "Instrumental")];
   const sources = () => hooks.snapshot().library.filter(item => !item.missing && (item.kind === "audio" || item.kind === "video"));
@@ -84,12 +109,16 @@ export function createStemsTool(hooks: Hooks) {
     return Math.min(preview?.seconds ?? 0, Math.max(0, context.currentTime - began));
   }
 
+  const progress = (time: number) => `${100 * time / (preview?.seconds || 1)}%`;
+
   function drawTime() {
     const time = clock();
     const range = document.getElementById("stems-position");
     if (range instanceof HTMLInputElement) range.value = String(time);
     const label = document.getElementById("stems-position-label");
-    if (label) label.textContent = durationLabel(time);
+    const timeLabel = durationLabel(time);
+    if (label && label.textContent !== timeLabel) label.textContent = timeLabel;
+    document.getElementById("stems-lanes")?.style.setProperty("--stems-progress", progress(time));
     if (nodes.length) frame = requestAnimationFrame(drawTime);
   }
 
@@ -132,7 +161,7 @@ export function createStemsTool(hooks: Hooks) {
     stop();
     if (preview) void hooks.command("stems_release", { previewId: preview.previewId }).catch(() => {});
     if (context) void context.close();
-    preview = null; context = null; buffers = []; position = 0; chosen = 0;
+    preview = null; context = null; buffers = []; waveforms = []; position = 0; chosen = 0;
   }
 
   function leave() {
@@ -143,19 +172,24 @@ export function createStemsTool(hooks: Hooks) {
   }
 
   function trackButtons() {
-    return labels().map((label, index) => action("stems-track", label, "audio", chosen === index ? "secondary" : "quiet",
-      `data-index="${index}" aria-pressed="${chosen === index}"`)).join("");
+    return labels().map((label, index) => `<button type="button" class="stems-lane" data-action="stems-track" data-index="${index}" aria-pressed="${chosen === index}">
+      <span class="stems-lane-label">${icon("audio")}${h(label)}</span>
+      <span class="stems-wave" aria-hidden="true"><svg viewBox="0 0 ${waveColumns} 24" preserveAspectRatio="none" focusable="false">
+        <path d="${waveforms[index]}" vector-effect="non-scaling-stroke"></path>
+      </svg><span class="stems-playhead"></span></span>
+    </button>`).join("");
   }
 
   function review() {
     if (!preview) return `<p class="field-note stems-empty">${t("Genera una muestra de hasta 8 segundos para comparar la mezcla y las pistas.", "Generate a sample of up to 8 seconds to compare the mix and the stems.")}</p>`;
+    const time = clock();
     return `<div class="stems-review">
-      <div class="button-group stems-tracks" role="group" aria-label="${t("Pista de escucha", "Track to listen to")}">${trackButtons()}</div>
+      <div id="stems-lanes" class="stems-lanes" role="group" aria-label="${t("Pista de escucha", "Track to listen to")}" style="--stems-progress:${progress(time)}">${trackButtons()}</div>
       <div class="stems-transport">
         ${action("stems-play", nodes.length ? t("Pausar", "Pause") : t("Reproducir", "Play"), nodes.length ? "pause" : "play", "secondary", 'id="stems-play"')}
-        <label class="stems-timeline"><span>${t("Posición en la muestra", "Sample position")}</span>
-          <input id="stems-position" type="range" min="0" max="${preview.seconds}" step="0.01" value="${clock()}"></label>
-        <span class="stems-time"><span id="stems-position-label">${durationLabel(clock())}</span> / ${durationLabel(preview.seconds)}</span>
+        <label class="stems-timeline"><span class="stems-timeline-heading"><span>${t("Posición en la muestra", "Sample position")}</span>
+          <span class="stems-time" aria-hidden="true"><span id="stems-position-label">${durationLabel(time)}</span> / ${durationLabel(preview.seconds)}</span></span>
+          <input id="stems-position" type="range" min="0" max="${preview.seconds}" step="0.01" value="${time}"></label>
       </div>
       <p class="field-note">${t("Las pistas comparten la misma posición. Puedes cambiar de pista mientras escuchas.", "Tracks share one position. Switch between them while listening.")}</p>
       ${preview.originalChannels > preview.channels ? `<p class="field-note">${t("La entrada multicanal se mezcla a estéreo.", "The multichannel input is downmixed to stereo.")}</p>` : ""}
@@ -229,6 +263,7 @@ export function createStemsTool(hooks: Hooks) {
             const samples = await Promise.all(labels().map(async (_, track) =>
               audio.decodeAudioData(await hooks.command<ArrayBuffer>("stems_sample", { previewId: prepared.previewId, track }))));
             if (revision !== active) return;
+            waveforms = sampleWaveforms(samples);
             context = audio; buffers = samples; preview = prepared;
           } finally {
             if (context !== audio) {

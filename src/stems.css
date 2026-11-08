@@ -11,10 +11,23 @@
 .stems-fields legend, .stems-tool h3 { margin: 0 0 8px; font-size: 14px; font-weight: 600; }
 .stems-sample-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; }
 .stems-sample-controls input { width: 112px; }
-.stems-review { display: grid; gap: 10px; margin: 12px 0 0; }
+.stems-review { --stems-label-width: 116px; display: grid; gap: 10px; margin: 12px 0 0; }
 .stems-tracks { flex-wrap: wrap; justify-content: flex-start; }
-.stems-transport { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
-.stems-timeline { flex: 1 1 130px; }
+.stems-lanes { display: grid; gap: 4px; }
+.stems-lane, .stems-transport { display: grid; grid-template-columns: var(--stems-label-width) minmax(0, 1fr); align-items: center; gap: 10px; padding-inline: 10px; }
+.stems-lane { width: 100%; min-height: 38px; border: 1px solid var(--edge-quiet); border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer; text-align: left; font: inherit; }
+.stems-lane:hover, .stems-lane[aria-pressed="true"] { background: var(--surface); color: var(--text); }
+.stems-lane[aria-pressed="true"] { box-shadow: inset 2px 0 var(--action); }
+.stems-lane-label { display: flex; gap: 8px; align-items: center; font-size: 12px; font-weight: 600; }
+.stems-lane-label svg { width: 14px; height: 14px; flex: none; }
+.stems-wave { display: block; position: relative; overflow: hidden; height: 24px; }
+.stems-wave::before { content: ""; position: absolute; inset: 50% 0 auto; border-top: 1px solid var(--edge-quiet); }
+.stems-wave svg { display: block; position: relative; width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-linecap: round; }
+.stems-playhead { position: absolute; inset: 0; transform: translateX(min(var(--stems-progress), calc(100% - 1px))); }
+.stems-playhead::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 1px; background: var(--action); }
+.stems-transport { padding-inline: 11px; }
+.stems-timeline { min-width: 0; }
+.stems-timeline-heading { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 8px; }
 .stems-timeline input { min-height: 28px; margin: 0; padding: 0; accent-color: var(--action); }
 .stems-time { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .stems-empty { margin-top: 12px; }

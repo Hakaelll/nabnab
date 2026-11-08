@@ -2,6 +2,10 @@
 
 En **Herramientas → Audio y voz → Separar pistas**, elige un audio o vídeo de Biblioteca, indica el segundo de inicio y genera una muestra de hasta ocho segundos. Puedes reproducirla, buscar una posición y cambiar entre Original, Voz e Instrumental sobre el mismo reloj de reproducción.
 
+Las tres formas de onda usan la misma escala y comparten un cursor. Puedes ver dónde aparece señal en cada pista y pulsar su fila para escucharla desde el mismo punto. La barra inferior permite buscar con el ratón o las flechas del teclado.
+
+![Comparación de las tres formas de onda con audio sintético](stems-waveforms.png)
+
 La separación es una estimación. Puede dejar restos de voz en el instrumental o introducir artefactos. El modelo disponible entrega dos pistas. La exportación genera dos FLAC de 44,1 kHz en una subcarpeta del destino y conserva el original. En Biblioteca ambas pistas se vinculan al original y comparten un conjunto y una colección. Las entradas mono conservan un canal, las estéreo conservan dos y las multicanal se mezclan a estéreo.
 
 ## Pistas completas
