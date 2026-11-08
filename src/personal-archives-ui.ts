@@ -88,6 +88,7 @@ interface ThreadPage {
   incomplete: boolean;
 }
 interface AttachmentPage { rows: Row[]; total: number; offset: number }
+interface ArchiveSearch { query: string; from: string; to: string }
 type MediaPreview = { row: Row } & (
   { kind: "loading"; request: string } | { kind: "ready"; src: string } | { kind: "unavailable" }
 );
@@ -121,8 +122,9 @@ export function createPersonalArchives(hooks: Hooks) {
   let postAttachments: { post: Row; page: AttachmentPage } | null = null;
   let mediaPreview: MediaPreview | null = null;
   let listeningView: ListeningView = "events";
-  let listeningSelection: { group: ListeningGroup; offset: number; query: string } | null = null;
-  let query = "", offset = 0, requestId = 0;
+  let listeningSelection: { group: ListeningGroup; offset: number; search: ArchiveSearch; applied: ArchiveSearch } | null = null;
+  let search: ArchiveSearch = { query: "", from: "", to: "" }, appliedSearch = search;
+  let offset = 0, requestId = 0;
   let privateOpen = false, confirming = false, privateExport = false;
   let loaded = false, busy = false, visible = false, adding = false;
   let error = "";
@@ -148,7 +150,8 @@ export function createPersonalArchives(hooks: Hooks) {
   function resetRecords(next: Category | null) {
     discardMediaPreview();
     category = next;
-    query = "";
+    search = { query: "", from: "", to: "" };
+    appliedSearch = search;
     offset = 0;
     result = null;
     thread = null;
@@ -187,14 +190,17 @@ export function createPersonalArchives(hooks: Hooks) {
     if (category && privateCategory(category)) resetRecords(category);
   }
 
-  async function read() {
-    if (!archiveId || !category || (privateCategory(category) && !privateOpen)) return;
+  async function read(filters = appliedSearch, position = offset) {
+    if (!archiveId || !category || (privateCategory(category) && !privateOpen)) return false;
     const page = await hooks.command<RecordPage>("personal_archive_records", {
-      id: archiveId, category, consent: privateOpen, query, offset,
+      id: archiveId, category, consent: privateOpen, query: filters.query, offset: position,
+      dates: filters.from || filters.to ? { from: filters.from || null, to: filters.to || null } : null,
       listening: category === "listening" && listeningView !== "events"
         ? { by: listeningView, key: listeningSelection?.group.key ?? null } : null,
     });
-    if (visible && (!category || !privateCategory(category) || privateOpen)) result = page;
+    if (!visible || !category || (privateCategory(category) && !privateOpen)) return false;
+    result = page;
+    return true;
   }
 
   async function choose() {
@@ -566,10 +572,23 @@ export function createPersonalArchives(hooks: Hooks) {
     const range = page ? dates(page.start, page.end) : "";
     const context = [range ? `${range} · UTC` : "", page?.listeningGroups
       ? `${number(page.total)} ${page.total === 1 ? t("evento", "event") : t("eventos", "events")}` : ""].filter(Boolean).join(" · ");
+    const formatSearchDay = (value: string) => day(Date.parse(`${value}T00:00:00Z`));
+    const period = appliedSearch.from && appliedSearch.from === appliedSearch.to ? formatSearchDay(appliedSearch.from) : [
+      appliedSearch.from ? `${t("Desde", "From")} ${formatSearchDay(appliedSearch.from)}` : "",
+      appliedSearch.to ? `${t("Hasta", "Through")} ${formatSearchDay(appliedSearch.to)}` : "",
+    ].filter(Boolean).join(" · ");
     return `${category === "listening" ? listeningControls() : ""}<form id="archive-search-form" class="archive-search">
       <label for="archive-query">${t("Buscar en esta categoría", "Search this category")}
-        <input id="archive-query" name="query" type="search" maxlength="120" value="${h(query)}" ${disabled()}>
+        <input id="archive-query" name="query" type="search" maxlength="120" value="${h(search.query)}" ${disabled()}>
       </label>
+      <details id="archive-browse-dates" class="archive-search-dates">
+        <summary>${t("Fechas (UTC)", "Dates (UTC)")}${period ? `<small>${h(period)}</small>` : ""}</summary>
+        <div class="archive-browse-date-fields">
+          <label for="archive-search-from">${t("Desde (UTC)", "From (UTC)")}<input id="archive-search-from" name="from" type="date" value="${h(search.from)}" ${disabled()}></label>
+          <label for="archive-search-to">${t("Hasta (UTC)", "Through (UTC)")}<input id="archive-search-to" name="to" type="date" value="${h(search.to)}" ${disabled()}></label>
+        </div>
+        <p class="field-note">${t("Incluye ambos días. Los registros sin fecha se omiten al filtrar.", "Both dates are inclusive. Filtering omits undated records.")}</p>
+      </details>
       <button type="submit" class="button secondary" ${disabled()}>${icon("search")}${t("Buscar", "Search")}</button>
     </form>
     ${page ? `${context ? `<p class="muted">${h(context)}</p>` : ""}
@@ -724,7 +743,7 @@ export function createPersonalArchives(hooks: Hooks) {
       case "archive-listening-group": {
         const group = result?.listeningGroups?.groups.find(group => group.key === button.dataset.id);
         if (group) {
-          await run(async () => { listeningSelection = { group, offset, query }; offset = 0; result = null; await read(); });
+          await run(async () => { listeningSelection = { group, offset, search, applied: appliedSearch }; offset = 0; result = null; await read(); });
           document.getElementById("archive-listening-title")?.focus();
         }
         break;
@@ -732,7 +751,7 @@ export function createPersonalArchives(hooks: Hooks) {
       case "archive-listening-back": {
         const previous = listeningSelection;
         if (previous) {
-          await run(async () => { listeningSelection = null; offset = previous.offset; query = previous.query; result = null; await read(); });
+          await run(async () => { listeningSelection = null; offset = previous.offset; search = previous.search; appliedSearch = previous.applied; result = null; await read(); });
           document.querySelector<HTMLElement>(`[data-action="archive-listening-group"][data-id="${CSS.escape(previous.group.key)}"]`)?.focus();
         }
         break;
@@ -817,7 +836,10 @@ export function createPersonalArchives(hooks: Hooks) {
       if (target.name === "from" || target.name === "to") resetMediaReview();
       return true;
     }
-    if (target.id === "archive-query") { query = target.value; return true; }
+    if (target.form?.id === "archive-search-form" && (target.name === "query" || target.name === "from" || target.name === "to")) {
+      search = { ...search, [target.name]: target.value };
+      return true;
+    }
     return false;
   }
 
@@ -848,7 +870,22 @@ export function createPersonalArchives(hooks: Hooks) {
 
   async function submit(form: HTMLFormElement) {
     if (form.id === "archive-search-form") {
-      await run(async () => { offset = 0; await read(); });
+      if (search.from && search.to && search.from > search.to) {
+        error = t("La fecha inicial debe ser anterior o igual a la final.", "The start date must be on or before the end date.");
+        hooks.render();
+        document.getElementById("archive-search-from")?.focus();
+        return true;
+      }
+      const filters = search;
+      await run(async () => {
+        if (!await read(filters, 0)) return;
+        if (filters.from !== appliedSearch.from || filters.to !== appliedSearch.to) {
+          selected.clear();
+          privateExport = false;
+        }
+        appliedSearch = filters;
+        offset = 0;
+      });
     } else if (form.id === "archive-import-form" && preview) {
       const fingerprint = preview.fingerprint;
       if (!included.size) {

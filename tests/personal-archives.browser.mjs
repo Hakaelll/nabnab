@@ -20,7 +20,7 @@ const setup = `
   const row=(id,title,text,author,extra={})=>({id,title,text,author,time,source:"fixture.json",link:null,media:null,threadParent:null,hasThread:false,attachmentCount:0,playedMs:null,trackCount:0,...extra});
   const threadPosts=[
     {row:row("p","Una publicación","Una publicación de prueba","Cuenta de prueba",{link:"https://example.org/post",hasThread:true,threadParent:"99"}),replyTo:null},
-    {row:row("r","Primera respuesta","Este es el primer mensaje guardado como respuesta.","Cuenta de prueba",{hasThread:true}),replyTo:1},
+    {row:row("r","Primera respuesta","Este es el primer mensaje guardado como respuesta.","Cuenta de prueba",{hasThread:true,time:time+86400000}),replyTo:1},
     {row:row("siguiente","Otra rama","Una respuesta distinta a la misma publicación.","Cuenta de prueba",{hasThread:true}),replyTo:1},
     ...Array.from({length:50},(_,index)=>({row:row("post-"+index,"Continuación "+(index+4),"Otra publicación guardada.","Cuenta de prueba",{hasThread:true}),replyTo:index+3})),
   ];
@@ -80,6 +80,11 @@ const setup = `
     if(cmd==="personal_archive_records"){
       if(args.category==="messages"&&!args.consent)throw "Missing private consent";
       let data=rows[args.category].filter(row=>!args.query||row.title.includes(args.query));
+      if(args.dates) {
+        const from=args.dates.from?Date.parse(args.dates.from+"T00:00:00Z"):-Infinity;
+        const to=args.dates.to?Date.parse(args.dates.to+"T23:59:59.999Z"):Infinity;
+        data=data.filter(row=>row.time!==null&&row.time>=from&&row.time<=to);
+      }
       if(args.category==="posts"&&summaries.find(item=>item.id===args.id)?.categories.media) data=data.map(row=>row.id==="p"?{...row,attachmentCount:2}:row);
       const isListening=args.category==="listening";
       if(args.listening?.key) {
@@ -87,7 +92,8 @@ const setup = `
         data=data.filter(row=>ids[args.listening.key[0]].includes(row.id));
       }
       const groups=args.listening&&!args.listening.key?listeningGroups[args.listening.by]:null;
-      return {rows:groups?[]:data.slice(args.offset,args.offset+50),total:data.length,start:data.length?time:null,end:data.length?time:null,
+      const dates=data.map(row=>row.time).filter(time=>time!==null);
+      return {rows:groups?[]:data.slice(args.offset,args.offset+50),total:data.length,start:dates.length?Math.min(...dates):null,end:dates.length?Math.max(...dates):null,
         playedMs:isListening?data.reduce((total,row)=>total+row.playedMs,0):null,completionKnown:0,completions:null,ended:isListening?1:null,
         listeningGroups:groups?{groups,total:groups.length}:null};
     }
@@ -188,6 +194,34 @@ try {
   assert.deepEqual(selection.categories, ["posts"]);
   assert.deepEqual(selection.sensitive, ["messages"]);
   assert.equal(selection.from, "2025-01-01");
+  const archiveSearch = page.getByRole("button", { name: "Buscar", exact: true });
+  const fromDate = page.getByLabel("Desde (UTC)", { exact: true });
+  const toDate = page.getByLabel("Hasta (UTC)", { exact: true });
+  await page.locator(".archive-browser-heading").evaluate(node => node.scrollIntoView({ block: "start" }));
+  await page.screenshot({ path: `${directory}/archive-search-before.png` });
+  await page.getByText("Fechas (UTC)", { exact: true }).click({ timeout: 3000 });
+  await page.locator('input[name="archive-record"][value="p"]').check();
+  await fromDate.fill("2025-01-09");
+  await toDate.fill("2025-01-09");
+  await archiveSearch.click();
+  await page.locator(".archive-record").getByText("Primera respuesta", { exact: true }).waitFor();
+  assert.equal(await page.locator(".archive-record").count(), 1);
+  assert.equal(await action("export").isDisabled(), true);
+  for (const [width, height] of [[1180, 780], [900, 620]]) {
+    await page.setViewportSize({ width, height });
+    const search = page.locator("#archive-search-form");
+    assert.ok(await search.evaluate(node => node.scrollWidth <= node.clientWidth + 1));
+    await page.locator(".archive-browser-heading").evaluate(node => node.scrollIntoView({ block: "start" }));
+    await page.screenshot({ path: `${directory}/archive-search-${width}.png` });
+  }
+  await fromDate.fill("2025-01-10");
+  await archiveSearch.click();
+  await page.getByRole("alert").getByText("La fecha inicial debe ser anterior o igual a la final.", { exact: true }).waitFor();
+  assert.equal(await page.locator(".archive-record").count(), 1);
+  await fromDate.fill("");
+  await toDate.fill("");
+  await archiveSearch.click();
+  await page.locator(".archive-record").getByText("Una publicación", { exact: true }).waitFor();
   await page.locator("#archive-query").fill("Una publicación");
   await page.getByRole("button", { name: "Buscar", exact: true }).click();
   const threadButton = page.locator('[data-action="archive-thread"][data-id="p"]');

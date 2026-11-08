@@ -1059,6 +1059,12 @@ pub struct Page {
     listening_groups: Option<listening::GroupPage>,
 }
 
+#[derive(Deserialize)]
+pub struct DateBounds {
+    from: Option<String>,
+    to: Option<String>,
+}
+
 #[tauri::command(async)]
 pub fn personal_archive_records(
     state: State<Arc<AppState>>,
@@ -1068,6 +1074,7 @@ pub fn personal_archive_records(
     query: String,
     offset: usize,
     listening: Option<listening::View>,
+    dates: Option<DateBounds>,
 ) -> Result<Page, String> {
     if query.chars().count() > 120 {
         return Err("Use a shorter archive search.".into());
@@ -1075,6 +1082,9 @@ pub fn personal_archive_records(
     if category.sensitive() && !consent {
         return Err("Open this private category explicitly to read its records.".into());
     }
+    let bounds = dates
+        .map(|dates| date_range(&dates.from, &dates.to))
+        .transpose()?;
     let (summary, mut records) = archive_records(&state, &id)?;
     let mut rows = records.remove(&category).unwrap_or_default();
     if listening.is_some()
@@ -1104,6 +1114,9 @@ pub fn personal_archive_records(
     } else {
         HashSet::new()
     };
+    if let Some((from, to)) = bounds {
+        rows.retain(|row| in_range(row.time, from, to));
+    }
     let query = query.trim().to_lowercase();
     if !query.is_empty() {
         rows.retain(|row| {

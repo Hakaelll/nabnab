@@ -98,6 +98,15 @@
 .archive-fields input, .archive-search input { width: 100%; min-width: 0; }
 .archive-search > label { flex: 1 1 15rem; }
 .archive-search .button svg { width: 15px; height: 15px; }
+.archive-search-dates { min-width: 0; }
+.archive-search-dates > summary { min-height: 38px; padding: 9px 10px; border: 1px solid var(--border); border-radius: 9px; font-size: 12px; cursor: pointer; }
+.archive-search-dates > summary small { display: inline-block; margin-inline-start: 8px; color: var(--muted); }
+.archive-search-dates[open] { flex: 1 0 100%; padding: 8px 10px 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--secondary); }
+.archive-search-dates[open] > summary { min-height: 0; padding: 0 0 7px; border: 0; }
+.archive-search:has(.archive-search-dates[open]) > button { margin-inline-start: auto; }
+.archive-browse-date-fields { display: flex; flex-wrap: wrap; gap: 8px; }
+.archive-browse-date-fields > label { flex: 1 1 135px; }
+.archive-search-dates > p { margin-top: 8px; }
 #archive-import-form { display: grid; gap: 13px; justify-items: start; }
 #archive-import-form > :is(fieldset, .archive-fields) { width: 100%; }
 #archive-media-review-result:empty { display: none; }

@@ -7,11 +7,12 @@ import path from "node:path";
 
 const { chromium } = createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODULE || "playwright");
 const root = path.resolve(import.meta.dirname, "..");
-const artifacts = process.env.NABNAB_ARCHIVE_ARTIFACTS || path.join(root, "artifacts/native-personal-archives");
+const artifacts = path.resolve(process.env.NABNAB_ARCHIVE_ARTIFACTS || path.join(root, "artifacts/native-personal-archives"));
 await mkdir(artifacts, { recursive: true });
 const data = await mkdtemp(path.join(artifacts, "run-"));
 const id = "a".repeat(64), generation = `${id}-00000001`;
 const instagram = "c".repeat(64), instagramGeneration = `${instagram}-00000001`;
+const spotify = "e".repeat(64), spotifyGeneration = `${spotify}-00000001`;
 const managed = path.join(data, "personal-archive-media", id);
 const secrets = path.join(data, "module-secrets");
 const records = path.join(data, "personal-archive-data");
@@ -27,7 +28,8 @@ const [photo, video, invalid, privatePhoto] = [
 ].map(row);
 const post = (id, title, replyTo = null) => ({ ...row("data/tweets.js"), id: digest(id), title, text: title,
   time: Date.UTC(2025, 0, Number(id) - 99), threadParent: replyTo, media: null });
-const first = post("100", "Salida al lago"), reply = post("101", "La segunda publicación", "100");
+const first = { ...post("100", "Salida al lago"), time: Date.UTC(2025, 0, 1, 23, 59, 59, 999) };
+const reply = post("101", "La segunda publicación", "100");
 const instagramMedia = [row("media/posts/202501/123-Lago.png"), row("media/posts/202501/Paseo.mp4")];
 const instagramPost = {...post("300", "Paseo por la sierra"), source: "your_instagram_activity/media/posts_1.json",
   attachmentIds: instagramMedia.map(item => item.id)};
@@ -64,12 +66,22 @@ await protect(secrets, "personal-archive-index", "nabnab-module-secret-v1", "nab
   id:instagram, generation:1, provider:"instagram", account:"Archivo de montaña", destination:"Viajes", source:"instagram-export.zip",
   fingerprint:"d".repeat(64), categories:{posts:1,media:2}, formats:{posts:["json"],media:["media"]},
   mediaBytes:bytes[0]+bytes[1], pendingRemoval:false,
+}, {
+  id:spotify, generation:1, provider:"spotify", account:"Escuchas de prueba", destination:"Historial", source:"spotify-export.zip",
+  fingerprint:"f".repeat(64), categories:{listening:3}, formats:{listening:["json"]}, mediaBytes:0, pendingRemoval:false,
 }]);
 await protect(records, generation, "nabnab-personal-archive-v1", `nabnab-personal-archive:${generation}`, {
   posts: [first, reply], media: [photo, video, invalid], messages: [privatePhoto],
 });
 await protect(records, instagramGeneration, "nabnab-personal-archive-v1", `nabnab-personal-archive:${instagramGeneration}`, {
   posts:[instagramPost], media:[...instagramMedia].reverse(),
+});
+const event = (key, title, day, playedMs, completed) => ({
+  ...row("StreamingHistory.json"), id: digest(key), media: null, title, author: "Artista de prueba",
+  time: Date.UTC(2025, 0, day), playedMs, completed,
+});
+await protect(records, spotifyGeneration, "nabnab-personal-archive-v1", `nabnab-personal-archive:${spotifyGeneration}`, {
+  listening: [event("a", "Primera grabación", 1, 240000, true), event("b", "Segunda grabación", 2, 120000, true), event("c", "Segunda grabación", 2, 30000, false)],
 });
 
 const port = process.env.NABNAB_ARCHIVE_DEBUG_PORT || 9269;
@@ -100,9 +112,33 @@ try {
   }, { command, args });
   const errors = [];
   page.on("pageerror", error => errors.push(error.message));
+  await wait(() => rpc("get_snapshot").catch(() => null));
+  const packages = await rpc("personal_archive_list");
+  assert.ok(packages.some(item => item.id === id));
+  const recordsArgs = { id, category: "posts", consent: false, query: "", offset: 0 };
+  const oneDay = await rpc("personal_archive_records", { ...recordsArgs, dates: { from: "2025-01-01", to: "2025-01-01" } });
+  assert.equal(oneDay.total, 1);
+  assert.deepEqual(oneDay.rows.map(item => item.id), [first.id]);
+  assert.equal(oneDay.rows[0].hasThread, true);
+  const secondDay = await rpc("personal_archive_records", { ...recordsArgs, dates: { from: "2025-01-02" } });
+  assert.deepEqual(secondDay.rows.map(item => item.id), [reply.id]);
+  const undated = await rpc("personal_archive_records", { ...recordsArgs, category: "media", dates: { to: "2025-01-01" } });
+  assert.equal(undated.total, 0);
+  await assert.rejects(rpc("personal_archive_records", { ...recordsArgs, dates: { from: "2025-01-02", to: "2025-01-01" } }), /start date must precede/);
+  await assert.rejects(rpc("personal_archive_records", { ...recordsArgs, category: "messages", dates: { to: "2025-01-01" } }), /private category explicitly/);
+  const history = await rpc("personal_archive_records", { ...recordsArgs, id: spotify, category: "listening",
+    dates: { from: "2025-01-02" }, listening: { by: "items" } });
+  assert.deepEqual([history.total, history.playedMs, history.completions], [2, 150000, 1]);
+  assert.deepEqual(history.listeningGroups.groups.map(group => [group.title, group.events, group.playedMs]), [["Segunda grabación", 2, 150000]]);
   await page.locator("[data-page='library']").click();
   await page.locator("[data-section='archives']").click();
   await page.getByRole("button", { name: /x-export.zip/ }).click();
+  await page.locator("#archive-browse-dates > summary").click();
+  await page.locator("#archive-search-from").fill("2025-01-01");
+  await page.locator("#archive-search-to").fill("2025-01-01");
+  await page.getByRole("button", { name: "Buscar", exact: true }).click();
+  await page.waitForFunction(() => document.querySelectorAll(".archive-record").length === 1);
+  assert.match(await page.locator(".archive-record").innerText(), /Salida al lago/);
   const attachmentButton = page.getByRole("button", { name: "2 adjuntos" });
   await attachmentButton.waitFor();
   assert.equal(await page.locator('[data-action="archive-attachments"]').count(), 1);
@@ -173,7 +209,7 @@ try {
   await page.getByRole("button", {name:"Volver a publicaciones"}).click();
   assert.ok(await instagramAttachments.evaluate(node => node === document.activeElement));
   assert.deepEqual(errors, []);
-  console.log(`Verified X and Instagram post attachments, native image and video previews, private reveal and unmatched media isolation in ${data}`);
+  console.log(`Verified inclusive UTC dates, filtered Spotify totals, X and Instagram attachments, native previews and private-category isolation in ${data}`);
 } catch (error) {
   console.error(log);
   throw error;
