@@ -29,6 +29,7 @@ interface Hooks {
   toggle(): void;
   playing(): boolean;
   thumbnails(): void;
+  compact?(): boolean;
   closed?(): void;
 }
 
@@ -51,7 +52,8 @@ export function createTrackWheel(hooks: Hooks) {
       </div>
       <div class="track-wheel-hint"><span class="track-wheel-position"></span><kbd></kbd></div>
       <button type="button" class="track-wheel-back" hidden></button>
-    </aside><span class="track-wheel-announcement sr-only" role="status"></span>`;
+    </aside>${playerButton("track-wheel-close", t("Cerrar salto rápido", "Close Quick Skip"), "close")}
+    <span class="track-wheel-announcement sr-only" role="status"></span>`;
   document.body.append(wheel);
 
   const drum = wheel.querySelector<HTMLElement>(".track-wheel-drum")!;
@@ -61,6 +63,7 @@ export function createTrackWheel(hooks: Hooks) {
   const previous = wheel.querySelector<HTMLButtonElement>("#track-wheel-previous")!;
   const next = wheel.querySelector<HTMLButtonElement>("#track-wheel-next")!;
   const playPause = wheel.querySelector<HTMLButtonElement>("#track-wheel-toggle")!;
+  const close = wheel.querySelector<HTMLButtonElement>("#track-wheel-close")!;
   const back = wheel.querySelector<HTMLButtonElement>(".track-wheel-back")!;
   const cards = new Map<number, HTMLButtonElement>();
   let entries: WheelEntry[] = [];
@@ -190,6 +193,13 @@ export function createTrackWheel(hooks: Hooks) {
   }
 
   function place(x: number, y: number, button?: HTMLButtonElement) {
+    if (wheel.classList.contains("is-compact")) {
+      wheel.dataset.side = "left";
+      wheel.style.left = wheel.style.top = "0px";
+      wheel.style.transformOrigin = "center";
+      offsetX = offsetY = 0;
+      return;
+    }
     const { width, height } = wheel.getBoundingClientRect();
     const margin = 8;
     const gap = 26;
@@ -215,6 +225,7 @@ export function createTrackWheel(hooks: Hooks) {
     opener = button;
     usingAlt = !button;
     opened = true;
+    wheel.classList.toggle("is-compact", hooks.compact?.() === true);
     drum.replaceChildren();
     cards.clear();
     opener?.setAttribute("aria-expanded", "true");
@@ -222,6 +233,7 @@ export function createTrackWheel(hooks: Hooks) {
     for (const [control, label] of [
       [previous, t("Selección anterior", "Previous selection")],
       [next, t("Selección siguiente", "Next selection")],
+      [close, t("Cerrar salto rápido", "Close Quick Skip")],
     ] as const) {
       control.title = label;
       control.setAttribute("aria-label", label);
@@ -255,6 +267,7 @@ export function createTrackWheel(hooks: Hooks) {
   previous.addEventListener("click", () => move(-1));
   next.addEventListener("click", () => move(1));
   playPause.addEventListener("click", hooks.toggle);
+  close.addEventListener("click", () => dismiss(true));
   back.addEventListener("click", () => {
     const target = returnTo?.from;
     if (target) commit(entries.findIndex(entry => entry.position === target.position && entry.id === target.id));

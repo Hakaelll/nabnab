@@ -12,6 +12,8 @@ En Windows, pulsa **Ctrl + Mayús + M** para abrir el mini de audio o vídeo con
 
 Con una pista de audio en la sesión, abre **Salto rápido** desde la barra de reproducción o el mini de audio. También puedes mantener **Alt** y girar la rueda. En Windows, el gesto funciona con nabnab minimizado y el mini cerrado. Las portadas aparecen junto al puntero y el escritorio se ve entre las tarjetas y los controles. Suelta **Alt** para reproducir la tarjeta central o pulsa **Esc** para cancelar. Puedes pulsar una tarjeta o usar **↑**, **↓** e **Intro**. **Volver a la pista** deshace el último salto dentro de la misma cola. Los dos atajos están en **Ajustes → General → Reproducción desde el escritorio**. [Referencia de la rueda](https://github.com/ffoouuaadd/skip-dat)
 
+En el mini flotante de audio, **Salto rápido** sustituye temporalmente los controles del reproductor por la rueda compacta. Pulsa **Esc** o **Cerrar salto rápido** para volver a los controles sin interrumpir la pista.
+
 Usa **↑** y **↓** para subir o bajar el volumen cinco puntos en vídeo o música. En la barra y el mini, el atajo funciona cuando el foco está en el reproductor. Los controles de formulario mantienen su manejo habitual con las flechas.
 
 | Muestra verificada en Windows | Resultado |
@@ -61,6 +63,8 @@ Con `NABNAB_PLAYBACK_DESKTOP_MINI_KEY=1` y la bandeja desactivada, envía **Ctrl
 
 Con `NABNAB_PLAYBACK_DESKTOP_RESTORE=1`, la prueba usa un MP3 con un título largo y restaura dos veces la ventana principal maximizada con el comando nativo de Windows. Comprueba que todos los controles del mini queden a la vista, que la interfaz y la barra compacta vuelvan y que una solicitud de minimizar obsoleta no vuelva a separar la ventana.
 
+Con `NABNAB_PLAYBACK_MINI_WHEEL=1`, abre la rueda compacta con cinco pistas en el mini flotante. Comprueba que las tarjetas caben, que cerrar devuelve el foco y que se puede cambiar de pista con el teclado antes de restaurar la ventana principal.
+
 Con `NABNAB_PLAYBACK_WINDOWS_MEDIA=1`, la prueba busca la sesión multimedia de los archivos de prueba y verifica la carátula, la pausa, la reanudación, la búsqueda y los saltos de pista con la ventana minimizada. [Controles multimedia de Windows](https://learn.microsoft.com/en-us/uwp/api/windows.media.control.globalsystemmediatransportcontrolssession)
 
 En Windows, compilación 26200, con Intel Iris Xe y ANGLE/D3D11, se observaron 60 FPS en Automática y 30 FPS en Ahorro, en la escena Órbita a 900 × 620 px CSS. Se midieron los fotogramas dibujados durante 2,3 segundos en cada modo, con la música activa y el selector de escenas abierto. Ahorro usó un lienzo interno de 610 × 420 px. Las cifras corresponden a ese equipo y esas condiciones.
@@ -71,4 +75,4 @@ Las pruebas de navegador de audio y biblioteca cubren las listas, los capítulos
 
 [Vídeo con controles](playback/video-controls.png) · [Pistas de audio](playback/video-audio-tracks.png) · [Vídeo con los controles ocultos](playback/video-clean.png) · [Subtítulos ASS externos](playback/video-ass.png) · [Subtítulos integrados en MKV](playback/video-embedded.png) · [Previsualización al buscar](playback/video-seek.png) · [Música a 900 px](playback/music.png) · [Fósforo](playback/phosphor-full.png) · [Selector de escenas](playback/scenes.png) · [Barra compacta a 900 px](playback/compact.png)
 
-[Salto rápido sobre el escritorio](playback/quick-skip-desktop.png) · [Mini flotante de audio](playback/mini-audio.png) · [Mini flotante de vídeo](playback/mini-video.png)
+[Salto rápido sobre el escritorio](playback/quick-skip-desktop.png) · [Salto rápido en el mini flotante](playback/mini-quick-skip.png) · [Mini flotante de audio](playback/mini-audio.png) · [Mini flotante de vídeo](playback/mini-video.png)

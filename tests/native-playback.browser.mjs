@@ -17,6 +17,7 @@ const desktopRestore = process.env.NABNAB_PLAYBACK_DESKTOP_RESTORE === "1";
 const windowsMedia = process.env.NABNAB_PLAYBACK_WINDOWS_MEDIA === "1";
 const embeddedBookOnly = process.env.NABNAB_PLAYBACK_EMBEDDED_BOOK === "1";
 const lyricsOnly = process.env.NABNAB_PLAYBACK_LYRICS === "1";
+const miniWheelOnly = process.env.NABNAB_PLAYBACK_MINI_WHEEL === "1";
 const fixtureArtist = windowsMedia ? `Laboratorio nabnab · ${path.basename(data)}` : "Laboratorio nabnab";
 const fixtureTitle = desktopRestore
   ? "Señal para la cola · Grabación completa de prueba para un título largo que debe dejar visibles todos los controles del minirreproductor"
@@ -713,6 +714,56 @@ async function restoreFloatingMini(original) {
   }
   if (!wasMaximized) await maximize.click();
   console.log("Restoring the maximized main window twice docked the mini, retained playback, and ignored a stale minimize request.");
+}
+
+async function verifyFloatingMiniWheel() {
+  windowCommand("resize", 1180, 800);
+  await wait(() => page.evaluate(() => innerWidth >= 900));
+  const files = [music, ...audioSamples.map(sample => sample.file)];
+  const imported = await rpc("import_paths", { paths: files });
+  const track = name => imported.library.find(item => path.basename(item.path) === name);
+  const playingItem = track(path.basename(audioSamples[2].file));
+  assert.ok(playingItem);
+  await page.locator('button[data-page="library"]').click();
+  await page.locator('[data-action="library-section"][data-section="audio"]').click();
+  await page.locator(`[data-action="audio-play"][data-id="${playingItem.id}"]`).click();
+  await wait(async () => (await playing()).id === playingItem.id && !(await playing()).paused);
+  await page.locator("#audio-toggle").click();
+  const original = await page.locator("#audio-engine").elementHandle();
+  await page.locator("#audio-mini").click();
+  await page.locator("#mini-float").click();
+  await wait(async () => await mainMinimized() && await page.evaluate(() => innerWidth <= 400));
+  await page.locator("#mini-wheel").press("Enter");
+  const wheel = page.locator("#track-wheel");
+  await wheel.waitFor();
+  const clipped = await wheel.locator('.track-wheel-card:not([aria-hidden="true"])').evaluateAll(cards => cards
+    .filter(card => {
+      const bounds = card.getBoundingClientRect();
+      return bounds.top < 0 || bounds.bottom > innerHeight || bounds.left < 0 || bounds.right > innerWidth;
+    }).map(card => card.title));
+  assert.deepEqual(clipped, [], "Visible Quick Skip cards must fit in the floating mini player");
+  const central = wheel.locator('[data-offset="0"]');
+  const selected = await central.getAttribute("data-position");
+  await wheel.press("ArrowUp");
+  assert.equal(Number(await central.getAttribute("data-position")), Number(selected) - 1);
+  await page.screenshot({ path: path.join(output, "floating-mini-wheel.png"), animations: "disabled" });
+  await wheel.getByRole("button", { name: "Cerrar salto rápido", exact: true }).click();
+  await wheel.waitFor({ state: "hidden" });
+  assert.ok(await page.locator("#mini-wheel").evaluate(button => button === document.activeElement));
+  assert.equal((await playing()).id, playingItem.id);
+  await page.locator("#mini-wheel").press("Enter");
+  await wheel.press("ArrowDown");
+  await wheel.press("Enter");
+  await wheel.waitFor({ state: "hidden" });
+  await wait(async () => (await playing()).id !== playingItem.id && !(await playing()).paused);
+  assert.equal(await mainMinimized(), true);
+  assert.ok(await original.evaluate(element => element === document.getElementById("audio-engine")));
+  windowCommand("restore");
+  await wait(async () => !await mainMinimized() && await page.evaluate(() => innerWidth >= 900
+    && !document.documentElement.classList.contains("has-detached-mini")));
+  await stage().waitFor({ state: "hidden" });
+  assert.ok(await original.evaluate(element => element === document.getElementById("audio-engine")));
+  console.log("Floating Quick Skip cards, keyboard selection and desktop restore passed.");
 }
 
 function windowsMediaControl(title, operation = "status") {
@@ -1635,7 +1686,8 @@ async function verifyPlayback(initial) {
 
 try {
   const initial = await launch();
-  if (lyricsOnly) await verifyLocalLyrics();
+  if (miniWheelOnly) await verifyFloatingMiniWheel();
+  else if (lyricsOnly) await verifyLocalLyrics();
   else if (embeddedBookOnly) await verifyEmbeddedBook();
   else await verifyPlayback(initial);
 } catch (error) {

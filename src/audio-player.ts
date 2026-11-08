@@ -828,6 +828,7 @@ export function createAudioPlayer(hooks: Hooks) {
       t, thumbnails: hooks.thumbnails, toggle: toggleWheelPlayback,
       playing: wheelPlaying, enabled: wheelEnabled, entries: wheelEntries,
       cursor: () => cursor,
+      compact: () => detached,
       play: ({ position, id }) => {
         if (tracks[order[position]] === id) activate(position, true, false);
       },
