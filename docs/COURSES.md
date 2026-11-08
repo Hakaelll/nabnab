@@ -45,6 +45,8 @@ En Rocketseat, Coursera y Domestika, la sesión y la descarga se gestionan en el
 
 ![Revisión de adjuntos para una lección existente, a 900 × 620 con IPC simulado](course-lesson-attachments.png)
 
+`tests/native-course-materials.browser.mjs` abre un perfil aislado de Windows y comprueba que el comando de revisión rechaza un archivo local cuando no hay un arrastre nativo que lo autorice. La biblioteca y los cursos quedan vacíos y el perfil temporal se elimina al terminar. Ejecuta `node tests/native-course-materials.browser.mjs` con Vite en el puerto 1420 y el ejecutable de depuración actualizado. El recorrido de arrastre entre ventanas sigue pendiente de comprobar con el Explorador.
+
 ### Adjuntos de Skillshare
 
 Abre el curso en Skillshare con tu sesión. En **Proyectos y recursos → Descargar recursos**, copia el enlace directo de cada archivo que el docente haya habilitado para descargar. En nabnab, abre **Descargar adjuntos de Skillshare**, pega un enlace por línea y pulsa **Revisar enlaces**. Puedes revisar hasta 30 enlaces por operación. Marca los archivos en el curso y pulsa **Añadir a la cola**. Los trabajos guardan los archivos en la carpeta de Descargas configurada y los asocian al curso. [Descargas autorizadas en las condiciones de Skillshare](https://learn.skillshare.com/en/terms)
