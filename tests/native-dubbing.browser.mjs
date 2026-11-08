@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { openTool } from "./tool-navigation.mjs";
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -275,8 +275,20 @@ try {
     alternateTracks: 2, failedMixKeptWav: true, mixedTracks: 1, unchangedOriginal: true, shares: 3, viewports: [1180, 900] }));
 } catch (error) {
   console.error(log);
-  await page?.screenshot({ path: path.join(base, "failure.png"), animations: "disabled" }).catch(() => {});
+  await page?.screenshot({ path: path.join(data, "failure.png"), animations: "disabled" }).catch(() => {});
   throw error;
 } finally {
   await close();
+  for (let launch = 1; launch <= launches; launch++) {
+    const profile = path.join(data, `webview-${launch}`);
+    try {
+      assert.equal(path.relative(profile, await realpath(profile)), "", "Refusing to remove a redirected WebView2 profile.");
+      await rm(profile, { recursive: true, force: true, maxRetries: 8, retryDelay: 150 });
+    } catch (error) {
+      if (error.code !== "ENOENT") {
+        console.error(`Could not clean up the WebView2 test profile at ${profile}:`, error);
+        process.exitCode = 1;
+      }
+    }
+  }
 }
