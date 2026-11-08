@@ -1,5 +1,6 @@
 import { activeStates, escapeHtml as h, type Copy, type Job, type Snapshot } from "./contracts";
 import { action, option, stateLabel } from "./views-common";
+import { publishedTranslationFile, translationOutput } from "./translation-output";
 import { audioBlob, type VoiceSample, type VoiceSettings, type VoiceStatus } from "./voice-ui";
 
 export interface DubSelection { draftId: string; revision: number; settings: VoiceSettings }
@@ -48,7 +49,8 @@ export function createDubbing(hooks: Hooks) {
   }
 
   function completedVoice() {
-    return matchingVoices().find(job => job.state === "completed" && job.outputs.length === 1 && hooks.snapshot().library.some(item => !item.missing && item.path === job.outputs[0]));
+    const { library } = hooks.snapshot();
+    return matchingVoices().find(job => publishedTranslationFile(job, library));
   }
 
   function videoJob() {
@@ -88,6 +90,9 @@ export function createDubbing(hooks: Hooks) {
     const job = matchingVoices()[0];
     const wav = completedVoice();
     const mux = videoJob();
+    const { library } = hooks.snapshot();
+    const audio = publishedTranslationFile(wav, library);
+    const video = publishedTranslationFile(mux, library);
     const issues = timingIssues();
     const disabled = busy || hooks.hasEdits();
     const cue = Math.min(sampleCue, draft.count - 1);
@@ -104,15 +109,15 @@ export function createDubbing(hooks: Hooks) {
         ${action("dub-sample", t("Escuchar muestra", "Play sample"), "play", "secondary")}
       </fieldset>
       ${sampleText ? `<div class="dub-sample"><span>${h(sampleText)}</span><div id="dub-sample-slot"></div></div>` : ""}
-      ${job ? `<div class="dub-result" role="status"><span>${stateLabel(job.state, t)} · WAV</span>${issues.length ? `<p>${t("Acorta los segmentos que no caben en su intervalo.", "Shorten the cues that do not fit their intervals.")}</p>${action("dub-edit-cue", `${t("Editar segmento", "Edit cue")} ${issues[0] + 1}`, "document", "quiet")}<small>${issues.map(index => index + 1).join(", ")}</small>` : job.error ? `<p>${h(job.error.message)}</p>` : ""}</div>` : ""}
+      ${job && job.id !== wav?.id ? `<div class="dub-result" role="status"><span>${stateLabel(job.state, t)} · WAV</span>${issues.length ? `<p>${t("Acorta los segmentos que no caben en su intervalo.", "Shorten the cues that do not fit their intervals.")}</p>${action("dub-edit-cue", `${t("Editar segmento", "Edit cue")} ${issues[0] + 1}`, "document", "quiet")}<small>${issues.map(index => index + 1).join(", ")}</small>` : job.error ? `<p>${h(job.error.message)}</p>` : ""}</div>` : ""}
       <div class="dub-export"><span class="field-note">${h(hooks.snapshot().settings.folder)}</span>${action("choose-folder", t("Cambiar carpeta", "Change folder"), "folder", "quiet", busy ? "disabled" : "")}
-        ${wav ? action("play-job", t("Escuchar WAV sincronizado", "Play synchronized WAV"), "play", "secondary", `data-id="${h(wav.id)}"`)
-          : action("dub-queue-voice", t("Generar WAV sincronizado", "Generate synchronized WAV"), "audio", "primary", `id="dub-queue-voice" ${disabled || pending(job) ? "disabled" : ""}`)}</div>
+        ${audio ? "" : action("dub-queue-voice", t("Generar WAV sincronizado", "Generate synchronized WAV"), "audio", "primary", `id="dub-queue-voice" ${disabled || pending(job) ? "disabled" : ""}`)}</div>
+      ${audio ? translationOutput(audio, t("Voz sincronizada · WAV", "Synchronized voice · WAV"), t, t("Escuchar WAV", "Play WAV")) : ""}
       ${wav ? `<fieldset id="dub-video-controls" class="translation-fields" ${disabled ? "disabled" : ""}><legend>${t("2. Copia de vídeo", "2. Video copy")}</legend>
         <label for="dub-video">${t("Vídeo de Biblioteca", "Library video")}<select id="dub-video">${option("", t("Selecciona el vídeo correspondiente", "Select the matching video"), videoChoice())}${videos().map(item => option(item.id, item.name, videoChoice())).join("")}</select></label>
         <label for="dub-mode">${t("Audio en la copia MKV", "Audio in the MKV copy")}<select id="dub-mode">${option("alternate", t("Pista alternativa", "Alternate track"), mode)}${option("replace", t("Solo voz traducida", "Translated voice only"), mode)}${option("mix", t("Voz + original al 20 %", "Voice + original at 20%"), mode)}</select></label>
         ${action("dub-queue-video", mux?.state === "error" || mux?.state === "cancelled" || mux?.state === "paused" ? t("Reintentar copia", "Retry copy") : t("Crear copia de vídeo", "Create video copy"), "video", "secondary", !videoChoice() || pending(mux) && mux?.state !== "paused" ? "disabled" : "")}
-      </fieldset>${mux ? `<p class="field-note" role="status">${stateLabel(mux.state, t)} · MKV ${mux.error ? `· ${h(mux.error.code === "dubbing_no_original"
+      </fieldset>${video ? translationOutput(video, t("Copia de vídeo · MKV", "Video copy · MKV"), t, t("Reproducir copia", "Play copy")) : mux ? `<p class="field-note" role="status">${stateLabel(mux.state, t)} · MKV ${mux.error ? `· ${h(mux.error.code === "dubbing_no_original"
         ? t("Este vídeo carece de audio original. El WAV sigue disponible.", "This video has no original audio. The WAV remains available.")
         : mux.error.message)}` : ""}</p>` : ""}` : ""}`}
       ${busy ? `<p class="field-note" role="status">${t("Preparando voz local…", "Preparing local voice…")}</p>` : ""}

@@ -6,6 +6,8 @@ Abre **Herramientas → Subtítulos → Traducir subtítulos** o elige **Traduci
 2. Abre el borrador cuando termine la tarea. El original y la traducción se muestran en columnas, con el identificador y el intervalo de cada segmento. Edita el texto y guarda los cambios. La revisión sigue marcada como traducción automática.
 3. Exporta SRT o VTT. Activa **Original y traducción** para incluir las dos versiones en cada segmento. VTT conserva los identificadores de texto. SRT usa identificadores numéricos. Cada exportación es un archivo nuevo vinculado a su entrada en Biblioteca.
 
+Cuando la exportación está lista, **Última exportación** muestra el archivo de la revisión, formato y variante elegidos. Pulsa **Enviar a dispositivo** en esa fila para revisar su nombre y tamaño antes de confirmar con KDE Connect. [Envío a un dispositivo](DEVICE-SHARE.md)
+
 El motor agrupa segmentos cercanos cuando puede recuperar cada traducción en orden. Si un bloque pierde la correspondencia, traduce sus segmentos por separado. Se conservan los tiempos y las etiquetas simples de negrita, cursiva y subrayado cuando las mantiene el motor. La herramienta avisa si un segmento supera 42 caracteres por línea o 20 por segundo. VTT conserva tiempos a milisegundos. Los estilos de posición, regiones y CSS quedan en el archivo original.
 
 ## Componentes
@@ -24,10 +26,10 @@ Cada segmento se reutiliza según su texto, voz, volumen y ritmo. Al editar el b
 
 Con el WAV disponible, puedes escucharlo o crear una copia MKV del vídeo. **Pista alternativa** conserva el audio original y añade la voz. **Solo voz traducida** crea una copia con el WAV como audio. **Voz + original al 20 %** mezcla la voz al 80 % con la primera pista original al 20 %. Si el vídeo original contiene diálogo, seguirá presente en la mezcla. Los subtítulos de texto `mov_text` se convierten a SubRip para la copia MKV. El vídeo se copia sin recodificar.
 
-La copia de vídeo tiene su propio trabajo en Descargas. Si falla, **Reintentar copia** vuelve a ejecutar ese trabajo con el WAV ya publicado. Los originales y el borrador siguen disponibles. [Panel de doblaje en Windows](dubbing-native.png)
+La copia de vídeo tiene su propio trabajo en Descargas. Si falla, **Reintentar copia** vuelve a ejecutar ese trabajo con el WAV ya publicado. Cuando están listos, el WAV y el MKV tienen acciones separadas para reproducir y enviar cada archivo. [Panel de doblaje en Windows](dubbing-native.png)
 
 ## Verificación
 
 El recorrido nativo de Windows instaló las dos direcciones desde Ajustes, con un único runtime y vocabulario. Tradujo un VTT local, conservó cuatro identificadores y sus tiempos, y mantuvo la cursiva. Se guardó una corrección, se reabrió el borrador y se verificaron el VTT bilingüe y el SRT traducido. El original quedó idéntico y los directorios temporales quedaron vacíos. La comparación se comprobó a 1180 y 900 px. [Comparación y aviso de longitud](translation-preview.png)
 
-`tests/native-dubbing.browser.mjs` parte de un borrador sintético y utiliza SAPI y FFmpeg reales. Comprueba la decodificación de la muestra, el aviso y el foco del segmento demasiado largo, la reutilización de una frase al editar otra y los silencios del WAV. Verifica las tres copias MKV con FFprobe, la diferencia entre mezclar y sustituir el audio, el reintento de un trabajo fallido y la integridad del WAV y del vídeo original. El panel se revisó a 1180 y 900 px.
+`tests/native-dubbing.browser.mjs` parte de un borrador sintético y utiliza SAPI y FFmpeg reales. Comprueba la decodificación de la muestra, el aviso y el foco del segmento demasiado largo, la reutilización de una frase al editar otra y los silencios del WAV. Verifica las tres copias MKV con FFprobe, la diferencia entre mezclar y sustituir el audio, el reintento de un trabajo fallido y la integridad del WAV y del vídeo original. El panel se revisó a 1180 y 900 px. Un ejecutable de prueba de KDE Connect registra la ruta de cada VTT, WAV y MKV después de la confirmación explícita desde el panel.

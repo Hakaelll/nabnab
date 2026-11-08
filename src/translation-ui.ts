@@ -1,6 +1,7 @@
 import "./translation.css";
 import { escapeHtml as h, type Copy, type Job, type Snapshot } from "./contracts";
 import { createDubbing } from "./dubbing-ui";
+import { publishedTranslationFile, translationOutput } from "./translation-output";
 import { action, icon, option, stateLabel } from "./views-common";
 
 type Pair = "es-en" | "en-es";
@@ -219,7 +220,13 @@ export function createTranslationTool(hooks: Hooks) {
     </section>`;
   }
 
-  function exportForm() {
+  function exportForm(current: Draft) {
+    const snapshot = hooks.snapshot();
+    const exported = snapshot.jobs.filter(job => job.source.kind === "captionTranslationExport"
+      && job.source.options.draftId === current.id && job.source.options.revision === current.revision
+      && job.source.options.format === format && job.source.options.bilingual === bilingual)
+      .sort((left, right) => right.createdAt - left.createdAt)
+      .map(job => publishedTranslationFile(job, snapshot.library)).find(Boolean);
     return `<form id="translation-export">
       <div class="translation-fields">
         <label for="translation-format">${t("Formato", "Format")}<select id="translation-format">
@@ -234,7 +241,7 @@ export function createTranslationTool(hooks: Hooks) {
         ${action("translation-confirm-remove", t("Retirar borrador", "Remove draft"), undefined, "quiet", busy || edits.size ? "disabled" : "")}
         <button id="translation-export-button" class="button primary" type="submit" ${busy || edits.size ? "disabled" : ""}>${t("Exportar subtítulos", "Export subtitles")}</button>
       </div>
-    </form>`;
+    </form>${exported ? translationOutput(exported, t("Última exportación", "Latest export"), t) : ""}`;
   }
 
   function render() {
@@ -247,7 +254,7 @@ export function createTranslationTool(hooks: Hooks) {
         <select id="translation-draft" ${busy || edits.size ? "disabled" : ""}>${option("", t("Selecciona un borrador", "Select a draft"), draft?.id ?? "")}
         ${drafts.map(job => option(job.id, job.title, draft?.id ?? "")).join("")}</select></label>` : ""}
       ${error ? `<p role="alert" class="asset-error">${h(error)}</p>` : ""}
-      ${draft ? comparison(draft) + exportForm() + dubbing.render() : ""}
+      ${draft ? comparison(draft) + exportForm(draft) + dubbing.render() : ""}
     </section>`;
   }
 

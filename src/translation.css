@@ -20,6 +20,11 @@
 .translation-warning { color: var(--text); }
 .translation-pagination, .translation-confirm { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
 #translation-export > .translation-fields { margin-top: 12px; }
+.translation-output { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding-block: 12px; border-top: 1px solid var(--edge-quiet); }
+.translation-output > div:first-child { flex: 1 1 170px; min-width: 0; overflow-wrap: anywhere; }
+.translation-output p.field-note { margin: 0 0 4px; }
+.translation-output strong { font-size: 13px; font-weight: 600; }
+.translation-output .button-group { flex-wrap: wrap; }
 .dub-section { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 16px; margin-top: 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--secondary); }
 .dub-section :is(p, small) { margin: 4px 0 0; }
 .dub-expanded { display: grid; grid-template-columns: minmax(0, 1fr); }

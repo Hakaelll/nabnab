@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const root = path.resolve(import.meta.dirname, "..");
 const base = path.join(root, "artifacts/dubbing");
@@ -11,6 +12,7 @@ await mkdir(base, { recursive: true });
 const data = await mkdtemp(path.join(base, "native-run-"));
 const output = path.join(data, "output");
 await mkdir(output);
+execFileSync("rustc", ["--edition=2021", path.join(root, "tests/kdeconnect-cli-fixture.rs"), "-o", path.join(data, "kdeconnect-cli.exe")], { windowsHide: true });
 const { chromium } = createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODULE || "playwright");
 const ffmpeg = path.join(root, "src-tauri/engines/ffmpeg.exe");
 const ffprobe = path.join(root, "src-tauri/engines/ffprobe.exe");
@@ -47,7 +49,8 @@ function rpc(command, args = {}) {
 async function launch() {
   const endpoint = `http://127.0.0.1:${port + launches++}`;
   child = spawn(path.join(root, "src-tauri/target/debug/nabnab.exe"), [], { cwd: root, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, NABNAB_TEST_DATA_DIR: data, WEBVIEW2_USER_DATA_FOLDER: path.join(data, `webview-${launches}`),
+    env: { ...process.env, Path: `${data}${path.delimiter}${process.env.Path ?? process.env.PATH ?? ""}`,
+      NABNAB_TEST_DATA_DIR: data, WEBVIEW2_USER_DATA_FOLDER: path.join(data, `webview-${launches}`),
       WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${new URL(endpoint).port} --mute-audio` } });
   for (const stream of [child.stdout, child.stderr]) stream.on("data", chunk => { log = (log + chunk).slice(-5000); });
   browser = await wait(async () => {
@@ -83,6 +86,41 @@ async function jobOf(kind, index, state) {
 }
 
 const probe = file => JSON.parse(execFileSync(ffprobe, ["-v", "error", "-show_streams", "-show_format", "-of", "json", file], { windowsHide: true })).streams;
+async function shares() {
+  const log = await readFile(path.join(data, "cli-arguments.jsonl"), "utf8").catch(error => {
+    if (error.code === "ENOENT") return "";
+    throw error;
+  });
+  return log.split("\n").filter(line => line.trim()).map(line => JSON.parse(line));
+}
+
+async function shareOutput(job) {
+  const outputPath = job.outputs[0];
+  const name = path.basename(outputPath);
+  const trigger = page.getByRole("button", { name: `Enviar a dispositivo · ${name}`, exact: true });
+  const previous = await shares();
+  await trigger.press("Enter");
+  const modal = page.locator(".device-share[open]");
+  await modal.locator('#share-device option[value="paired-device-123"]').waitFor({ state: "attached" });
+  await modal.locator("#share-device").selectOption("paired-device-123");
+  await modal.locator("#share-review").click();
+  await modal.locator("#share-send").waitFor();
+  assert.deepEqual(await modal.locator(".device-share-review li > span").allTextContents(), [name]);
+  assert.deepEqual(await shares(), previous);
+  if (name.endsWith(".mkv")) await modal.screenshot({ path: path.join(data, "dubbing-share.png"), animations: "disabled" });
+  await modal.locator("#share-send").click();
+  await modal.getByText("Entregado a KDE Connect", { exact: true }).waitFor();
+  const submitted = await shares();
+  assert.equal(submitted.length, previous.length + 1);
+  const [device, file] = submitted.at(-1);
+  assert.equal(device, "--device=paired-device-123");
+  assert.ok(file.startsWith("--share=file:"));
+  assert.equal(path.toNamespacedPath(fileURLToPath(file.slice("--share=".length))), path.toNamespacedPath(outputPath));
+  await modal.locator("#share-close").click();
+  await modal.waitFor({ state: "hidden" });
+  assert.equal(await trigger.evaluate(button => button === document.activeElement), true);
+}
+
 function rms(bytes, from, to) {
   let sum = 0;
   const start = Math.round(from * 22050), end = Math.round(to * 22050);
@@ -151,7 +189,7 @@ try {
   assert.ok(rms(pcm, 0.5, 2) > 0.01);
   assert.equal(rms(pcm, 2, 2.99), 0);
   assert.ok(rms(pcm, 3, 5.5) > 0.01);
-  await page.getByRole("button", { name: "Escuchar WAV sincronizado" }).click();
+  await page.getByRole("button", { name: "Escuchar WAV", exact: true }).click();
   await wait(() => page.locator("#audio-engine").evaluate(media => media.currentTime > 0));
   await page.locator("#audio-close").click();
 
@@ -169,6 +207,7 @@ try {
   assert.equal(failed.error.code, "dubbing_no_original");
   assert.equal(failed.source.options.voiceJobId, wav.id);
   assert.deepEqual(failed.outputs, []);
+  assert.equal(await page.locator(".dub-expanded .translation-output").filter({ hasText: "Copia de vídeo" }).count(), 0);
   const bytes = await readFile(wav.outputs[0]);
   assert.equal(hash(bytes), hash(pcm));
   await page.getByRole("button", { name: "Reintentar copia" }).click();
@@ -190,6 +229,11 @@ try {
   const speechGap = execFileSync(ffmpeg, ["-v", "error", "-ss", "2.4", "-i", replaced.outputs[0], "-t", "0.25", "-vn", "-ac", "1", "-ar", "22050", "-f", "s16le", "pipe:1"], { windowsHide: true });
   assert.ok(speechGap.every(value => value === 0));
   assert.equal(hash(await readFile(video)), hash(sourceBytes));
+  await page.locator("#translation-export-button").click();
+  const exported = await jobOf("captionTranslationExport", 0, "completed");
+  await shareOutput(exported);
+  await shareOutput(wav);
+  await shareOutput(replaced);
   assert.deepEqual(errors, []);
 
   for (const [width, height] of [[1180, 780], [900, 620]]) {
@@ -200,10 +244,11 @@ try {
     for (const selector of [".dub-export .field-note", "#translation-export .path"]) {
       await page.locator(selector).evaluate(node => { node.textContent = "C:\\Pruebas\\nabnab\\dubbing\\output"; });
     }
-    await page.screenshot({ path: path.join(base, `dubbing-${width}.png`), animations: "disabled" });
+    await page.screenshot({ path: path.join(data, `dubbing-${width}.png`), animations: "disabled" });
+    if (width === 1180) await section.screenshot({ path: path.join(data, "dubbing-results.png"), animations: "disabled" });
   }
   console.log(JSON.stringify({ draftFixture: true, sapiSample: true, timingIssue: tooLong.error.technical, reusedCues: 1, synchronizedSeconds: 5.5,
-    alternateTracks: 2, failedMixKeptWav: true, mixedTracks: 1, unchangedOriginal: true, viewports: [1180, 900] }));
+    alternateTracks: 2, failedMixKeptWav: true, mixedTracks: 1, unchangedOriginal: true, shares: 3, viewports: [1180, 900] }));
 } catch (error) {
   console.error(log);
   await page?.screenshot({ path: path.join(base, "failure.png"), animations: "disabled" }).catch(() => {});
