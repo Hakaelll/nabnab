@@ -20,6 +20,13 @@ pub(crate) const WEBDAV_INTERRUPTED: &str =
     "The WebDAV transfer was interrupted. A verified partial was kept for retry.";
 pub(crate) const WEBDAV_CHANGED: &str = "The WebDAV file changed. Refresh the folder and select it again.";
 pub(crate) const WEBDAV_INVALID_RANGE: &str = "The WebDAV server returned an incompatible byte range. Retry to start a fresh copy.";
+pub(crate) const MOUNTED_INTERRUPTED: &str =
+    "The mounted transfer was interrupted. A verified partial was kept for retry.";
+pub(crate) const MOUNTED_CHANGED: &str = "The mounted file changed. Refresh the folder and select it again.";
+
+pub(crate) fn interrupted(error: &str) -> bool {
+    error.starts_with(WEBDAV_INTERRUPTED) || error.starts_with(MOUNTED_INTERRUPTED)
+}
 
 const SECRET: &str = "personal-servers";
 const MAX_SERVERS: usize = 12;
@@ -144,13 +151,27 @@ impl Selection {
         format!("personal:{}", fingerprint(self))
     }
 
-    pub(crate) fn webdav_partial(&self, staging: &Path) -> Option<PathBuf> {
-        self.can_resume_webdav()
-            .then(|| staging.join(format!(".personal-webdav-{}.part", fingerprint(self))))
+    pub(crate) fn partial_path(&self, staging: &Path) -> Option<PathBuf> {
+        let kind = if self.can_resume_mounted() {
+            "nas"
+        } else if webdav::resume_size(&self.stamp).is_some() {
+            "webdav"
+        } else {
+            return None;
+        };
+        Some(staging.join(format!(".personal-{kind}-{}.part", fingerprint(self))))
     }
 
-    pub(crate) fn can_resume_webdav(&self) -> bool {
-        webdav::resume_size(&self.stamp).is_some()
+    pub(crate) fn can_resume_mounted(&self) -> bool {
+        nas::resume_size(&self.stamp).is_some()
+    }
+
+    pub(crate) fn paused_progress(&self, staging: &Path, run_id: u64) -> Option<crate::model::Progress> {
+        let total = nas::resume_size(&self.stamp)?;
+        let path = self.partial_path(staging)?;
+        let written = crate::direct::partial_len(&path).ok().flatten()
+            .filter(|length| *length > 0 && *length < total)?;
+        Some(nas::copy_progress(run_id, total, written))
     }
 }
 
@@ -634,11 +655,11 @@ pub async fn execute(
     staging: &Path,
     run_id: u64,
     cancel: watch::Receiver<bool>,
-    emit: impl Fn(crate::model::Progress),
+    emit: impl Fn(crate::model::Progress) + Send + 'static,
 ) -> Result<PathBuf, String> {
     let name = selection.filename()?;
     let root = crate::config_root(state)?;
-    let candidate = selection.webdav_partial(staging);
+    let candidate = selection.partial_path(staging);
     let config = (|| {
         let _guard = state.personal_servers.vault.lock().unwrap();
         Ok::<_, String>(
@@ -657,7 +678,8 @@ pub async fn execute(
         }
     };
     let partial = match &config {
-        Config::Webdav(_) => candidate,
+        Config::Webdav(_) if webdav::resume_size(&selection.stamp).is_some() => candidate,
+        Config::Nas(_) if selection.can_resume_mounted() => candidate,
         _ => None,
     };
     let temporary = partial
@@ -693,6 +715,8 @@ pub async fn execute(
                 &selection.stamp,
                 &temporary,
                 cancel.clone(),
+                run_id,
+                emit,
             )
             .await
         }

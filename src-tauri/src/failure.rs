@@ -54,6 +54,10 @@ impl Failure {
             ("cancelled", "Download cancelled.", false)
         } else if raw.starts_with(crate::personal_servers::WEBDAV_INTERRUPTED) {
             ("webdav_interrupted", "The WebDAV copy stopped. Retry to continue or discard its partial file.", false)
+        } else if raw.starts_with(crate::personal_servers::MOUNTED_INTERRUPTED) {
+            ("mounted_interrupted", "Reconnect the mounted folder in Windows to continue the copy.", false)
+        } else if raw == crate::personal_servers::MOUNTED_CHANGED {
+            ("mounted_changed", "The mounted file changed. Refresh the folder and select the new version.", false)
         } else if raw == crate::personal_servers::WEBDAV_CHANGED {
             ("webdav_changed", "The WebDAV file changed. Refresh the folder and select the new version.", false)
         } else if raw == crate::personal_servers::WEBDAV_INVALID_RANGE {

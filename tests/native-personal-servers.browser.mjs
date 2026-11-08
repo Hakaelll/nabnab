@@ -20,8 +20,8 @@ const secrets = path.join(data, "module-secrets");
 await Promise.all([mkdir(docs, { recursive: true }), mkdir(output), mkdir(secrets)]);
 const file = "Cuaderno ñ.txt";
 const remote = path.join(docs, file);
-const original = "Edición A\n";
-const replacement = "Edición B\n";
+const original = "Edición A\n" + "a".repeat(210_000);
+const replacement = "Edición B\n" + "b".repeat(210_000);
 await writeFile(remote, original);
 
 const location = path.toNamespacedPath(mount);
@@ -360,6 +360,37 @@ try {
   assert.equal(await readFile(first.outputs[0], "utf8"), original);
   assert.equal(await readFile(remote, "utf8"), replacement);
   console.log("Native mounted-folder reconnection rejected the old version and preserved both verified copies.");
+
+  await rename(mount, offline);
+  await selectReference();
+  await button("Obtener copia local").click();
+  const interrupted = await job(3);
+  assert.equal(interrupted.state, "error");
+  const stage = path.join(output, ".nabnab-" + interrupted.id);
+  const { serverId, path: relative, stamp: { size, modified, etag } } = interrupted.source.selection;
+  const fingerprint = createHash("sha256").update(JSON.stringify({ serverId, path: relative, stamp: { size, modified, etag } })).digest("hex");
+  const partial = path.join(stage, `.personal-nas-${fingerprint}.part`);
+  const prefix = Buffer.from(replacement).subarray(0, 65_536);
+  await writeFile(partial, prefix);
+  await page.locator('[data-page="downloads"]').click();
+  const copyRow = page.locator(`.job-row:has([data-action="inspect-job"][data-id="${interrupted.id}"])`);
+  await copyRow.getByRole("button", { name: "Reintentar", exact: true }).click();
+  const stillOffline = await job(3, id, interrupted.runId);
+  assert.equal(stillOffline.error?.code, "mounted_interrupted");
+  assert.equal(stillOffline.progress?.downloaded, prefix.length);
+  assert.deepEqual(await readFile(partial), prefix);
+  await copyRow.getByText(/Reconecta la carpeta.*64 KB guardados/).waitFor();
+  await copyRow.getByText("Interrumpida", { exact: true }).waitFor();
+  assert.equal(await copyRow.getByRole("button", { name: "Descartar parcial", exact: true }).count(), 1);
+  assert.ok(await copyRow.evaluate(row => row.scrollWidth <= row.clientWidth + 1));
+  await copyRow.screenshot({ path: path.join(data, "mounted-resume.png") });
+  await rename(offline, mount);
+  await copyRow.getByRole("button", { name: "Reanudar", exact: true }).click();
+  const resumed = await job(3, id, stillOffline.runId);
+  assert.equal(resumed.state, "completed", JSON.stringify(resumed.error));
+  assert.equal(await readFile(resumed.outputs[0], "utf8"), replacement);
+  await wait(async () => (await readdir(stage).catch(() => [])).every(name => !name.endsWith(".part")));
+  console.log("Native mounted-folder retry retained the owned prefix offline and published the verified file after reconnecting.");
   if (process.env.NABNAB_TEST_OPENSSL) await verifyWebdav(process.env.NABNAB_TEST_OPENSSL);
 } catch (error) {
   console.error(log);

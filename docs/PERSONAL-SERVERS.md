@@ -10,9 +10,11 @@ Abre la conexión, navega por carpetas y marca archivos. **Indexar referencia** 
 
 Desde una referencia, **Revisar en servidor** abre su carpeta y compara los metadatos guardados con los actuales. Si cambia el identificador de versión, el panel lo señala aunque tamaño y fecha coincidan. **Actualizar referencia** guarda los metadatos revisados. **Copiar a mi biblioteca** solicita una copia de la versión seleccionada. Si el archivo desaparece o la carpeta está inaccesible, la referencia sigue disponible para revisarla más tarde.
 
-Las copias verifican los metadatos seleccionados y comprueban el recurso al finalizar. En WebDAV, si se interrumpe una copia con ETag fuerte y tamaño conocido, **Reanudar** solicita los bytes pendientes de esa versión. **Descartar parcial** elimina los bytes guardados. Si el servidor ignora el rango y devuelve el mismo archivo completo, la copia vuelve a empezar. Si el archivo cambió, nabnab descarta el parcial y pide elegir la versión nueva. Los demás reintentos empiezan con una copia nueva. [Rangos HTTP y combinación de fragmentos](https://www.rfc-editor.org/rfc/rfc9110.html#name-combining-parts)
+Las copias verifican los metadatos seleccionados y comprueban el recurso al finalizar. En WebDAV, si se interrumpe una copia con ETag fuerte y tamaño conocido, **Reanudar** solicita los bytes pendientes de esa versión. Si el servidor devuelve el mismo archivo completo, la copia vuelve a empezar. [Rangos HTTP y combinación de fragmentos](https://www.rfc-editor.org/rfc/rfc9110.html#name-combining-parts)
 
-Para copiar desde WebDAV se exige un ETag fuerte o un tamaño y una fecha de modificación comprobables. SFTP v3 comprueba tamaño y fecha de modificación en el archivo abierto y en la ruta. La precisión de esta última depende del servidor. Un archivo con metadatos insuficientes se puede indexar como referencia.
+En una carpeta montada puedes **Pausar** la copia desde Descargas. Si se interrumpe después de guardar datos, vuelve a conectar la carpeta en Windows y pulsa **Reanudar**. La aplicación comprueba el volumen, la identidad del archivo, el tamaño y las marcas de escritura y cambio antes de saltar a los bytes pendientes y al terminar. **Descartar parcial** elimina los datos guardados por el trabajo. Si cambia la versión, nabnab descarta el parcial y pide elegir el archivo de nuevo. [Identidad del archivo en Windows](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-file_id_info) · [Marcas del archivo abierto](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-file_basic_info)
+
+Para copiar desde WebDAV se exige un ETag fuerte o un tamaño y una fecha de modificación comprobables. SFTP v3 comprueba tamaño y fecha de modificación en el archivo abierto y en la ruta e inicia una copia nueva al reintentar. La precisión de la fecha depende del servidor. Un archivo con metadatos insuficientes se puede indexar como referencia.
 
 La exploración consulta una carpeta a la vez y tiene límites de profundidad y tamaño. Las conexiones se limitan a lectura. Desconectar conserva las referencias y copias existentes. El índice de referencias se consulta en la interfaz local.
 
@@ -27,6 +29,10 @@ Para repetir la prueba nativa, inicia Vite en el puerto 1420 y ejecuta `node tes
 La prueba también cortó una copia HTTPS después de 96.000 bytes. Verificó el rango de reanudación, el resultado byte a byte, el reinicio ante una respuesta completa y el descarte de rangos o versiones incompatibles.
 
 ![Copia WebDAV interrumpida y acciones de recuperación en Windows, con datos de prueba](personal-server-resume.png)
+
+La prueba de la copia montada pausa el lector de Windows tras 65.536 bytes. Comprueba que una carpeta desconectada conserva esos bytes, que la copia continúa desde ese punto y que un reemplazo con el mismo tamaño y fecha invalida el parcial. La prueba de escritorio introduce un parcial de tamaño conocido en el trabajo y verifica el aviso, las acciones y el archivo publicado al volver a conectar la carpeta de prueba.
+
+![Copia de una carpeta montada interrumpida con 64 KB guardados, en Descargas](personal-server-mounted-resume.png)
 
 ![Selección de un archivo remoto y destino de una copia, con datos de prueba](personal-server-selection.png)
 

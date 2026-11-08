@@ -954,16 +954,16 @@ fn action_authorized(state: &AppState, ids: &[String], action: &str, client_id:O
                 if job.state.active()
                     || matches!(job.state, JobState::Pending | JobState::Paused)
                     || job.state == JobState::Error && matches!(job.source, Source::PersonalFile { .. })
-                        && job.error.as_ref().is_some_and(|error| error.code == "webdav_interrupted") =>
+                        && job.error.as_ref().is_some_and(|error| matches!(error.code.as_str(), "webdav_interrupted" | "mounted_interrupted")) =>
             {
                 if !job.state.active() {
-                    if let Err(error) = discard_webdav_partial(job) {
+                    if let Err(error) = discard_personal_partial(job) {
                         cleanup_error = Some(error);
                         continue;
                     }
                 }
                 job.state = JobState::Cancelled;
-                if job.error.as_ref().is_some_and(|error| error.code == "webdav_interrupted") {
+                if matches!(job.source, Source::PersonalFile { .. }) {
                     job.error = None;
                     job.progress = None;
                 }
@@ -972,6 +972,11 @@ fn action_authorized(state: &AppState, ids: &[String], action: &str, client_id:O
             "pause" if job.state == JobState::Pending => job.state = JobState::Paused,
             "pause" if job.state.active()&&matches!(job.source,Source::Voice {..})=>{job.state=JobState::Paused;job.progress=None;job.next_retry_at=None;cancellations.push(job.id.clone());},
             "pause" if job.state==JobState::Downloading&&matches!(job.source,Source::Torrent{..}|Source::AdvancedFile{..})=>{job.state=JobState::Paused;job.progress=None;job.next_retry_at=None;cancellations.push(job.id.clone());},
+            "pause" if job.state == JobState::Downloading && matches!(&job.source, Source::PersonalFile { selection } if selection.can_resume_mounted()) => {
+                job.state = JobState::Paused;
+                job.progress = None;
+                cancellations.push(job.id.clone());
+            }
             "retry"
                 if matches!(
                     job.state,
@@ -1040,7 +1045,7 @@ fn phase(
         .iter_mut()
         .find(|j| j.id == id && j.run_id == run_id)
         .ok_or(engine::CANCELLED)?;
-    if job.state == JobState::Cancelled {
+    if matches!(job.state, JobState::Paused | JobState::Cancelled) {
         return Err(engine::CANCELLED.into());
     }
     job.state = value;
@@ -1138,17 +1143,17 @@ fn owned_stage(job: &Job, staging: &Path) -> Result<PathBuf, String> {
     Ok(canonical)
 }
 
-fn discard_webdav_partial(job: &Job) -> Result<(), String> {
+fn discard_personal_partial(job: &Job) -> Result<(), String> {
     let Source::PersonalFile { selection } = &job.source else { return Ok(()); };
-    if job.run_id == 0 || !selection.can_resume_webdav() { return Ok(()); }
+    if job.run_id == 0 { return Ok(()); }
     let (_, stage) = stage_path(job)?;
-    let Some(path) = selection.webdav_partial(&stage) else { return Ok(()); };
+    let Some(path) = selection.partial_path(&stage) else { return Ok(()); };
     match fs::symlink_metadata(&stage) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         _ => { owned_stage(job, &stage)?; }
     }
     if crate::direct::partial_len(&path)?.is_some() {
-        fs::remove_file(path).map_err(|error| format!("Could not discard the WebDAV partial: {error}"))?;
+        fs::remove_file(path).map_err(|error| format!("Could not discard the personal server partial: {error}"))?;
     }
     Ok(())
 }
@@ -1162,8 +1167,8 @@ fn stage(job: &Job) -> Result<PathBuf, String> {
             let journaled = [JOURNAL, "publication.new"]
                 .iter()
                 .any(|name| fs::symlink_metadata(owned.join(name)).is_ok());
-            let webdav_partial = matches!(&job.source, Source::PersonalFile { selection } if
-                selection.webdav_partial(&owned).is_some_and(|path| matches!(crate::direct::partial_len(&path), Ok(Some(_)))));
+            let personal_partial = matches!(&job.source, Source::PersonalFile { selection } if
+                selection.partial_path(&owned).is_some_and(|path| matches!(crate::direct::partial_len(&path), Ok(Some(_)))));
             if matches!(job.source, Source::Stems { .. } | Source::CaptionTranslation { .. } | Source::CaptionTranslationExport { .. } | Source::DubVoice { .. } | Source::DubVideo { .. }) && owner.run_id != job.run_id && !journaled {
                 cleanup(job, &owned)?;
                 fs::create_dir(&staging).map_err(|e| e.to_string())?;
@@ -1171,7 +1176,7 @@ fn stage(job: &Job) -> Result<PathBuf, String> {
             } else if matches!(job.source, Source::Transform { .. } | Source::Voice {..} | Source::Capture {..} | Source::ImageAssets {..} | Source::Sticker {..} | Source::Upscale {..} | Source::Background {..} | Source::FileAnalysis {..} | Source::FileRename {..} | Source::FileUndo {..} | Source::PortableExport {..} | Source::PortableImport {..} | Source::CloudFile {..} | Source::PersonalFile {..} | Source::Attribution {..} | Source::WebArchive {..} | Source::DocumentEdit {..} | Source::Ocr {..} | Source::OcrText {..} | Source::AudioTagsCopy {..})
                 && owner.run_id != job.run_id
                 && !journaled
-                && !webdav_partial
+                && !personal_partial
             {
                 let archived =
                     parent.join(format!(".nabnab-{}-interrupted-{}", job.id, owner.run_id));
@@ -1816,6 +1821,7 @@ async fn execute(app: AppHandle, state: Arc<AppState>, job: Job, cancel: watch::
         Err(error) => (Err(error), None),
     };
     let mut success = false;
+    let mut keep_paused_stage = false;
     {
         let mut guard = state.repository.lock().unwrap();
         if let Some(repo) = guard.as_mut() {
@@ -1837,8 +1843,13 @@ async fn execute(app: AppHandle, state: Arc<AppState>, job: Job, cancel: watch::
                     }
                 }
                 let current = &mut repo.data.jobs[index];
-                if current.state == JobState::Cancelled || !result.as_ref().is_err_and(|error|
-                    error.starts_with(crate::personal_servers::WEBDAV_INTERRUPTED)) {
+                if current.state == JobState::Paused && result.is_err() {
+                    if let (Source::PersonalFile { selection }, Ok(staging)) = (&job.source, &staging) {
+                        current.progress = selection.paused_progress(staging, job.run_id);
+                        keep_paused_stage = current.progress.is_some();
+                    }
+                } else if current.state == JobState::Cancelled || !result.as_ref().is_err_and(|error|
+                    crate::personal_servers::interrupted(error)) {
                     current.progress = None;
                 }
                 current.updated_at = now();
@@ -1871,7 +1882,7 @@ async fn execute(app: AppHandle, state: Arc<AppState>, job: Job, cancel: watch::
                         }
                     }
                     Err(ref e)
-                        if e == engine::CANCELLED || current.state == JobState::Cancelled =>
+                        if e == engine::CANCELLED || matches!(current.state, JobState::Paused | JobState::Cancelled) =>
                     {
                         if current.state!=JobState::Paused {current.state = JobState::Cancelled;}
                         current.error = None;
@@ -1931,7 +1942,7 @@ async fn execute(app: AppHandle, state: Arc<AppState>, job: Job, cancel: watch::
     if let Ok(path) = staging {
         let incomplete_local_output = matches!(job.source, Source::Stems { .. } | Source::CaptionTranslation { .. } | Source::CaptionTranslationExport { .. } | Source::DubVoice { .. } | Source::DubVideo { .. })
             && [JOURNAL, "publication.new"].iter().all(|name| fs::symlink_metadata(path.join(name)).is_err());
-        if success || incomplete_local_output || ((*cancel.borrow() || job.automation.is_some()) && matches!(has_published_output(&job, &path), Ok(false))) {
+        if success || incomplete_local_output || (!keep_paused_stage && (*cancel.borrow() || job.automation.is_some()) && matches!(has_published_output(&job, &path), Ok(false))) {
             let _ = cleanup(&job, &path);
         }
     }

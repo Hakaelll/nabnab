@@ -10,25 +10,45 @@ function profileLabel(job:Job,t:Copy):string{switch(job.source.kind){case 'voice
 function jobErrorLabel(job: Job, t: Copy): string {
   switch (job.error?.code) {
     case "partial_operation": return t("El renombrado quedó parcial. Revisa su historial para continuar o deshacer.", "The rename is partial. Review its history to resume or undo.");
+    case "mounted_interrupted":
     case "webdav_interrupted": {
       const kept = job.progress?.downloaded;
+      if (job.error.code === "mounted_interrupted") {
+        return kept ? t(`Reconecta la carpeta · ${bytesLabel(kept)} guardados`, `Reconnect the folder · ${bytesLabel(kept)} saved`)
+          : t("Reconecta la carpeta en Windows para reanudar la copia.", "Reconnect the folder in Windows to resume the copy.");
+      }
       return kept ? t(`Copia interrumpida · ${bytesLabel(kept)} guardados`, `Copy interrupted · ${bytesLabel(kept)} saved`)
         : t("Copia interrumpida. Puedes reanudarla o descartar el archivo parcial.", "Copy interrupted. Resume it or discard the partial file.");
     }
+    case "mounted_changed":
     case "webdav_changed": return t("El archivo cambió en el servidor. Actualiza la carpeta y elige la nueva versión.", "The file changed on the server. Refresh the folder and select the new version.");
     case "webdav_range": return t("El servidor devolvió un tramo incompatible. Reintenta para copiar desde el principio.", "The server returned an incompatible byte range. Retry to copy from the beginning.");
     default: return job.error?.message ?? "";
   }
 }
-function activityLabel(job:Job,t:Copy):string{return job.source.kind==='live'&&job.state==='downloading'?t('Grabando','Recording'):job.progress?.phase==='seeding'?t('Compartiendo','Seeding'):stateLabel(job.state,t);}
+function interruptedCopy(job: Job): boolean {
+  return job.state === "error" && (job.error?.code === "webdav_interrupted" || job.error?.code === "mounted_interrupted");
+}
+function activityLabel(job:Job,t:Copy):string{
+  if (interruptedCopy(job)) return t("Interrumpida", "Interrupted");
+  if (job.state === "paused" && job.source.kind === "personalFile" && job.progress?.downloaded) {
+    const saved = bytesLabel(job.progress.downloaded);
+    return t(`En pausa · ${saved} guardados`, `Paused · ${saved} saved`);
+  }
+  return job.source.kind==='live'&&job.state==='downloading'?t('Grabando','Recording'):job.progress?.phase==='seeding'?t('Compartiendo','Seeding'):stateLabel(job.state,t);
+}
 function jobActions(job: Job, t: Copy): string {
   const id = `data-id="${h(job.id)}"`;
-  const partial = job.state === "error" && job.error?.code === "webdav_interrupted";
+  const partial = interruptedCopy(job);
+  const mounted = job.source.kind === "personalFile" && (job.source.selection.stamp.size ?? 0) > 0
+    && /^nas-[\da-f]{64}$/i.test(job.source.selection.stamp.etag ?? "");
   const retry = job.state === "paused" || partial ? t("Reanudar", "Resume") : t("Reintentar", "Retry");
   const discard = t("Descartar parcial", "Discard partial");
-  return `${job.source.kind==="captionTranslation"&&job.state==="completed"?action("translation-open-draft",t("Abrir borrador","Open draft"),"document","icon-button",id):""}${job.source.kind==='live'&&job.state==='downloading'&&job.progress?.phase.startsWith('recording:')?action("stop-recording",t("Detener y guardar","Stop and save"),"check","secondary",id):""}${(job.state === "pending"||job.source.kind==='voice'&&activeStates.includes(job.state)||(job.source.kind==='torrent'||job.source.kind==='advancedFile')&&job.state==='downloading') ? action("pause-job", t("Pausar", "Pause"), "pause", "icon-button", id + ` title="${t("Pausar trabajo", "Pause job")}"`) : ""}
-    ${cancellableStates.includes(job.state) ? action("cancel-job", t("Cancelar", "Cancel"), "close", "icon-button", id + ` title="${t("Cancelar", "Cancel")}"`) : ["error", "cancelled", "paused"].includes(job.state) ? action("retry-job", retry, "retry", "icon-button", id + ` title="${retry}"`) : ""}
-    ${partial ? action("cancel-job", discard, "close", "icon-button", id + ` title="${discard}"`) : ""}`;
+  const hasPartial = partial || mounted && job.state === "paused" && Boolean(job.progress?.downloaded);
+  const cancel = hasPartial ? discard : t("Cancelar", "Cancel");
+  return `${job.source.kind==="captionTranslation"&&job.state==="completed"?action("translation-open-draft",t("Abrir borrador","Open draft"),"document","icon-button",id):""}${job.source.kind==='live'&&job.state==='downloading'&&job.progress?.phase.startsWith('recording:')?action("stop-recording",t("Detener y guardar","Stop and save"),"check","secondary",id):""}${(job.state === "pending"||job.source.kind==='voice'&&activeStates.includes(job.state)||(job.source.kind==='torrent'||job.source.kind==='advancedFile'||mounted)&&job.state==='downloading') ? action("pause-job", t("Pausar", "Pause"), "pause", "icon-button", id + ` title="${t("Pausar trabajo", "Pause job")}"`) : ""}
+    ${["error", "cancelled", "paused"].includes(job.state) ? action("retry-job", retry, "retry", "icon-button", id + ` title="${retry}"`) : ""}
+    ${cancellableStates.includes(job.state) || hasPartial ? action("cancel-job", cancel, "close", "icon-button", id + ` title="${cancel}"`) : ""}`;
 }
 export function filteredJobs(snapshot: Snapshot, view: DownloadView): Job[] {
   const query = view.query.toLocaleLowerCase();
@@ -77,7 +97,7 @@ export function downloadsView(snapshot: Snapshot, view: DownloadView, t: Copy): 
       const transferring = job.state === "downloading";
       const percent = transferring ? job.progress?.percent ?? null : null;
       const selected = view.detailId === job.id;
-      const size = job.state === "completed" || job.error?.code === "webdav_interrupted" ? null : job.progress?.total;
+      const size = job.state === "completed" || interruptedCopy(job) ? null : job.progress?.total;
       const metric = transferring && job.progress?.speed ? bytesLabel(job.progress.speed) + "/s"
         : size ? bytesLabel(size)
         : job.state !== "completed" ? ""
@@ -89,10 +109,12 @@ export function downloadsView(snapshot: Snapshot, view: DownloadView, t: Copy): 
       const members=job.groupId?snapshot.jobs.filter(item=>item.groupId===job.groupId):[];
       const finished=members.filter(item=>item.state==='completed').length;const errors=members.filter(item=>item.state==='error'||item.state==='cancelled').length;
       const source=snapshot.sources?.find(source=>source.id===job.sourceId);
+      const origin = sourceLabel(job,t);
+      const originLabel = job.source.kind === "personalFile" ? origin : `${job.provider} · ${origin}`;
       const heading=job.groupId&&(startsSection||ordered[index-1].groupId!==job.groupId)?`<li class="job-group-summary">${h(source?.name??t('Lote de operaciones','Operations batch'))} · ${finished}/${members.length} ${t('salidas terminadas','outputs complete')}${finished&&errors?` · ${t('Éxito parcial. Puedes reintentar las salidas fallidas.','Partial success. Failed outputs can be retried.')}`:errors?` · ${errors} ${t('con incidencias','with issues')}`:''}</li>`:'';
       return `${sectionHeading}${heading}<li class="job-row ${selected ? "is-selected" : ""} ${transferring ? "is-transferring" : ""}" data-state="${job.state}"><input type="checkbox" data-select-job="${h(job.id)}" aria-label="${h(t("Seleccionar ", "Select ") + job.title)}" ${view.selected.has(job.id) ? "checked" : ""}>
         <div class="row-thumbnail"${!job.thumbnail && preview ? ` data-thumbnail-id="${h(preview)}"` : ""}>${job.thumbnail ? `<img src="${h(job.thumbnail)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : icon(job.source.kind === "transform" ? "tools" : job.source.kind === "cloudFile" || job.source.kind === "personalFile" || job.source.kind === "publicFile" || job.source.kind === "attribution" ? "document" : "video")}</div>
-        <button class="row-content" data-action="inspect-job" data-id="${h(job.id)}" aria-pressed="${selected}"><strong>${h(job.title)}</strong><span>${h(job.provider)} · ${h(sourceLabel(job,t))}${job.priority&&job.priority!=='normal'?` · ${priorityLabel(job.priority,t)}`:''}${job.schedule&&job.schedule.kind!=='immediate'?` · ${h(scheduleLabel(job.schedule,t))}`:''}${job.options?.values.subtitleMode==='only'?` · ${t('Solo subtítulos','Subtitles only')}`:''}</span>${job.error?`<small class="row-error">${h(jobErrorLabel(job,t))}</small>`:""}</button>
+        <button class="row-content" data-action="inspect-job" data-id="${h(job.id)}" aria-pressed="${selected}"><strong>${h(job.title)}</strong><span>${h(originLabel)}${job.priority&&job.priority!=='normal'?` · ${priorityLabel(job.priority,t)}`:''}${job.schedule&&job.schedule.kind!=='immediate'?` · ${h(scheduleLabel(job.schedule,t))}`:''}${job.options?.values.subtitleMode==='only'?` · ${t('Solo subtítulos','Subtitles only')}`:''}</span>${job.error?`<small class="row-error">${h(jobErrorLabel(job,t))}</small>`:""}</button>
         <div class="job-state"><span class="state-label state-${job.state}">${job.state === "completed" ? icon("check") : job.state === "error" ? icon("error") : ""}${activityLabel(job,t)}</span></div>
         <div class="job-metrics">${job.source.kind==='live'&&job.progress?.phase.startsWith('recording:')?`<strong>${durationLabel(Number(job.progress.phase.slice(10)))}</strong><small>${bytesLabel(job.progress.downloaded??0)}</small>`:""}${percent !== null ? `<strong>${percent.toFixed(1)}%</strong>` : ""}<small>${metric}</small></div><div class="row-actions">${job.state==="completed"&&job.outputs.some(file=>playablePaths.has(file))?action("play-job",t("Reproducir","Play"),"play","icon-button",`data-id="${h(job.id)}" title="${t("Reproducir","Play")}"`):""}${jobActions(job,t)}</div>
         ${transferring ? `<div class="progress-rail ${percent === null ? "indeterminate" : ""}" role="progressbar" aria-label="${h(job.title)}" aria-valuemin="0" aria-valuemax="100" ${percent !== null ? `aria-valuenow="${percent.toFixed(1)}"` : ""}><span style="width:${percent ?? 35}%"></span></div>` : ""}</li>`;
