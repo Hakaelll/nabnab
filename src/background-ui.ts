@@ -31,6 +31,8 @@ export function createBackgroundTool(hooks: Hooks) {
   let libraryId = "", query = "", picking = false;
   let edge = 0, softness = 1, format: Format = "png", transparent = true, color = "#f2f2f3";
   let surface: Surface = "grid";
+  let zoomed = false;
+  let pan = { x: 0.5, y: 0.5 };
   let preview: (Omit<Preview, "result" | "mask"> & { result: string; mask: string }) | null = null;
   let busy = false, requestId = 0, error = "";
   const images = () => hooks.snapshot().library.filter(item => item.kind === "image" && !item.missing && /\.(png|jpe?g|webp)$/i.test(item.name));
@@ -97,16 +99,41 @@ export function createBackgroundTool(hooks: Hooks) {
 
   function comparison() {
     if (!preview) return `<p class="background-empty">${t("Genera una muestra para revisar el recorte y su máscara.", "Generate a preview to review the cutout and its mask.")}</p>`;
-    return `<div class="background-pair">
-      <figure><figcaption>${t("Resultado", "Result")}</figcaption><div class="asset-preview-image" data-surface="${surface}">
+    const { width, height } = preview.dimensions;
+    const viewport = (label: string) => zoomed ? `role="region" tabindex="0" aria-label="${label}" aria-describedby="background-pan-note"` : "";
+    return `<div class="background-pair" data-zoomed="${zoomed}" style="--background-ratio:${width} / ${height}">
+      <figure><figcaption>${t("Resultado", "Result")}</figcaption><div class="asset-preview-image" id="background-result" data-surface="${surface}" ${viewport(t("Resultado ampliado", "Zoomed result"))}>
         <img src="${preview.result}" alt="${t("Sujeto con el fondo de salida elegido", "Subject with the selected output background")}"></div></figure>
-      <figure><figcaption>${t("Máscara", "Mask")}</figcaption><div class="asset-preview-image">
+      <figure><figcaption>${t("Máscara", "Mask")}</figcaption><div class="asset-preview-image" id="background-mask" ${viewport(t("Máscara ampliada", "Zoomed mask"))}>
         <img src="${preview.mask}" alt="${t("Máscara de opacidad: blanco conserva, negro recorta", "Opacity mask: white keeps, black removes")}"></div></figure>
     </div>
-    <div class="background-review-controls"><span class="field-note">${preview.dimensions.width} × ${preview.dimensions.height} px</span>
+    <div class="background-review-controls"><span class="field-note">${width} × ${height} px</span>
       ${transparent ? `<label for="background-surface">${t("Inspeccionar sobre", "Inspect on")}<select id="background-surface">
         ${option("grid", t("Cuadrícula", "Checkerboard"), surface)}${option("light", t("Claro", "Light"), surface)}${option("dark", t("Oscuro", "Dark"), surface)}
-      </select></label>` : ""}</div>`;
+      </select></label>` : ""}</div>
+    ${zoomed ? `<p class="field-note" id="background-pan-note">${t("Desplaza cualquiera de las dos vistas con las barras o las flechas. La otra sigue el mismo punto.", "Scroll either view with its scrollbars or the arrow keys. The other follows the same point.")}</p>` : ""}`;
+  }
+
+  function bind() {
+    if (!zoomed) return;
+    const result = document.getElementById("background-result");
+    const mask = document.getElementById("background-mask");
+    if (!result || !mask) return;
+
+    const extent = (frame: HTMLElement) => ({ x: frame.scrollWidth - frame.clientWidth, y: frame.scrollHeight - frame.clientHeight });
+    function place(frame: HTMLElement) {
+      const { x, y } = extent(frame);
+      frame.scrollTo({ left: Math.round(pan.x * x), top: Math.round(pan.y * y), behavior: "instant" });
+    }
+    for (const [frame, peer] of [[result, mask], [mask, result]]) {
+      place(frame);
+      frame.addEventListener("scroll", () => {
+        const { x, y } = extent(frame);
+        if (frame.scrollLeft === Math.round(pan.x * x) && frame.scrollTop === Math.round(pan.y * y)) return;
+        pan = { x: x ? frame.scrollLeft / x : pan.x, y: y ? frame.scrollTop / y : pan.y };
+        place(peer);
+      });
+    }
   }
 
   function render() {
@@ -121,7 +148,8 @@ export function createBackgroundTool(hooks: Hooks) {
         <section class="asset-review background-review" aria-labelledby="background-preview-title">
           <div class="section-heading"><h3 id="background-preview-title">${t("Muestra", "Preview")}</h3><div class="button-group">
             ${action("background-preview", t("Generar muestra", "Generate preview"), "image", "secondary", !ready() || !selected() || busy ? "disabled" : "")}
-            ${requestId ? action("background-cancel", t("Cancelar muestra", "Cancel preview"), "close", "quiet") : ""}</div></div>
+            ${requestId ? action("background-cancel", t("Cancelar muestra", "Cancel preview"), "close", "quiet") : ""}
+            ${preview ? action("background-zoom", t("Ampliar muestra 2×", "Zoom preview 2×"), "search", "quiet", `aria-pressed="${zoomed}"`) : ""}</div></div>
           ${comparison()}
           ${busy ? `<p role="status" class="field-note">${requestId ? t("Separando el sujeto en este equipo…", "Isolating the subject on this device…") : t("Añadiendo a la cola…", "Adding to the queue…")}</p>` : ""}
           ${error ? `<p role="alert" class="asset-error">${h(error)}</p>` : ""}
@@ -150,6 +178,9 @@ export function createBackgroundTool(hooks: Hooks) {
       case "background-cancel":
         if (requestId) await hooks.command("cancel_file_source_inspection", { requestId });
         return true;
+      case "background-zoom":
+        if (preview) { zoomed = !zoomed; hooks.render(); }
+        return true;
       default: return false;
     }
   }
@@ -158,7 +189,10 @@ export function createBackgroundTool(hooks: Hooks) {
     if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) return false;
     if (target.id === "background-query") { query = target.value; hooks.render(); return true; }
     if (target.id === "background-surface") { surface = target.value as Surface; hooks.render(); return true; }
-    if (target.name === "background-input") { libraryId = target.value; picking = false; }
+    if (target.name === "background-input") {
+      if (libraryId !== target.value) { zoomed = false; pan = { x: 0.5, y: 0.5 }; }
+      libraryId = target.value; picking = false;
+    }
     else switch (target.id) {
       case "background-edge": edge = Number(target.value); break;
       case "background-softness": softness = Number(target.value); break;
@@ -185,5 +219,5 @@ export function createBackgroundTool(hooks: Hooks) {
     return true;
   }
 
-  return { render, load, click, input, submit };
+  return { render, bind, load, click, input, submit };
 }

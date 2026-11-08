@@ -483,6 +483,7 @@ function renderCurrent(): void {
     if(page==='settings'&&preferences.section==='automation')required('.settings-content').insertAdjacentHTML('beforeend',automation.render());
     if(page==='settings'&&preferences.section==='connections')required('.settings-content').insertAdjacentHTML('beforeend',fileSources.renderConnections()+personalServers.renderConnections());
     renderInspector();libraryFeatures.bind();if(page==='platforms'&&platformModule==='catalog')platforms.bind();updateActivity();observeThumbnails();screenCapture.bind();voice.bind();if(showingDubbing)translationTool.bind();
+    if(page==='tools'&&localToolModule==='background'&&!showToolCatalog)backgroundTool.bind();
   });
   audioLibrary.bindLyrics(page === "library" && librarySection === "audio");
 }
