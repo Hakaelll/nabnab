@@ -294,6 +294,16 @@ pub async fn audio_tags_read(
     })
 }
 
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct PlaylistMatchHints {
+    id: Option<String>,
+    artist: Option<String>,
+    duration: Option<f64>,
+    version: Option<String>,
+    path: Option<String>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(
     tag = "kind",
@@ -302,8 +312,18 @@ pub async fn audio_tags_read(
 )]
 pub enum PlaylistEntry {
     Local { id: String, title: String },
-    Remote { url: String, title: String },
-    Missing { locator: String, title: String },
+    Remote {
+        url: String,
+        title: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        hints: Option<PlaylistMatchHints>,
+    },
+    Missing {
+        locator: String,
+        title: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        hints: Option<PlaylistMatchHints>,
+    },
 }
 
 impl PlaylistEntry {
@@ -317,16 +337,24 @@ impl PlaylistEntry {
                         .bytes()
                         .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-'),
             ),
-            Self::Remote { url, title } => (
+            Self::Remote { url, title, .. } => (
                 title,
                 url.len() <= 2048 && crate::model::validate_url(url).is_ok(),
             ),
-            Self::Missing { locator, title } => {
+            Self::Missing { locator, title, .. } => {
                 (title, !locator.is_empty() && valid_label(locator, 2048))
             }
         };
         if !valid || title.trim().is_empty() || !valid_label(title, 256) {
             return Err("The playlist contains an invalid entry.".into());
+        }
+        if let Self::Remote { hints: Some(hints), .. } | Self::Missing { hints: Some(hints), .. } = self {
+            if [&hints.id, &hints.artist, &hints.version].into_iter().flatten().any(|value| !valid_label(value, 256))
+                || hints.duration.is_some_and(|value| !value.is_finite() || !(0.0..=604800.0).contains(&value))
+                || hints.path.as_deref().is_some_and(|value| !valid_label(value, 2048) || !Path::new(value).is_absolute())
+            {
+                return Err("The playlist contains invalid recording metadata.".into());
+            }
         }
         Ok(())
     }

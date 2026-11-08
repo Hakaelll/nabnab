@@ -24,6 +24,8 @@ Desde la pista actual, **Elegir portada** permite asociar un JPEG, PNG o WebP lo
 
 En **Listas → Importar lista** puedes abrir M3U, M3U8, PLS o CSV en UTF-8. En CSV, confirma las columnas y la unidad de duración. nabnab reconoce identificadores y rutas de archivos que ya están en Biblioteca. Abre las sugerencias de una entrada para comparar la duración y la ruta completa de las grabaciones. El indicador de versión compara el texto con el nombre del archivo o del álbum. La referencia remota o ausente queda seleccionada al empezar. Puedes elegir una grabación local y preparar la lista conservando su orden.
 
+Cuando incorpores más música, abre la lista guardada y pulsa **Revisar referencias**. Verás las entradas remotas o ausentes en su posición original, con las grabaciones disponibles en Biblioteca. Las nuevas importaciones conservan los datos de identificación, artista, duración y versión cuando el archivo los incluye. Las listas antiguas pueden buscar por título o por el identificador o la ruta que ya tengan guardados. Elige una grabación, pulsa **Preparar cambios** y después **Guardar lista**. Puedes cerrar la revisión para conservar las referencias originales.
+
 La prueba de interfaz reproduce un WAV silencioso en Edge con almacenamiento de escritorio simulado. Comprueba el orden por disco y pista, la estantería con teclado, la continuidad del reproductor, el descanso de audiolibros, las letras y la edición de listas y etiquetas. La prueba nativa usa audio sintético y verifica que, después de reiniciar nabnab, **Continuar** abre el capítulo siguiente de un libro cuyo capítulo anterior terminó. La integración con Windows se comprueba mediante solicitudes del sistema a la sesión multimedia de prueba.
 
 Con `NABNAB_PLAYBACK_LYRICS=1`, `tests/native-playback.browser.mjs` abre dos LRC locales. Comprueba el desplazamiento de tiempo declarado en el archivo, las líneas simultáneas y el cambio de letra al pasar de pista. La revisión visual se hizo a 900 y 1180 px.
@@ -35,6 +37,8 @@ Con `NABNAB_PLAYBACK_EMBEDDED_BOOK=1`, `tests/native-playback.browser.mjs` impor
 ![Estantería de audiolibros y continuación en el capítulo siguiente con datos de prueba](audio-bookshelf.png)
 
 ![Revisión de una lista importada y elección de una grabación local](audio-playlist-matching.png)
+
+![Revisión de las referencias pendientes de una lista guardada](audio-playlist-rematch.png)
 
 ![Previsualización de etiquetas y creación explícita de copias](audio-tags-preview.png)
 

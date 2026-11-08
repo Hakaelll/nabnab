@@ -64,6 +64,13 @@ const setup = `
     if(cmd==="library_playback"){const details=state.library.find(item=>item.id===args.id).details;details.playbackPosition=args.position;details.lastPlayedAt=Date.now();return;}
     if(cmd==="audio_tags_edit"){for(const item of state.library.filter(item=>args.ids.includes(item.id)))Object.assign(item.details.audio,args.patch);return;}
     if(cmd==="audio_playlist_save"){const list={id:args.id??"fixture-playlist-"+state.audioPlaylists.length,name:args.name,entries:args.entries};state.audioPlaylists=state.audioPlaylists.filter(entry=>entry.id!==list.id).concat(list);return copy(state.audioPlaylists);}
+    if(cmd==="audio_playlist_rematch"){
+      const list=state.audioPlaylists.find(item=>item.id===args.listId);
+      return {kind:"list",listId:list.id,name:list.name,rows:list.entries.map(entry=>({
+        entry,artist:entry.kind==="missing"?"Sonia":null,duration:entry.kind==="missing"?12:null,version:null,
+        candidates:entry.kind==="missing"?[{id:"first",title:"Primera pista",artist:"Sonia",album:"Álbum de prueba",duration:12,versionMatches:false}]:[],
+      }))};
+    }
     if(cmd==="audio_playlist_choose")return {kind:"csv",id:"fixture-csv",name:"Lista exportada",columns:["Track name","Artist","Duration (ms)","Version"],sample:[["Versión buscada","Sonia","10000","En directo"]],count:3};
     if(cmd==="audio_playlist_map")return {kind:"list",name:"Lista exportada",rows:[
       {entry:{kind:"remote",url:"https://example.org/audio",title:"Versión buscada"},artist:"Sonia",duration:10,version:"En directo",candidates:[
@@ -324,6 +331,47 @@ try {
   assert.equal(mapping.duration,2);
   assert.equal(mapping.milliseconds,true);
 
+  const reviewReferences = page.getByRole("button", { name: "Revisar referencias" });
+  const closeReview = page.getByRole("button", { name: "Cerrar revisión" });
+  const prepareChanges = page.getByRole("button", { name: "Preparar cambios" });
+  const missingRecording = page.locator("#audio-import-match-1");
+  const readSavedPlaylist = () => page.evaluate(() => window.audioFixture.state.audioPlaylists.find(list=>list.name==="Lista exportada"));
+  await page.setViewportSize({width:900,height:620});
+  await reviewReferences.scrollIntoViewIfNeeded();
+  await page.screenshot({path:`${directory}/saved-references-before-900.png`});
+  await reviewReferences.press("Enter");
+  await missingRecording.waitFor();
+  assert.equal(await page.locator("#audio-import-heading").evaluate(heading => heading === document.activeElement), true);
+  assert.deepEqual(await page.locator(".audio-import-rows li[value]").evaluateAll(rows => rows.map(row => row.value)), [2,3]);
+  await page.getByText("Sin coincidencias locales", {exact:true}).waitFor();
+  assert.equal(await prepareChanges.isDisabled(), true);
+  await missingRecording.locator("summary").press("Enter");
+  assert.equal(await missingRecording.getByRole("radio", {name:"Conservar referencia original"}).isChecked(), true);
+  const replacement = missingRecording.getByRole("radio", {name:/Primera pista/});
+  await replacement.press("Space");
+  assert.deepEqual(await readSavedPlaylist(), imported);
+  for (const [width,height] of [[1180,780],[900,620]]) {
+    await page.setViewportSize({width,height});
+    await missingRecording.scrollIntoViewIfNeeded();
+    await prepareChanges.evaluate(button => button.scrollIntoView({block:"center"}));
+    assert.ok(await missingRecording.evaluate(panel => panel.scrollWidth <= panel.clientWidth + 1));
+    assert.ok(await prepareChanges.evaluate(button => button.getBoundingClientRect().bottom <= document.querySelector("#audio-player").getBoundingClientRect().top));
+    await page.screenshot({path:`${directory}/saved-references-review-${width}.png`});
+  }
+  await closeReview.press("Enter");
+  assert.equal(await reviewReferences.evaluate(button => button === document.activeElement), true);
+  assert.deepEqual(await readSavedPlaylist(), imported);
+  await reviewReferences.press("Enter");
+  await missingRecording.locator("summary").press("Enter");
+  await replacement.press("Space");
+  await prepareChanges.press("Enter");
+  assert.deepEqual(await readSavedPlaylist(), imported);
+  await page.getByRole("button", {name:"Guardar lista",exact:true}).press("Enter");
+  await page.waitForFunction(id => window.audioFixture.state.audioPlaylists.find(list=>list.id===id).entries[1].id==="first", imported.id);
+  const rematched = await readSavedPlaylist();
+  assert.equal(rematched.id, imported.id);
+  assert.deepEqual(rematched.entries, [imported.entries[0], {kind:"local",id:"first",title:"Primera pista"}, imported.entries[2]]);
+
   await category("podcasts").click();
   assert.deepEqual(await page.locator(".audio-track strong").allTextContents(), ["Episodio"]);
   await category("books").click();
@@ -378,5 +426,5 @@ try {
   assert.deepEqual(await chapterIndex.locator("strong").allTextContents(), ["Parte 31", "Parte 32", "Parte 33"]);
   assert.equal(await chapterIndex.getByRole("heading").evaluate(node => node === document.activeElement), true);
   assert.deepEqual(errors, []);
-  console.log("Audio shelves, independent tab state, timed lyrics, persistent playback, playlist review, and audiobook controls passed.");
+  console.log("Audio shelves, playback, playlist import and saved reference review, and audiobook controls passed.");
 } finally { await browser.close(); }

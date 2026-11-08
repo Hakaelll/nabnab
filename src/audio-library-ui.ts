@@ -19,7 +19,7 @@ type Lyrics =
   | { id: string; kind: "ready"; cues: Lyric[]; scrollTop: number };
 export type ImportPreview =
   | { kind: "csv"; id: string; name: string; columns: string[]; sample: string[][]; count: number }
-  | { kind: "list"; name: string; rows: ImportedRow[] };
+  | { kind: "list"; name: string; rows: ImportedRow[]; listId?: string };
 const categories: Category[] = ["music", "podcasts", "books", "playlists"];
 const categoryIcons: Record<Category, Icon> = { music: "audio", podcasts: "wave", books: "library", playlists: "list" };
 const tagFields: TagField[] = ["title", "artist", "albumArtist", "album", "genre", "disc", "track"];
@@ -120,6 +120,10 @@ export function createAudioLibrary(hooks: Hooks) {
 
   const items = () => hooks.snapshot().library.filter(item => item.kind === "audio");
   const itemFor = (id: string) => hooks.snapshot().library.find(item => item.id === id && item.kind === "audio");
+  const isLocalAvailable = (entry: AudioPlaylistEntry) => {
+    const item = entry.kind === "local" ? itemFor(entry.id) : undefined;
+    return item !== undefined && !item.missing;
+  };
   const lists = () => hooks.snapshot().audioPlaylists ?? [];
   const active = () => lists().find(list => list.id === activeList);
   const tagName = (field: TagField) => ({
@@ -359,11 +363,13 @@ export function createAudioLibrary(hooks: Hooks) {
     const list = active();
     const entries = editing?.entries ?? list?.entries ?? [];
     const name = editing?.name ?? list?.name ?? "";
+    const unresolved = list?.entries.some(entry => !isLocalAvailable(entry));
     return `<div class="audio-playlists"><div class="audio-filters"><label>${t("Lista guardada", "Saved playlist")}<select id="audio-active-list" ${disabled()}>${option("", t("Elige lista", "Choose playlist"), activeList)}${lists().map(item => option(item.id, item.name, activeList)).join("")}</select></label>
       ${action("audio-create-list", t("Nueva lista", "New playlist"), "add", "secondary", disabled())}
       ${action("audio-import-list", t("Importar lista", "Import playlist"), "file", "secondary", disabled())}
       ${list && !editing ? action("audio-edit-list", t("Editar lista", "Edit playlist"), "settings", "quiet", disabled()) : ""}</div>
-      ${editing ? `<form id="audio-playlist-form" class="audio-editor"><label>${t("Nombre de la lista", "Playlist name")}<input id="audio-playlist-name" value="${h(name)}" required maxlength="100" ${disabled()}></label></form>` : list ? `<h2>${h(list.name)}</h2>` : ""}
+      ${editing ? `<form id="audio-playlist-form" class="audio-editor"><label>${t("Nombre de la lista", "Playlist name")}<input id="audio-playlist-name" value="${h(name)}" required maxlength="100" ${disabled()}></label></form>` : list ? `<div class="audio-playlist-heading"><h2>${h(list.name)}</h2>
+        ${unresolved ? action("audio-rematch-list", t("Revisar referencias", "Review references"), "search", "quiet", disabled()) : ""}</div>` : ""}
       ${entries.length ? `<ol class="audio-rows audio-list-entries">${entries.map((entry, index) => {
         const item = entry.kind === "local" ? itemFor(entry.id) : undefined;
         const playable = item && !item.missing;
@@ -379,9 +385,11 @@ export function createAudioLibrary(hooks: Hooks) {
   }
 
   function importView(preview: ImportPreview) {
+    const rematching = preview.kind === "list" && preview.listId !== undefined;
     const instruction = preview.kind === "csv" ? t("Confirma qué contiene cada columna.", "Confirm what each column contains.")
-      : t("Compara las grabaciones locales.", "Compare local recordings.");
-    const header = `<div class="page-heading"><div><h2>${h(preview.name)}</h2><p>${instruction}</p></div>${action("audio-cancel-import", t("Cerrar importación", "Close import"), "close", "quiet", disabled())}</div>`;
+      : rematching ? t("Elige una grabación para sustituir una referencia en esta lista.", "Choose a recording to replace a reference in this playlist.")
+        : t("Compara las grabaciones locales.", "Compare local recordings.");
+    const header = `<div class="page-heading"><div><h2 id="audio-import-heading" tabindex="-1">${h(preview.name)}</h2><p>${instruction}</p></div>${action("audio-cancel-import", rematching ? t("Cerrar revisión", "Close review") : t("Cerrar importación", "Close import"), "close", "quiet", disabled())}</div>`;
     if (preview.kind === "csv") {
       const labels: Record<Column, string> = {
         locator: t("Ruta o URL", "Path or URL"), id: t("Identificador", "Identifier"), title: tagName("title"),
@@ -395,18 +403,23 @@ export function createAudioLibrary(hooks: Hooks) {
         <button class="button primary" type="submit" ${busy || mapping.id === undefined && mapping.title === undefined && mapping.locator === undefined ? "disabled" : ""}>${t("Buscar coincidencias locales", "Find local matches")}</button></form></section>`;
     }
     const start = importPage * 40;
-    const unresolved = preview.rows.filter((row, index) => row.entry.kind !== "local" && !resolutions.has(index)).length;
-    const filePaths = new Map(hooks.snapshot().library.map(item => [item.id, item.path]));
-    return `<section class="audio-editor audio-import-editor">${header}<p class="field-note">${preview.rows.length} ${t("entradas", "entries")} · ${unresolved} ${t("referencias remotas o ausentes", "remote or missing references")}</p>
-      <ol class="audio-rows audio-import-rows" start="${start + 1}">${preview.rows.slice(start, start + 40).map((row, offset) => {
-        const index = start + offset;
+    const filePaths = new Map(hooks.snapshot().library.filter(item => item.kind === "audio" && !item.missing).map(item => [item.id, item.path]));
+    const reviewRows = preview.rows.map((row, index) => ({row, index, local: row.entry.kind === "local" && filePaths.has(row.entry.id)}))
+      .filter(({local}) => !rematching || !local);
+    const unresolved = reviewRows.filter(({index, local}) => !local && !resolutions.has(index)).length;
+    const count = preview.rows.length === 1 ? t("1 entrada", "1 entry") : t(`${preview.rows.length} entradas`, `${preview.rows.length} entries`);
+    const pending = unresolved === 1 ? t("1 referencia remota o ausente", "1 remote or missing reference")
+      : t(`${unresolved} referencias remotas o ausentes`, `${unresolved} remote or missing references`);
+    return `<section class="audio-editor audio-import-editor">${header}<p class="field-note" role="status">${count} · ${pending}</p>
+      ${reviewRows.length ? "" : `<p class="field-note">${t("Todas las grabaciones de esta lista están disponibles.", "All recordings in this playlist are available.")}</p>`}
+      <ol class="audio-rows audio-import-rows" start="${start + 1}">${reviewRows.slice(start, start + 40).map(({row, index, local}) => {
         const selected = resolutions.get(index);
         const original = selected ? t("Copia local elegida", "Local copy chosen")
-          : row.entry.kind === "local" ? t("Archivo local", "Local file") : row.entry.kind === "remote" ? t("URL remota", "Remote URL") : t("Archivo ausente", "Missing file");
+          : local ? t("Archivo local", "Local file") : row.entry.kind === "remote" ? t("URL remota", "Remote URL") : t("Archivo ausente", "Missing file");
         const metadata = [row.artist, row.version, row.duration === null ? "" : durationLabel(row.duration), original].filter(Boolean).join(" · ");
         const count = row.candidates.length;
         const radio = (optionIndex: number, id: string) => `<input type="radio" id="audio-match-${index}-${optionIndex}" name="audio-match-${index}" data-audio-match="${index}" value="${h(id)}" ${id === (selected ?? "") ? "checked" : ""} ${disabled()}>`;
-        return `<li class="audio-playlist-entry"><span>${index + 1}</span><div><strong id="audio-import-title-${index}">${h(row.entry.title)}</strong><small>${h(metadata)}</small></div>
+        return `<li class="audio-playlist-entry" value="${index + 1}"><span>${index + 1}</span><div><strong id="audio-import-title-${index}">${h(row.entry.title)}</strong><small>${h(metadata)}</small></div>
           ${count ? `<details class="audio-match" id="audio-import-match-${index}"><summary id="audio-match-summary-${index}" aria-describedby="audio-import-title-${index}">${count === 1 ? t("Revisar grabación local", "Review local recording") : `${count} ${t("grabaciones locales para comparar", "local recordings to compare")}`}</summary>
             <fieldset><legend class="sr-only">${h(t("Grabaciones locales para ", "Local recordings for ") + row.entry.title)}</legend>
               <label class="audio-match-option">${radio(0, "")}<span>${t("Conservar referencia original", "Keep original reference")}</span></label>
@@ -415,12 +428,12 @@ export function createAudioLibrary(hooks: Hooks) {
                 const filePath = filePaths.get(candidate.id);
                 return `<label class="audio-match-option">${radio(candidateIndex + 1, candidate.id)}<span><strong>${h(candidate.title)}</strong>${details ? `<small>${h(details)}</small>` : ""}${filePath ? `<small class="audio-match-path" dir="auto">${h(filePath)}</small>` : ""}</span></label>`;
               }).join("")}</div>
-            </fieldset></details>` : ""}</li>`;
+            </fieldset></details>` : rematching ? `<small class="field-note">${t("Sin coincidencias locales", "No local matches")}</small>` : ""}</li>`;
       }).join("")}</ol>
-      ${preview.rows.length > 40 ? `<div class="library-pagination"><span>${start + 1}–${Math.min(preview.rows.length, start + 40)} / ${preview.rows.length}</span>
+      ${reviewRows.length > 40 ? `<div class="library-pagination"><span>${start + 1}–${Math.min(reviewRows.length, start + 40)} / ${reviewRows.length}</span>
         ${action("audio-import-back", t("Anterior", "Previous"), undefined, "quiet", importPage ? disabled() : "disabled")}
-        ${action("audio-import-next", t("Siguiente", "Next"), undefined, "quiet", start + 40 < preview.rows.length ? disabled() : "disabled")}</div>` : ""}
-      ${action("audio-import-review", t("Preparar lista", "Prepare playlist"), "check", "primary", disabled())}</section>`;
+        ${action("audio-import-next", t("Siguiente", "Next"), undefined, "quiet", start + 40 < reviewRows.length ? disabled() : "disabled")}</div>` : ""}
+      ${action("audio-import-review", rematching ? t("Preparar cambios", "Prepare changes") : t("Preparar lista", "Prepare playlist"), "check", "primary", rematching && !resolutions.size ? "disabled" : disabled())}</section>`;
   }
 
   function context(upcoming: QueueEntry[], next: QueueEntry | undefined, remaining: number) {
@@ -697,16 +710,37 @@ export function createAudioLibrary(hooks: Hooks) {
           milliseconds = mapping.duration !== undefined && labels[mapping.duration] === "durationms";
         }
       }); break;
-      case "audio-cancel-import": imported = null; resolutions.clear(); hooks.render(); break;
+      case "audio-rematch-list": if (list && !editing) {
+        await run(async () => {
+          const preview = await hooks.command<ImportPreview>("audio_playlist_rematch", { listId: list.id });
+          await hooks.refresh();
+          imported = preview;
+          resolutions.clear();
+          importPage = 0;
+        });
+        document.getElementById("audio-import-heading")?.focus();
+      } break;
+      case "audio-cancel-import": {
+        const saved = imported?.kind === "list" && imported.listId !== undefined;
+        imported = null; resolutions.clear(); hooks.render();
+        if (saved) document.querySelector<HTMLElement>('[data-action="audio-rematch-list"]')?.focus();
+      } break;
       case "audio-import-back": importPage = Math.max(0, importPage - 1); hooks.render(); break;
       case "audio-import-next": importPage++; hooks.render(); break;
       case "audio-import-review": if (imported?.kind === "list") {
         const preview = imported;
+        if ([...resolutions.values()].some(id => {
+          const item = itemFor(id);
+          return !item || item.missing;
+        })) {
+          hooks.notify(t("Una grabación elegida ya no está disponible.", "A chosen recording is no longer available."), "error");
+          break;
+        }
         const entries = preview.rows.map((row, index) => {
           const chosen = row.candidates.find(candidate => candidate.id === resolutions.get(index));
           return chosen ? { kind: "local" as const, id: chosen.id, title: chosen.title } : row.entry;
         });
-        editing = { id: null, name: preview.name, entries };
+        editing = { id: preview.listId ?? null, name: preview.name, entries };
         imported = null; resolutions.clear();
         hooks.render(); document.getElementById("audio-playlist-name")?.focus();
       } break;

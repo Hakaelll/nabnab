@@ -1340,6 +1340,7 @@ fn main() {
             audio_library::tag_copy::audio_tags_queue_copies,
             audio_library::audio_playlist_save, audio_library::audio_playlist_remove,
             audio_library::playlist_import::audio_playlist_choose, audio_library::playlist_import::audio_playlist_map,
+            audio_library::playlist_import::audio_playlist_rematch,
             audio_library::audio_lyrics, audio_library::audio_lyrics_choose,
             audio_library::audio_cover_choose,
             personal_archive::personal_archive_choose, personal_archive::personal_archive_review_media, personal_archive::personal_archive_import,

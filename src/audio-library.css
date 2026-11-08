@@ -109,6 +109,8 @@
 .audio-playlist-entry { grid-template-columns: 24px minmax(0, 1fr) auto; }
 .audio-playlist-entry strong, .audio-playlist-entry small { display: block; overflow-wrap: anywhere; }
 .audio-playlists > .button-group { margin-top: 12px; }
+.audio-playlist-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; }
+.audio-playlist-heading h2 { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .audio-table-wrap { max-width: 100%; overflow: auto; }
 .audio-import-table { width: 100%; border-collapse: collapse; font-size: 12px; text-align: start; }
 .audio-import-table th, .audio-import-table td { padding: 8px; border-bottom: 1px solid var(--edge-quiet); text-align: start; }
@@ -119,6 +121,7 @@
 .audio-ms { display: flex; align-items: center; gap: 6px; color: var(--muted); }
 body:not([data-page="home"]) #page-content .audio-import-editor > .page-heading { margin-bottom: 0; }
 .audio-import-rows .audio-playlist-entry { grid-template-columns: 24px minmax(0, 1fr); }
+.audio-import-rows .audio-playlist-entry > .field-note { grid-column: 2; }
 .audio-match { grid-column: 2; min-width: 0; }
 .audio-match summary { width: fit-content; max-width: 100%; padding: 4px 0; color: var(--muted); font-size: 12px; cursor: pointer; }
 .audio-match summary:hover, .audio-match[open] summary { color: var(--text); }

@@ -1,4 +1,4 @@
-use super::{tag, PlaylistEntry, MAX_ENTRIES};
+use super::{tag, valid_label, PlaylistEntry, PlaylistMatchHints, MAX_ENTRIES};
 use crate::{delimited, library::LibraryItem, AppState};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -33,6 +33,58 @@ struct Row {
     artist: Option<String>,
     duration: Option<f64>,
     version: Option<String>,
+    original: Option<PlaylistEntry>,
+}
+
+impl Row {
+    fn from_saved(entry: &PlaylistEntry) -> Self {
+        let (title, locator, hints) = match entry {
+            PlaylistEntry::Local { id, title } => {
+                return Self {
+                    title: Some(title.clone()),
+                    id: Some(id.clone()),
+                    original: Some(entry.clone()),
+                    ..Self::default()
+                }
+            }
+            PlaylistEntry::Remote { title, url, hints } => (title, url, hints),
+            PlaylistEntry::Missing {
+                title,
+                locator,
+                hints,
+            } => (title, locator, hints),
+        };
+        let hints = hints.clone().unwrap_or_default();
+        Self {
+            locator: hints.path.or_else(|| Some(locator.clone())),
+            id: hints.id.or_else(|| Some(locator.clone())),
+            title: Some(title.clone()),
+            artist: hints.artist,
+            duration: hints.duration,
+            version: hints.version,
+            original: Some(entry.clone()),
+        }
+    }
+
+    fn match_hints(&self, source_path: Option<&Path>) -> Option<PlaylistMatchHints> {
+        let path = source_path
+            .filter(|path| path.is_absolute())
+            .and_then(Path::to_str)
+            .filter(|path| valid_label(path, 2048))
+            .map(str::to_owned);
+        let has_metadata = self.id.is_some()
+            || self.artist.is_some()
+            || self.duration.is_some()
+            || self.version.is_some()
+            || path.is_some();
+        has_metadata.then(|| PlaylistMatchHints {
+            id: self.id.clone(),
+            artist: self.artist.clone(),
+            duration: self.duration,
+            version: self.version.clone(),
+            path,
+        })
+    }
 }
 
 #[derive(Serialize)]
@@ -73,6 +125,8 @@ pub enum Preview {
     List {
         name: String,
         rows: Vec<Match>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        list_id: Option<String>,
     },
 }
 
@@ -256,11 +310,15 @@ fn local(item: &LibraryItem) -> PlaylistEntry {
     }
 }
 
-fn match_rows(rows: Vec<Row>, directory: &Path, library: &[LibraryItem]) -> Vec<Match> {
+fn match_rows<'a>(
+    rows: Vec<Row>,
+    directory: &Path,
+    library: impl IntoIterator<Item = &'a LibraryItem>,
+) -> Vec<Match> {
     let mut by_id = HashMap::<&str, Vec<&LibraryItem>>::new();
     let mut by_path = HashMap::new();
     let mut by_title = HashMap::<String, Vec<&LibraryItem>>::new();
-    for item in library.iter().filter(|item| item.kind == "audio") {
+    for item in library.into_iter().filter(|item| item.kind == "audio") {
         by_id.entry(&item.id).or_default().push(item);
         if let Some(id) = item
             .details
@@ -290,16 +348,20 @@ fn match_rows(rows: Vec<Row>, directory: &Path, library: &[LibraryItem]) -> Vec<
                 .or_else(|| row.id.as_deref().and_then(tag))
                 .unwrap_or_else(|| "Untitled track".into());
             let id_matches = row.id.as_deref().and_then(|id| by_id.get(id));
-            let exact_path = row
+            let source_path = row
                 .locator
                 .as_deref()
-                .and_then(|value| local_path(value, directory))
-                .and_then(|path| by_path.get(&path_key(&path)).copied());
+                .and_then(|value| local_path(value, directory));
+            let exact_path = source_path.as_deref().and_then(|path| by_path.get(&path_key(path)).copied());
             let exact = id_matches
                 .filter(|items| items.len() == 1)
                 .map(|items| items[0])
                 .or(exact_path);
-            let entry = if let Some(item) = exact {
+            let reviewing_saved = row.original.is_some();
+            let available_local = matches!(&row.original, Some(PlaylistEntry::Local { id, .. }) if id_matches.is_some_and(|items| items.iter().any(|item| item.id == *id)));
+            let entry = if let Some(entry) = row.original {
+                entry
+            } else if let Some(item) = exact {
                 local(item)
             } else if let Some(url) = row
                 .locator
@@ -309,6 +371,7 @@ fn match_rows(rows: Vec<Row>, directory: &Path, library: &[LibraryItem]) -> Vec<
                 PlaylistEntry::Remote {
                     url: url.clone(),
                     title: title.clone(),
+                    hints: row.match_hints(source_path.as_deref()),
                 }
             } else {
                 PlaylistEntry::Missing {
@@ -318,14 +381,17 @@ fn match_rows(rows: Vec<Row>, directory: &Path, library: &[LibraryItem]) -> Vec<
                         .or(row.id.clone())
                         .unwrap_or_else(|| title.clone()),
                     title: title.clone(),
+                    hints: row.match_hints(source_path.as_deref()),
                 }
             };
             let mut candidates = Vec::new();
-            if exact.is_none() {
-                let suggestions = id_matches.or_else(|| by_title.get(&normal(&title)));
+            if !available_local && (reviewing_saved || exact.is_none()) {
+                let suggestions = if exact.is_some() { exact.as_slice() } else {
+                    id_matches.or_else(|| by_title.get(&normal(&title))).map_or(&[][..], Vec::as_slice)
+                };
                 let expected_artist = row.artist.as_deref().map(normal);
                 let expected_version = row.version.as_deref().map(normal);
-                for item in suggestions.into_iter().flatten() {
+                for item in suggestions {
                     let tags = item.details.audio.as_ref();
                     let artist = tags
                         .and_then(|tags| tags.artist.clone())
@@ -544,6 +610,7 @@ pub fn audio_playlist_map(
             artist: get(artist).and_then(tag),
             duration: get(duration_column).and_then(|value| duration(value, milliseconds)),
             version: get(version).and_then(tag),
+            original: None,
         });
     }
     if rows.is_empty() {
@@ -583,7 +650,40 @@ fn resolve(
     let library = &guard.as_ref().ok_or("Open nabnab first.")?.data.library;
     Ok(Preview::List {
         name,
-        rows: match_rows(rows, directory, library),
+        rows: match_rows(
+            rows,
+            directory,
+            library
+                .iter()
+                .filter(|item| item.kind == "audio" && item.path.is_file()),
+        ),
+        list_id: None,
+    })
+}
+
+#[tauri::command]
+pub fn audio_playlist_rematch(
+    state: State<Arc<AppState>>,
+    list_id: String,
+) -> Result<Preview, String> {
+    let guard = state.repository.lock().unwrap();
+    let data = &guard.as_ref().ok_or("Open nabnab first.")?.data;
+    let list = data
+        .audio_playlists
+        .iter()
+        .find(|list| list.id == list_id)
+        .ok_or("The playlist was removed.")?;
+    let rows = list.entries.iter().map(Row::from_saved).collect();
+    Ok(Preview::List {
+        name: list.name.clone(),
+        rows: match_rows(
+            rows,
+            Path::new(""),
+            data.library
+                .iter()
+                .filter(|item| item.kind == "audio" && item.path.is_file()),
+        ),
+        list_id: Some(list_id),
     })
 }
 
@@ -643,5 +743,48 @@ mod tests {
         );
         assert!(matches!(&result[1].entry, PlaylistEntry::Local { id, .. } if id == "studio"));
         assert!(result[1].candidates.is_empty());
+    }
+
+    #[test]
+    fn saved_references_keep_metadata_and_require_review_even_for_an_exact_match() {
+        let original = match_rows(
+            vec![Row {
+                title: Some("La canción".into()),
+                id: Some("track-uri".into()),
+                locator: Some("https://example.org/recording".into()),
+                artist: Some("Una artista".into()),
+                duration: Some(200.0),
+                version: Some("Live".into()),
+                ..Row::default()
+            }],
+            Path::new(""),
+            &[],
+        );
+        let data = serde_json::to_value(&original[0].entry).unwrap();
+        let reference: PlaylistEntry = serde_json::from_value(data.clone()).unwrap();
+        let legacy = serde_json::from_value(serde_json::json!({
+            "kind": "missing", "locator": "lost.wav", "title": "La canción"
+        }))
+        .unwrap();
+        let mut exact = track("concert", "Live recording");
+        exact.details.content_id = Some("track-uri".into());
+        let available = vec![track("studio", "Studio recording"), exact];
+        let reviewed = match_rows(
+            [&reference, &legacy]
+                .into_iter()
+                .map(Row::from_saved)
+                .collect(),
+            Path::new(""),
+            &available,
+        );
+        assert_eq!(serde_json::to_value(&reviewed[0].entry).unwrap(), data);
+        assert_eq!(reviewed[0].artist.as_deref(), Some("Una artista"));
+        assert_eq!(reviewed[0].duration, Some(200.0));
+        assert_eq!(reviewed[0].version.as_deref(), Some("Live"));
+        assert_eq!(reviewed[0].candidates.len(), 1);
+        assert_eq!(reviewed[0].candidates[0].id, "concert");
+        assert!(reviewed[0].candidates[0].version_matches);
+        assert!(matches!(reviewed[1].entry, PlaylistEntry::Missing { .. }));
+        assert_eq!(reviewed[1].candidates.len(), 2);
     }
 }
