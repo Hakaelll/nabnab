@@ -11,6 +11,7 @@ const data = await mkdtemp(path.join(base, "native-run-"));
 const output = path.join(data, "output");
 await mkdir(output);
 const desktopGesture = process.env.NABNAB_PLAYBACK_DESKTOP_GESTURE === "1";
+const desktopTray = process.env.NABNAB_PLAYBACK_DESKTOP_TRAY === "1";
 const { chromium } = createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODULE || "playwright");
 const port = process.env.NABNAB_PLAYBACK_DEBUG_PORT || 9254;
 const endpoint = `http://127.0.0.1:${port}`;
@@ -189,7 +190,7 @@ async function verifyStyledCaptions(engine) {
   await wait(async () => (await pixels()).left > first.left + 20 && (await pixels()).yellow > 100);
   const box = await canvas.boundingBox();
   assert.ok(Math.abs(box.width / box.height - 360 / 640) < 0.01);
-  await page.screenshot({ path: path.join(base, "video-ass.png"), animations: "disabled" });
+  await page.screenshot({ path: path.join(output, "video-ass.png"), animations: "disabled" });
   const offset = page.locator("#stage-caption-offset");
   await offset.fill("3");
   await offset.press("Tab");
@@ -232,7 +233,7 @@ async function verifyEmbeddedCaptions(engine, video) {
     const frame = await captionPixels(canvas);
     return frame.yellow > 60 && frame.cyan > 60 && frame.left > first.left + 5;
   });
-  await page.screenshot({ path: path.join(base, "video-embedded.png"), animations: "disabled" });
+  await page.screenshot({ path: path.join(output, "video-embedded.png"), animations: "disabled" });
   await select.selectOption({ label: "Diálogo clásico · eng · ASS" });
   await wait(async () => {
     const frame = await captionPixels(canvas);
@@ -283,7 +284,7 @@ async function verifyAudioTracks(engine, videoId) {
   assert.ok(Math.abs((await playing()).time - time) < 0.08);
   assert.equal((await playing()).paused, true);
   assert.equal(await select.evaluate(element => element === document.activeElement), true);
-  await page.screenshot({ path: path.join(base, "video-audio-tracks.png"), animations: "disabled" });
+  await page.screenshot({ path: path.join(output, "video-audio-tracks.png"), animations: "disabled" });
   await clickStage("toggle");
   await frequency(660);
   await select.selectOption({ label: "Predeterminada del archivo" });
@@ -366,7 +367,7 @@ async function verifyCoursePlayback(videoId, musicId, audioId, handoutId) {
   assert.equal(await button("Añadir a la cola").count(), 0);
   assert.equal((await playing()).id, musicId);
   assert.equal(await button("Usar tiempo actual").isEnabled(), false);
-  await page.screenshot({ path: path.join(base, "course-video-1180x780.png"), animations: "disabled" });
+  await page.screenshot({ path: path.join(output, "course-video-1180x780.png"), animations: "disabled" });
   await button("Reproducir lección").press("Enter");
   await stage().locator("#stage-resume").waitFor();
   assert.equal(await engine.evaluate(node => node === document.getElementById("audio-engine")), true);
@@ -464,6 +465,99 @@ function windowCommand(operation, width = 0, height = 0) {
   assert.ok(Number.isSafeInteger(nativeHandle) && nativeHandle > 0);
 }
 
+function trayMini(select) {
+  return execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `
+    Add-Type -AssemblyName System.Drawing
+    Add-Type -Name PlaybackTrayMenu -Namespace Nabnab -MemberDefinition @'
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    public struct Rect { public int Left, Top, Right, Bottom; }
+    [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern System.IntPtr FindWindowExW(System.IntPtr parent, System.IntPtr after, [System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.LPWStr)] string name, System.IntPtr title);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(System.IntPtr window, out uint process);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool PostMessageW(System.IntPtr window, uint message, System.IntPtr wParam, System.IntPtr lParam);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool IsWindowVisible(System.IntPtr window);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool GetWindowRect(System.IntPtr window, out Rect rect);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern System.IntPtr SendMessageW(System.IntPtr window, uint message, System.IntPtr wParam, System.IntPtr lParam);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern uint GetMenuState(System.IntPtr menu, uint item, uint flags);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern int GetMenuItemCount(System.IntPtr menu);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern void mouse_event(uint flags, int x, int y, int data, System.UIntPtr extra);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern System.IntPtr SetThreadDpiAwarenessContext(System.IntPtr awareness);
+'@
+    $api = [Nabnab.PlaybackTrayMenu]
+    [void]$api::SetThreadDpiAwarenessContext([IntPtr](-4))
+    function Find-OwnedWindow($className) {
+      $window = [IntPtr]::Zero
+      while (($window = $api::FindWindowExW([IntPtr]0, $window, $className, [IntPtr]0)) -ne [IntPtr]::Zero) {
+        [uint32]$owner = 0
+        [void]$api::GetWindowThreadProcessId($window, [ref]$owner)
+        if ($owner -eq ${child.pid} -and ($className -ne '#32768' -or $api::IsWindowVisible($window))) { return $window }
+      }
+      return [IntPtr]::Zero
+    }
+    $tray = Find-OwnedWindow 'tray_icon_app'
+    if ($tray -eq [IntPtr]::Zero) { throw 'The fixture tray icon was not created.' }
+    # Deliver the right-click notification used by the pinned tray-icon crate.
+    [void]$api::SetCursorPos(120, 220)
+    if (!$api::PostMessageW($tray, 6002, [IntPtr]0, [IntPtr]0x205)) { throw 'Could not open the tray menu.' }
+    $popup = [IntPtr]::Zero
+    try {
+      for ($attempt = 0; $attempt -lt 40 -and $popup -eq [IntPtr]::Zero; $attempt++) {
+        Start-Sleep -Milliseconds 50
+        $popup = Find-OwnedWindow '#32768'
+      }
+      if ($popup -eq [IntPtr]::Zero) { throw 'The native tray popup did not appear.' }
+      Start-Sleep -Milliseconds 150
+      $rect = [Nabnab.PlaybackTrayMenu+Rect]::new()
+      if (!$api::GetWindowRect($popup, [ref]$rect)) { throw 'Could not locate the native tray menu.' }
+      $width = $rect.Right - $rect.Left
+      $height = $rect.Bottom - $rect.Top
+      if ($width -lt 1 -or $width -gt 500 -or $height -lt 1 -or $height -gt 240) { throw "Unexpected native tray menu bounds $width x $height." }
+      $bitmap = [System.Drawing.Bitmap]::new($width, $height)
+      $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+      try {
+        $graphics.CopyFromScreen($rect.Left, $rect.Top, 0, 0, $bitmap.Size)
+        $bitmap.Save('${path.join(output, select ? "tray-menu-active.png" : "tray-menu-idle.png").replaceAll("'", "''")}')
+      } finally {
+        $graphics.Dispose()
+        $bitmap.Dispose()
+      }
+      $menu = $api::SendMessageW($popup, 0x1e1, [IntPtr]0, [IntPtr]0)
+      if ($api::GetMenuItemCount($menu) -ne 3) { throw "Expected three entries in the native tray menu. Found $($api::GetMenuItemCount($menu))." }
+      $enabled = ($api::GetMenuState($menu, 1, 0x400) -band 3) -eq 0
+      if (${select ? "$true" : "$false"} -and $enabled) {
+        # The mini player is the middle of three equally sized native command rows.
+        [void]$api::SetCursorPos(($rect.Left + $rect.Right) / 2, ($rect.Top + $rect.Bottom) / 2)
+        $api::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero)
+        $api::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero)
+        $popup = [IntPtr]::Zero
+      }
+      if ($enabled) { 'enabled' } else { 'disabled' }
+    } finally {
+      if ($popup -ne [IntPtr]::Zero) { [void]$api::PostMessageW($tray, 0x1f, [IntPtr]0, [IntPtr]0) }
+    }
+  `], { windowsHide: true, encoding: "utf8", timeout: 8000 }).trim();
+}
+
+async function openMiniFromTray(kind, original) {
+  const before = await playing();
+  assert.equal(await stage().getAttribute("data-mini"), null);
+  windowCommand("minimize");
+  await wait(mainMinimized);
+  assert.equal(trayMini(true), "enabled");
+  await wait(async () => await mainMinimized() && await page.evaluate(() => innerWidth <= 400));
+  assert.equal(await stage().getAttribute("data-mini"), kind);
+  assert.equal(await original.evaluate(element => element === document.getElementById("audio-engine")), true);
+  assert.equal((await playing()).id, before.id);
+  assert.equal((await playing()).paused, before.paused);
+  if (!before.paused) await wait(async () => (await playing()).time > before.time + 0.2);
+  await page.locator("#mini-toggle").click();
+  await wait(async () => (await playing()).paused !== before.paused);
+  await page.locator("#mini-toggle").click();
+  await wait(async () => (await playing()).paused === before.paused);
+  assert.equal(await mainMinimized(), true);
+  console.log(`Opened the ${kind} mini player from the Windows tray while the main window stayed minimized.`);
+}
+
 async function verifyDesktopWheel(original, selectedTracks) {
   const overlay = await wait(() => browser.contexts()[0]?.pages().find(tab => tab.url().includes("/quick-skip.html")));
   overlay.on("pageerror", error => { log += `\nQuick Skip: ${error.message}`; });
@@ -474,17 +568,24 @@ async function verifyDesktopWheel(original, selectedTracks) {
     $form.Text = 'Nabnab playback test window'
     $form.StartPosition = 'Manual'
     $form.SetBounds($work.Right - 450, $work.Top + 180, 420, 280)
-    $form.Add_Shown({ $form.Activate(); [Console]::WriteLine('ready') })
+    $form.TopMost = $true
+    $form.Add_Shown({ $form.Activate(); [Console]::WriteLine("ready:$($form.Handle.ToInt64())") })
     [Windows.Forms.Application]::Run($form)
   `], { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
-  let ready = false;
-  other.stdout.on("data", bytes => { if (String(bytes).includes("ready")) ready = true; });
+  let readyOutput = "";
+  other.stdout.on("data", bytes => { readyOutput += String(bytes); });
   other.stderr.on("data", bytes => { log += String(bytes); });
+  const fixtureHandle = () => Number(/ready:(\d+)\r?\n/.exec(readyOutput)?.[1] ?? 0);
   function desktop(operation, delta = 0) {
     return execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `
       Add-Type -Name DesktopWheelInput -Namespace Nabnab -MemberDefinition @'
+      public struct Point { public int X, Y; }
+      public struct Rect { public int Left, Top, Right, Bottom; }
       [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern System.IntPtr GetForegroundWindow();
       [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(System.IntPtr h, out uint process);
+      [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern System.IntPtr WindowFromPoint(Point point);
+      [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool GetWindowRect(System.IntPtr window, out Rect rect);
+      [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool SetWindowPos(System.IntPtr window, System.IntPtr after, int x, int y, int width, int height, uint flags);
       [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
       [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern void keybd_event(byte key, byte scan, uint flags, System.UIntPtr extra);
       [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern void mouse_event(uint flags, int x, int y, int data, System.UIntPtr extra);
@@ -495,6 +596,22 @@ async function verifyDesktopWheel(original, selectedTracks) {
       [void]$api::GetWindowThreadProcessId($api::GetForegroundWindow(), [ref]$owner)
       $owner
       if ('${operation}' -eq 'release') { $api::keybd_event(0xA4, 0, 2, [UIntPtr]::Zero); exit }
+      if ('${operation}' -eq 'focus') {
+        [void]$api::SetThreadDpiAwarenessContext([IntPtr](-4))
+        $fixture = [IntPtr]${fixtureHandle()}
+        if (!$api::SetWindowPos($fixture, [IntPtr](-1), 0, 0, 0, 0, 0x43)) { throw 'Could not show the fixture window.' }
+        $rect = [Nabnab.DesktopWheelInput+Rect]::new()
+        if (!$api::GetWindowRect($fixture, [ref]$rect)) { throw 'The fixture window has no bounds.' }
+        $point = [Nabnab.DesktopWheelInput+Point]::new()
+        $point.X = ($rect.Left + $rect.Right) / 2
+        $point.Y = ($rect.Top + $rect.Bottom) / 2
+        [void]$api::GetWindowThreadProcessId($api::WindowFromPoint($point), [ref]$owner)
+        if ($owner -ne ${other.pid}) { throw 'The fixture window is not under the pointer.' }
+        [void]$api::SetCursorPos($point.X, $point.Y)
+        $api::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero)
+        $api::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero)
+        exit
+      }
       if ($owner -ne ${other.pid}) { exit }
       if ('${operation}' -eq 'open') {
         [void]$api::SetThreadDpiAwarenessContext([IntPtr](-4))
@@ -519,7 +636,8 @@ async function verifyDesktopWheel(original, selectedTracks) {
     return new Window("quick-skip", { skip: true }).isVisible();
   });
   try {
-    await wait(() => ready);
+    await wait(fixtureHandle);
+    desktop("focus");
     await wait(() => desktop("status") === String(other.pid), 7000);
     const before = (await playing()).id;
     const expected = selectedTracks.find(item => item.name === path.basename(music)).id;
@@ -540,7 +658,10 @@ async function verifyDesktopWheel(original, selectedTracks) {
     assert.equal(desktop("release"), String(other.pid));
     await wheel.waitFor({ state: "hidden" });
     await wait(async () => !await visible());
-    await wait(async () => (await playing()).id === expected);
+    await wait(async () => {
+      const current = await playing();
+      return current.id === expected && !current.paused && current.time > 0.15;
+    });
     assert.equal(await mainMinimized(), true);
     assert.equal(await original.evaluate(element => element === document.getElementById("audio-engine")), true);
     assert.equal(desktop("open", 120 * Math.sign(distance)), String(other.pid));
@@ -715,7 +836,8 @@ try {
       return draw.call(this, ...args);
     };
   });
-  await rpc("save_settings", { settings: { ...initial.settings, folder: output, language: "es", reducedMotion: false, trayEnabled: false, closeToTray: false } });
+  await rpc("save_settings", { settings: { ...initial.settings, folder: output, language: "es", reducedMotion: false, trayEnabled: desktopTray, closeToTray: false } });
+  if (desktopTray) assert.equal(trayMini(false), "disabled");
   const imported = await rpc("import_paths", { paths: [video, music, webm, mkv, broken, missing, handout, ...audioSamples.map(sample => sample.file), ...(av1 ? [av1] : [])] });
   const item = file => imported.library.find(candidate => candidate.name === path.basename(file));
   const videoId = item(video).id, musicId = item(music).id;
@@ -738,6 +860,11 @@ try {
   await wait(async () => { const current = await playing(); return !current.paused && current.time >= 5.25; });
   assert.deepEqual([(await playing()).width, (await playing()).height], [360, 640]);
   assert.equal(await page.locator("audio, video").count(), 1);
+  if (desktopTray) {
+    await openMiniFromTray("video", original);
+    await page.locator("#mini-expand").click();
+    await wait(async () => !await mainMinimized() && await page.evaluate(() => innerWidth >= 900));
+  }
   await clickStage("mini");
   await page.locator('#playback-stage[data-mini="video"] > video').waitFor();
   assert.equal(await page.locator(".app-shell").evaluate(shell => shell.inert), false);
@@ -764,9 +891,9 @@ try {
   await verifyStyledCaptions(original);
   await clickStage("captions");
   await page.mouse.move(200, 230);
-  await page.screenshot({ path: path.join(base, "video-controls.png"), animations: "disabled" });
+  await page.screenshot({ path: path.join(output, "video-controls.png"), animations: "disabled" });
   await wait(async () => (await stage().getAttribute("data-controls")) === "hidden", 5000);
-  await page.screenshot({ path: path.join(base, "video-clean.png"), animations: "disabled" });
+  await page.screenshot({ path: path.join(output, "video-clean.png"), animations: "disabled" });
   await page.mouse.move(250, 270);
   assert.equal(await stage().getAttribute("data-controls"), "visible");
   await clickStage("toggle");
@@ -790,7 +917,7 @@ try {
   const hoverFrame = stage().locator("#stage-hover img");
   await wait(async () => hoverFrame.evaluate(image => !image.hidden && image.naturalHeight > 0));
   assert.match(await hoverFrame.getAttribute("src"), /^data:image\/jpeg;base64,/);
-  await page.screenshot({ path: path.join(base, "video-seek.png"), animations: "disabled" });
+  await page.screenshot({ path: path.join(output, "video-seek.png"), animations: "disabled" });
   console.log(JSON.stringify({ audioTracksInMp4: clip(video).filter(stream => stream.codec_type === "audio").map(stream => stream.tags.language),
     audioTracksExposedByWebView: await page.locator("#audio-engine").evaluate(media => media.audioTracks?.length ?? 0) }));
 
@@ -857,7 +984,7 @@ try {
   await wait(() => page.evaluate(() => Math.abs(innerWidth - 900) <= 3 && Math.abs(innerHeight - 620) <= 3), 8000)
     .catch(async error => { throw Error(`Native resize returned ${await page.evaluate(() => [innerWidth, innerHeight, devicePixelRatio])}`, { cause: error }); });
   assert.ok(await stage().locator(".stage-toolbar").evaluate(bar => bar.scrollWidth <= bar.clientWidth + 1));
-  await page.screenshot({ path: path.join(base, "video-900.png"), animations: "disabled" });
+  await page.screenshot({ path: path.join(output, "video-900.png"), animations: "disabled" });
   await clickStage("captions");
   assert.equal(await stage().locator('#stage-caption-track option[value="styled"]').count(), 0);
   assert.ok(await stage().locator("#stage-panel-captions").evaluate(panel => {
@@ -877,7 +1004,7 @@ try {
   await wait(async () => { const current = await playing(); return current.id === musicId && current.time > 0; });
   await page.locator("#audio-player").waitFor();
   assert.ok(await page.locator("#audio-player").evaluate(bar => bar.scrollWidth <= bar.clientWidth + 1));
-  await page.screenshot({ path: path.join(base, "compact-900.png"), animations: "disabled" });
+  await page.screenshot({ path: path.join(output, "compact-900.png"), animations: "disabled" });
   await page.locator('[data-page="home"]').click();
   await page.locator("#url").waitFor();
   assert.ok(await page.locator(".work-area").evaluate(area => {
@@ -886,7 +1013,7 @@ try {
     return main.getBoundingClientRect().bottom === controls.top && controls.bottom === frame.bottom
       && controls.left === frame.left && getComputedStyle(bar).borderTopWidth === "0px";
   }));
-  await page.screenshot({ path: path.join(base, "compact-home-900.png"), animations: "disabled" });
+  await page.screenshot({ path: path.join(output, "compact-home-900.png"), animations: "disabled" });
   await page.locator('[data-page="library"]').click();
   await page.locator('[data-action="library-layout"][data-layout="grid"]').click();
   assert.equal(await original.evaluate(element => element === document.getElementById("audio-engine")), true);
@@ -904,7 +1031,7 @@ try {
     const toggle = bar.querySelector("#stage-toggle").getBoundingClientRect();
     return bar.scrollWidth <= bar.clientWidth + 1 && Math.abs(toggle.x + toggle.width / 2 - innerWidth / 2) < 2;
   }));
-  await page.screenshot({ path: path.join(base, "music-900.png"), animations: "disabled" });
+  await page.screenshot({ path: path.join(output, "music-900.png"), animations: "disabled" });
   await clickStage("scenes");
   assert.ok(await stage().locator("#stage-panel-scenes").evaluate(panel => {
     const bounds = panel.getBoundingClientRect();
@@ -920,7 +1047,7 @@ try {
   await wait(async () => { const state = await graphics(); return state.blend > 0 && state.blend < 0.98; });
   await page.locator("#scene-color").selectOption("color");
   await wait(async () => (await graphics()).blend === 1);
-  await page.screenshot({ path: path.join(base, "music-scenes-900.png"), animations: "disabled" });
+  await page.screenshot({ path: path.join(output, "music-scenes-900.png"), animations: "disabled" });
   const pixels = () => page.locator(".music-surface canvas").evaluate(canvas => {
     const gl = canvas.getContext("webgl2");
     const data = new Uint8Array(canvas.width * canvas.height * 4);
@@ -943,7 +1070,7 @@ try {
     await wait(async () => (await pixels()).hash !== first.hash);
     signatures.add(first.hash);
     await page.keyboard.press("Escape");
-    await page.screenshot({ path: path.join(base, `music-${name}-900.png`), animations: "disabled" });
+    await page.screenshot({ path: path.join(output, `music-${name}-900.png`), animations: "disabled" });
     await clickStage("scenes");
   }
   assert.equal(signatures.size, 5);
@@ -1120,6 +1247,16 @@ try {
 
   await play(musicId);
   await wait(async () => { const current = await playing(); return current.id === musicId && !current.paused && current.time > 0.15; });
+  if (desktopTray) {
+    await openMiniFromTray("audio", original);
+    await page.locator("#mini-dock").click();
+    await wait(async () => !await mainMinimized());
+    await stage().waitFor({ state: "hidden" });
+    await page.locator("#audio-close").click();
+    assert.equal(trayMini(false), "disabled");
+    await play(musicId);
+    await wait(async () => !(await playing()).paused && (await playing()).time > 0.15);
+  }
   const continuous = await playing();
   for (let iteration = 0; iteration < 3; iteration++) {
     await page.locator(".audio-visualize").click();

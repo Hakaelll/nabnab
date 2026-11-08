@@ -1,12 +1,44 @@
 use crate::store::Settings;
-use std::path::Path;
+use std::{path::Path, sync::Mutex};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Manager,
+    AppHandle, Emitter, EventTarget, Manager, Webview,
 };
 
 const TRAY_ID: &str = "nabnab";
+const TRAY_MINI: &str = "nabnab-playback-mini";
+
+#[derive(Default)]
+pub struct PlaybackTray(Mutex<PlaybackTrayState>);
+
+#[derive(Default)]
+struct PlaybackTrayState {
+    available: bool,
+    item: Option<MenuItem<tauri::Wry>>,
+}
+
+#[tauri::command]
+pub fn playback_tray_available(
+    app: AppHandle,
+    webview: Webview,
+    available: bool,
+) -> Result<(), String> {
+    if webview.label() != "main" {
+        return Err("Only the playback view can update the tray menu.".into());
+    }
+    let tray = app.state::<PlaybackTray>();
+    let item = {
+        let mut state = tray.0.lock().unwrap();
+        state.available = available;
+        state.item.clone()
+    };
+    if let Some(item) = item {
+        item.set_enabled(available)
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
 
 fn show_main(app: &AppHandle) -> Result<(), String> {
     let window = app
@@ -23,8 +55,18 @@ fn show_main(app: &AppHandle) -> Result<(), String> {
         .map_err(|_| "Could not focus the nabnab window.".into())
 }
 
-fn set_tray(app: &AppHandle, enabled: bool) -> Result<(), String> {
+fn set_tray(app: &AppHandle, enabled: bool, english: bool) -> Result<(), String> {
+    let label = if english {
+        "Open mini player"
+    } else {
+        "Abrir minirreproductor"
+    };
+    let state = app.state::<PlaybackTray>();
     if let Some(tray) = app.tray_by_id(TRAY_ID) {
+        let item = state.0.lock().unwrap().item.clone();
+        if let Some(item) = item {
+            item.set_text(label).map_err(|error| error.to_string())?;
+        }
         return tray
             .set_visible(enabled)
             .map_err(|_| "Could not change the nabnab tray icon.".into());
@@ -34,10 +76,12 @@ fn set_tray(app: &AppHandle, enabled: bool) -> Result<(), String> {
     }
     let show = MenuItem::with_id(app, "nabnab-show", "Mostrar nabnab", true, None::<&str>)
         .map_err(|_| "Could not prepare the tray menu.")?;
+    let mini = MenuItem::with_id(app, TRAY_MINI, label, false, None::<&str>)
+        .map_err(|_| "Could not prepare the tray menu.")?;
     let exit = MenuItem::with_id(app, "nabnab-exit", "Salir", true, None::<&str>)
         .map_err(|_| "Could not prepare the tray menu.")?;
-    let menu =
-        Menu::with_items(app, &[&show, &exit]).map_err(|_| "Could not prepare the tray menu.")?;
+    let menu = Menu::with_items(app, &[&show, &mini, &exit])
+        .map_err(|_| "Could not prepare the tray menu.")?;
     let icon = app
         .default_window_icon()
         .ok_or("The nabnab application icon is unavailable.")?
@@ -50,6 +94,9 @@ fn set_tray(app: &AppHandle, enabled: bool) -> Result<(), String> {
         .on_menu_event(|app, event| match event.id().as_ref() {
             "nabnab-show" => {
                 let _ = show_main(app);
+            }
+            TRAY_MINI => {
+                let _ = app.emit_to(EventTarget::webview("main"), "playback-mini-open", ());
             }
             "nabnab-exit" => app.exit(0),
             _ => {}
@@ -67,6 +114,13 @@ fn set_tray(app: &AppHandle, enabled: bool) -> Result<(), String> {
         })
         .build(app)
         .map_err(|_| "Could not add the nabnab tray icon.")?;
+    let available = {
+        let mut state = state.0.lock().unwrap();
+        state.item = Some(mini.clone());
+        state.available
+    };
+    mini.set_enabled(available)
+        .map_err(|error| error.to_string())?;
     Ok(())
 }
 
@@ -230,7 +284,7 @@ fn set_windows_startup(enabled: bool) -> Result<(), String> {
 pub fn apply(app: &AppHandle, settings: &Settings) -> Result<(), String> {
     settings.validate()?;
     set_windows_startup(settings.start_with_windows)?;
-    set_tray(app, settings.tray_enabled)
+    set_tray(app, settings.tray_enabled, settings.language == "en")
 }
 
 pub fn close_to_tray(app: &AppHandle) -> Result<(), String> {

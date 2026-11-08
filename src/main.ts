@@ -154,11 +154,17 @@ const libraryFeatures=createLibraryFeatures({
 });
 let desktopWheelConfig = "";
 let desktopWheelRevision = 0;
+let trayPlaybackAvailable: boolean | undefined;
 const audioPlayer=createAudioPlayer({
   item: id => snapshot.library.find(item => item.id === id),
   command, render: renderCurrent, refresh, showError, t,
   fullscreen: enabled => getCurrentWindow().setFullscreen(enabled),
   miniWindow: desktop ? action => command("playback_mini_window", {action}) : undefined,
+  trayPlayback: desktop ? available => {
+    if (available === trayPlaybackAvailable) return;
+    trayPlaybackAvailable = available;
+    void command("playback_tray_available", {available}).catch(showError);
+  } : undefined,
   desktopWheel: desktop ? session => {
     const configuration = session && { ...session, language: snapshot.settings.language,
       reducedMotion: snapshot.settings.reducedMotion, reducedTransparency: snapshot.settings.reducedTransparency };
@@ -919,6 +925,7 @@ if(desktop){
   const updateMaximize=async()=>{const maximized=await nativeWindow.isMaximized();const button=required('#maximize');button.dataset.maximized=String(maximized);const label=maximized?t("Restaurar", "Restore"):t("Maximizar", "Maximize");button.setAttribute('aria-label',label);button.title=label;};
   try{
     await listen('playback-mini-restored',audioPlayer.nativeMiniRestored);
+    await listen('playback-mini-open',audioPlayer.openFloatingMini,{target:{kind:"Webview",label:"main"}});
     await listen<WheelAction>('quick-skip-action',({payload})=>audioPlayer.wheelAction(payload),{target:{kind:"Webview",label:"main"}});
     await nativeWindow.onResized(async()=>{if(await nativeWindow.isMinimized())audioPlayer.detachMini();await updateMaximize();});
     await updateMaximize();

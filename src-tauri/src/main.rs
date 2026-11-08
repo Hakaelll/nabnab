@@ -1214,6 +1214,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .manage(state)
         .manage(quick_skip::DesktopWheel::default())
+        .manage(preferences::PlaybackTray::default())
         .manage(courses::browser::Reviews::default())
         .register_uri_scheme_protocol("nabmedia", |context, request| {
             local_media::serve(context.app_handle(), request)
@@ -1226,6 +1227,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             playback_mini::playback_mini_window,
+            preferences::playback_tray_available,
             quick_skip::quick_skip_session, quick_skip::quick_skip_overlay,
             web_archive::archive_document,web_archive::archive_add_annotation,web_archive::archive_remove_annotation,web_archive::queue_article_export,
             capture_operations::screen_capture_status,capture_operations::screen_capture_sources,capture_operations::screen_capture_preview,capture_operations::cancel_screen_capture_preview,capture_operations::screen_capture_start,capture_operations::screen_capture_stop,capture_operations::screen_capture_save_replay,capture_operations::screen_capture_screenshot,capture_operations::screen_capture_recoverable,capture_operations::queue_screen_capture_recovery,

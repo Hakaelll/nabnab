@@ -28,6 +28,7 @@ interface Hooks {
   refresh(): Promise<void>;
   fullscreen(enabled: boolean): Promise<void>;
   miniWindow?(action: "detach-audio" | "detach-video" | "restore" | "drag" | "resize-audio" | "resize-video"): Promise<void>;
+  trayPlayback?(available: boolean): void;
   desktopWheel?(session: WheelSession | null): void;
   convert(id: string): void;
   timeChanged(id: string, time: number): void;
@@ -221,6 +222,12 @@ export function createAudioPlayer(hooks: Hooks) {
       hooks.showError(error);
     }).finally(() => { changingWindow = false; });
     return true;
+  }
+
+  function openFloatingMini() {
+    if (detached || changingWindow || !isPlayable(current())) return;
+    if (!mini?.active()) showMini();
+    detachMini();
   }
 
   function backFromStage() {
@@ -417,6 +424,7 @@ export function createAudioPlayer(hooks: Hooks) {
     if (!host || !transport || !media) return;
     const item = current();
     const floating = mini?.active();
+    hooks.trayPlayback?.(isPlayable(item));
     host.hidden = !item || expanded || Boolean(floating);
     document.documentElement.classList.toggle("has-audio-player", !host.hidden);
     if (!item) { transport.replaceChildren(); syncDesktopWheel(); return; }
@@ -1020,7 +1028,7 @@ export function createAudioPlayer(hooks: Hooks) {
     return true;
   }
 
-  return { mount, render, restore, play, playAt, add, remove, input, click, key, current, nextEntries, seek, persist, detachMini,
+  return { mount, render, restore, play, playAt, add, remove, input, click, key, current, nextEntries, seek, persist, detachMini, openFloatingMini,
     nativeMiniRestored: () => setDetached(false), syncDesktopWheel, wheelAction, isExpanded: () => expanded, isDetached: () => detached,
     timeFor: (id: string) => id === currentId() && matchesSource() && media?.readyState ? media.currentTime : undefined,
     time: () => media?.currentTime ?? 0 };
