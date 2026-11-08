@@ -584,8 +584,8 @@ try {
     };
     const locations = new WeakMap();
     const proto = WebGL2RenderingContext.prototype;
-    const location = proto.getUniformLocation, uniform4 = proto.uniform4f, uniform1 = proto.uniform1f, draw = proto.drawArrays;
-    window.sceneProbe = { frames: 0, signal: [], blend: 1, timestamps: [] };
+    const location = proto.getUniformLocation, uniform4 = proto.uniform4f, uniform1 = proto.uniform1f, uniformId = proto.uniform1i, draw = proto.drawArrays;
+    window.sceneProbe = { frames: 0, signal: [], blend: 1, scene: 0, timestamps: [] };
     proto.getUniformLocation = function (program, name) {
       const value = location.call(this, program, name);
       if (value) locations.set(value, name);
@@ -598,6 +598,10 @@ try {
     proto.uniform1f = function (uniform, value) {
       if (this.canvas.closest(".music-surface") && locations.get(uniform) === "blend") window.sceneProbe.blend = value;
       return uniform1.call(this, uniform, value);
+    };
+    proto.uniform1i = function (uniform, value) {
+      if (this.canvas.closest(".music-surface") && locations.get(uniform) === "scene") window.sceneProbe.scene = value;
+      return uniformId.call(this, uniform, value);
     };
     proto.drawArrays = function (...args) {
       if (this.canvas.closest(".music-surface")) {
@@ -621,7 +625,9 @@ try {
   await rpc("library_playback", { id: videoId, position: 5.25 });
   await page.reload();
   await page.locator('[data-page="library"]').click();
-  await play(videoId);
+  await page.locator(`.media-details[data-id="${videoId}"]`).click();
+  await page.locator('[data-action="close-inspector"]:visible').click();
+  await page.locator(`.media-open[data-id="${videoId}"]`).dblclick();
   await stage().locator("#stage-resume").waitFor();
   const original = await page.locator("#audio-engine").elementHandle();
   assert.equal((await playing()).paused, true);
@@ -743,11 +749,26 @@ try {
   await clickStage("captions");
   await clickStage("back");
   await page.locator("#audio-close").click();
-  await play(musicId);
+  await page.locator('[data-action="library-layout"][data-layout="list"]').click();
+  const musicRow = page.locator(`.media-list .media-open[data-id="${musicId}"]`);
+  await musicRow.click();
+  assert.equal(await page.locator("#audio-player").isVisible(), false);
+  await musicRow.dblclick();
   await wait(async () => { const current = await playing(); return current.id === musicId && current.time > 0; });
   await page.locator("#audio-player").waitFor();
   assert.ok(await page.locator("#audio-player").evaluate(bar => bar.scrollWidth <= bar.clientWidth + 1));
   await page.screenshot({ path: path.join(base, "compact-900.png"), animations: "disabled" });
+  await page.locator('[data-page="home"]').click();
+  await page.locator("#url").waitFor();
+  assert.ok(await page.locator(".work-area").evaluate(area => {
+    const main = area.querySelector("#main"), bar = area.querySelector("#audio-player");
+    const frame = area.getBoundingClientRect(), controls = bar.getBoundingClientRect();
+    return main.getBoundingClientRect().bottom === controls.top && controls.bottom === frame.bottom
+      && controls.left === frame.left && getComputedStyle(bar).borderTopWidth === "0px";
+  }));
+  await page.screenshot({ path: path.join(base, "compact-home-900.png"), animations: "disabled" });
+  await page.locator('[data-page="library"]').click();
+  await page.locator('[data-action="library-layout"][data-layout="grid"]').click();
   assert.equal(await original.evaluate(element => element === document.getElementById("audio-engine")), true);
 
   await page.locator(".audio-visualize").click();
@@ -768,9 +789,10 @@ try {
   assert.ok(await stage().locator("#stage-panel-scenes").evaluate(panel => {
     const bounds = panel.getBoundingClientRect();
     const timeline = document.querySelector(".stage-timeline").getBoundingClientRect();
-    return bounds.top >= 0 && bounds.right <= innerWidth && bounds.bottom < timeline.top && panel.scrollHeight <= panel.clientHeight + 1;
+    return bounds.top >= 0 && bounds.right <= innerWidth && bounds.bottom < timeline.top
+      && panel.scrollWidth <= panel.clientWidth + 1 && getComputedStyle(panel).overflowY === "auto";
   }));
-  assert.equal(await page.locator(".music-scene-pick").count(), 8);
+  assert.equal(await page.locator(".music-scene-pick").count(), 13);
   await wait(async () => page.locator(".music-scene-pick img").evaluateAll(images => images.every(image => image.complete && image.naturalWidth > 0)));
   await page.locator("#scene-favorite-4").click();
   assert.equal(await page.locator("#scene-favorite-4").getAttribute("aria-pressed"), "true");
@@ -779,6 +801,33 @@ try {
   await page.locator("#scene-color").selectOption("color");
   await wait(async () => (await graphics()).blend === 1);
   await page.screenshot({ path: path.join(base, "music-scenes-900.png"), animations: "disabled" });
+  await stage().locator("#stage-seek").evaluate(range => { range.value = "12"; range.dispatchEvent(new Event("input", { bubbles: true })); });
+  const pixels = () => page.locator(".music-surface canvas").evaluate(canvas => {
+    const gl = canvas.getContext("webgl2");
+    const data = new Uint8Array(canvas.width * canvas.height * 4);
+    gl.readPixels(0, 0, canvas.width, canvas.height, gl.RGBA, gl.UNSIGNED_BYTE, data);
+    let hash = 2166136261, peak = 0;
+    for (let offset = 0; offset < data.length; offset += 68) {
+      const value = data[offset] + data[offset + 1] + data[offset + 2];
+      peak = Math.max(peak, value);
+      hash = Math.imul(hash ^ value, 16777619);
+    }
+    return { hash, peak };
+  });
+  const signatures = new Set();
+  for (const [index, name] of [[8, "moire"], [9, "phosphor"], [10, "cassette"], [11, "nacre"], [12, "vector"]]) {
+    await page.locator(`#scene-pick-${index}`).click();
+    await wait(async () => { const state = await graphics(); return state.scene === index && state.blend === 1 && state.signal[3] > .25; });
+    const first = await pixels();
+    assert.ok(first.peak > 120);
+    await wait(async () => (await pixels()).hash !== first.hash);
+    signatures.add(first.hash);
+    await page.keyboard.press("Escape");
+    await page.screenshot({ path: path.join(base, `music-${name}-900.png`), animations: "disabled" });
+    await clickStage("scenes");
+  }
+  assert.equal(signatures.size, 5);
+  await page.locator("#scene-pick-4").click();
   async function measure(quality) {
     await page.locator("#scene-quality").selectOption(quality);
     await wait(async () => (await graphics()).blend === 1);

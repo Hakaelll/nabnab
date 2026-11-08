@@ -30,6 +30,10 @@ try{
     ));
     const homeShell = await shell();
     assert.ok(homeShell[".sidebar-mark"][2] > 0 && homeShell[".titlebar-search"][2] > 0);
+    if (!before) assert.deepEqual(await page.locator(".work-area").evaluate(area => {
+      const style = getComputedStyle(area);
+      return [style.borderTopWidth, style.borderTopLeftRadius, style.backgroundColor];
+    }), ["0px", "0px", "rgba(0, 0, 0, 0)"], "The workspace does not draw a second screen over the shared background.");
     assert.deepEqual(await page.locator("#emblem").evaluate(canvas => {
       const orbit = getComputedStyle(canvas.parentElement, "::after");
       return [canvas.clientWidth, canvas.clientHeight, orbit.content];

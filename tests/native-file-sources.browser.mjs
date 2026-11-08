@@ -208,7 +208,7 @@ try {
   await page.locator("[data-page='library']").click();
   if (snapshot.library.length) await page.waitForFunction(() => document.querySelectorAll("[data-select-media]").length > 0);
   for (const item of snapshot.library) {
-    const label = await page.locator(`[data-action='inspect-media'][data-id=${JSON.stringify(item.id)}] .media-info > span`).innerText();
+    const label = await page.locator(`.media-item .media-open[data-id=${JSON.stringify(item.id)}] .media-info > span`).innerText();
     assert.match(label, item.kind === "document" ? /^Documento/ : item.kind === "file" ? /^Archivo/ : /^Imagen/, `The visible type must match ${item.kind}: ${item.name}`);
   }
   if (snapshot.library.some(item => item.kind === "image")) await page.waitForFunction(() => {

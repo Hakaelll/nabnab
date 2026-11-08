@@ -13,15 +13,16 @@ function fileKindLabel(kind:LibraryItem["kind"],t:Copy):string{
 }
 function itemKindLabel(item:LibraryItem,t:Copy):string{return item.details?.audiobook?t("Audiolibro","Audiobook"):item.details?.narration?t('Voz local','Local voice'):item.details?.recording?t(item.details.recording.kind==='image'?'Captura de pantalla':'Grabación',item.details.recording.kind==='image'?'Screenshot':'Recording'):fileKindLabel(item.kind,t);}
 function libraryTile(item:LibraryItem,view:LibraryView,t:Copy):string{
+  const playable = isPlayable(item);
   const extension=/\.([a-z0-9]{1,8})$/i.exec(item.name)?.[1]?.toUpperCase();
   const labels=[item.details?.recording?.interrupted?t('Parcial','Partial'):'',detailsFor(item).favorite?t("Favorito","Favorite"):"",item.collections.join(" · ")].filter(Boolean).join(" · ");
   return `<article class="media-item ${view.detailId===item.id?'is-selected':''}" data-media-kind="${item.kind}">
     <label class="media-check"><input type="checkbox" data-select-media="${h(item.id)}" aria-label="${h(t("Seleccionar ","Select ")+item.name)}" ${view.selected.has(item.id)?'checked':''}></label>
-    <button class="media-open" data-action="inspect-media" data-id="${h(item.id)}" aria-pressed="${view.detailId===item.id}">
+    <button type="button" class="media-open" data-action="${playable?'play-media':'inspect-media'}" data-id="${h(item.id)}" ${playable? `data-open-on-double-click aria-label="${h(t("Reproducir ", "Play ") + item.name)}" title="${t("Doble clic para reproducir", "Double-click to play")}"` : `aria-pressed="${view.detailId===item.id}"`}>
       <span class="media-poster" ${(item.kind==='video'||item.kind==='image')&&!item.missing?`data-thumbnail-id="${h(item.id)}"`:""}>${icon(item.kind==='subtitle'?'list':item.kind==='file'||item.kind==='article'?'document':item.kind)}${extension?`<span class="media-format" aria-hidden="true">${h(extension)}</span>`:""}</span>
       <span class="media-info"><strong title="${h(item.name)}">${h(item.name)}</strong><span>${itemKindLabel(item,t)}${item.duration!==null?' · '+durationLabel(item.duration):''} · ${bytesLabel(item.size)}</span>${item.missing?`<small class="missing-label">${t("No encontrado","Not found")}</small>`:labels?`<small class="media-annotations" title="${h(labels)}">${h(labels)}</small>`:""}</span>
     </button>
-    ${isPlayable(item) ? `<button type="button" class="icon-button media-play" data-action="play-media" data-id="${h(item.id)}" aria-label="${h(t("Reproducir ", "Play ") + item.name)}" title="${t("Reproducir", "Play")}">${icon("play")}</button>` : ""}
+    ${playable ? `<button type="button" class="icon-button media-details" data-action="inspect-media" data-id="${h(item.id)}" aria-pressed="${view.detailId===item.id}" aria-label="${h(t("Detalles de ", "Details for ") + item.name)}" title="${t("Detalles", "Details")}">${icon("info")}</button><button type="button" class="icon-button media-play" data-action="play-media" data-id="${h(item.id)}" aria-label="${h(t("Reproducir ", "Play ") + item.name)}" title="${t("Reproducir", "Play")}">${icon("play")}</button>` : ""}
   </article>`;
 }
 function inspectorBookmarks(item:LibraryItem,t:Copy):string{

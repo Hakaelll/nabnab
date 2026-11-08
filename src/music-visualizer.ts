@@ -5,6 +5,8 @@ export const scenes = [
   ["ink", "Tinta", "Ink"], ["vortex", "Vórtice", "Vortex"], ["silk", "Seda", "Silk"],
   ["interference", "Interferencia", "Interference"], ["orbit", "Órbita", "Orbit"],
   ["prism", "Prisma", "Prism"], ["rain", "Lluvia", "Rain"], ["aurora", "Aurora", "Aurora"],
+  ["moire", "Moiré", "Moiré"], ["phosphor", "Fósforo", "Phosphor"], ["cassette", "Casete", "Cassette"],
+  ["nacre", "Nácar", "Nacre"], ["vector", "Vectorial", "Vector Tunnel"],
 ] as const;
 export type Quality = "auto" | "high" | "low" | "off";
 
@@ -49,7 +51,7 @@ function renderer(canvas: HTMLCanvasElement) {
   const location = (name: string) => gl.getUniformLocation(program, name);
   const uniforms = {
     size: location("size"), signal: location("signal"), dynamics: location("dynamics"), wave: location("wave[0]"),
-    clock: location("clock"), delta: location("delta"), blend: location("blend"), color: location("colorMode"),
+    clock: location("clock"), drive: location("drive"), delta: location("delta"), blend: location("blend"), color: location("colorMode"),
     scene: location("scene"), previous: location("previous"),
   };
   const textures = [gl.createTexture(), gl.createTexture()];
@@ -85,7 +87,7 @@ function renderer(canvas: HTMLCanvasElement) {
     clear();
   }
 
-  function draw(scene: number, previous: number, blend: number, color: boolean, intensity: number, clock: number, dt: number, signal: PlaybackSignal) {
+  function draw(scene: number, previous: number, blend: number, color: boolean, intensity: number, clock: number, drive: number, dt: number, signal: PlaybackSignal) {
     const next = 1 - current;
     gl.bindFramebuffer(gl.FRAMEBUFFER, buffers[next]);
     gl.bindTexture(gl.TEXTURE_2D, textures[current]);
@@ -93,6 +95,7 @@ function renderer(canvas: HTMLCanvasElement) {
     gl.uniform2f(uniforms.dynamics, intensity * signal.attack, signal.stereo);
     gl.uniform1fv(uniforms.wave, signal.waveform);
     gl.uniform1f(uniforms.clock, clock);
+    gl.uniform1f(uniforms.drive, drive);
     gl.uniform1f(uniforms.delta, dt);
     gl.uniform1f(uniforms.blend, blend);
     gl.uniform1f(uniforms.color, Number(color));
@@ -118,7 +121,7 @@ export interface VisualSettings { scene: number; color: boolean; intensity: numb
 export function createMusicVisualizer(canvas: HTMLCanvasElement, read: (dt: number, playing: boolean) => PlaybackSignal | undefined,
   reducedMotion: () => boolean, failure: (failed: boolean) => void, tick: (seconds: number) => void) {
   let surface: ReturnType<typeof renderer> | undefined;
-  let frame = 0, last = 0, nextDue = 0, clock = 0, elapsed = 4, tail = 0, previous = 0, slowFrames = 0;
+  let frame = 0, last = 0, nextDue = 0, clock = 0, drive = 0, elapsed = 4, tail = 0, previous = 0, slowFrames = 0;
   let active = false, playing = false, blocked = false, adaptive = false, windowVisible = true;
   let bounds = { width: 0, height: 0 };
   let settings: VisualSettings = { scene: 0, color: false, intensity: 0.78, quality: "auto" };
@@ -152,10 +155,11 @@ export function createMusicVisualizer(canvas: HTMLCanvasElement, read: (dt: numb
       surface.resize(Math.max(2, Math.round(bounds.width * scale)), Math.max(2, Math.round(bounds.height * scale)));
       const input = staticFrame ? quiet : read(dt, playing) ?? quiet;
       clock += staticFrame ? 0 : dt * (playing ? .24 + .56 * input.level + .20 * input.mids : tail * .30);
+      drive += staticFrame || !playing ? 0 : dt * settings.intensity * (.75 * input.level + 2.1 * input.bass);
       elapsed = Math.min(3.6, elapsed + dt);
       const progress = staticFrame ? 1 : elapsed / 3.6;
       surface.draw(settings.scene, progress === 1 ? settings.scene : previous,
-        progress * progress * (3 - 2 * progress), settings.color, settings.intensity, clock, dt, input);
+        progress * progress * (3 - 2 * progress), settings.color, settings.intensity, clock, drive, dt, input);
       failure(false);
       if (playing) tick(dt);
       tail = Math.max(0, tail - dt);

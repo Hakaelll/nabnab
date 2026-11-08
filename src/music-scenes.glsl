@@ -8,6 +8,7 @@ uniform vec4 signal;
 uniform vec2 dynamics;
 uniform float wave[48];
 uniform float clock;
+uniform float drive;
 uniform float delta;
 uniform float blend;
 uniform float colorMode;
@@ -156,6 +157,137 @@ vec3 aurora(vec2 p, float time) {
   return sum;
 }
 
+float roundedBox(vec2 p, vec2 halfSize, float radius) {
+  vec2 q = abs(p) - halfSize + radius;
+  return length(max(q, 0.)) + min(max(q.x, q.y), 0.) - radius;
+}
+
+float gridLine(float value, float width) {
+  float distance = abs(fract(value + .5) - .5);
+  return 1. - smoothstep(width, width + clamp(fwidth(value),.001,.18), distance);
+}
+
+vec3 moire(vec2 p, float time) {
+  vec2 q = rotate(.22 + .19 * sin(time*.37)) * p;
+  vec2 center = vec2(.82+.19*signal.x,.42*sin(time*.41));
+  q.y += .15*sin(q.x*2.1-time*.72) + .11 * scope(uv.x);
+  float a = length(q - center), b = length(q + center);
+  float spacing = 18. + 7.*signal.y;
+  float waveA = cos(spacing*a - 2.4*drive + 1.3*sin(b*4.-time*.49));
+  float waveB = cos(spacing*b + 2.0*drive + 1.2*cos(a*3.6+time*.43));
+  float overlap = pow(.5+.5*waveA*waveB,4.);
+  float threads = pow(abs((waveA+waveB)*.5),9.);
+  float seam = thread(abs(a-b) - .32 - .12*signal.x,.07);
+  float crossing = smoothstep(-.65,.85,waveA*waveB) * (.20 + .54 * threads);
+  vec3 tint = palette(vec3(.23,.16,.67), vec3(.40,.92,.76), crossing);
+  vec3 glints = palette(vec3(.43,.14,.48), vec3(.91,.57,.78), .48);
+  return exp(-.12*dot(q,q)) * (tint*(.08 + .25*overlap + .40*threads) +
+    glints*seam*(.13 + .19*signal.z));
+}
+
+vec3 phosphor(vec2 p, float time) {
+  float aspect = size.x / size.y;
+  vec2 q = p * (1. + .035 * dot(uv-.5,uv-.5));
+  float caseEdge = roundedBox(p, vec2(aspect*.985,.955),.14);
+  float screen = roundedBox(q, vec2(aspect*.947,.855),.13);
+  float inside = 1. - smoothstep(-.006,.005,screen);
+  vec3 phosphorInk = palette(vec3(.08,.36,.27),vec3(.64,1.,.58),.72);
+  vec3 caseInk = palette(vec3(.12,.17,.15),vec3(.36,.39,.33),.27);
+  vec3 color = caseInk * (thread(caseEdge,.009)*.31 + (1.-smoothstep(-.03,.006,caseEdge))*.055);
+  color += phosphorInk * thread(screen,.007) * .21;
+  float raster = .78 + .22 * cos(gl_FragCoord.y * PI);
+  float graticule = max(gridLine(q.x*5.,.025),gridLine(q.y*5.,.025));
+  float marks = max(thread(q.y,.002),thread(q.x,.002)) * (.32 + .68 * gridLine((q.x + q.y)*36.,.10));
+  float phase = clamp(q.x / (aspect*1.88) + .5, 0., 1.);
+  float base = scope(phase);
+  float ghost = .58 * base + .42 * scope(phase + .021);
+  float width = .006 + .009 * signal.y;
+  float trace = thread(q.y - .23 - base*.98,width);
+  float echo = thread(q.y + .27 + ghost*.61,width*.76);
+  float persistence = thread(q.y - .23 - base*.98,.047) * (.08 + .22 * signal.x);
+  float sweep = thread(q.x - aspect*.93 * sin(time*.64),.12);
+  color += inside * raster * phosphorInk * (graticule*.048 + marks*.085 + sweep*.038 +
+    trace*(.24 + .45*signal.w) + echo*(.13 + .18*signal.z) + persistence);
+  vec2 lamp = p - vec2(aspect*.91,-.905);
+  float lights = 0.;
+  for (int i=0; i<3; i++) {
+    lights += thread(length(lamp + vec2(.06*float(i),0.)), .012) * (.30 + .28 * signal.z);
+  }
+  return color + phosphorInk*lights;
+}
+
+float reel(vec2 p, float angle, float size) {
+  float r = length(p), a = atan(p.y,p.x) + angle;
+  float spokes = pow(.5+.5*cos(a*6.),14.) * smoothstep(.058,.085,r) * (1.-smoothstep(.125,.145,r));
+  float teeth = pow(.5+.5*cos(a*42.),7.) * thread(r - size,.011);
+  return .33*thread(r-size,.012) + teeth*.34 + spokes*.62 + .49*thread(r-.055,.007);
+}
+
+vec3 cassette(vec2 p, float time) {
+  vec2 q = rotate(-.078 + .022*sin(time*.58)) * p;
+  q.y += .022 * sin(time*.71) + .022 * dynamics.x;
+  float shell = roundedBox(q, vec2(1.08,.55),.075);
+  float face = 1. - smoothstep(-.015,.005,shell);
+  float paper = roundedBox(q - vec2(0.,.14),vec2(.99,.33),.03);
+  float windowEdge = roundedBox(q - vec2(0.,.055),vec2(.75,.194),.115);
+  float inWindow = 1. - smoothstep(-.006,.006,windowEdge);
+  vec3 chrome = palette(vec3(.19,.22,.27),vec3(.72,.76,.72),.52);
+  vec3 label = palette(vec3(.23,.08,.22),vec3(.94,.55,.28),.41);
+  vec3 color = chrome * (thread(shell,.009)*.48 + face*.07);
+  float sheen = (q.y - .33)*25.;
+  color += label * (1.-inWindow) * (1.-smoothstep(-.006,.006,paper)) *
+    (.12 + .20 * exp(-sheen*sheen) + .08*thread(q.y + .095,.035));
+  color += chrome * thread(windowEdge,.006) * .39;
+  vec2 left = q - vec2(-.46,.055), right = q - vec2(.46,.055);
+  float winding = .018*sin(drive*.25);
+  float reels = reel(left,drive*1.78,.16+winding) + reel(right,drive*2.18,.15-winding);
+  float tape = thread(q.y + .11 + .018 * scope(q.x*.67+.5), .013) * (1.-smoothstep(.42,.49,abs(q.x)));
+  color += inWindow * chrome * (reels*.58 + tape*(.32 + .29*signal.x));
+  float lower = roundedBox(vec2(q.x*(1. + q.y*.6),q.y+.414),vec2(.54,.092),.026);
+  color += chrome * (thread(lower,.006)*.28 + face * .05 * smoothstep(.15,.51,abs(q.x)));
+  float holes = thread(length(vec2(abs(q.x)-.22,q.y+.405))-.035,.007);
+  float screws = thread(length(abs(q)-vec2(.992,.469))-.018,.006);
+  float printMarks = thread(q.y-.395,.005) * (1.-smoothstep(.12,.13,abs(q.x+.59)));
+  float leds = gridLine((q.x+.28)*15.,.14) * thread(q.y+.42,.007) * step(0.,q.x) * step(q.x,.44*signal.w);
+  float grooves = pow(.5+.5*cos(29. * length(p*vec2(.7,1.)) - drive*.43),8.) * exp(-.39*dot(p,p));
+  return color + chrome*(.52*screws + .43*holes + .22*printMarks + grooves*.07*(1.-face)) + label*leds*.7;
+}
+
+vec3 nacre(vec2 p, float time) {
+  vec2 q = rotate(-.37 + .15*sin(time*.40)) * p;
+  float drift = .50*sin(q.x*1.63 - time*.62) + .22*cos(q.x*3.6 + time*.78);
+  drift += .19*sin(q.x*6.9 - .77*drive + q.y*2.1) * signal.y + .14 * scope(uv.x);
+  float surface = q.y + drift + .27*sin(q.y*2.4 - time*.53 + q.x*2.);
+  float bands = surface*1.84 + .23*cos(q.x*3.8 + drive*.33);
+  float folds = pow(.5+.5*cos(bands*PI*2.),5.);
+  float fibers = gridLine(bands*11. + .38*sin(q.x*15. + time*.72),.022);
+  float sheen = .5+.5*sin(surface*8. - q.x*2. + time*.61);
+  float edge = gridLine(bands,.055) * (.22+.28*signal.z);
+  vec3 shell = palette(vec3(.17,.26,.60), vec3(.87,.64,.55),sheen);
+  vec3 rim = palette(vec3(.24,.37,.67),vec3(.55,.97,.85),.38+.38*sheen);
+  return (shell*(.065+folds*(.24+.16*signal.x)) + rim*(edge + fibers*(.046+.09*signal.z))) *
+    (.72 + .28*exp(-.32*dot(q,q)));
+}
+
+vec3 vectorTunnel(vec2 p, float time) {
+  vec2 q = p - vec2(.19*sin(time*.51)+.13*dynamics.y,.14*cos(time*.41));
+  float r = length(q);
+  float theta = atan(q.y,q.x) + .19*time + .29*signal.y*sin(r*2.3);
+  float angle = mod(theta + PI/6., PI/3.) - PI/6.;
+  float polygon = r*cos(angle);
+  float depth = log(max(polygon,.018) + .075);
+  float sweep = depth*3.1 - drive*.47;
+  float gate = gridLine(sweep,.026);
+  float rafters = gridLine(theta*6./(2.*PI),.017);
+  float etch = gridLine(sweep*3.,.018) * (.12+.17*signal.z);
+  float band = smoothstep(.08,.2,polygon) * (.82 + .18*cos(depth*6.2));
+  float sparks = pow(.5+.5*cos(theta*24. + drive*2.2),8.) * gate;
+  float bloom = thread(fract(sweep+.5)-.5,.11) * (.11+.20*signal.x);
+  vec3 frame = palette(vec3(.13,.22,.53),vec3(.85,.50,.23),.46+.34*cos(sweep*2.));
+  vec3 beam = palette(vec3(.31,.16,.47),vec3(.42,.82,1.),.57);
+  return band * (frame*(gate*.56 + bloom + sparks*.18) + beam*(rafters*.24+etch));
+}
+
 vec3 shape(int mode, vec2 p, float time) {
   if (mode == 0) return ink(p, time);
   if (mode == 1) return vortex(p, time);
@@ -164,23 +296,29 @@ vec3 shape(int mode, vec2 p, float time) {
   if (mode == 4) return orbit(p, time);
   if (mode == 5) return prism(p, time);
   if (mode == 6) return rain(p, time);
-  return aurora(p, time);
+  if (mode == 7) return aurora(p, time);
+  if (mode == 8) return moire(p,time);
+  if (mode == 9) return phosphor(p,time);
+  if (mode == 10) return cassette(p,time);
+  if (mode == 11) return nacre(p,time);
+  return vectorTunnel(p,time);
 }
 
 void main() {
   float aspect = size.x/size.y;
   vec2 p = (uv-.5)*2.*vec2(aspect,1.);
   float r = length(p);
-  float flow = (.07 + .10*signal.y + .14*sin(clock*.41 + r*3.))*delta;
+  float vintage = mix(previous == 9 || previous == 10 ? 1. : 0., scene == 9 || scene == 10 ? 1. : 0., blend);
+  float flow = (.07 + .10*signal.y + .14*sin(clock*.41 + r*3.))*delta*(1.-vintage*.82);
   vec2 warped = rotate(flow) * p * (1. + delta*(.095 + .22*signal.x));
   warped += delta*.025*vec2(sin(p.y*7.+clock), cos(p.x*6.-clock));
   vec3 old = texture(trail, warped/vec2(aspect,1.)*.5+.5).rgb;
   vec3 form = shape(scene,p,clock);
   if (previous != scene) form = mix(shape(previous,p,clock),form,blend);
   float dt = delta * 30.;
-  float presence = .32 + .64*signal.w;
+  float presence = mix(.32,.45,vintage) + mix(.64,.54,vintage)*signal.w;
   vec3 light = pow(clamp(form * 1.65, 0., .92), vec3(.61)) * presence;
-  vec3 feedback = old * exp(-delta*(4.0 - 1.15*signal.x));
+  vec3 feedback = old * exp(-delta*(4.0 + 6.*vintage - 1.15*signal.x));
   vec3 combined = max(light, min(vec3(.82),feedback + light*dt*.14));
   pixel = vec4(combined,1.);
 }

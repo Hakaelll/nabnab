@@ -148,7 +148,10 @@
   .playback-stage[data-state="loading"] .stage-scrub input::-webkit-slider-runnable-track { animation: none; }
 }
 .media-play { position: absolute; top: 17px; right: 17px; width: 40px; height: 40px; border: 1px solid var(--border); border-radius: 8px; background: var(--secondary); }
-.media-list .media-item:has(.media-play) .media-open { padding-right: 48px; }
+.media-details { position: absolute; top: 19px; right: 63px; width: 32px; height: 32px; border: 1px solid var(--border); border-radius: 50%; background: var(--secondary); }
+.media-details svg { width: 16px; height: 16px; }
+.media-list .media-item:has(.media-play) .media-open { padding-right: 86px; }
+.media-list .media-details { top: 50%; transform: translateY(-50%); right: 55px; }
 .media-list .media-play { top: 50%; transform: translateY(-50%); right: 10px; }
 .inspector-media-art { min-height: 76px; display: grid; place-items: center; background: var(--secondary); border-radius: 8px; overflow: hidden; }
 .inspector-media-art svg { width: 30px; height: 30px; stroke: var(--muted); }

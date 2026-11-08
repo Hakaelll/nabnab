@@ -3,26 +3,17 @@
 .app-shell {
   --work-top: 40px;
   --work-gutter: 12px;
-  --work-radius: 22px;
 }
-#main {
-  height: auto;
+.work-area {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-width: 0;
+  min-height: 0;
   margin: var(--work-top) var(--work-gutter) var(--work-gutter) 0;
-  border: 1px solid var(--edge-quiet);
-  border-radius: var(--work-radius);
-  background: color-mix(in srgb, var(--background) 52%, transparent);
+  overflow: hidden;
 }
-.has-audio-player #main {
-  margin-bottom: 0;
-  border-bottom: 0;
-  border-bottom-left-radius: 0;
-  border-bottom-right-radius: 0;
-}
-.has-audio-player .audio-player {
-  margin: 0 var(--work-gutter) var(--work-gutter) 0;
-  border: 1px solid var(--edge-quiet);
-  border-radius: 0 0 var(--work-radius) var(--work-radius);
-  background: var(--surface);
+.work-area .audio-player {
+  background: linear-gradient(transparent, color-mix(in srgb, var(--surface) 65%, transparent) 90%);
 }
 .sidebar {
   border-right: 0;
@@ -326,7 +317,7 @@ body:not([data-page="home"]) :is(#page-content,.inspector,.detail-dialog) textar
 body:not([data-page="home"]) :is(#page-content,.inspector,.detail-dialog) :is(button,input,select,textarea):focus-visible { outline: 2px solid var(--action); outline-offset: 3px; }
 body:not([data-page="home"]) :is(#page-content,.inspector,.detail-dialog) :is(button,input,select,textarea):disabled { cursor: not-allowed; }
 body:not([data-page="home"]) .inspector {
-  height: calc(100dvh - var(--work-top) - var(--work-gutter) - var(--audio-player-height, 0px) - 2px);
+  height: calc(100dvh - var(--work-top) - var(--work-gutter) - var(--audio-player-height, 0px));
   background-color: var(--secondary);
   background-image: none;
   border-left-color: var(--edge-quiet);
@@ -373,7 +364,7 @@ body[data-page="platforms"] #page-content .platform-filters { position: sticky; 
   body[data-page="platforms"] #page-content .platform-filters { position: static; }
 }
 @media (forced-colors: active) {
-  :is(#main, .nav-item[aria-current="page"]) { border-color: CanvasText; }
+  .nav-item[aria-current="page"] { border-color: CanvasText; }
   .sidebar-mark { background: CanvasText; forced-color-adjust: none; }
   body[data-page="library"] :is(.media-item,.media-poster,.media-format) { border-color: CanvasText; }
   body[data-page="library"] .media-format { background: Canvas; color: CanvasText; }
