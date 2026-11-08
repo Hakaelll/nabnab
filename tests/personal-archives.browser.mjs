@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 const { chromium } = createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODULE || "playwright");
 const browser = await chromium.launch({ headless: true, channel: "msedge" });
 const base = process.env.NABNAB_UI_URL || "http://127.0.0.1:1420/";
-const directory = "artifacts/personal-archives";
+const directory = process.env.NABNAB_ARCHIVE_ARTIFACTS || "artifacts/personal-archives";
 await mkdir(directory, { recursive: true });
 const page = await browser.newPage({ viewport: { width: 1180, height: 780 } });
 const errors = [];

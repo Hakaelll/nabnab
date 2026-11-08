@@ -512,6 +512,13 @@ fn merge(records: &mut Records, new: Records) -> Result<(), String> {
                 if category == Category::Listening && saved[index].listening_item.is_none() {
                     saved[index].listening_item = row.listening_item;
                 }
+                let attachments = &mut saved[index].attachment_ids;
+                for id in row.attachment_ids {
+                    if attachments.len() < parse::MAX_POST_ATTACHMENTS && !attachments.contains(&id)
+                    {
+                        attachments.push(id);
+                    }
+                }
             } else {
                 positions.insert(row.id.clone(), saved.len());
                 saved.push(row);
@@ -820,7 +827,7 @@ fn archive_records(state: &AppState, id: &str) -> Result<(Summary, Records), Str
     Ok((summary, records))
 }
 
-fn attachment_counts(records: &Records) -> HashMap<String, usize> {
+fn x_attachment_counts(records: &Records) -> HashMap<String, usize> {
     let mut counts = HashMap::new();
     for owner in records
         .get(&Category::Media)
@@ -909,10 +916,21 @@ pub fn personal_archive_records(
         return Err("Listening summaries are available for imported Spotify history.".into());
     }
     let show_threads = summary.provider == Provider::X && category == Category::Posts;
-    let counts = if show_threads {
-        attachment_counts(&records)
+    let x_counts = if show_threads {
+        x_attachment_counts(&records)
     } else {
         HashMap::new()
+    };
+    let meta_media = if summary.provider.is_meta() && category == Category::Posts {
+        records
+            .get(&Category::Media)
+            .into_iter()
+            .flatten()
+            .filter(|row| row.media.is_some())
+            .map(|row| row.id.as_str())
+            .collect::<HashSet<_>>()
+    } else {
+        HashSet::new()
     };
     let parents: HashSet<_> = if show_threads {
         rows.iter().filter_map(Record::reply_parent).collect()
@@ -972,7 +990,14 @@ pub fn personal_archive_records(
                     show_threads && (parents.contains(&row.id) || row.reply_parent().is_some());
                 RowView {
                     has_thread,
-                    attachment_count: counts.get(&row.id).copied().unwrap_or(0),
+                    attachment_count: if show_threads {
+                        x_counts.get(&row.id).copied().unwrap_or(0)
+                    } else {
+                        row.attachment_ids
+                            .iter()
+                            .filter(|id| meta_media.contains(id.as_str()))
+                            .count()
+                    },
                     ..RowView::from(row)
                 }
             })
@@ -1099,7 +1124,7 @@ pub async fn personal_archive_thread(
         }
         let rows = records.remove(&Category::Posts).unwrap_or_default();
         let mut page = archived_thread(rows, &record, offset)?;
-        let counts = attachment_counts(&records);
+        let counts = x_attachment_counts(&records);
         for post in &mut page.posts {
             post.row.attachment_count = counts.get(&post.row.id).copied().unwrap_or(0);
         }
@@ -1118,25 +1143,41 @@ pub struct AttachmentPage {
 }
 
 fn attachment_page(
+    provider: Provider,
     mut records: Records,
     post: &str,
     offset: usize,
 ) -> Result<AttachmentPage, String> {
-    if !records
+    let media = records.remove(&Category::Media).unwrap_or_default();
+    let post_record = records
         .get(&Category::Posts)
-        .is_some_and(|rows| rows.iter().any(|row| row.id == post))
-    {
-        return Err("The selected post is no longer in this export.".into());
-    }
-    let mut rows = records.remove(&Category::Media).unwrap_or_default();
-    rows.retain(|row| {
-        row.media
-            .as_deref()
-            .and_then(parse::x_attachment_owner)
-            .as_deref()
-            == Some(post)
-    });
-    rows.sort_by(|a, b| a.title.cmp(&b.title).then_with(|| a.source.cmp(&b.source)));
+        .and_then(|rows| rows.iter().find(|row| row.id == post))
+        .ok_or("The selected post is no longer in this export.")?;
+    let rows: Vec<_> = if provider.is_meta() {
+        let mut by_id = media
+            .into_iter()
+            .filter(|row| row.media.is_some())
+            .map(|row| (row.id.clone(), row))
+            .collect::<HashMap<_, _>>();
+        post_record
+            .attachment_ids
+            .iter()
+            .filter_map(|id| by_id.remove(id))
+            .collect()
+    } else {
+        let mut rows: Vec<_> = media
+            .into_iter()
+            .filter(|row| {
+                row.media
+                    .as_deref()
+                    .and_then(parse::x_attachment_owner)
+                    .as_deref()
+                    == Some(post)
+            })
+            .collect();
+        rows.sort_by(|a, b| a.title.cmp(&b.title).then_with(|| a.source.cmp(&b.source)));
+        rows
+    };
     let total = rows.len();
     let offset = offset.min(total.saturating_sub(1)) / PAGE * PAGE;
     let rows = rows
@@ -1160,10 +1201,12 @@ pub fn personal_archive_attachments(
     offset: usize,
 ) -> Result<AttachmentPage, String> {
     let (summary, records) = archive_records(&state, &id)?;
-    if summary.provider != Provider::X {
-        return Err("Post attachments are available for imported X posts.".into());
+    if summary.provider != Provider::X && !summary.provider.is_meta() {
+        return Err(
+            "Post attachments are available for imported X, Instagram and Facebook posts.".into(),
+        );
     }
-    attachment_page(records, &post, offset)
+    attachment_page(summary.provider, records, &post, offset)
 }
 
 #[tauri::command]
@@ -1447,7 +1490,7 @@ mod tests {
         .await
         .unwrap()
         .archive;
-        assert!(attachment_counts(&read_records(&root, &first).unwrap()).is_empty());
+        assert!(x_attachment_counts(&read_records(&root, &first).unwrap()).is_empty());
         let archive = import(
             &root,
             &storage,
@@ -1462,11 +1505,12 @@ mod tests {
         let mut records = read_records(&root, &archive).unwrap();
         let key = |id| format!("{:x}", Sha256::digest(format!("{id}")));
         assert_eq!(records[&Category::Messages].len(), 1);
-        let counts = attachment_counts(&records);
+        let counts = x_attachment_counts(&records);
         assert_eq!(counts[&key(1)], 2);
         assert_eq!(counts[&key(11)], 1);
         assert!(!counts.contains_key(&key(2)));
-        let attachments = attachment_page(records.clone(), &key(1), usize::MAX).unwrap();
+        let attachments =
+            attachment_page(Provider::X, records.clone(), &key(1), usize::MAX).unwrap();
         assert_eq!((attachments.total, attachments.offset), (2, 0));
         assert_eq!(
             attachments
@@ -1476,7 +1520,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["1-a-video.mp4", "1-b-photo.png"]
         );
-        assert!(attachment_page(records.clone(), &key(99), 0).is_err());
+        assert!(attachment_page(Provider::X, records.clone(), &key(99), 0).is_err());
         let rows = records.remove(&Category::Posts).unwrap();
 
         let first = archived_thread(rows.clone(), &key(1), None).unwrap();
@@ -1513,7 +1557,12 @@ mod tests {
         let files = [
             (
                 "your_facebook_activity/posts/your_posts.json",
-                r#"[{"id":"1","content":"A fixture post","timestamp":1717200000}]"#,
+                r#"[{"id":"1","content":"A fixture post","timestamp":1717200000,"attachments":[{"data":[
+                    {"media":{"uri":"your_facebook_activity/posts/media/day/clip.mp4"}},
+                    {"media":{"uri":"your_facebook_activity/posts/media/day/photo.jpg"}},
+                    {"media":{"uri":"your_facebook_activity/messages/inbox/thread/photos/photo.jpg"}},
+                    {"media":{"uri":"your_facebook_activity/posts/media/day/missing.jpg"}}
+                ]}]}]"#,
             ),
             (
                 "your_facebook_activity/messages/inbox/thread/message_1.json",
@@ -1526,6 +1575,18 @@ mod tests {
             (
                 "security/session_cookies.json",
                 r#"[{"content":"excluded cookie fixture"}]"#,
+            ),
+            (
+                "your_facebook_activity/posts/media/day/photo.jpg",
+                "public photo",
+            ),
+            (
+                "your_facebook_activity/posts/media/day/clip.mp4",
+                "public video",
+            ),
+            (
+                "your_facebook_activity/posts/media/other/photo.jpg",
+                "same filename, different path",
             ),
         ];
         let inputs = files
@@ -1581,6 +1642,14 @@ mod tests {
         .archive;
         assert_eq!(imported.categories, BTreeMap::from([(Category::Posts, 1)]));
         assert_eq!(imported.media_bytes, 0);
+        let first = read_records(&root, &imported).unwrap();
+        let post_id = first[&Category::Posts][0].id.clone();
+        assert_eq!(
+            attachment_page(Provider::Facebook, first, &post_id, 0)
+                .unwrap()
+                .total,
+            0
+        );
         let private = import(
             &root,
             &archive,
@@ -1596,7 +1665,10 @@ mod tests {
             &root,
             &archive,
             plan,
-            selection(vec![Category::Posts], vec![Category::Messages]),
+            selection(
+                vec![Category::Posts, Category::Media],
+                vec![Category::Messages],
+            ),
             cancel,
         )
         .await
@@ -1604,9 +1676,35 @@ mod tests {
         .archive;
         assert_eq!(
             repeated.categories,
-            BTreeMap::from([(Category::Posts, 1), (Category::Messages, 2)])
+            BTreeMap::from([
+                (Category::Posts, 1),
+                (Category::Messages, 2),
+                (Category::Media, 3)
+            ])
         );
-        assert_eq!(repeated.media_bytes, 21);
+        assert_eq!(
+            repeated.media_bytes,
+            [2, 4, 5, 6]
+                .iter()
+                .map(|index| files[*index].1.len() as u64)
+                .sum::<u64>()
+        );
+        let attached = attachment_page(
+            Provider::Facebook,
+            read_records(&root, &repeated).unwrap(),
+            &post_id,
+            0,
+        )
+        .unwrap();
+        assert_eq!(attached.total, 2);
+        assert_eq!(
+            attached
+                .rows
+                .iter()
+                .map(|row| row.source.as_str())
+                .collect::<Vec<_>>(),
+            [files[5].0, files[4].0]
+        );
         assert_eq!(
             repeated.formats[&Category::Messages],
             [Format::Json, Format::Media]

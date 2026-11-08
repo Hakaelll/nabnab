@@ -21,6 +21,10 @@ For an X post with a recorded reply relationship, open **View thread**. Nabnab f
 
 An X post with matching local media shows an attachment count in the posts list and in the thread. Open it to preview or save the matching files. Nabnab matches an exact numeric post ID at the start of the filename in a recognized post media folder in the same import. You can add the Media category by reimporting the same package. Unmatched files stay in **Media**. Attachments from private messages stay in their own category.
 
+For Instagram and Facebook JSON exports, select **Posts** and **Media** to see available photos and videos on their post, in export order. Select the attachment count to open the existing preview and save controls. Nabnab reads up to 64 references per post from `media[].uri` or `attachments[].data[].media.uri` and matches the exact path of a file imported into **Media** from the same package. Reimport the original ZIP with both categories to add the links to an older import. Unmatched files remain in **Media**. Private message media stays in **Messages**.
+
+![Instagram post attachments in Windows with synthetic data](personal-archive-meta-attachments.png)
+
 ![Archived X thread opened in Windows with synthetic data](personal-archive-thread.png)
 
 ![Spotify listening history with separate event and completion counts](personal-archive-listening.png)
@@ -43,3 +47,5 @@ Provider documentation on requesting an export
 - [LinkedIn account data](https://www.linkedin.com/help/linkedin/answer/a1339364)
 
 Verification uses synthetic exports. The Windows tests exercise selective ZIP extraction, repeat and partial imports, DPAPI storage, removal, and reply chains with branches, missing parents, or cycles. Native WebView2 checks opened a thread from a previously indexed fixture and distinguished same-title Spotify recordings, including exact drilldown, album search, and legacy rows without an identifier. The Edge test exercises return focus at 900 and 1180 pixels, account grouping, private reveal, CSV confirmation, and the handoff to Audio.
+
+The Facebook ZIP fixture verifies that the post keeps its identity across imports and that a same-name file from a different folder, an absent file, and a private photo stay out of its attachments. The native Instagram fixture verifies the attachment order, image decoding, and focus restoration at 900 and 1180 pixels.

@@ -3,7 +3,9 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::{path::Path, sync::LazyLock};
+use std::{collections::HashSet, path::Path, sync::LazyLock};
+
+pub(super) const MAX_POST_ATTACHMENTS: usize = 64;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -36,6 +38,10 @@ impl Category {
 }
 
 impl Provider {
+    pub(super) fn is_meta(self) -> bool {
+        matches!(self, Self::Instagram | Self::Facebook)
+    }
+
     pub fn categories(self) -> &'static [Category] {
         use Category::*;
         match self {
@@ -234,6 +240,8 @@ pub struct Record {
     pub listening_item: Option<ListeningItem>,
     pub tracks: Vec<Track>,
     pub media: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachment_ids: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -424,6 +432,7 @@ fn empty(source: &str) -> Record {
         listening_item: None,
         tracks: vec![],
         media: None,
+        attachment_ids: vec![],
     }
 }
 
@@ -467,6 +476,32 @@ fn spotify_playlist(value: &Value, source: &str) -> Option<Record> {
     Some(finish(record, field_id(value, &["id", "uri"])))
 }
 
+fn meta_post_media(provider: Provider, value: &Value) -> Vec<&str> {
+    let nested = value["attachments"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|attachment| attachment["data"].as_array())
+        .flatten()
+        .map(|entry| &entry["media"]);
+    let mut seen = HashSet::new();
+    value["media"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .chain(nested)
+        .filter_map(|media| media["uri"].as_str())
+        .filter(|uri| crate::portable_zip::validate_name(uri).is_ok())
+        .filter(|uri| {
+            classify(provider, uri).is_some_and(|entry| {
+                entry.format == Format::Media && entry.category == Category::Media
+            })
+        })
+        .filter(|uri| seen.insert(*uri))
+        .take(MAX_POST_ATTACHMENTS)
+        .collect()
+}
+
 fn json_record(
     provider: Provider,
     category: Category,
@@ -491,7 +526,7 @@ fn json_record(
     .find_map(|key| value[*key].is_object().then_some(&value[*key]))
     .unwrap_or(value);
     let mut record = empty(source);
-    let external = field_id(value, &["id_str", "id", "tweetId", "post_id", "messageId"]);
+    let mut external = field_id(value, &["id_str", "id", "tweetId", "post_id", "messageId"]);
     record.time = timestamp(value);
     record.author = string(
         value,
@@ -633,13 +668,25 @@ fn json_record(
             .or_else(|| external.clone())
             .unwrap_or_default();
     }
+    let media = if provider.is_meta() && category == Category::Posts {
+        meta_post_media(provider, value)
+    } else {
+        Vec::new()
+    };
     if record.title.is_empty()
         && record.text.is_empty()
         && record.link.is_none()
         && record.played_ms.is_none()
     {
-        return None;
+        let first = media.first()?;
+        record.title = clean(first.rsplit('/').next()?, 160)?;
+        external = Some(format!(
+            "meta-media\n{:?}\n{}",
+            record.time,
+            media.join("\n")
+        ));
     }
+    record.attachment_ids = media.into_iter().map(record_id).collect();
     Some(finish(record, external))
 }
 
@@ -907,6 +954,33 @@ pub fn media_record(source: &str) -> Record {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn instagram_photo_only_posts_keep_ordered_local_references() {
+        let source = "your_instagram_activity/media/posts_1.json";
+        let classification = classify(Provider::Instagram, source).unwrap();
+        let rows = parse(
+            Provider::Instagram,
+            classification,
+            source,
+            r#"[{"media":[
+            {"uri":"media/posts/123-Salida.jpg"},{"uri":"media/posts/clip.mp4"},
+            {"uri":"media/posts/123-Salida.jpg"},{"uri":"https://example.org/clip.mp4"},
+            {"uri":"media/posts/../private.jpg"},{"uri":"messages/photos/secret.jpg"}
+        ]}]"#,
+        )
+        .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].title, "123-Salida.jpg");
+        assert_eq!(
+            rows[0].attachment_ids,
+            [
+                media_record("media/posts/123-Salida.jpg").id,
+                media_record("media/posts/clip.mp4").id
+            ]
+        );
+        assert_eq!(rows[0].link, None);
+    }
 
     #[test]
     fn x_assignments_are_parsed_as_json_and_sensitive_media_stays_separate() {

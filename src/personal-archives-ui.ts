@@ -342,7 +342,9 @@ export function createPersonalArchives(hooks: Hooks) {
     return action("archive-attachments", label, "image", "quiet", `data-id="${h(row.id)}" aria-describedby="archive-post-label-${h(row.id)}" ${disabled()}`);
   }
 
-  function attachmentName(row: Row) { return row.title.replace(/^\d{1,20}-/, ""); }
+  function attachmentName(row: Row) {
+    return current()?.provider === "x" ? row.title.replace(/^\d{1,20}-/, "") : row.title;
+  }
 
   function attachmentView(post: Row, page: AttachmentPage) {
     const back = thread ? t("Volver al hilo", "Back to thread") : t("Volver a publicaciones", "Back to posts");
@@ -696,7 +698,7 @@ export function createPersonalArchives(hooks: Hooks) {
       case "archive-attachments": {
         const post = thread ? thread.page.posts.find(item => item.row.id === button.dataset.id)?.row
           : result?.rows.find(row => row.id === button.dataset.id);
-        if (post?.attachmentCount && category === "posts" && current()?.provider === "x") await openAttachments(post);
+        if (post?.attachmentCount && category === "posts") await openAttachments(post);
         break;
       }
       case "archive-attachments-back": backFromAttachments(); break;

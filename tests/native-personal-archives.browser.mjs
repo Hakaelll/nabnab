@@ -1,16 +1,17 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, readdir, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readdir, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 
 const { chromium } = createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODULE || "playwright");
 const root = path.resolve(import.meta.dirname, "..");
-const artifacts = path.join(root, "artifacts/native-personal-archives");
+const artifacts = process.env.NABNAB_ARCHIVE_ARTIFACTS || path.join(root, "artifacts/native-personal-archives");
 await mkdir(artifacts, { recursive: true });
 const data = await mkdtemp(path.join(artifacts, "run-"));
 const id = "a".repeat(64), generation = `${id}-00000001`;
+const instagram = "c".repeat(64), instagramGeneration = `${instagram}-00000001`;
 const managed = path.join(data, "personal-archive-media", id);
 const secrets = path.join(data, "module-secrets");
 const records = path.join(data, "personal-archive-data");
@@ -27,6 +28,9 @@ const [photo, video, invalid, privatePhoto] = [
 const post = (id, title, replyTo = null) => ({ ...row("data/tweets.js"), id: digest(id), title, text: title,
   time: Date.UTC(2025, 0, Number(id) - 99), threadParent: replyTo, media: null });
 const first = post("100", "Salida al lago"), reply = post("101", "La segunda publicación", "100");
+const instagramMedia = [row("media/posts/202501/123-Lago.png"), row("media/posts/202501/Paseo.mp4")];
+const instagramPost = {...post("300", "Paseo por la sierra"), source: "your_instagram_activity/media/posts_1.json",
+  attachmentIds: instagramMedia.map(item => item.id)};
 const file = item => path.join(managed, digest(item.source) + path.extname(item.source));
 const ffmpeg = path.join(root, "src-tauri/engines/ffmpeg.exe");
 function encode(args) {
@@ -37,6 +41,11 @@ encode(["-f", "lavfi", "-i", "testsrc2=size=360x640:duration=1", "-c:v", "libope
 encode(["-f", "lavfi", "-i", "color=orange:size=120x80", "-frames:v", "1", file(privatePhoto)]);
 await writeFile(file(invalid), "#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4,\nhttps://example.invalid/private.ts\n#EXT-X-ENDLIST\n");
 const bytes = await Promise.all([photo, video, invalid, privatePhoto].map(async item => (await stat(file(item))).size));
+const instagramDirectory = path.join(data, "personal-archive-media", instagram);
+await mkdir(instagramDirectory, { recursive: true });
+for (const [index, item] of instagramMedia.entries()) {
+  await copyFile(file([photo,video][index]), path.join(instagramDirectory, item.id + path.extname(item.source)));
+}
 async function protect(directory, name, header, purpose, value) {
   const sealed = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `
     Add-Type -AssemblyName System.Security
@@ -51,9 +60,16 @@ await protect(secrets, "personal-archive-index", "nabnab-module-secret-v1", "nab
   id, generation: 1, provider: "x", account: "Cuenta de prueba", destination: "Álbum de 2025", source: "x-export.zip",
   fingerprint: "b".repeat(64), categories: { posts: 2, media: 3, messages: 1 }, formats: { posts: ["xAssignment"], media: ["media"], messages: ["media"] },
   mediaBytes: bytes.reduce((total, size) => total + size), pendingRemoval: false,
+}, {
+  id:instagram, generation:1, provider:"instagram", account:"Archivo de montaña", destination:"Viajes", source:"instagram-export.zip",
+  fingerprint:"d".repeat(64), categories:{posts:1,media:2}, formats:{posts:["json"],media:["media"]},
+  mediaBytes:bytes[0]+bytes[1], pendingRemoval:false,
 }]);
 await protect(records, generation, "nabnab-personal-archive-v1", `nabnab-personal-archive:${generation}`, {
   posts: [first, reply], media: [photo, video, invalid], messages: [privatePhoto],
+});
+await protect(records, instagramGeneration, "nabnab-personal-archive-v1", `nabnab-personal-archive:${instagramGeneration}`, {
+  posts:[instagramPost], media:[...instagramMedia].reverse(),
 });
 
 const port = process.env.NABNAB_ARCHIVE_DEBUG_PORT || 9269;
@@ -135,8 +151,29 @@ try {
   await page.getByRole("button", { name: "Mostrar categoría privada" }).waitFor();
   assert.equal(await page.locator(".archive-media-stage img").count(), 0);
   assert.equal((await readdir(managed)).length, 4);
+  await page.getByRole("button", { name: /instagram-export.zip/ }).click();
+  const instagramAttachments = page.getByRole("button", {name:"2 adjuntos",exact:true});
+  await instagramAttachments.press("Enter");
+  await attachmentTitle.waitFor();
+  assert.deepEqual(await page.locator(".archive-attachment-name strong").allTextContents(), ["123-Lago.png", "Paseo.mp4"]);
+  for (const [width,height] of [[1180,780],[900,620]]) {
+    await page.setViewportSize({width,height});
+    const panel = page.locator(".archive-attachments");
+    assert.ok(await panel.evaluate(node => node.scrollWidth <= node.clientWidth + 1));
+    await panel.scrollIntoViewIfNeeded();
+    await page.screenshot({path:path.join(data, `instagram-attachments-${width}.png`),animations:"disabled"});
+  }
+  await preview(instagramMedia[0]).press("Enter");
+  const instagramImage = page.getByRole("img", {name:"123-Lago.png"});
+  await instagramImage.waitFor();
+  await page.waitForFunction(() => document.querySelector(".archive-media-stage img")?.naturalWidth > 0);
+  assert.deepEqual(await instagramImage.evaluate(node => [node.naturalWidth,node.naturalHeight]), [900,600]);
+  await page.getByRole("button", {name:"Volver a adjuntos"}).click();
+  assert.ok(await preview(instagramMedia[0]).evaluate(node => node === document.activeElement));
+  await page.getByRole("button", {name:"Volver a publicaciones"}).click();
+  assert.ok(await instagramAttachments.evaluate(node => node === document.activeElement));
   assert.deepEqual(errors, []);
-  console.log(`Verified X post and thread attachments, native image and video previews, private reveal and unmatched media isolation in ${data}`);
+  console.log(`Verified X and Instagram post attachments, native image and video previews, private reveal and unmatched media isolation in ${data}`);
 } catch (error) {
   console.error(log);
   throw error;
