@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { openTool } from "./tool-navigation.mjs";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createRequire } from "node:module";
 
 const root = path.resolve(import.meta.dirname, "..");
-const base = path.join(root, "artifacts/stickers");
+const base = path.resolve(process.env.NABNAB_STICKER_ARTIFACTS ?? path.join(root, "artifacts/stickers"));
 await mkdir(base, { recursive: true });
 const data = await mkdtemp(path.join(base, "native-run-"));
 const output = path.join(data, "output");
@@ -35,7 +35,7 @@ function rpc(command, args = {}) {
 }
 
 try {
-  child = spawn(path.join(root, "src-tauri/target/debug/nabnab.exe"), [], {
+  child = spawn(process.env.NABNAB_STICKER_TEST_EXE ?? path.join(root, "src-tauri/target/debug/nabnab.exe"), [], {
     cwd: root, windowsHide: true, stdio: "ignore",
     env: { ...process.env, NABNAB_TEST_DATA_DIR: data, WEBVIEW2_USER_DATA_FOLDER: path.join(data, "webview"),
       WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}` },
@@ -78,8 +78,13 @@ try {
   }), "base64");
   const source = path.join(data, "Estrella de prueba.png");
   await writeFile(source, fixture);
-  const imported = await rpc("import_paths", { paths: [source] });
+  const clip = path.join(data, "Clip de prueba.mp4");
+  execFileSync(path.join(root, "src-tauri/engines/ffmpeg.exe"), ["-v", "error", "-f", "lavfi", "-i",
+    "testsrc2=size=320x180:rate=12:duration=2", "-c:v", "libopenh264", clip], { windowsHide: true });
+  const clipBytes = await readFile(clip);
+  const imported = await rpc("import_paths", { paths: [source, clip] });
   const libraryId = imported.library.find(item => item.name === "Estrella de prueba.png").id;
+  const clipId = imported.library.find(item => item.name === "Clip de prueba.mp4").id;
   const options = { profile: "whatsappImage", crop: null, outline: 8, startMs: 0, durationMs: null };
   const sample = await rpc("sticker_preview", { libraryId, options, requestId: 96401 });
   let rejected;
@@ -137,8 +142,65 @@ try {
   assert.deepEqual(failed.outputs, []);
   assert.deepEqual(await readFile(source), changed);
   assert.deepEqual(await readFile(completed.output.path), reviewed);
+
+  await module.getByRole("button", { name: "Elegir archivo" }).click();
+  await module.getByRole("searchbox").fill("Clip");
+  await module.getByRole("radio", { name: "Clip de prueba.mp4" }).click();
+  await page.locator("#sticker-profile").selectOption("whatsappAnimated");
+  await page.locator("#sticker-length").fill("1");
+  await page.locator("#sticker-length").press("Tab");
+  await module.getByRole("button", { name: "Generar muestra" }).click();
+  const play = module.getByRole("button", { name: "Reproducir animación", exact: true });
+  await play.waitFor();
+  await module.locator(".sticker-review").scrollIntoViewIfNeeded();
+  await page.screenshot({ path: path.join(base, "animated-sticker-stopped-900.png"), animations: "disabled" });
+  await image.waitFor({ timeout: 2500 });
+  const still = await image.getAttribute("src");
+  assert.match(still, /^data:image\/png;base64,/);
+  assert.deepEqual(await image.evaluate(async element => {
+    await element.decode();
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = 512;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(element, 0, 0);
+    return [element.naturalWidth, ctx.getImageData(0, 0, 1, 1).data[3], ctx.getImageData(256, 256, 1, 1).data[3]];
+  }), [512, 0, 255]);
+  const surface = page.getByLabel("Inspeccionar sobre", { exact: true });
+  await surface.focus();
+  await surface.selectOption("light");
+  assert.equal(await module.locator(".sticker-preview").getAttribute("data-surface"), "light");
+  assert.equal(await image.getAttribute("src"), still);
+  assert.equal(await surface.evaluate(control => control === document.activeElement), true);
+  await play.press("Enter");
+  const motion = await image.getAttribute("src");
+  assert.match(motion, /^data:image\/webp;base64,/);
+  await image.evaluate(element => { element.dataset.playbackMarker = "preserved"; });
+  await surface.selectOption("dark");
+  assert.equal(await image.getAttribute("data-playback-marker"), "preserved");
+  assert.equal(await image.getAttribute("src"), motion);
+  await module.getByRole("button", { name: "Detener animación", exact: true }).press("Enter");
+  assert.equal(await image.getAttribute("src"), still);
+  assert.equal(await module.locator(".sticker-preview").getAttribute("data-surface"), "dark");
+  for (const [width,height] of [[1180,780],[900,620]]) {
+    await page.setViewportSize({width,height});
+    await module.locator(".sticker-review").evaluate(panel => panel.scrollIntoView({block:"start"}));
+    assert.ok(await module.evaluate(element => element.scrollWidth <= element.clientWidth + 1));
+    await page.screenshot({path:path.join(base,`animated-sticker-review-${width}.png`),animations:"disabled"});
+  }
+  await submit.click();
+  const animation = await wait(async () => {
+    const snapshot = await rpc("get_snapshot");
+    const job = snapshot.jobs.find(item => item.source.kind === "sticker" && item.id !== completed.job.id && item.id !== stale.id);
+    if (job?.state === "error") throw Error(JSON.stringify(job.error));
+    return job?.state === "completed" && snapshot.library.find(item => item.path === job.outputs[0]);
+  });
+  assert.equal(animation.parentId, clipId);
+  const animatedBytes = Buffer.from(motion.split(",")[1], "base64");
+  assert.ok(animatedBytes.length <= 500000);
+  assert.deepEqual(await readFile(animation.path), animatedBytes);
+  assert.deepEqual(await readFile(clip), clipBytes);
   assert.deepEqual(errors, []);
-  console.log("Verified real Windows preview, changed options and source checks, queued output and original bytes.");
+  console.log("Verified still and animated WebP previews, paused alpha inspection, queue output and original bytes.");
 } finally {
   try { await page?.evaluate(async () => { const { getCurrentWindow } = await import("/node_modules/@tauri-apps/api/window.js"); await getCurrentWindow().close(); }); } catch {}
   if (child?.exitCode === null) {

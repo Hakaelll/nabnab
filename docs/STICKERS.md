@@ -11,6 +11,8 @@ Open **Tools → Image and composition → Stickers**. Choose an image, GIF or v
 
 For a still from a GIF or video, enter the frame time. For animation, set the start and length. **Generate preview** encodes the result and reports its actual size and duration. The encoder tries progressively smaller settings if needed. A shorter or simpler excerpt can fit when the chosen source exceeds the profile's byte limit.
 
+An animated WebP preview opens on the first frame. Select **Play animation** to review movement or **Stop animation** to return to the first frame. Use **Inspect on** to switch between a checkerboard and light or dark backgrounds while checking transparency and the outline. Changing the background leaves playback and the export intact.
+
 ![A native sticker preview with transparent padding and an outline](sticker-preview.png)
 
 Choose the destination and select **Queue export**. Changes to the source or options require a fresh preview. The job uses the normal processing limit and publishes a new file linked to the original in Library.

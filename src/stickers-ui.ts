@@ -5,6 +5,7 @@ import { isCancelled } from "./presentation";
 import { action, icon, option } from "./views-common";
 
 type Profile = "telegramImage" | "telegramVideo" | "whatsappImage" | "whatsappAnimated";
+type Surface = "grid" | "light" | "dark";
 const profiles: Record<Profile, { limit: number; duration: number | null; format: string }> = {
   telegramImage: { limit: 512, duration: null, format: "WebP" },
   telegramVideo: { limit: 256, duration: 3, format: "WebM · VP9" },
@@ -47,13 +48,29 @@ function webpUrl(bytes: number[]) {
   return "data:image/webp;base64," + btoa(binary);
 }
 
+async function firstFrame(bytes: number[]) {
+  const bitmap = await createImageBitmap(new Blob([new Uint8Array(bytes)], { type: "image/webp" }));
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const context = canvas.getContext("2d");
+    if (!context) return "";
+    context.drawImage(bitmap, 0, 0);
+    return canvas.toDataURL("image/png");
+  } finally {
+    bitmap.close();
+  }
+}
+
 export function createStickerTool(hooks: Hooks) {
   const { t } = hooks;
   let libraryId = "", query = "", sourceOpen = false;
   let profile: Profile = "telegramImage", crop = false, horizontal = 50, vertical = 50, outline = 4;
   let start = "0", duration = "1.5", busy = false, requestId = 0, error = "", playAnimation = false;
   let preview: Omit<Preview, "data"> | null = null;
-  let previewUrl = "";
+  let previewUrl = "", posterUrl = "";
+  let surface: Surface = "grid";
   const items = () => hooks.snapshot().library.filter(item => !item.missing && inputTypes.test(item.name) && (item.kind === "image" || item.kind === "video"));
   const selected = () => items().find(item => item.id === libraryId);
   const motion = () => motionTypes.test(selected()?.name ?? "");
@@ -69,6 +86,7 @@ export function createStickerTool(hooks: Hooks) {
   function invalidate() {
     if (previewUrl.startsWith("blob:")) URL.revokeObjectURL(previewUrl);
     previewUrl = "";
+    posterUrl = "";
     preview = null;
     playAnimation = false;
   }
@@ -143,12 +161,23 @@ export function createStickerTool(hooks: Hooks) {
     if (!preview) return `<div class="sticker-empty"><span>${icon("image")}</span><p>${t("Prepara una muestra para ver el encuadre, el contorno y el peso real.", "Generate a preview to check framing, outline and actual file size.")}</p></div>`;
     const animatedWebp = preview.mime === "image/webp" && preview.durationMs !== null;
     const resultLabel = t("Vista previa del sticker exportado", "Exported sticker preview");
-    return `<div class="asset-preview-image sticker-preview">
+    const image = animatedWebp && !playAnimation ? posterUrl : previewUrl;
+    return `<div class="asset-preview-image sticker-preview" id="sticker-preview-stage" data-surface="${surface}">
       ${preview.mime === "video/webm" ? `<video src="${h(previewUrl)}" controls muted loop preload="metadata" aria-label="${resultLabel}"></video>`
-        : !animatedWebp || playAnimation ? `<img src="${h(previewUrl)}" alt="${resultLabel}">`
-          : `<p>${t("La animación está detenida.", "Animation is stopped.")}</p>`}
+        : image ? `<img src="${h(image)}" alt="${resultLabel}">`
+          : `<p>${t("No se pudo mostrar el primer fotograma.", "The first frame could not be displayed.")}</p>`}
     </div>
-    ${animatedWebp ? action("sticker-play", playAnimation ? t("Detener animación", "Stop animation") : t("Reproducir animación", "Play animation"), playAnimation ? "pause" : "play", "secondary", `aria-pressed="${playAnimation}"`) : ""}
+    <div class="sticker-preview-controls">
+      <div class="sticker-surface-field">
+        <label for="sticker-surface">${t("Inspeccionar sobre", "Inspect on")}</label>
+        <select id="sticker-surface">
+          ${option("grid", t("Cuadrícula", "Checkerboard"), surface)}
+          ${option("light", t("Fondo claro", "Light background"), surface)}
+          ${option("dark", t("Fondo oscuro", "Dark background"), surface)}
+        </select>
+      </div>
+      ${animatedWebp ? action("sticker-play", playAnimation ? t("Detener animación", "Stop animation") : t("Reproducir animación", "Play animation"), playAnimation ? "pause" : "play", "secondary", 'id="sticker-play" aria-controls="sticker-preview-stage"') : ""}
+    </div>
     <p class="sticker-result">${preview.width} × ${preview.height} px · ${number(preview.bytes / 1000, 1)} / ${number(preview.limit / 1000)} KB${preview.durationMs !== null ? ` · ${number(preview.durationMs / 1000, 2)} s` : ""}</p>`;
   }
 
@@ -198,6 +227,9 @@ export function createStickerTool(hooks: Hooks) {
           previewUrl = details.mime === "video/webm"
             ? URL.createObjectURL(new Blob([new Uint8Array(data)], { type: details.mime }))
             : webpUrl(data);
+          if (details.mime === "image/webp" && details.durationMs !== null) {
+            posterUrl = await firstFrame(data).catch(() => "");
+          }
           preview = details;
         });
         return true;
@@ -205,7 +237,11 @@ export function createStickerTool(hooks: Hooks) {
       case "sticker-cancel":
         if (requestId) await hooks.command("cancel_file_source_inspection", { requestId });
         return true;
-      case "sticker-play": playAnimation = !playAnimation; hooks.render(); return true;
+      case "sticker-play":
+        playAnimation = !playAnimation;
+        hooks.render();
+        document.getElementById("sticker-play")?.focus({ preventScroll: true });
+        return true;
       default: return false;
     }
   }
@@ -213,6 +249,14 @@ export function createStickerTool(hooks: Hooks) {
   function input(target: HTMLElement) {
     if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) return false;
     if (target.id === "sticker-query") { query = target.value; hooks.render(); return true; }
+    if (target.id === "sticker-surface") {
+      const value = target.value;
+      if (value === "grid" || value === "light" || value === "dark") {
+        surface = value;
+        document.getElementById("sticker-preview-stage")?.setAttribute("data-surface", surface);
+      }
+      return true;
+    }
     if (target.name === "sticker-input") {
       libraryId = target.value; start = "0"; sourceOpen = false;
       if (!motion() && profiles[profile].duration !== null) profile = profile === "telegramVideo" ? "telegramImage" : "whatsappImage";
