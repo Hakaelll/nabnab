@@ -19,6 +19,7 @@ const courseProviders: [CourseProvider, string][] = [
   ["domestika", "Domestika"], ["skillshare", "Skillshare"],
 ];
 const isBrowserProvider = (value: string): value is BrowserCourseProvider => Object.hasOwn(browserCoursePlatforms, value);
+const hasManualOutline = (provider: string): boolean => provider === "rocketseat" || provider === "domestika" || provider === "skillshare";
 const courseProviderName = (id: string) => courseProviders.find(([value]) => value === id)?.[1] ?? id;
 const skillshareResourceSection = "skillshare-resources";
 const unitResourceId = (unitId: string) => `unit-resources-${unitId}`;
@@ -49,6 +50,7 @@ interface ResourceReview {
   url: string; title: string; lesson: Pick<CourseLesson, "id" | "title"> | null;
   links: string[]; checks: ResourceCheck[]; selected: Set<number>;
 }
+interface OutlineReview { course: Course; request: { provider: string; url: string; title: string; text: string } }
 interface CourseHooks {
   command<T>(name: string, args?: Record<string, unknown>): Promise<T>;
   getSnapshot(): { library: LibraryItem[]; jobs: Job[] };
@@ -82,6 +84,8 @@ export function createCoursesController(hooks: CourseHooks) {
   let noteTime = "";
   let review: { plan: MaterialReview; files: Set<number>; trigger: string; target?: MaterialTarget } | null = null;
   let resourceReview: ResourceReview | null = null;
+  let outlineReview: OutlineReview | null = null;
+  let outlineText: string | null = null;
   const selected = new Set<string>();
   const current = () => courses.find(course => course.id === courseId);
   const currentLesson = () => current()?.sections.flatMap(section => section.lessons).find(lesson => lesson.id === lessonId);
@@ -134,6 +138,7 @@ export function createCoursesController(hooks: CourseHooks) {
 
   async function open(url = "", initialProvider?: string): Promise<void> {
     resourceReview = null;
+    outlineReview = null;
     if (review) {
       const reviewId = review.plan.id;
       review = null;
@@ -148,6 +153,7 @@ export function createCoursesController(hooks: CourseHooks) {
       courseId = null;
       lessonId = null;
       browserTitle = "";
+      outlineText = null;
       courseraIds = { organization: "", program: "", courseId: "" };
       resourceLinks = "";
       resourceLessonId = "";
@@ -195,7 +201,7 @@ export function createCoursesController(hooks: CourseHooks) {
   }
 
   async function receiveDrop(paths: string[]): Promise<void> {
-    if (!paths.length || busy || review || resourceReview) return;
+    if (!paths.length || busy || review || resourceReview || outlineReview) return;
     const course = current();
     if (course?.url && isBrowserProvider(course.provider)) {
       await reviewMaterials(course.provider, course.url, course.title, false, undefined, paths);
@@ -299,7 +305,37 @@ export function createCoursesController(hooks: CourseHooks) {
           ${source === "skillshare" ? skillshareEntry() : ""}
         </section>
       </div>
-    </form>${source === "coursera" ? courseraForm() : ""}`;
+    </form>${source === "coursera" ? courseraForm() : outlineForm()}`;
+  }
+
+  function outlineForm(course?: Course): string {
+    const saved = course?.sections.filter(section => section.id.startsWith("outline-section-"))
+      .map(section => [`# ${section.title}`, ...section.lessons.filter(lesson => !isUnitResource(lesson)).map(lesson => lesson.title)].join("\n")).join("\n\n") ?? "";
+    return `<details id="course-manual-outline" class="course-resource-entry">
+      <summary>${t("Temario manual", "Manual outline")}</summary>
+      <form id="course-outline-form" class="settings-form" aria-busy="${busy}">
+        <label for="course-outline-text">${t("Unidades y lecciones", "Units and lessons")}</label>
+        <p id="course-outline-hint" class="field-note">${t("Escribe # antes de cada título de unidad y una lección por línea. Usa solo títulos.", "Start each unit title with # and put one lesson on each following line. Use titles only.")}</p>
+        <textarea id="course-outline-text" name="outline" required rows="6" maxlength="65536" aria-describedby="course-outline-hint" placeholder="${t("# Unidad 1&#10;Introducción&#10;Primer ejercicio", "# Unit 1&#10;Introduction&#10;First exercise")}" ${busy ? "disabled" : ""}>${h(outlineText ?? saved)}</textarea>
+        <div class="button-group"><button type="submit" class="button secondary" ${busy ? "disabled" : ""}>${t("Revisar temario", "Review outline")}</button></div>
+      </form></details>`;
+  }
+
+  function outlineReviewView({ course }: OutlineReview): string {
+    return `<section class="course-review course-outline-review">
+      <div class="page-heading"><div><h1 id="course-heading" tabindex="-1">${t("Revisar temario", "Review outline")}</h1><p>${h(course.title)} · ${h(courseProviderName(course.provider))}</p></div></div>
+      <p class="field-note">${t("Comprueba el orden antes de guardar. Las lecciones guardadas que falten en este temario se conservan.", "Check the order before saving. Saved lessons omitted from this outline are kept.")}</p>
+      <div class="course-review-groups">${course.sections.map(section => `<details open><summary><strong>${h(section.title)}</strong><small>${lessonCount(section.lessons.length)}</small></summary><ol>${section.lessons.map(lesson => `<li>${h(lesson.title)}</li>`).join("")}</ol></details>`).join("")}</div>
+      <footer class="course-review-footer"><output>${lessonCount(studyLessonCount(course))}</output><div class="button-group">
+        ${action("course-outline-back", t("Editar temario", "Edit outline"), undefined, "quiet", busy ? "disabled" : "")}
+        ${action("course-outline-save", t("Guardar temario", "Save outline"), "add", "primary", busy ? "disabled" : "")}</div></footer>
+    </section>`;
+  }
+
+  function focusOutlineEditor(): void {
+    const entry = document.querySelector<HTMLDetailsElement>("#course-manual-outline");
+    if (entry) entry.open = true;
+    document.getElementById("course-outline-text")?.focus();
   }
 
   function courseraForm(course?: Course): string {
@@ -405,6 +441,7 @@ export function createCoursesController(hooks: CourseHooks) {
   function render(): string {
     if (review) return reviewView(review.plan, review.files, review.target);
     if (resourceReview) return resourceReviewView(resourceReview);
+    if (outlineReview) return outlineReviewView(outlineReview);
     const course = current();
     const platformField = `<label><span id="course-platform-label">${t("Plataforma", "Platform")}</span><select id="course-provider" aria-labelledby="course-platform-label">${courseProviders.map(([id, name]) => option(id, name, provider)).join("")}</select></label>`;
     const linkField = `<label>${t("Enlace del curso", "Course URL")}<input id="course-url" type="url" required value="${h(input)}" placeholder="https://…" autocomplete="off"></label>`;
@@ -429,6 +466,7 @@ export function createCoursesController(hooks: CourseHooks) {
     const queueable = course.sections.flatMap(section => section.lessons).flatMap(lesson => lesson.assets).filter(asset => selected.has(asset.id) && available(asset));
     return `<div class="page-heading"><div>${action("course-back", t("Todos los cursos", "All courses"), undefined, "quiet")}<h1 id="course-heading" tabindex="-1">${h(course.title)}</h1><p>${h(course.provider === "local" ? t("Archivos locales", "Local files") : courseProviderName(course.provider))} · ${courseCounts}</p></div>${browserAssisted ? `<div class="button-group">${action("course-browser-open", t("Abrir curso en el navegador", "Open course in browser"), "arrow", "quiet", busy ? "disabled" : "")}${action("course-add-folder", t("Añadir carpeta", "Add folder"), "folder", "secondary", `id="course-add-folder" ${busy ? "disabled" : ""}`)}${action("course-add-materials", t("Añadir archivos guardados", "Add saved files"), "add", "primary", `id="course-add-materials" ${busy ? "disabled" : ""}`)}</div>` : course.url ? action("course-refresh", t("Actualizar materiales", "Refresh materials"), "retry", "quiet", busy ? "disabled" : "") : ""}</div>
       ${course.provider === "skillshare" ? skillshareEntry(course) : course.provider === "coursera" ? courseraForm(course) : ""}
+      ${hasManualOutline(course.provider) ? outlineForm(course) : ""}
       ${!showQueue ? "" : `<div class="selection-toolbar"><span>${queueable.length === 1 ? t("1 material seleccionado", "1 material selected") : `${queueable.length} ${t("materiales seleccionados", "materials selected")}`}</span>${action("course-queue", t("Añadir a la cola", "Add to queue"), "add", "primary", busy || !queueable.length ? "disabled" : "")}${action("course-clear", t("Quitar selección", "Clear selection"), undefined, "quiet")}</div>`}
       <div class="course-layout${browserAssisted ? " course-layout--browser" : ""}">${renderCourseTree(course, localStudy, Boolean(resourceCount))}<section class="course-study">${lesson ? `<div class="page-heading"><h2>${h(lessonTitle(lesson))}</h2>${action("course-learned", resourceLesson ? (lesson.learned ? t("Marcar pendiente", "Mark as pending") : t("Marcar revisado", "Mark as reviewed")) : (lesson.learned ? t("Marcar pendiente de aprender", "Mark as not learned") : t("Marcar aprendida", "Mark as learned")), "check", "quiet", `aria-pressed="${lesson.learned}" ${busy ? "disabled" : ""}`)}</div>
       ${item ? lessonPlayback(item) : ""}
@@ -459,10 +497,11 @@ export function createCoursesController(hooks: CourseHooks) {
     switch (element.id) {
       case "course-provider": {
         const next = courseProviders.find(([id]) => id === element.value)?.[0];
-        if (next && next !== provider) { provider = next; resourceLinks = ""; resourceLessonId = ""; }
+        if (next && next !== provider) { provider = next; resourceLinks = ""; resourceLessonId = ""; outlineText = null; }
         hooks.render(); return true;
       }
       case "course-browser-title": browserTitle = element.value; return true;
+      case "course-outline-text": outlineText = element.value; return true;
       case "course-resource-links": resourceLinks = element.value; return true;
       case "course-resource-lesson": resourceLessonId = element.value; return true;
       case "course-product-id": productId = element.value; return true;
@@ -476,6 +515,23 @@ export function createCoursesController(hooks: CourseHooks) {
     }
   }
   async function handleSubmit(form: HTMLFormElement): Promise<boolean> {
+    if (form.id === "course-outline-form") {
+      const course = current();
+      const source = course?.provider ?? provider;
+      if (!hasManualOutline(source) || busy || !form.reportValidity()) return true;
+      if (!course && !document.querySelector<HTMLFormElement>("#course-browser-form")?.reportValidity()) return true;
+      const text = new FormData(form).get("outline");
+      if (typeof text !== "string") return true;
+      outlineText = text;
+      const request = { provider: source, url: course?.url ?? input, title: course?.title ?? browserTitle, text };
+      await perform(async () => {
+        outlineReview = { course: await hooks.command<Course>("course_manual_outline", { ...request, save: false }), request };
+        return false;
+      });
+      if (outlineReview) focusCourseHeading();
+      else focusOutlineEditor();
+      return true;
+    }
     if (form.id === "course-browser-form") {
       if (isBrowserProvider(provider) && form.reportValidity()) await reviewMaterials(provider, input, browserTitle);
       return true;
@@ -519,6 +575,25 @@ export function createCoursesController(hooks: CourseHooks) {
     if (!name.startsWith("course-")) return false;
     const course = current(), lesson = currentLesson();
     switch (name) {
+      case "course-outline-back":
+        if (busy) return true;
+        outlineReview = null;
+        hooks.render();
+        focusOutlineEditor();
+        return true;
+      case "course-outline-save": {
+        const review = outlineReview;
+        if (!review || busy) return true;
+        await perform(async () => {
+          const next = await hooks.command<Course>("course_manual_outline", { ...review.request, save: true });
+          if (courseId !== next.id) { selected.clear(); lessonId = next.sections[0]?.lessons[0]?.id ?? null; }
+          courseId = next.id;
+          outlineReview = null;
+          outlineText = null;
+        });
+        focusCourseHeading();
+        return true;
+      }
       case "course-review-resources": {
         if ((course?.provider ?? provider) !== "skillshare" || !course && !element.closest("form")?.reportValidity()) return true;
         const links = resourceLinks.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
@@ -616,8 +691,8 @@ export function createCoursesController(hooks: CourseHooks) {
         return true;
       case "course-token-remove": await perform(async () => { await hooks.command("save_course_token", { provider, token: "", remove: true }); hooks.notify(t("Conexión eliminada. Los archivos se conservan.", "Connection removed. Local files are kept."), "success"); }); break;
       case "course-import": await perform(async () => { const course = await hooks.command<Course>("import_local_course"); courseId = course.id; lessonId = course.sections[0]?.lessons[0]?.id ?? null; hooks.notify(t("Curso local importado.", "Local course imported."), "success"); }); break;
-      case "course-open": courseId = element.dataset.id ?? null; lessonId = current()?.sections[0]?.lessons[0]?.id ?? null; resourceLinks = ""; resourceLessonId = ""; break;
-      case "course-back": courseId = null; lessonId = null; resourceLinks = ""; resourceLessonId = ""; selected.clear(); break;
+      case "course-open": courseId = element.dataset.id ?? null; lessonId = current()?.sections[0]?.lessons[0]?.id ?? null; resourceLinks = ""; resourceLessonId = ""; outlineText = null; break;
+      case "course-back": courseId = null; lessonId = null; resourceLinks = ""; resourceLessonId = ""; outlineText = null; selected.clear(); break;
       case "course-lesson": lessonId = element.dataset.id ?? null; noteText = ""; noteTime = ""; break;
       case "course-clear": selected.clear(); break;
       case "course-select-section": if (course) for (const asset of course.sections.find(section => section.id === element.dataset.id)?.lessons.flatMap(lesson => lesson.assets) ?? []) if (available(asset)) selected.add(asset.id); break;

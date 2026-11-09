@@ -132,6 +132,72 @@ pub fn open_course_site(provider: String, url: String) -> Result<(), String> {
     crate::cloud_storage::browser(link.page.as_str())
 }
 
+const OUTLINE_SECTION: &str = "outline-section-";
+
+fn outline_sections(text: &str) -> Result<Vec<CourseSection>, String> {
+    if text.len() > 64 * 1024 {
+        return Err("The outline is too long. Use up to 64 KiB of titles.".into());
+    }
+    let mut sections: Vec<CourseSection> = Vec::new();
+    let mut ids = HashSet::new();
+    let mut lessons = 0;
+    for (index, line) in text.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() { continue; }
+        let heading = line.strip_prefix("# ");
+        let title = heading.unwrap_or(line).trim();
+        let invalid = || format!("Check outline line {}. Use # followed by a unit title, then one lesson title per line.", index + 1);
+        if title.is_empty() || title.starts_with('#') || title.contains("://")
+            || title.chars().count() > 240 || title.chars().any(char::is_control)
+        {
+            return Err(invalid());
+        }
+        let key = title.to_lowercase();
+        if heading.is_some() {
+            let id = format!("{OUTLINE_SECTION}{}", digest(&key));
+            if !ids.insert(id.clone()) { return Err(format!("Duplicate unit on line {}.", index + 1)); }
+            sections.push(CourseSection { id, title: title.into(), lessons: Vec::new() });
+        } else {
+            let section = sections.last_mut().ok_or_else(invalid)?;
+            let id = format!("outline-lesson-{}", digest(&format!("{}:{key}", section.id)));
+            if !ids.insert(id.clone()) { return Err(format!("Duplicate lesson on line {}.", index + 1)); }
+            section.lessons.push(CourseLesson { id, title: title.into(), learned: false, assets: Vec::new(), notes: Vec::new() });
+            lessons += 1;
+        }
+        if sections.len() > 50 || lessons > 400 { return Err("Use up to 50 units and 400 lessons.".into()); }
+    }
+    if sections.is_empty() || sections.iter().any(|section| section.lessons.is_empty()) {
+        return Err("Enter at least one lesson under each unit.".into());
+    }
+    Ok(sections)
+}
+
+#[tauri::command]
+pub fn course_manual_outline(
+    state: State<'_, Arc<AppState>>, provider: String, url: String, title: String, text: String, save: bool,
+) -> Result<Course, String> {
+    if !matches!(provider.as_str(), "rocketseat" | "domestika" | "skillshare") {
+        return Err("Choose Rocketseat, Domestika or Skillshare for a manual outline.".into());
+    }
+    let link = CourseLink::selected(&provider, &url)?;
+    let title = label(&title, 240);
+    if title.is_empty() { return Err("Enter the course name.".into()); }
+    let mut course = Course { id: link.id, title, provider, url: Some(link.page.to_string()),
+        slug: None, sections: outline_sections(&text)?, created_at: queue::now() };
+    if !save { return Ok(course); }
+    let mut guard = state.repository.lock().unwrap();
+    let repo = guard.as_mut().ok_or("Open the app first.")?;
+    if let Some(previous) = repo.data.courses.iter().find(|previous| previous.id == course.id) {
+        course.created_at = previous.created_at;
+        let prior_lessons: HashMap<_, _> = previous.sections.iter().flat_map(|section| &section.lessons)
+            .map(|lesson| (lesson.id.as_str(), lesson)).collect();
+        for lesson in course.sections.iter_mut().flat_map(|section| &mut section.lessons) {
+            if let Some(previous) = prior_lessons.get(lesson.id.as_str()) { lesson.assets.clone_from(&previous.assets); }
+        }
+    }
+    save_course(repo, course)
+}
+
 fn is_course_attachment(path: &Path) -> bool {
     let extension = path
         .extension()
@@ -469,7 +535,7 @@ fn merge_material_sections(sections: &mut Vec<CourseSection>, added: Vec<CourseS
     sections.sort_by_cached_key(|section| {
         let local = section.id.starts_with("section-");
         (
-            !local,
+            if section.id.starts_with(OUTLINE_SECTION) { 0 } else if local { 1 } else { 2 },
             local.then(|| (natural_key(&section.title), section.id.clone())),
         )
     });
@@ -549,7 +615,8 @@ fn import_selected(
     match target {
         Some(AttachmentTarget::Lesson(id)) => {
             let lesson = course.sections.iter_mut().filter(|section| {
-                section.id.starts_with("section-") || link.provider == "coursera" && section.id.starts_with("coursera-module-")
+                section.id.starts_with("section-") || section.id.starts_with(OUTLINE_SECTION)
+                    || link.provider == "coursera" && section.id.starts_with("coursera-module-")
             })
                 .flat_map(|section| &mut section.lessons)
                 .find(|lesson| lesson.id == *id && !lesson.id.starts_with(UNIT_RESOURCES))
@@ -558,7 +625,8 @@ fn import_selected(
         }
         Some(AttachmentTarget::Unit(section_id)) => {
             let section = course.sections.iter_mut().find(|section| {
-                link.provider == "domestika" && section.id == *section_id && section.id.starts_with("section-")
+                link.provider == "domestika" && section.id == *section_id
+                    && (section.id.starts_with("section-") || section.id.starts_with(OUTLINE_SECTION))
             }).ok_or("This Domestika unit is no longer available. Open the course and choose the resources again.")?;
             let id = unit_resources_id(section_id);
             if let Some(entry) = section.lessons.iter_mut().find(|lesson| lesson.id == id) {

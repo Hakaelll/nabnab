@@ -82,6 +82,9 @@
   background: var(--background);
 }
 .course-review-footer output { color: var(--muted); font-variant-numeric: tabular-nums; }
+.course-outline-review { overflow-wrap: anywhere; }
+.course-outline-review ol { margin: 0; padding: 0 16px 12px 38px; }
+.course-outline-review li { padding-block: 4px; }
 @media (max-width: 1000px) { .course-layout { grid-template-columns: minmax(0, 1fr); } }
 @media (min-width: 860px) and (max-width: 1000px) {
   .course-layout--browser { grid-template-columns: minmax(180px, 1fr) minmax(0, 2fr); }
@@ -95,6 +98,7 @@
 .course-resource-entry { min-width: 0; margin-block: 12px; padding: 12px 0; border-block-start: 1px solid var(--edge-quiet); }
 .course-resource-entry summary { cursor: pointer; font-weight: 600; }
 #course-coursera-form { margin-top: 16px; }
+#course-outline-form { margin-top: 14px; gap: 12px; max-width: 42rem; }
 #course-coursera-form .field-note { margin: 0; }
 #course-coursera-form fieldset { display: grid; gap: 12px; width: min(100%, 700px); min-width: 0; margin: 0; padding: 0; border: 0; }
 @media (min-width: 760px) {

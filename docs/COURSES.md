@@ -35,6 +35,18 @@ Si un documento, subtítulo, imagen o archivo comprimido pertenece a una lecció
 
 En Rocketseat, Coursera y Domestika, la sesión de alumno y la descarga se gestionan en el sitio oficial. El índice local asocia los archivos elegidos con su curso. En Skillshare, el flujo de enlaces directos que se describe abajo permite enviar adjuntos públicos a Descargas después de revisarlos. Los usuarios autorizados de Coursera Business pueden consultar el temario con su token de organización.
 
+### Temario manual
+
+En Rocketseat, Domestika y Skillshare puedes organizar el curso antes de añadir archivos. Indica el enlace y el nombre del curso y abre **Temario manual**. Escribe `# ` antes de cada título de unidad y pon una lección por línea. Usa títulos distintos dentro de cada unidad. **Revisar temario** muestra el orden y el total antes de guardar. La sesión y la consulta del curso se hacen en el sitio oficial.
+
+Puedes añadir adjuntos a cada lección desde la vista de estudio. En Domestika también puedes añadir recursos a la unidad. En Skillshare puedes revisar enlaces directos y asociarlos a una lección del temario. Guardar el temario no crea trabajos en Descargas.
+
+Al editar el temario, conserva el título de cada unidad y lección para mantener su identidad. Cambiar el orden conserva los adjuntos, las notas y el progreso. Los elementos que omitas se conservan al final. Cambiar un título crea una entrada distinta, conservando la anterior.
+
+![Revisión de un temario manual de Domestika con datos de prueba](course-manual-outline.png)
+
+La prueba nativa de Windows guarda temarios sintéticos de los tres proveedores y comprueba que la revisión no escribe en el índice. Verifica el orden, el foco a 900 y 1180 px, y que al reordenar se conservan las notas, el progreso y un adjunto de Skillshare. No usa sesiones ni descarga los materiales de prueba.
+
 ![Enlace de aula de Rocketseat pegado desde Inicio, a 900 × 620 con IPC simulado](course-rocketseat-classroom.png)
 
 La prueba de Rocketseat en Edge pega un enlace público de aula en Inicio y comprueba el formulario a 900 y 1180 px. La prueba de Rust importa dos veces el mismo archivo sintético, conserva una sola copia en el índice y distingue el aula de una formación con el mismo nombre en la URL.
