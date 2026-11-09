@@ -38,6 +38,7 @@ const setup = `
   const asset=(id,filename,extra={})=>({id,sourceUrl:"https://github.com/example/nabnab-fixture/releases/tag/v1.0",downloadUrl:"https://example.org/"+filename,filename,mime:"application/zip",size:1048576,title:filename,version:"v1.0",original:true,author:null,license:null,attribution:null,sha256:null,platform:null,architecture:null,...extra});
   const sourcePage=(url,extra={})=>({provider:"github",sourceUrl:url,title:"nabnab-fixture",description:"Public source fixture. No remote provider access is represented.",rights:null,entries:[],assets:[],nextCursor:null,warnings:[],...extra});
   const historyUrl="https://zenodo.org/api/records?q=conceptrecid%3A1234&all_versions=true";
+  const communityUrl="https://zenodo.org/communities/research-fixture";
   const dataset=(url,id,version)=>sourcePage(url,{provider:"zenodo",title:"Fixture dataset",
     zenodo:{recordId:String(id),familyId:"1234",version,versionsUrl:historyUrl},
     assets:[
@@ -92,6 +93,9 @@ const setup = `
       if(args.url.includes("/error"))throw "Fixture source permission denied. Choose another source or retry.";
       if(args.url.startsWith("https://arxiv.org/abs/"))return sourcePage(args.url,{provider:"arxiv",title:"A versioned paper",assets:[1,2].map(version=>asset("arxiv:2401.00001v"+version,"arxiv-2401.00001v"+version+".pdf",{mime:"application/pdf",size:null,version:"v"+version,publishedAt:"2024-01-02",author:"Fixture Author"}))});
       if(args.url==="10.5281/zenodo.1234")return dataset("https://doi.org/10.5281/zenodo.1234",1236,"v2");
+      if(args.url===communityUrl)return sourcePage(communityUrl,{provider:"zenodo",title:"Comunidad de prueba",
+        entries:[{id:args.cursor?"zenodo:1235":"zenodo:1236",title:args.cursor?"Dataset histórico":"Dataset reciente",
+          url:"https://zenodo.org/records/"+(args.cursor?"1235":"1236"),prerelease:false,publishedAt:"2024-02-02"}],nextCursor:args.cursor?null:"2"});
       if(args.url===historyUrl)return sourcePage(historyUrl,{provider:"zenodo",title:"Fixture dataset",
         entries:[{id:"zenodo:1236",title:"v2 · Fixture dataset",url:"https://zenodo.org/records/1236",prerelease:false,publishedAt:"2024-02-02"},{id:"zenodo:1235",title:"v1 · Fixture dataset",url:"https://zenodo.org/records/1235",prerelease:false,publishedAt:"2024-01-02"}]});
       if(args.url==="https://zenodo.org/records/1235")return dataset(args.url,1235,"v1");
@@ -300,7 +304,33 @@ try {
     await page.getByRole("button", { name: "Volver a versiones" }).click();
     assert.equal(await oldVersion.evaluate(node => node === document.activeElement), true);
 
-    await page.locator("[data-action='file-source-search-mode'][data-id='librivox']").click();
+    const communityUrl = "https://zenodo.org/communities/research-fixture";
+    await inspect(communityUrl);
+    await page.getByText("Zenodo · Comunidad", { exact: true }).waitFor({ timeout: 4000 });
+    await page.getByRole("heading", { name: "Comunidad de prueba" }).waitFor();
+    assert.equal(await page.locator("[data-file-source-select]").count(), 0);
+    assert.equal(await page.locator("[data-action='file-source-queue']").count(), 0);
+    await page.getByRole("button", { name: "Cargar más", exact: true }).click();
+    const communityRecord = page.getByRole("button", { name: /Dataset histórico/ });
+    await communityRecord.waitFor();
+    for (const [width, height] of [[1180, 780], [900, 620]]) {
+      await page.setViewportSize({ width, height });
+      await checkNoHorizontalOverflow(`Zenodo community ${width}`);
+      await page.locator(".file-source-result-heading").scrollIntoViewIfNeeded();
+      await page.screenshot({ path: `${directory}/zenodo-community-${width}.png` });
+    }
+    await communityRecord.press("Enter");
+    await page.locator("[data-file-source-select='zenodo:1235:samples.csv']").waitFor();
+    assert.equal(await page.locator("[data-file-source-select]:checked").count(), 0);
+    await page.getByRole("button", { name: "Volver a la comunidad", exact: true }).press("Enter");
+    assert.equal(await communityRecord.evaluate(node => node === document.activeElement), true);
+    assert.equal(await page.locator(".file-source-entry").count(), 2);
+    await page.getByRole("button", { name: "Seguir comunidad", exact: true }).click();
+    await page.locator("#source-url").waitFor();
+    assert.equal(await page.locator("#source-url").inputValue(), communityUrl);
+    await page.getByRole("button", { name: "Plataformas", exact: true }).click();
+    await page.locator("[data-action='open-fileSources'][data-id='librivox']").click();
+
     const language = page.getByRole("combobox", { name: "Idioma", exact: true });
     await language.selectOption({ label: "Español" });
     assert.equal(await page.locator("#file-source-catalog-query").inputValue(), "");

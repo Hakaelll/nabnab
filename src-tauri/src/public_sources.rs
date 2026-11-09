@@ -248,11 +248,20 @@ pub fn canonical_followed_search(input: &str) -> Result<String, String> {
     let target = target(input)?;
     if !matches!(target, Target::Arxiv(arxiv::ArxivTarget::Search { .. })
         | Target::Librivox(librivox::LibrivoxTarget::Search { .. } | librivox::LibrivoxTarget::Language(_))
-        | Target::Zenodo(zenodo::ZenodoTarget::Versions(_)))
+        | Target::Zenodo(zenodo::ZenodoTarget::Versions(_) | zenodo::ZenodoTarget::Community(_)))
     {
-        return Err("Choose an arXiv or LibriVox search or a Zenodo version history to follow.".into());
+        return Err("Choose an arXiv or LibriVox search, or a Zenodo community or version history to follow.".into());
     }
     Ok(source_url(&target))
+}
+
+pub async fn prepare_followed_search(input: &str) -> Result<String, String> {
+    let canonical = canonical_followed_search(input)?;
+    if let Target::Zenodo(zenodo::ZenodoTarget::Community(identifier)) = target(&canonical)? {
+        let (id, _) = zenodo::community_info(&identifier).await?;
+        return Ok(zenodo::canonical(&zenodo::ZenodoTarget::Community(id)));
+    }
+    Ok(canonical)
 }
 
 pub fn followed_search_page_size(input: &str) -> Result<usize, String> {
@@ -274,7 +283,7 @@ pub fn valid_followed_search_entry(search: &str, entry_url: &str, entry_id: &str
             entry_id == format!("librivox:{id}"),
         (Ok(Target::Librivox(librivox::LibrivoxTarget::Language(_))), Target::Librivox(librivox::LibrivoxTarget::CatalogPage(slug))) =>
             entry_id == format!("librivox:catalog:{slug}"),
-        (Ok(Target::Zenodo(zenodo::ZenodoTarget::Versions(_))), Target::Zenodo(zenodo::ZenodoTarget::Record(id))) =>
+        (Ok(Target::Zenodo(zenodo::ZenodoTarget::Versions(_) | zenodo::ZenodoTarget::Community(_))), Target::Zenodo(zenodo::ZenodoTarget::Record(id))) =>
             entry_id == format!("zenodo:{id}"),
         _ => false,
     }

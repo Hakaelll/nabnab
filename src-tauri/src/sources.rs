@@ -1440,7 +1440,7 @@ pub async fn add_source(
         let id = github_source_id(&canonical);
         (canonical, SourceKind::Github, None, None, id)
     } else if kind == Some(SourceKind::PublicSearch) {
-        let canonical = crate::public_sources::canonical_followed_search(&url)?;
+        let canonical = crate::public_sources::prepare_followed_search(&url).await?;
         validate_public_search_settings(&settings, &canonical)?;
         let id = public_search_id(&canonical);
         (canonical, SourceKind::PublicSearch, None, None, id)

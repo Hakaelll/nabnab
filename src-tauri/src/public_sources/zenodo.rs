@@ -2,14 +2,16 @@ use super::*;
 use std::{collections::{HashSet, VecDeque}, sync::LazyLock, time::Instant};
 
 const RECORDS: &str = "https://zenodo.org/api/records";
-const VERSION_PAGE_SIZE: usize = 20;
-const VERSION_PAGE_LIMIT: usize = 10;
+const COMMUNITIES: &str = "https://zenodo.org/api/communities";
+const CATALOG_PAGE_SIZE: usize = 20;
+const CATALOG_PAGE_LIMIT: usize = 10;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum ZenodoTarget {
     Record(u64),
     Doi(String),
     Versions(u64),
+    Community(String),
 }
 
 fn record_id(value: &str) -> Option<u64> {
@@ -44,6 +46,21 @@ pub(super) fn parse(url: &url::Url, parts: &[String]) -> Result<ZenodoTarget, St
             .map(ZenodoTarget::Doi)
             .ok_or_else(|| "Use a valid Zenodo record DOI.".into());
     }
+    let community = match parts {
+        [route, id] if route == "communities" => Some(id),
+        [route, id, records] if route == "communities" && records == "records" => Some(id),
+        _ => None,
+    };
+    if let Some(id) = community {
+        if url.query().is_some_and(|query| !query.is_empty())
+            || id.is_empty()
+            || id.len() > 100
+            || !id.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"-_".contains(&byte))
+        {
+            return Err("Use a Zenodo community link without search filters.".into());
+        }
+        return Ok(ZenodoTarget::Community(id.to_ascii_lowercase()));
+    }
     if matches!(parts, [api, route] if api == "api" && route == "records") {
         let mut family = None;
         let mut all_versions = false;
@@ -74,6 +91,7 @@ pub(super) fn canonical(target: &ZenodoTarget) -> String {
         ZenodoTarget::Record(id) => format!("https://zenodo.org/records/{id}"),
         ZenodoTarget::Doi(doi) => url_path("https://doi.org", &doi.split('/').collect::<Vec<_>>()),
         ZenodoTarget::Versions(family) => catalog_url(&format!("conceptrecid:{family}")).to_string(),
+        ZenodoTarget::Community(id) => format!("https://zenodo.org/communities/{id}"),
     }
 }
 
@@ -125,7 +143,7 @@ fn catalog_url(query: &str) -> url::Url {
 
 fn search_url(query: &str, current: usize) -> String {
     let mut url = catalog_url(query);
-    url.query_pairs_mut().append_pair("size", &VERSION_PAGE_SIZE.to_string())
+    url.query_pairs_mut().append_pair("size", &CATALOG_PAGE_SIZE.to_string())
         .append_pair("page", &current.to_string()).append_pair("sort", "mostrecent");
     url.to_string()
 }
@@ -153,7 +171,9 @@ async fn record(target: &ZenodoTarget) -> Result<Value, String> {
             let escaped = value.replace('/', "\\/");
             (format!("doi:\"{escaped}\" OR conceptdoi:\"{escaped}\""), Some(value.as_str()), None)
         }
-        ZenodoTarget::Versions(_) => return Err("Open a specific version to review its files.".into()),
+        ZenodoTarget::Versions(_) | ZenodoTarget::Community(_) => {
+            return Err("Open a specific Zenodo record to review its files.".into());
+        }
     };
     let raw = metadata(search_url(&query, 1)).await?;
     let id = raw["hits"]["hits"].as_array().into_iter().flatten()
@@ -239,13 +259,20 @@ fn asset(raw: &Value, id: u64, file: &Value) -> Option<Asset> {
     })
 }
 
+fn catalog_cursor(page: &mut Page, raw: &Value, count: usize, current: usize) {
+    let total = raw["hits"]["total"].as_u64().or_else(|| raw["hits"]["total"]["value"].as_u64());
+    let more = total.map_or(count == CATALOG_PAGE_SIZE, |total| total > (current * CATALOG_PAGE_SIZE) as u64);
+    if more && current < CATALOG_PAGE_LIMIT {
+        page.next_cursor = Some((current + 1).to_string());
+    }
+}
+
 fn version_page(raw: &Value, family: u64, current: usize) -> Result<Page, String> {
     let hits = raw["hits"]["hits"].as_array().ok_or("Zenodo returned no version list.")?;
-    let total = raw["hits"]["total"].as_u64().or_else(|| raw["hits"]["total"]["value"].as_u64());
     let mut seen = HashSet::new();
     let mut title = None;
     let mut entries = Vec::new();
-    for hit in hits.iter().take(VERSION_PAGE_SIZE) {
+    for hit in hits.iter().take(CATALOG_PAGE_SIZE) {
         let Some(id) = id_field(&hit["id"]).filter(|id| family_id(hit) == Some(family) && seen.insert(*id)) else { continue; };
         let meta = &hit["metadata"];
         let name = field(meta, "title", 200).unwrap_or_else(|| format!("Zenodo {id}"));
@@ -262,19 +289,61 @@ fn version_page(raw: &Value, family: u64, current: usize) -> Result<Page, String
     let mut page = page(&Target::Zenodo(ZenodoTarget::Versions(family)), Provider::Zenodo,
         title.unwrap_or_else(|| format!("Zenodo {family}")));
     page.entries = entries;
-    let more = total.map_or(hits.len() == VERSION_PAGE_SIZE, |total| total > (current * VERSION_PAGE_SIZE) as u64);
-    if more && current < VERSION_PAGE_LIMIT {
-        page.next_cursor = Some((current + 1).to_string());
-    }
+    catalog_cursor(&mut page, raw, hits.len(), current);
     Ok(page)
+}
+
+pub(super) async fn community_info(identifier: &str) -> Result<(String, String), String> {
+    let raw = metadata(url_path(COMMUNITIES, &[identifier])).await?;
+    let id = raw["id"].as_str().filter(|id| {
+        id.len() == 36 && id.bytes().enumerate().all(|(index, byte)| {
+            if matches!(index, 8 | 13 | 18 | 23) { byte == b'-' } else { byte.is_ascii_hexdigit() }
+        })
+    }).ok_or("Zenodo returned an invalid community identifier.")?;
+    if raw["access"]["visibility"].as_str() != Some("public")
+        || (id != identifier && raw["slug"].as_str() != Some(identifier))
+    {
+        return Err("Zenodo did not return the requested public community.".into());
+    }
+    let title = field(&raw["metadata"], "title", 240).unwrap_or_else(|| format!("Zenodo · {identifier}"));
+    Ok((id.to_ascii_lowercase(), title))
+}
+
+fn community_page(target: &ZenodoTarget, title: String, raw: &Value, current: usize) -> Result<Page, String> {
+    let hits = raw["hits"]["hits"].as_array().ok_or("Zenodo returned no community record list.")?;
+    let mut result = page(&Target::Zenodo(target.clone()), Provider::Zenodo, title);
+    let mut seen = HashSet::new();
+    result.entries = hits.iter().take(CATALOG_PAGE_SIZE).filter_map(|record| {
+        let id = id_field(&record["id"]).filter(|id| seen.insert(*id))?;
+        let meta = &record["metadata"];
+        Some(Entry {
+            id: format!("zenodo:{id}"),
+            title: field(meta, "title", 240).unwrap_or_else(|| format!("Zenodo {id}")),
+            url: canonical(&ZenodoTarget::Record(id)),
+            prerelease: false,
+            published_at: field(meta, "publication_date", 40),
+        })
+    }).collect();
+    catalog_cursor(&mut result, raw, hits.len(), current);
+    Ok(result)
 }
 
 pub(super) async fn inspect(target: &ZenodoTarget, cursor: Option<&str>) -> Result<Page, String> {
     let current = numeric_page(cursor)?;
     if let ZenodoTarget::Versions(family) = target {
-        if current > VERSION_PAGE_LIMIT { return Err("Zenodo history is limited to 200 versions per exploration.".into()); }
+        if current > CATALOG_PAGE_LIMIT { return Err("Zenodo history is limited to 200 versions per exploration.".into()); }
         let raw = metadata(search_url(&format!("conceptrecid:{family}"), current)).await?;
         return version_page(&raw, *family, current);
+    }
+    if let ZenodoTarget::Community(identifier) = target {
+        if current > CATALOG_PAGE_LIMIT { return Err("Zenodo communities are limited to 200 records per exploration.".into()); }
+        let (id, title) = community_info(identifier).await?;
+        let mut url = url::Url::parse(&url_path(COMMUNITIES, &[&id, "records"]))
+            .expect("constant Zenodo endpoint and validated identifier");
+        url.query_pairs_mut().append_pair("size", &CATALOG_PAGE_SIZE.to_string())
+            .append_pair("page", &current.to_string()).append_pair("sort", "mostrecent");
+        let raw = metadata(url.to_string()).await?;
+        return community_page(target, title, &raw, current);
     }
     let raw = record(target).await?;
     let id = id_field(&raw["id"]).ok_or("Zenodo returned no record identifier.")?;
@@ -376,5 +445,32 @@ mod tests {
         assert_eq!(parse(&url, &path).unwrap(), ZenodoTarget::Versions(7));
         let unrelated = url::Url::parse("https://zenodo.org/api/records?q=conceptrecid%3A7+OR+*&all_versions=true").unwrap();
         assert!(parse(&unrelated, &path).is_err());
+    }
+
+    #[test]
+    fn community_pages_are_bounded_and_only_link_to_exact_records() {
+        let url = "https://zenodo.org/communities/research-fixture";
+        assert_eq!(canonical_followed_search(&format!("{url}/records")).as_deref(), Ok(url));
+        assert!(canonical_followed_search(&format!("{url}?q=sample")).is_err());
+        assert!(canonical_followed_search("https://zenodo.org/communities/research%2Ffixture").is_err());
+        let target = ZenodoTarget::Community("research-fixture".into());
+        let raw = json!({"hits": {"total": 240, "hits": [
+            {"id": 9, "metadata": {"title": "Open record", "publication_date": "2025-04-03"}},
+            {"id": 9},
+            {"id": "8", "metadata": {"title": "Restricted files", "access_right": "restricted"}},
+            {"id": "invalid", "links": {"self": "https://example.invalid"}}
+        ]}});
+        let result = community_page(&target, "Research group".into(), &raw, 1).unwrap();
+        assert_eq!(result.source_url, url);
+        assert_eq!(result.title, "Research group");
+        assert_eq!(result.next_cursor.as_deref(), Some("2"));
+        assert!(result.assets.is_empty());
+        assert_eq!(result.entries.iter().map(|entry| entry.url.as_str()).collect::<Vec<_>>(), [
+            "https://zenodo.org/records/9",
+            "https://zenodo.org/records/8",
+        ]);
+        assert!(valid_followed_search_entry(url, &result.entries[0].url, "zenodo:9"));
+        assert!(!valid_followed_search_entry(url, &result.entries[0].url, "zenodo:8"));
+        assert!(community_page(&target, "Research group".into(), &raw, 10).unwrap().next_cursor.is_none());
     }
 }

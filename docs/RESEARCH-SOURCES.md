@@ -15,6 +15,8 @@ En **Plataformas → Archivos y documentos**, pega un enlace, un identificador o
 
 - Abre un enlace de registro, un ID numérico o un DOI. La ficha distingue el registro concreto del conjunto al que pertenece. Cada archivo queda ligado al registro concreto, aunque se haya abierto mediante un DOI de conjunto.
 - **Historial de versiones** enumera los registros públicos de la familia. Abre una versión para elegir sus archivos o usa **Seguir versiones** para revisar las novedades manualmente desde Biblioteca.
+- Pega el enlace principal de una comunidad pública de Zenodo para ver sus registros recientes. **Cargar más** consulta bloques de 20, con un máximo de 200 por exploración. Abre un registro para revisar sus archivos y vuelve a la misma fila con **Volver a la comunidad**.
+- **Seguir comunidad** guarda su identificador estable en **Biblioteca → Fuentes**. La revisión es manual. Abre el registro concreto antes de elegir archivos para Descargas.
 - Revisa tipo, versión, tamaño y checksum de los archivos. La selección muestra el tamaño total conocido antes de enviar nada a la cola. Se verifica el checksum publicado MD5 o SHA-256 cuando esté disponible.
 - Usa **Solo seleccionados** para revisar todos los archivos marcados, incluidos los que el texto de búsqueda había ocultado. Puedes quitar archivos y ver cómo cambia el total. Pulsa el botón de nuevo para recuperar la búsqueda anterior.
 - Los registros con archivos restringidos, embargados o sin acceso público declarado muestran metadatos sin permitir la descarga. La cola guarda archivos sin ejecutarlos.
@@ -48,6 +50,8 @@ Para repetir la prueba nativa, inicia Vite en el puerto 1420 y ejecuta `node tes
 
 Con `NABNAB_RESEARCH_LANGUAGE_ONLY=1` la prueba se limita a consultar el catálogo de LibriVox, abrir una edición y guardar un seguimiento manual con un límite de 25 posiciones.
 
+Con `NABNAB_RESEARCH_COMMUNITY_ONLY=1`, la prueba nativa consultó 14 registros públicos de una comunidad de Zenodo. Abrió un registro concreto, volvió a la misma fila y guardó el seguimiento manual. Guardar de nuevo con el identificador estable reutilizó la misma fuente y Descargas quedó vacía. La prueba de Edge comprobó la paginación y el regreso con datos simulados a 900 y 1180 px. [Comunidad de prueba](https://zenodo.org/communities/cfa)
+
 Con `NABNAB_RESEARCH_CHAPTER_FILTERS_ONLY=1` la prueba combina idioma y lectura en una edición multilingüe, cambia el filtro y recupera el capítulo marcado con **Solo seleccionados**. La cola descargó únicamente el capítulo 3, leído en español por Alexandria Adair, con 1.048.675 bytes. Biblioteca conservó los datos de ese capítulo y su edición. [Edición multilingüe en LibriVox](https://librivox.org/mini-multilingual-bedtime-stories-2-by-aesop/)
 
 ![Selección de PDF por versión de arXiv](arxiv-versions.png)
@@ -57,6 +61,8 @@ Con `NABNAB_RESEARCH_CHAPTER_FILTERS_ONLY=1` la prueba combina idioma y lectura 
 ![Volumen y checksum antes de descargar un archivo de Zenodo](zenodo-selection.png)
 
 ![Selección de Zenodo con un archivo de tamaño desconocido](zenodo-review.png)
+
+![Comunidad pública de Zenodo en la aplicación de Windows](zenodo-community.png)
 
 ![Capítulos seleccionados de una edición de LibriVox](librivox-chapters.png)
 

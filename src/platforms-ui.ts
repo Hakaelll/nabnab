@@ -22,7 +22,7 @@ const platforms:Platform[] = [
   {id:'telegram',name:'Telegram',host:'t.me · cuenta MTProto autorizada',group:'telegram',operations:'Medios de mensajes y chats accesibles · selección paginada',engine:'TDLib opcional',session:'api_id, api_hash y cuenta propia',module:'telegram'},
   {id:'personal',name:'Servidores personales',host:'Nextcloud · WebDAV · SFTP · NAS',group:'files',operations:'Navegar · guardar referencias · copiar archivos',engine:'Solo lectura',session:'Raíz autorizada por ti',module:'fileSources'},
   {id:'arxiv',name:'arXiv',host:'arxiv.org',group:'files',operations:'Buscar artículos · comparar versiones · guardar PDF',engine:'API oficial',session:'Sin cuenta',module:'fileSources'},
-  {id:'zenodo',name:'Zenodo',host:'zenodo.org',group:'files',operations:'Registros y DOI · tamaños · selección de archivos',engine:'API oficial',session:'Archivos públicos',module:'fileSources'},
+  {id:'zenodo',name:'Zenodo',host:'zenodo.org',group:'files',operations:'Registros, DOI y comunidades · selección de archivos',engine:'API oficial',session:'Archivos públicos',module:'fileSources'},
   {id:'librivox',name:'LibriVox',host:'librivox.org',group:'audio',operations:'Catálogo · ediciones · capítulos de audiolibros',engine:'API oficial',session:'Sin cuenta',module:'fileSources'},
   {id:'udemy',name:'Udemy',host:'udemy.com',group:'courses',operations:'Secciones · lecciones · materiales con descarga autorizada',engine:'Integrado',session:'Sesión autorizada necesaria',module:'courses'},
   {id:'hotmart',name:'Hotmart',host:'hotmart.com',group:'courses',operations:'Lecciones · adjuntos autorizados',engine:'Integrado',session:'Token de alumno necesario',module:'courses'},

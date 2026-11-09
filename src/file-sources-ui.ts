@@ -49,11 +49,14 @@ const providers: { id: CloudProvider; name: string }[] = [
 function isZenodoHistory(page: PublicPage | null): boolean {
   return page?.provider === "zenodo" && page.sourceUrl.startsWith("https://zenodo.org/api/records?");
 }
+function isZenodoCommunity(page: PublicPage | null): boolean {
+  return page?.provider === "zenodo" && page.sourceUrl.startsWith("https://zenodo.org/communities/");
+}
 function isLibrivoxLanguageBrowse(page: PublicPage | null): boolean {
   return page?.provider === "librivox" && page.sourceUrl.startsWith("https://librivox.org/search/?language_id=");
 }
 function isCatalogSearch(page: PublicPage | null): boolean {
-  return isZenodoHistory(page) || Boolean(page && (page.provider === "arxiv" || page.provider === "librivox")
+  return isZenodoHistory(page) || isZenodoCommunity(page) || Boolean(page && (page.provider === "arxiv" || page.provider === "librivox")
     && page.sourceUrl.startsWith(`https://${page.provider}.org/search/?`));
 }
 const publicNames = {
@@ -258,6 +261,7 @@ export function createFileSources(hooks: FileSourceHooks) {
     return `<p class="field-note">${h(metadata.filter(Boolean).join(" · "))}</p>`;
   }
   function publicRows(visible: PublicAsset[], reviewing: boolean): string {
+    if (isZenodoCommunity(publicPage)) return "";
     if (isZenodoHistory(publicPage)) return publicPage?.entries.length ? "" : `<p class="file-source-empty">${t("Zenodo no devolvió versiones públicas para esta familia.", "Zenodo returned no public versions for this family.")}</p>`;
     if (!publicPage || !publicPage.assets.length && publicPage.entries.length) return "";
     const { provider, rights } = publicPage;
@@ -327,9 +331,10 @@ export function createFileSources(hooks: FileSourceHooks) {
     const provider: CloudProvider = tab === "public" ? "drive" : tab;
     const isSearch = isCatalogSearch(publicPage);
     const zenodoHistory = isZenodoHistory(publicPage);
+    const zenodoCommunity = isZenodoCommunity(publicPage);
     const languageBrowse = isLibrivoxLanguageBrowse(publicPage);
     const chapters = isPublic && publicPage?.provider === "librivox" ? publicPage.assets : null;
-    const zenodoFiles = isPublic && publicPage?.provider === "zenodo" && !zenodoHistory;
+    const zenodoFiles = isPublic && publicPage?.provider === "zenodo" && !isSearch;
     const canReview = canReviewPublicSelection();
     const reviewing = canReview && publicSelectionReview;
     const visibleAssets = isPublic ? publicPage?.assets.filter(reviewing ? asset => publicSelected.has(asset.id) : matchesPublicFilter) ?? [] : [];
@@ -340,9 +345,12 @@ export function createFileSources(hooks: FileSourceHooks) {
       ? `LibriVox · ${displayLibrivoxLanguage(publicPage.title.replace(/^LibriVox · /, ""))}`
       : publicPage?.title ?? "";
     const followLabel = zenodoHistory ? t("Seguir versiones", "Follow versions")
-      : languageBrowse ? t("Seguir idioma", "Follow language")
+      : zenodoCommunity ? t("Seguir comunidad", "Follow community")
+        : languageBrowse ? t("Seguir idioma", "Follow language")
         : isSearch ? t("Seguir búsqueda", "Follow search") : t("Seguir versiones", "Follow releases");
-    const returnLabel = isZenodoHistory(catalogReturn?.page ?? null) ? t("Volver a versiones", "Back to versions") : t("Volver a resultados", "Back to results");
+    const previousCatalog = catalogReturn?.page ?? null;
+    const returnLabel = isZenodoHistory(previousCatalog) ? t("Volver a versiones", "Back to versions")
+      : isZenodoCommunity(previousCatalog) ? t("Volver a la comunidad", "Back to community") : t("Volver a resultados", "Back to results");
     const hasPage = isPublic ? Boolean(publicPage) : Boolean(cloudPage);
     const cursor = isPublic ? publicPage?.nextCursor : cloudPage?.nextCursor;
     return `${header}
@@ -350,11 +358,15 @@ export function createFileSources(hooks: FileSourceHooks) {
       ${isPublic && catalogReturn ? `<div class="file-source-return">${action("file-source-back-results", returnLabel, "back", "quiet", busy ? "disabled" : "")}</div>` : ""}
       ${error ? `<div class="file-source-error" role="alert">${icon("error")}<span>${h(error)}</span></div>` : ""}${busy === "inspect" || busy === "connect" ? `<div class="file-source-progress" role="status"><span>${busy === "connect" ? t("Esperando autorización en el navegador…", "Waiting for browser authorization…") : t("Consultando archivos del origen…", "Reading source files…")}</span>${action("file-source-cancel", t("Cancelar", "Cancel"), "close", "quiet")}</div>` : ""}
       ${hasPage ? `<div class="file-source-results"><div class="file-source-result-heading"><div>
-        <span class="file-source-eyebrow">${isPublic ? zenodoHistory ? t("Zenodo · Historial de versiones", "Zenodo · Version history") : h(publicPage ? publicNames[publicPage.provider] : "") : h(cloudName(provider))}</span>
+        <span class="file-source-eyebrow">${isPublic ? zenodoHistory ? t("Zenodo · Historial de versiones", "Zenodo · Version history")
+          : zenodoCommunity ? t("Zenodo · Comunidad", "Zenodo · Community") : h(publicPage ? publicNames[publicPage.provider] : "") : h(cloudName(provider))}</span>
         <h2${isPublic && (catalogReturn || zenodoHistory) ? ' tabindex="-1"' : ""}>${h(isPublic ? publicTitle : trail.at(-1)?.name ?? t("Mis archivos", "My files"))}</h2>${isPublic ? zenodoSummary() : ""}</div>
         ${isPublic && !catalogReturn && publicPage?.zenodo?.versionsUrl ? action("file-source-versions", t("Historial de versiones", "Version history"), "list", "quiet", busy ? "disabled" : "") : ""}
         ${isPublic && (publicPage?.provider === "github" || isSearch) && hooks.followSource ? action("file-source-follow", followLabel, "add", "quiet", busy ? "disabled" : "") : ""}
         ${!isPublic && trail.length ? action("file-source-parent", t("Volver", "Back"), undefined, "quiet", busy ? "disabled" : "") : ""}</div>${isPublic ? publicDescription() : ""}${isPublic && publicPage?.rights ? `<p class="field-note">${t("Derechos indicados por el origen", "Rights stated by the source")}: ${h(publicPage.rights)}</p>` : ""}${warningList(isPublic ? publicPage?.warnings ?? [] : cloudPage?.warnings ?? [])}
+        ${zenodoCommunity ? `<p class="field-note">${publicPage?.entries.length
+          ? t("Abre un registro para comprobar su licencia y los archivos disponibles.", "Open a record to check its license and available files.")
+          : t("La comunidad no ha devuelto registros en esta consulta.", "The community returned no records for this request.")}</p>` : ""}
         ${isPublic && publicPage?.entries.length ? `<div class="file-source-entries">${publicPage.entries.map(entry => `<button type="button" class="file-source-entry" data-action="file-source-entry" data-id="${h(entry.id)}" ${busy ? "disabled" : ""}><span><strong>${h(entry.title)}</strong><small>${h(entry.publishedAt ?? "")}</small></span>${publicPage?.provider === "github" ? `<span class="file-source-status">${entry.prerelease ? "Prerelease" : t("Estable", "Stable")}</span>` : ""}${icon("arrow")}</button>`).join("")}</div>` : ""}
         ${loadedCount ? `<div class="file-source-filter">
           <label>${icon("search")}<input id="file-source-query" type="search" value="${reviewing ? "" : h(query)}" placeholder="${reviewing ? t("Búsqueda en pausa", "Search paused") : filterLabel}" aria-label="${filterLabel}" ${reviewing ? "disabled" : ""}></label>

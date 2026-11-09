@@ -15,6 +15,7 @@ const output = path.join(data, "output");
 await mkdir(output);
 const languageOnly = process.env.NABNAB_RESEARCH_LANGUAGE_ONLY === "1";
 const chaptersOnly = process.env.NABNAB_RESEARCH_CHAPTER_FILTERS_ONLY === "1";
+const communityOnly = process.env.NABNAB_RESEARCH_COMMUNITY_ONLY === "1";
 const port = process.env.NABNAB_RESEARCH_DEBUG_PORT || 9259;
 const endpoint = `http://127.0.0.1:${port}`;
 const child = spawn(process.env.NABNAB_RESEARCH_TEST_EXE ?? path.join(root, "src-tauri/target/debug/nabnab.exe"), [], {
@@ -96,7 +97,48 @@ try {
   await rpc("save_settings", { settings: { ...initial.settings, language: "es", folder: output, reducedMotion: true, trayEnabled: false, closeToTray: false } });
   await page.reload();
 
-  if (!chaptersOnly) await verify("LibriVox language", async () => {
+  if (communityOnly) await verify("Zenodo community", async () => {
+    const url = "https://zenodo.org/communities/cfa";
+    const title = "Harvard-Smithsonian Center for Astrophysics";
+    const stableUrl = "https://zenodo.org/communities/e4064eef-ce1b-4e34-b801-9f9570159e58";
+    await page.locator("#url").fill(url);
+    await page.locator("#load").click();
+    const communityHeading = page.getByRole("heading", { name: title, exact: true });
+    await communityHeading.waitFor({ timeout: 60_000 });
+    const records = page.locator(".file-source-entry");
+    const ids = await records.evaluateAll(entries => entries.map(entry => entry.dataset.id));
+    assert.ok(ids.length > 0 && ids.length <= 20);
+    assert.equal(new Set(ids).size, ids.length);
+    assert.ok(ids.every(id => /^zenodo:\d+$/.test(id)));
+    for (const [width, height] of [[1180, 780], [900, 620]]) {
+      await page.setViewportSize({ width, height });
+      await communityHeading.scrollIntoViewIfNeeded();
+      assert.ok(await page.locator(".file-sources").evaluate(node => node.scrollWidth <= node.clientWidth + 1));
+      await page.screenshot({ path: path.join(data, `zenodo-community-${width}.png`) });
+    }
+    const first = records.first();
+    await first.press("Enter");
+    const back = page.getByRole("button", { name: "Volver a la comunidad", exact: true });
+    await back.waitFor();
+    await page.getByText(/^Registro \d+|^Versión .*Registro \d+/).first().waitFor({ timeout: 60_000 });
+    assert.equal(await page.locator("[data-file-source-select]:checked").count(), 0);
+    await back.press("Enter");
+    assert.equal(await first.evaluate(element => element === document.activeElement), true);
+    await page.getByRole("button", { name: "Seguir comunidad", exact: true }).click();
+    await page.getByRole("button", { name: "Añadir y explorar", exact: true }).click();
+    const saved = await wait(async () => (await getSnapshot()).sources.find(source => source.url === stableUrl && source.lastCheck), 90_000);
+    assert.equal(saved.settings.automatic, false);
+    assert.equal(saved.settings.intervalHours, null);
+    assert.equal(saved.items.length, ids.length);
+    assert.ok(saved.items.every(item => item.state === "review" && !item.jobIds.length));
+    const same = await rpc("add_source", { url: stableUrl, settings: saved.settings, kind: "publicSearch", publicFeed: false });
+    assert.equal(same.id, saved.id);
+    assert.equal((await getSnapshot()).sources.length, 1);
+    assert.equal((await getSnapshot()).jobs.length, 0);
+    return { records: ids.length, stableUrl, queued: 0 };
+  });
+
+  if (!chaptersOnly && !communityOnly) await verify("LibriVox language", async () => {
     await page.locator('[data-page="platforms"]').click();
     await page.locator('[data-action="open-fileSources"][data-id="librivox"]').click();
     await page.getByRole("combobox", { name: "Idioma", exact: true }).selectOption({ label: "Español" });
@@ -183,7 +225,7 @@ try {
     return { chapter: chapter.audiobook.chapter, language: chapter.audiobook.language, reader: chapter.audiobook.reader, bytes: chapter.size };
   });
 
-  if (!languageOnly && !chaptersOnly) await verify("arXiv", async () => {
+  if (!languageOnly && !chaptersOnly && !communityOnly) await verify("arXiv", async () => {
     const paper = "2506.08399";
     const source = await inspect(`https://arxiv.org/abs/${paper}`);
     assert.deepEqual(source.assets.map(asset => asset.version), ["v2", "v1"]);
@@ -203,7 +245,7 @@ try {
     return { versions: saved.map(value => value.item.name), bytes: saved.map(value => value.bytes.length) };
   });
 
-  if (!languageOnly && !chaptersOnly) await verify("Zenodo", async () => {
+  if (!languageOnly && !chaptersOnly && !communityOnly) await verify("Zenodo", async () => {
     const family = await inspect("14634896");
     assert.equal(family.zenodo.recordId, "14634897");
     assert.equal(family.zenodo.familyId, "14634896");
@@ -222,7 +264,7 @@ try {
     return { family: family.zenodo.familyId, record: source.zenodo.recordId, filename: item.name, bytes: item.size, checksum: asset.checksum };
   });
 
-  if (!languageOnly && !chaptersOnly) await verify("LibriVox", async () => {
+  if (!languageOnly && !chaptersOnly && !communityOnly) await verify("LibriVox", async () => {
     const source = await inspect("https://librivox.org/rss/353");
     const chapters = source.assets.map(asset => asset.audiobook?.chapter);
     assert.ok(chapters.length > 2);
@@ -240,7 +282,7 @@ try {
     assert.deepEqual(shown, assets.map(asset => `Cap. ${asset.audiobook.chapter}`));
     return { chapters: assets.map(asset => asset.audiobook.chapter), bytes: assets.map(asset => asset.size) };
   });
-  const expected = chaptersOnly ? ["LibriVox chapter filters"] : languageOnly ? ["LibriVox language"]
+  const expected = communityOnly ? ["Zenodo community"] : chaptersOnly ? ["LibriVox chapter filters"] : languageOnly ? ["LibriVox language"]
     : ["LibriVox language", "arXiv", "Zenodo", "LibriVox"];
   assert.deepEqual(results, expected, errors.map(String).join("\n"));
 } catch (error) {
