@@ -2,11 +2,13 @@
 
 nabnab is a Windows desktop app for saving media and documents, organizing a local library, and playing or editing your files. Downloads and local processing share a queue, so you can leave a job running while you browse your library.
 
-The Windows x64 installer for version 0.2.0 is unsigned and requires WebView2. An upgrade from ytnabber keeps the existing installation folder and application data. The features below describe the source on `main`. [Download 0.2.0](https://github.com/Hakaelll/nabnab/releases/tag/v0.2.0) · [Release notes](docs/releases/0.2.0.md) · [Migration guide](docs/MIGRATION.md)
+Download version 0.2.0 for Windows x64. The installer is unsigned and requires WebView2. An upgrade from ytnabber keeps the existing installation folder and application data. See the release notes for what the installer includes. [Download 0.2.0](https://github.com/Hakaelll/nabnab/releases/tag/v0.2.0) · [Release notes](docs/releases/0.2.0.md) · [Migration guide](docs/MIGRATION.md)
 
 ![The nabnab Home screen](docs/home-motion-after.png)
 
 ## Get started
+
+These workflows describe the source on `main`. To try features added after the release, [run nabnab from source](#run-from-source).
 
 1. Paste a link in **Home** or import a list of links from a `.txt` file. Choose a download profile after nabnab analyzes the link.
 2. Click **Download** or **Add to queue**. Follow the job in **Downloads**. Verified outputs appear in **Library**.
@@ -20,8 +22,8 @@ After a restart, interrupted jobs are paused for review. Choose **Retry** to run
 - **Research.** Open arXiv PDFs by exact version, or review the files and sizes in a Zenodo record. Paste a public Zenodo community link to browse recent records and follow the community in **Library → Sources** for manual review. [Research sources](docs/RESEARCH-SOURCES.md)
 - **Audiobooks.** Browse LibriVox editions and review the chapters you want before downloading. [LibriVox workflow](docs/RESEARCH-SOURCES.md) · [Chapter selection](docs/librivox-chapter-review.png)
 - **Media and subscriptions.** Review individual gallery and social attachments, follow podcast RSS feeds, and import or export OPML subscriptions. The BitTorrent workflow offers file selection and requires explicit P2P consent. Telegram attachment selection requires the optional TDLib component and an authorized account. [Sources and tools](docs/EXPANSION.md) · [Podcasts](docs/PODCASTS.md)
-- **Personal servers.** Browse Nextcloud, WebDAV, SFTP, or a network folder that Windows can access. Index a reference or queue a local copy. If a file changes on the server, compare the saved version with the current one before updating the reference or copying again. [Personal servers](docs/PERSONAL-SERVERS.md)
-- **Courses.** Study local lessons with notes, progress, and playback position. Udemy, Hotmart, and Kiwify use separate authorized connections. With a Coursera Business organization token, you can import an outline and attach files saved from the site. Rocketseat has separate entries for classroom and learning path links, with access to the original page in your browser. For Rocketseat and Domestika, import files you saved through their websites. Skillshare can also review supported direct attachment links. [Courses and provider limits](docs/COURSES.md)
+- **Personal servers.** Browse Nextcloud, WebDAV, SFTP, or a network folder that Windows can access. Search the current folder by name, then show only selected files to review their total size and destination. Save a reference or queue a local copy. If a file changes on the server, you can compare the saved and current versions. [Personal servers](docs/PERSONAL-SERVERS.md) · [File selection](docs/personal-server-selected.png)
+- **Courses.** Study local lessons with notes, progress, and playback position. Udemy, Hotmart, and Kiwify use separate authorized connections. Use a Coursera Business organization token to import a course outline. Open Rocketseat classroom or learning path links in your browser. Import resources you saved from Rocketseat or Domestika, and attach Domestika resources to the unit they belong to. Skillshare can also review supported direct attachment links. [Courses and provider limits](docs/COURSES.md) · [Domestika unit resources](docs/course-domestika-unit.png)
 
 ## Library and playback
 
@@ -34,8 +36,9 @@ The animated character field on Home cycles through eleven patterns. The sidebar
 
 ## Local tools and device sharing
 
-- **Images and stickers.** Compare the same crop before and after upscaling, or inspect a cutout and its mask at the same zoom. Play an animated WhatsApp sticker preview, return to its first frame, and check its edges on light, dark, or checkerboard backgrounds. [Upscaling](docs/IMAGE-UPSCALE.md) · [Background removal](docs/REMOVE-BACKGROUND.md) · [Sticker export](docs/STICKERS.md)
-- **Audio and subtitles.** Compare synchronized waveforms for the original audio, vocals, and instrumental. Translate subtitles locally, edit the draft by segment, and export a translated or bilingual track. [Stem separation](docs/STEMS.md) · [Subtitle translation](docs/TRANSLATION.md)
+- **Images and stickers.** Place an upscale sample directly on the image thumbnail or use the keyboard to set its coordinates. Compare the same crop before and after processing. Inspect a cutout and its mask at the same zoom, or preview an animated WhatsApp sticker on light, dark, or checkerboard backgrounds. [Upscaling](docs/IMAGE-UPSCALE.md) · [Crop picker](docs/upscale-crop-overview.png) · [Background removal](docs/REMOVE-BACKGROUND.md) · [Sticker export](docs/STICKERS.md)
+- **Audio stems.** Compare the original audio, vocals, and instrumental with synchronized waveforms. Return from the comparison to the same track and position in your playback queue. [Stem separation](docs/STEMS.md)
+- **Subtitles.** Translate subtitles locally. Find a draft segment by text, cue ID, or timestamp and edit it in place. Export the complete translated or bilingual track while a search is active. [Subtitle translation](docs/TRANSLATION.md) · [Draft search](docs/translation-cue-search.png)
 - **Dubbing.** Use installed Windows voices to create a synchronized WAV. Export an MKV with an alternate voice track, replace the audio, or mix the voice with a selected original track or a previously exported instrumental from the same video. [Dubbing guide](docs/TRANSLATION.md#doblaje-local) · [Instrumental selector](docs/dubbing-instrumental.png)
 - **Documents and captures.** Search scanned pages after local OCR, or read a saved PDF or EPUB and add bookmarks. Capture a monitor, window, or region, with separate controls for microphone and system audio. [Local documents](docs/DOCUMENTS.md) · [Screen capture](docs/SCREEN-CAPTURE.md)
 - **Send to device.** Review files, a portable ZIP, a public link, or selected text before handing the request to KDE Connect. If a file is missing from disk, remove it from the share while keeping its Library entry. The text field shows how much of the 8 KiB limit you have used. Use KDE Connect to follow the transfer and verify receipt. [KDE Connect setup and status](docs/DEVICE-SHARE.md) · [Portable collections](docs/PORTABLE-COLLECTIONS.md)
