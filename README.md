@@ -78,7 +78,9 @@ npm run desktop:build
 
 The installer is written to `src-tauri/target/release/bundle/nsis/`. For frontend development, run `npm run dev` to serve the interface in a browser. Launch the desktop app for native operations. [Native test setup](docs/NATIVE-TESTS.md)
 
-To reclaim build space, close the development app, save any installer you want to keep, then run `cargo clean --manifest-path src-tauri/Cargo.toml`. The next build recreates `src-tauri/target/`. This build folder is separate from the Library and the thumbnail cache in Settings.
+Development builds keep file and line numbers in Rust backtraces. If you need to inspect Rust types and variables in a debugger, run `$env:CARGO_PROFILE_DEV_DEBUG = '2'` in PowerShell before building. This creates larger debug files. [Cargo profiles](https://doc.rust-lang.org/cargo/reference/profiles.html#debug)
+
+To reclaim development build space, close the development app and run `cargo clean --profile dev --manifest-path src-tauri/Cargo.toml`. The next development build recreates `src-tauri/target/debug/`. This build folder is separate from the Library and the thumbnail cache in Settings.
 
 ## Verification and compatibility
 
