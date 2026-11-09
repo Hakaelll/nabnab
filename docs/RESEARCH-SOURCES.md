@@ -18,6 +18,7 @@ En **Plataformas → Archivos y documentos**, pega un enlace, un identificador o
 - Pega el enlace principal de una comunidad pública de Zenodo para ver sus registros recientes. **Cargar más** consulta bloques de 20, con un máximo de 200 por exploración. Abre un registro para revisar sus archivos y vuelve a la misma fila con **Volver a la comunidad**.
 - **Seguir comunidad** guarda su identificador estable en **Biblioteca → Fuentes**. La revisión es manual. Abre el registro concreto antes de elegir archivos para Descargas.
 - Revisa tipo, versión, tamaño y checksum de los archivos. La selección muestra el tamaño total conocido antes de enviar nada a la cola. Se verifica el checksum publicado MD5 o SHA-256 cuando esté disponible.
+- **En Biblioteca** indica que ya tienes una copia de ese archivo del registro abierto. nabnab compara la versión y el checksum con la procedencia guardada, y el tamaño con el que figura en Biblioteca. **Mostrar carpeta** abre la ubicación de la copia en el Explorador. Los archivos de otro registro de la misma familia se revisan por separado.
 - Usa **Solo seleccionados** para revisar todos los archivos marcados, incluidos los que el texto de búsqueda había ocultado. Puedes quitar archivos y ver cómo cambia el total. Pulsa el botón de nuevo para recuperar la búsqueda anterior.
 - Los registros con archivos restringidos, embargados o sin acceso público declarado muestran metadatos sin permitir la descarga. La cola guarda archivos sin ejecutarlos.
 
@@ -44,6 +45,8 @@ La prueba de interfaz usa datos simulados. Recorre la selección por versión, e
 
 La prueba nativa descargó dos versiones distintas del mismo PDF de arXiv y comprobó que ambas se conservan. Descargó un CSV de Zenodo de 450 bytes y verificó el MD5 publicado. Descargó dos capítulos de LibriVox en orden inverso y comprobó el orden de lectura en Biblioteca. [Artículo de arXiv](https://arxiv.org/abs/2506.08399) · [Registro de Zenodo](https://zenodo.org/records/14634897) · [Edición de LibriVox](https://librivox.org/aesops-fables-volume-1-fables-1-25/)
 
+Con `NABNAB_RESEARCH_ZENODO_ONLY=1`, la prueba nativa descarga solo ese CSV. Al abrir el DOI del conjunto desde Inicio, comprueba que la ficha identifica la copia descargada y que no se crea otro trabajo. La prueba de Edge verifica la acción **Mostrar carpeta** con teclado a 900 y 1180 px y distingue una copia ausente, una versión distinta y discrepancias de tamaño o checksum.
+
 La prueba por idioma consultó dos páginas reales en español. La primera mostró 23 ediciones distintas y la segunda avanzó aunque sus capítulos pertenecían a una edición ya visible. Se abrieron los capítulos de *La desheredada*, se volvió a la misma fila y se guardó la revisión manual con 23 ediciones y cero trabajos de descarga. [La desheredada en LibriVox](https://librivox.org/la-desheredada-by-benito-perez-galdos/)
 
 Para repetir la prueba nativa, inicia Vite en el puerto 1420 y ejecuta `node tests/native-research.browser.mjs` con Playwright y el ejecutable de depuración de Windows disponibles. Los archivos y el perfil de prueba quedan en `artifacts/native-research`.
@@ -61,6 +64,8 @@ Con `NABNAB_RESEARCH_CHAPTER_FILTERS_ONLY=1` la prueba combina idioma y lectura 
 ![Volumen y checksum antes de descargar un archivo de Zenodo](zenodo-selection.png)
 
 ![Selección de Zenodo con un archivo de tamaño desconocido](zenodo-review.png)
+
+![Un archivo guardado junto a los demás archivos de la versión de Zenodo, con datos de prueba](zenodo-saved-copy.png)
 
 ![Comunidad pública de Zenodo en la aplicación de Windows](zenodo-community.png)
 

@@ -16,6 +16,8 @@ await mkdir(output);
 const languageOnly = process.env.NABNAB_RESEARCH_LANGUAGE_ONLY === "1";
 const chaptersOnly = process.env.NABNAB_RESEARCH_CHAPTER_FILTERS_ONLY === "1";
 const communityOnly = process.env.NABNAB_RESEARCH_COMMUNITY_ONLY === "1";
+const zenodoOnly = process.env.NABNAB_RESEARCH_ZENODO_ONLY === "1";
+const allProviders = !languageOnly && !chaptersOnly && !communityOnly && !zenodoOnly;
 const port = process.env.NABNAB_RESEARCH_DEBUG_PORT || 9259;
 const endpoint = `http://127.0.0.1:${port}`;
 const child = spawn(process.env.NABNAB_RESEARCH_TEST_EXE ?? path.join(root, "src-tauri/target/debug/nabnab.exe"), [], {
@@ -138,7 +140,7 @@ try {
     return { records: ids.length, stableUrl, queued: 0 };
   });
 
-  if (!chaptersOnly && !communityOnly) await verify("LibriVox language", async () => {
+  if (languageOnly || allProviders) await verify("LibriVox language", async () => {
     await page.locator('[data-page="platforms"]').click();
     await page.locator('[data-action="open-fileSources"][data-id="librivox"]').click();
     await page.getByRole("combobox", { name: "Idioma", exact: true }).selectOption({ label: "Español" });
@@ -225,7 +227,7 @@ try {
     return { chapter: chapter.audiobook.chapter, language: chapter.audiobook.language, reader: chapter.audiobook.reader, bytes: chapter.size };
   });
 
-  if (!languageOnly && !chaptersOnly && !communityOnly) await verify("arXiv", async () => {
+  if (allProviders) await verify("arXiv", async () => {
     const paper = "2506.08399";
     const source = await inspect(`https://arxiv.org/abs/${paper}`);
     assert.deepEqual(source.assets.map(asset => asset.version), ["v2", "v1"]);
@@ -245,7 +247,7 @@ try {
     return { versions: saved.map(value => value.item.name), bytes: saved.map(value => value.bytes.length) };
   });
 
-  if (!languageOnly && !chaptersOnly && !communityOnly) await verify("Zenodo", async () => {
+  if (zenodoOnly || allProviders) await verify("Zenodo", async () => {
     const family = await inspect("14634896");
     assert.equal(family.zenodo.recordId, "14634897");
     assert.equal(family.zenodo.familyId, "14634896");
@@ -261,10 +263,20 @@ try {
     assert.equal(asset.checksum, "md5:e9cdc5528564d20d0516ef90a9e3a980");
     const { item } = await queue(source, asset, asset.size, "document");
     assert.equal(item.name, "Fig_3b_left.csv");
-    return { family: family.zenodo.familyId, record: source.zenodo.recordId, filename: item.name, bytes: item.size, checksum: asset.checksum };
+    const jobCount = (await getSnapshot()).jobs.length;
+    await page.getByRole("button", { name: "Inicio", exact: true }).click();
+    await page.locator("#url").fill("10.5281/zenodo.14634896");
+    await page.locator("#load").click();
+    const showFolder = page.getByRole("button", { name: "Mostrar carpeta de Fig_3b_left.csv", exact: true });
+    await showFolder.waitFor({ timeout: 60_000 });
+    assert.equal(await showFolder.getAttribute("data-id"), item.id);
+    assert.match(await page.locator(".file-source-saved-copy").innerText(), /En Biblioteca · 450 B/);
+    assert.equal(await page.locator(".file-source-saved-copy").count(), 1);
+    assert.equal((await getSnapshot()).jobs.length, jobCount);
+    return { family: family.zenodo.familyId, record: source.zenodo.recordId, filename: item.name, bytes: item.size, checksum: asset.checksum, savedCopyViaConceptDoi: true };
   });
 
-  if (!languageOnly && !chaptersOnly && !communityOnly) await verify("LibriVox", async () => {
+  if (allProviders) await verify("LibriVox", async () => {
     const source = await inspect("https://librivox.org/rss/353");
     const chapters = source.assets.map(asset => asset.audiobook?.chapter);
     assert.ok(chapters.length > 2);
@@ -282,7 +294,7 @@ try {
     assert.deepEqual(shown, assets.map(asset => `Cap. ${asset.audiobook.chapter}`));
     return { chapters: assets.map(asset => asset.audiobook.chapter), bytes: assets.map(asset => asset.size) };
   });
-  const expected = communityOnly ? ["Zenodo community"] : chaptersOnly ? ["LibriVox chapter filters"] : languageOnly ? ["LibriVox language"]
+  const expected = communityOnly ? ["Zenodo community"] : chaptersOnly ? ["LibriVox chapter filters"] : languageOnly ? ["LibriVox language"] : zenodoOnly ? ["Zenodo"]
     : ["LibriVox language", "arXiv", "Zenodo", "LibriVox"];
   assert.deepEqual(results, expected, errors.map(String).join("\n"));
 } catch (error) {

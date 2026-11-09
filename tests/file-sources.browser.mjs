@@ -24,6 +24,17 @@ const setup = `
       chapters:[],tracks:[],playbackPosition:0,favorite:false,bookmarks:[],clip:null}
   });
   state.library.push(savedPaper("local-v1","v1"),savedPaper("missing-v2","v2",true));
+  const savedDataset=(id,record,filename,size,version,sourceChecksum=null,missing=false)=>({
+    ...savedPaper(id,version,missing),name:filename,path:"C:/Datasets/"+id+"/"+filename,size,
+    source:"https://zenodo.org/records/"+record,details:{...savedPaper(id,version).details,
+      contentId:"zenodo:"+record+":"+filename,platform:"Zenodo",sourceChecksum}
+  });
+  state.library.push(
+    savedDataset("zenodo-copy-v1",1235,"samples.csv",2**31,"v1","md5:"+"a".repeat(32)),
+    savedDataset("zenodo-old-checksum",1235,"readme.txt",2048,"v1","md5:"+"b".repeat(32)),
+    savedDataset("zenodo-wrong-size",1236,"readme.txt",1024,"v2","md5:"+"c".repeat(32)),
+    savedDataset("zenodo-missing-v2",1236,"appendix.zip",100,"v2",null,true)
+  );
   state.sources.push({id:"follow-arxiv",name:"Artículos de prueba",url:"https://arxiv.org/search/?field=author&query=Fixture+Author",
     kind:"publicSearch",status:"ready",lastCheck:1,settings:{presetId:null,relativeFolder:"",intervalHours:null,automatic:false,pageSize:20},
     baseline:{inspected:2,total:2,complete:true,cursor:2,hasMore:false},
@@ -44,7 +55,7 @@ const setup = `
     assets:[
       asset("zenodo:"+id+":samples.csv","samples.csv",{sourceUrl:"https://zenodo.org/records/"+id,mime:"text/csv",size:2**31,version,checksum:"md5:"+"a".repeat(32)}),
       asset("zenodo:"+id+":appendix.zip","appendix.zip",{mime:"application/zip",size:null,version}),
-      asset("zenodo:"+id+":readme.txt","readme.txt",{mime:"text/plain",size:2048,version}),
+      asset("zenodo:"+id+":readme.txt","readme.txt",{mime:"text/plain",size:2048,version,checksum:"md5:"+"c".repeat(32)}),
     ]});
   const native=(id="doc",name="Project notes")=>({selection:{provider:"drive",accountId:"fixture-account",id,exportMime:null,version:"v1"},name,kind:"document",mime:"application/vnd.google-apps.document",size:null,location:"My Drive/Documents",exports:[{mime:"application/pdf",extension:"pdf",label:"PDF"},{mime:"application/vnd.openxmlformats-officedocument.wordprocessingml.document",extension:"docx",label:"Word (.docx)"}],downloadable:true});
   const binary=(id,name)=>({selection:{provider:"drive",accountId:"fixture-account",id,exportMime:null,version:"v1"},name,kind:"file",mime:"application/pdf",size:2048,location:"My Drive/Documents",exports:[],downloadable:true});
@@ -253,6 +264,7 @@ try {
 
     await inspect("10.5281/zenodo.1234");
     await page.getByText("Versión v2 · Registro 1236 · Familia 1234", { exact: true }).waitFor();
+    assert.equal(await page.locator(".file-source-saved-copy").count(), 0);
     await page.locator("[data-file-source-select='zenodo:1236:samples.csv']").check();
     assert.match(await page.locator(".file-source-selection").innerText(), /2\.00 GiB/);
     assert.match(await page.locator(".file-source-list").innerText(), /md5:[a-f0-9]{32}/);
@@ -295,6 +307,19 @@ try {
     const oldVersion = page.locator("[data-action='file-source-entry'][data-id='zenodo:1235']");
     await oldVersion.click();
     await page.getByText("Versión v1 · Registro 1235 · Familia 1234", { exact: true }).waitFor();
+    const savedDatasetFolder = page.getByRole("button", { name: "Mostrar carpeta de samples.csv", exact: true });
+    await savedDatasetFolder.waitFor({ timeout: 2500 });
+    assert.equal(await page.locator(".file-source-saved-copy").count(), 1);
+    assert.match(await page.locator(".file-source-saved-copy").innerText(), /En Biblioteca · 2\.00 GiB/);
+    for (const [width, height] of [[1180, 780], [900, 620]]) {
+      await page.setViewportSize({ width, height });
+      await checkNoHorizontalOverflow(`Saved Zenodo file ${width}`);
+      await page.locator(".file-source-filter").evaluate(element => element.scrollIntoView({ block: "start" }));
+      await page.screenshot({ path: `${directory}/zenodo-saved-record-${width}.png` });
+    }
+    await savedDatasetFolder.press("Enter");
+    await page.waitForFunction(() => window.fileSourceFixture.calls.some(call =>
+      call.cmd === "open_media" && call.args.id === "zenodo-copy-v1" && call.args.folder === true));
     assert.equal(await review.getAttribute("aria-pressed"), "false");
     const exactFile = page.locator("[data-file-source-select='zenodo:1235:samples.csv']");
     assert.equal(await exactFile.isChecked(), false);

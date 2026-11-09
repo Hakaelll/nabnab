@@ -72,6 +72,21 @@ const librivoxSpanish = new Map(Object.entries({
 }));
 function isCloud(value: string): value is CloudProvider { return providers.some(provider => provider.id === value); }
 function cloudName(provider: CloudProvider): string { return providers.find(value => value.id === provider)?.name ?? provider; }
+function zenodoCopies(assets: readonly PublicAsset[], library: readonly LibraryItem[]): Map<string, LibraryItem> {
+  const byId = new Map(assets.map(asset => [asset.id, asset]));
+  const copies = new Map<string, LibraryItem>();
+  for (const item of library) {
+    const details = item.details;
+    if (item.missing || !details?.contentId) continue;
+    const asset = byId.get(details.contentId);
+    if (!asset || (details.sourceVersion ?? null) !== asset.version
+      || (details.sourceChecksum ?? null) !== (asset.checksum ?? null)
+      || (asset.size !== null && item.size !== asset.size)) continue;
+    const previous = copies.get(asset.id);
+    if (!previous || previous.addedAt < item.addedAt) copies.set(asset.id, item);
+  }
+  return copies;
+}
 function fileSize(value: number | null, t: Copy): string {
   if (value === null) return t("Tamaño desconocido", "Size unknown");
   if (value < 1024) return `${value} B`;
@@ -265,8 +280,9 @@ export function createFileSources(hooks: FileSourceHooks) {
     if (isZenodoHistory(publicPage)) return publicPage?.entries.length ? "" : `<p class="file-source-empty">${t("Zenodo no devolvió versiones públicas para esta familia.", "Zenodo returned no public versions for this family.")}</p>`;
     if (!publicPage || !publicPage.assets.length && publicPage.entries.length) return "";
     const { provider, rights } = publicPage;
-    const research = provider === "arxiv" || provider === "librivox";
-    const copies = provider === "arxiv" ? arxivCopies(hooks.library()) : null;
+    const research = provider === "arxiv" || provider === "librivox" || provider === "zenodo";
+    const copies = provider === "arxiv" ? arxivCopies(hooks.library())
+      : provider === "zenodo" ? zenodoCopies(visible, hooks.library()) : null;
     const group = provider === "arxiv" ? t("Versiones del PDF", "PDF versions")
       : provider === "librivox" ? reviewing ? t("Capítulos seleccionados", "Selected chapters") : t("Capítulos", "Chapters")
       : reviewing ? t("Archivos seleccionados", "Selected files") : t("Archivos disponibles", "Available files");
@@ -282,17 +298,19 @@ export function createFileSources(hooks: FileSourceHooks) {
       const metadata = [version ? asset.filename : chapter ? null : asset.mime, chapter || version ? null : asset.version, asset.publishedAt, chapter?.reader, chapter?.language && displayLibrivoxLanguage(chapter.language), asset.platform, asset.architecture].filter(Boolean).join(" · ");
       const attribution = [asset.author, research && rights === asset.license ? null : asset.license].filter(Boolean).join(" · ");
       const checked = publicSelected.has(asset.id);
-      const saved = copies?.get(asset.id);
+      const saved = version || provider === "zenodo" ? copies?.get(asset.id) : undefined;
       const row = `<label class="file-source-row ${checked ? "is-selected" : ""}">
         <input type="checkbox" data-file-source-select="${h(asset.id)}" ${name ? `aria-label="${h(name)}"` : ""} ${checked ? "checked" : ""} ${busy || publicSelected.size >= 199 && !checked ? "disabled" : ""}>
         <span class="file-source-file-icon" aria-hidden="true">${chapter ? String(chapter.chapter).padStart(2, "0") : icon(asset.mime.startsWith("image/") ? "image" : asset.mime.startsWith("audio/") ? "audio" : "file")}</span>
         <span class="file-source-row-main"><strong>${h(title)}</strong>${metadata ? `<small>${h(metadata)}</small>` : ""}${provider === "archive" ? `<small>${asset.original ? t("Original", "Original") : t("Derivado", "Derivative")}</small>` : ""}${attribution ? `<small>${h(attribution)}</small>` : ""}${asset.checksum || asset.sha256 ? `<small class="file-source-checksum" title="${h(asset.checksum ?? asset.sha256 ?? "")}">${h(asset.checksum ?? `sha256:${asset.sha256}`)}</small>` : ""}</span>
         ${saved ? "" : `<span class="file-source-size">${h(fileSize(asset.size, t))}</span>`}</label>`;
-      if (!saved || !version) return row;
-      const label = t(`Abrir copia de la versión ${version}`, `Open copy of version ${version}`);
+      if (!saved) return row;
+      const copyAction = version
+        ? action("open-media", t("Abrir copia", "Open copy"), "arrow", "quiet", `data-id="${h(saved.id)}" aria-label="${h(t(`Abrir copia de la versión ${version}`, `Open copy of version ${version}`))}"`)
+        : action("reveal-media", t("Mostrar carpeta", "Show folder"), "folder", "quiet", `data-id="${h(saved.id)}" aria-label="${h(t(`Mostrar carpeta de ${asset.filename}`, `Show folder for ${asset.filename}`))}"`);
       return `<div class="file-source-saved-row">${row}<div class="file-source-saved-copy">
         <span>${t("En Biblioteca", "In Library")} · ${h(fileSize(saved.size, t))}</span>
-        ${action("open-media", t("Abrir copia", "Open copy"), "arrow", "quiet", `data-id="${h(saved.id)}" aria-label="${h(label)}"`)}
+        ${copyAction}
       </div></div>`;
     }).join("") || `<p class="file-source-empty">${empty}</p>`}</div>`;
   }
