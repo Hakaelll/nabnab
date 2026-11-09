@@ -114,8 +114,10 @@
 .audio-playlist-entry { grid-template-columns: 24px minmax(0, 1fr) auto; }
 .audio-playlist-entry strong, .audio-playlist-entry small { display: block; overflow-wrap: anywhere; }
 .audio-playlists > .button-group { margin-top: 12px; }
-.audio-playlist-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; }
-.audio-playlist-heading h2 { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.audio-playlist-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px 20px; margin-bottom: 8px; padding: 4px 0 14px; border-bottom: 1px solid var(--edge-quiet); }
+.audio-playlist-heading > div { min-width: 0; }
+.audio-playlist-heading h2 { margin: 0; font-size: 17px; letter-spacing: -.02em; overflow-wrap: anywhere; }
+.audio-playlist-heading p { margin-top: 4px; font-variant-numeric: tabular-nums; }
 .audio-table-wrap { max-width: 100%; overflow: auto; }
 .audio-import-table { width: 100%; border-collapse: collapse; font-size: 12px; text-align: start; }
 .audio-import-table th, .audio-import-table td { padding: 8px; border-bottom: 1px solid var(--edge-quiet); text-align: start; }

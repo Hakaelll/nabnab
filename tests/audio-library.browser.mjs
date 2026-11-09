@@ -419,6 +419,58 @@ try {
   assert.equal(rematched.id, imported.id);
   assert.deepEqual(rematched.entries, [imported.entries[0], {kind:"local",id:"first",title:"Primera pista"}, imported.entries[2]]);
 
+  await page.evaluate(async () => {
+    window.audioFixture.state.audioPlaylists.push({
+      id: "mixed",
+      name: "Sesión nocturna",
+      entries: [
+        { kind: "missing", title: "Sin archivo", locator: "missing.mp3" },
+        { kind: "local", title: "Tercera pista", id: "last" },
+        { kind: "remote", title: "Solo enlace", url: "https://example.org/audio" },
+        { kind: "local", title: "Primera pista", id: "first" },
+        { kind: "local", title: "Pista ausente", id: "album-missing" },
+      ],
+    });
+    window.audioFixture.state.audioPlaylists.push({ id: "remote", name: "Solo referencias",
+      entries: [{ kind: "remote", title: "Solo enlace", url: "https://example.org/audio" }] });
+    const { emit } = await import("/node_modules/@tauri-apps/api/event.js");
+    await emit("library-update");
+  });
+  await page.locator("#audio-active-list").selectOption("remote");
+  let playlist = page.getByRole("region", { name: "Solo referencias" });
+  assert.equal(await playlist.getByRole("button", { name: "Reproducir lista" }).isDisabled({ timeout: 3500 }), true);
+  assert.equal(await playlist.getByRole("button", { name: "Lista a continuación" }).isDisabled(), true);
+  await page.locator("#audio-active-list").selectOption("mixed");
+  playlist = page.getByRole("region", { name: "Sesión nocturna" });
+  assert.match(await playlist.innerText({ timeout: 3500 }), /2 pistas disponibles · 0:20 · 1 remota · 2 ausentes/);
+  const playPlaylist = playlist.getByRole("button", { name: "Reproducir lista" });
+  await playPlaylist.press("Enter");
+  await page.waitForFunction(() => {
+    const media = document.getElementById("audio-engine");
+    return media.dataset.localPlayer === "last" && !media.paused;
+  });
+  assert.deepEqual(await page.locator(".audio-next li strong").allTextContents(), ["Primera pista"]);
+  assert.equal(await playPlaylist.evaluate(button => button === document.activeElement), true);
+  await category("music").click();
+  await page.locator("[data-action='audio-play'][data-id='archive']").click();
+  await page.waitForFunction(() => {
+    const media = document.getElementById("audio-engine");
+    return media.dataset.localPlayer === "archive" && !media.paused;
+  });
+  await category("playlists").click();
+  await playlist.getByRole("button", { name: "Lista a continuación" }).press("Enter");
+  assert.deepEqual((await page.locator(".audio-next li strong").allTextContents()).slice(0, 2), ["Tercera pista", "Primera pista"]);
+  assert.equal(await page.locator("#audio-engine").evaluate(media => media.dataset.localPlayer === "archive" && !media.paused), true);
+  assert.equal(await page.locator("#notification-text").textContent(), "Lista colocada a continuación.");
+  await page.getByRole("button", { name: "Cerrar aviso" }).click();
+  for (const [width, height] of [[900, 620], [1180, 780]]) {
+    await page.setViewportSize({ width, height });
+    await page.locator("#main").evaluate(main => { main.scrollTop = 0; });
+    assert.ok(await playlist.evaluate(node => node.scrollWidth <= node.clientWidth + 1));
+    assert.ok(await playlist.evaluate(node => node.getBoundingClientRect().bottom <= document.querySelector("#audio-player").getBoundingClientRect().top));
+    await page.screenshot({ path: `${directory}/playlist-playback-${width}.png`, animations: "disabled" });
+  }
+
   await category("podcasts").click();
   assert.deepEqual(await page.locator(".audio-track strong").allTextContents(), ["Episodio"]);
   await category("books").click();

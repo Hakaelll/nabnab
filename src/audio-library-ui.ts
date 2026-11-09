@@ -430,16 +430,34 @@ export function createAudioLibrary(hooks: Hooks) {
     const list = active();
     const entries = editing?.entries ?? list?.entries ?? [];
     const name = editing?.name ?? list?.name ?? "";
-    const unresolved = list?.entries.some(entry => !isLocalAvailable(entry));
+    const rows = entries.map(entry => ({ entry, item: entry.kind === "local" ? itemFor(entry.id) : undefined }));
+    const available = rows.flatMap(({ item }) => isPlayable(item) ? [item] : []);
+    const remote = entries.filter(entry => entry.kind === "remote").length;
+    const missing = entries.length - available.length - remote;
+    const current = player.current();
+    const canQueue = !(current && isAudiobook(current)) && available.some(item => item.id !== current?.id && !isAudiobook(item));
+    const length = available.length && available.every(item => item.duration !== null)
+      ? durationLabel(available.reduce((sum, item) => sum + (item.duration ?? 0), 0)) : "";
+    const summary = [
+      t(`${available.length} ${available.length === 1 ? "pista disponible" : "pistas disponibles"}`,
+        `${available.length} available ${available.length === 1 ? "track" : "tracks"}`),
+      length,
+      remote ? t(`${remote} ${remote === 1 ? "remota" : "remotas"}`, `${remote} remote`) : "",
+      missing ? t(`${missing} ${missing === 1 ? "ausente" : "ausentes"}`, `${missing} missing`) : "",
+    ].filter(Boolean).join(" · ");
     return `<div class="audio-playlists"><div class="audio-filters"><label>${t("Lista guardada", "Saved playlist")}<select id="audio-active-list" ${disabled()}>${option("", t("Elige lista", "Choose playlist"), activeList)}${lists().map(item => option(item.id, item.name, activeList)).join("")}</select></label>
       ${action("audio-create-list", t("Nueva lista", "New playlist"), "add", "secondary", disabled())}
       ${action("audio-import-list", t("Importar lista", "Import playlist"), "file", "secondary", disabled())}
       ${list && !editing ? action("audio-edit-list", t("Editar lista", "Edit playlist"), "settings", "quiet", disabled()) : ""}</div>
-      ${editing ? `<form id="audio-playlist-form" class="audio-editor"><label>${t("Nombre de la lista", "Playlist name")}<input id="audio-playlist-name" value="${h(name)}" required maxlength="100" ${disabled()}></label></form>` : list ? `<div class="audio-playlist-heading"><h2>${h(list.name)}</h2>
-        ${unresolved ? action("audio-rematch-list", t("Revisar referencias", "Review references"), "search", "quiet", disabled()) : ""}</div>` : ""}
-      ${entries.length ? `<ol class="audio-rows audio-list-entries">${entries.map((entry, index) => {
-        const item = entry.kind === "local" ? itemFor(entry.id) : undefined;
-        const playable = item && !item.missing;
+      ${editing ? `<form id="audio-playlist-form" class="audio-editor"><label>${t("Nombre de la lista", "Playlist name")}<input id="audio-playlist-name" value="${h(name)}" required maxlength="100" ${disabled()}></label></form>` : list ? `<section class="audio-playlist-heading" aria-labelledby="audio-playlist-title">
+        <div><h2 id="audio-playlist-title">${h(list.name)}</h2><p class="field-note">${h(summary)}</p></div>
+        <div class="button-group">
+          ${action("audio-list-play-all", t("Reproducir lista", "Play playlist"), "play", "primary", !available.length ? "disabled" : disabled())}
+          ${action("audio-list-queue-next", t("Lista a continuación", "Queue playlist next"), "next", "secondary", !canQueue ? "disabled" : disabled())}
+          ${remote || missing ? action("audio-rematch-list", t("Revisar referencias", "Review references"), "search", "quiet", disabled()) : ""}
+        </div></section>` : ""}
+      ${rows.length ? `<ol class="audio-rows audio-list-entries">${rows.map(({ entry, item }, index) => {
+        const playable = isPlayable(item);
         const description = playable ? item?.details?.audio?.artist ?? t("Archivo local", "Local file")
           : entry.kind === "remote" ? t("URL remota", "Remote URL") : t("Archivo ausente", "Missing file");
         return `<li class="audio-playlist-entry"><span>${index + 1}</span><div><strong>${h(item ? audioTitle(item) : entry.title)}</strong><small>${h(description)}</small></div>
@@ -846,6 +864,19 @@ export function createAudioLibrary(hooks: Hooks) {
         const position = list.entries.slice(0, index).filter(entry => entry.kind === "local").length;
         lyricOpen = false;
         player.play(ids, position);
+      } break;
+      case "audio-list-play-all":
+      case "audio-list-queue-next": if (list && !editing) {
+        const ids = list.entries.flatMap(entry => entry.kind === "local" && isLocalAvailable(entry) ? [entry.id] : []);
+        if (!ids.length) break;
+        if (name === "audio-list-play-all") {
+          const restart = player.current()?.id === ids[0];
+          lyricOpen = false;
+          player.play(ids, 0);
+          if (restart) player.seek(0);
+        } else if (player.playNext(ids)) {
+          hooks.notify(t("Lista colocada a continuación.", "Playlist queued next."));
+        }
       } break;
       case "audio-add-list": {
         const target = lists().find(list => list.id === addTo);
