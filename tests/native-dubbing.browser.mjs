@@ -289,6 +289,12 @@ try {
   assert.equal(failed.source.options.voiceJobId, wav.id);
   assert.deepEqual(failed.outputs, []);
   assert.equal(await page.locator(".dub-expanded .translation-output").filter({ hasText: "Copia de vídeo" }).count(), 0);
+  const recovery = page.getByRole("region", { name: "La copia necesita un cambio" });
+  await recovery.getByRole("button", { name: "Usar solo voz traducida" }).press("Enter");
+  assert.equal(await page.locator("#dub-mode").inputValue(), "replace");
+  assert.equal(await page.locator("#dub-copy").evaluate(button => document.activeElement === button), true);
+  assert.equal((await rpc("get_snapshot")).jobs.filter(job => job.source.kind === "dubVideo").length, 2);
+  await page.locator("#dub-mode").selectOption("mix");
   const bytes = await readFile(wav.outputs[0]);
   assert.equal(hash(bytes), hash(pcm));
   await rpc("job_action", { ids: [failed.id], action: "retry" });
@@ -372,13 +378,60 @@ try {
     const staleStem = await jobOf("dubVideo", 6, "error");
     assert.equal(staleStem.error.code, "dubbing_instrumental_changed");
     assert.deepEqual(staleStem.outputs, []);
+    const staleStatus = page.locator(".dub-expanded [role='status']").filter({ hasText: "El vídeo o el instrumental cambiaron." });
+    await staleStatus.waitFor();
+    for (const [width, height] of [[1180, 780], [900, 620]]) {
+      await page.setViewportSize({ width, height });
+      await staleStatus.evaluate(element => element.scrollIntoView({ block: "center" }));
+      assert.ok(await staleStatus.evaluate(node => node.scrollWidth <= node.clientWidth + 1));
+      await page.locator("#dub-video-controls").screenshot({ path: path.join(data, `dubbing-recovery-${width}.png`), animations: "disabled" });
+    }
+    await recovery.getByRole("button", { name: "Abrir Separar pistas" }).waitFor({ timeout: 3500 });
+    assert.equal(await page.getByRole("button", { name: "Reintentar copia", exact: true }).count(), 0);
+    assert.equal(await page.getByRole("button", { name: "Escuchar WAV", exact: true }).count(), 1);
   } finally {
     await writeFile(video, sourceBytes);
   }
   assert.equal(hash(await readFile(wav.outputs[0])), hash(pcm));
   assert.deepEqual(await readFile(instrumental), instrumentalBytes);
   assert.equal(hash(await readFile(video)), hash(sourceBytes));
+
+  await page.locator("#dub-mode").selectOption("mix");
+  await reviewAudio.press("Enter");
+  await track.selectOption(originalAudioId);
+  const modifiedTrack = path.join(data, "Vídeo con pista cambiada.mp4");
+  execFileSync(ffmpeg, ["-v", "error", "-i", video, "-map", "0", "-c", "copy", "-metadata:s:a:1", "handler_name=Mezcla cambiada", modifiedTrack], { windowsHide: true });
+  await writeFile(video, await readFile(modifiedTrack));
+  let failedTrack;
+  try {
+    await page.locator("#dub-copy").press("Enter");
+    failedTrack = await jobOf("dubVideo", 7, "error");
+    assert.equal(failedTrack.error.code, "dubbing_audio_changed");
+    await recovery.getByRole("button", { name: "Revisar pistas del vídeo" }).waitFor();
+    assert.equal(await page.locator("#dub-copy").count(), 0);
+  } finally {
+    await writeFile(video, sourceBytes);
+  }
+  await recovery.getByRole("button", { name: "Revisar pistas del vídeo" }).press("Enter");
+  assert.equal(await track.inputValue(), originalAudioId);
+  assert.equal(await track.evaluate(element => document.activeElement === element), true);
+  await page.getByRole("button", { name: "Reintentar copia", exact: true }).press("Enter");
+  const retriedTrack = await jobOf("dubVideo", 7, "completed");
+  assert.equal(retriedTrack.id, failedTrack.id);
+  assert.equal(retriedTrack.source.options.voiceJobId, wav.id);
+  assert.equal(hash(await readFile(wav.outputs[0])), hash(pcm));
+
+  const short = path.join(data, "Vídeo demasiado corto.mp4");
+  execFileSync(ffmpeg, ["-v", "error", "-i", silent, "-t", "2", "-c", "copy", short], { windowsHide: true });
+  const { library } = await rpc("import_paths", { paths: [short] });
+  const shortId = library.find(entry => entry.name === "Vídeo demasiado corto.mp4").id;
   await page.locator("#dub-mode").selectOption("replace");
+  await page.locator("#dub-video").selectOption(shortId);
+  await page.locator("#dub-copy").press("Enter");
+  assert.equal((await jobOf("dubVideo", 8, "error")).error.code, "dubbing_duration");
+  await recovery.getByRole("button", { name: "Elegir otro vídeo" }).press("Enter");
+  assert.equal(await page.locator("#dub-video").evaluate(select => document.activeElement === select), true);
+  await page.locator("#dub-video").selectOption(item(video).id);
   await shareOutput(wav);
   await shareOutput(replaced);
   await page.getByRole("button", { name: "Editar traducción", exact: true }).click();

@@ -40,7 +40,9 @@ Cada segmento se reutiliza según su texto, voz, volumen y ritmo. Al editar el b
 
 Con el WAV disponible, puedes escucharlo o crear una copia MKV del vídeo. **Pista alternativa** conserva las pistas originales y añade la voz. **Solo voz traducida** crea una copia con el WAV como audio. En **Voz + original al 20 %**, pulsa **Revisar pistas** y elige cuál usar. El selector muestra título, idioma y códec cuando el archivo los declara. La mezcla combina la voz al 80 % con la pista elegida al 20 %. Si esa pista contiene diálogo, seguirá presente en la mezcla. Los subtítulos de texto `mov_text` se convierten a SubRip para la copia MKV. El vídeo se copia sin recodificar. [Selección de pistas en FFmpeg](https://ffmpeg.org/ffmpeg.html#Stream-specifiers)
 
-La copia de vídeo tiene su propio trabajo en Descargas. Si falla, **Reintentar copia** vuelve a ejecutar ese trabajo con el WAV ya publicado. Si la pista elegida ya no coincide con los datos del vídeo, revisa las pistas y elige de nuevo. Cuando están listos, el WAV y el MKV tienen acciones separadas para reproducir y enviar cada archivo. [Panel de doblaje en Windows](dubbing-native.png)
+La copia de vídeo tiene su propio trabajo en Descargas. **Reintentar copia** vuelve a ejecutar ese trabajo con el WAV ya publicado. Si los archivos elegidos son incompatibles, **La copia necesita un cambio** explica el motivo y da acceso a la corrección. Puedes revisar las pistas, usar solo la voz traducida en un vídeo sin audio, elegir el vídeo que corresponde al WAV o volver a Separar pistas para exportar el instrumental. Si restauraste una pista original, revísala antes de reintentar el mismo trabajo. El WAV y el MKV tienen acciones separadas para reproducir y enviar cada archivo. [Panel de doblaje en Windows](dubbing-native.png)
+
+![Mezcla detenida por un instrumental que ya no corresponde al vídeo, con el WAV conservado](dubbing-copy-recovery.png)
 
 ![Selección de la segunda pista del vídeo en una ventana de 900 píxeles](dubbing-mix-track.png)
 

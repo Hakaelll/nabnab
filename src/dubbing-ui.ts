@@ -34,7 +34,7 @@ export function createDubbing(hooks: Hooks) {
   let status: VoiceStatus | null = null, busy = false, error = "";
   let voiceId = "", rate = 0, volume = 100, videoId = "", sampleCue = 0;
   let mode: DubVideoOptions["mode"] = "alternate";
-  let audioReview: { videoId: string; tracks: OriginalAudio[] } | null = null;
+  let audioReview: { videoId: string; tracks: OriginalAudio[]; reviewedFailure?: { id: string; runId: number } } | null = null;
   let originalAudioId = "";
   let instrumentalId = "";
   let player: HTMLAudioElement | null = null, sampleUrl = "", sampleText = "", requestId = 0;
@@ -98,6 +98,32 @@ export function createDubbing(hooks: Hooks) {
     }).sort((left, right) => right.createdAt - left.createdAt)[0];
   }
 
+  function reviewedFailedTrack(job: Job | undefined) {
+    const reviewed = audioReview?.reviewedFailure;
+    return job?.error?.code === "dubbing_audio_changed" && reviewed?.id === job.id && reviewed.runId === job.runId;
+  }
+
+  function copyCorrection(job: Job | undefined) {
+    const code = job?.state === "error" ? job.error?.code : null;
+    switch (code) {
+      case "dubbing_no_original":
+        return { message: t("Este vídeo carece de audio original.", "This video has no original audio."),
+          button: action("dub-voice-only", t("Usar solo voz traducida", "Use translated voice only"), "audio", "secondary") };
+      case "dubbing_audio_changed":
+        return reviewedFailedTrack(job) ? null : {
+          message: t("La pista elegida cambió. Revisa el audio del vídeo.", "The selected track changed. Review the video's audio."),
+          button: action("dub-review-audio", t("Revisar pistas del vídeo", "Review video tracks"), "list", "secondary", 'id="dub-review-audio"') };
+      case "dubbing_instrumental_changed":
+        return { message: t("El vídeo o el instrumental cambiaron. Exporta un nuevo instrumental para este vídeo.", "The video or instrumental changed. Export a fresh instrumental for this video."),
+          button: action("tool-module", t("Abrir Separar pistas", "Open Separate stems"), "arrow", "secondary", 'data-id="stems"') };
+      case "dubbing_duration":
+        return { message: t("El WAV dura más que el vídeo elegido.", "The WAV is longer than the selected video."),
+          button: action("dub-focus-video", t("Elegir otro vídeo", "Choose another video"), "video", "secondary") };
+      default:
+        return null;
+    }
+  }
+
   function timingIssues(job = matchingVoices()[0]): number[] {
     const error = job?.state === "error" ? job.error : null;
     if (error?.code !== "dubbing_timing" || !/^DUB_TIMING \d+(, \d+)*$/.test(error.technical)) return [];
@@ -157,9 +183,9 @@ export function createDubbing(hooks: Hooks) {
     });
   }
 
-  function originalAudioControls() {
+  function originalAudioControls(showReview: boolean) {
     const tracks = reviewedTracks();
-    const refresh = action("dub-review-audio", tracks ? t("Volver a revisar", "Review again") : t("Revisar pistas", "Review tracks"), "list", "quiet", 'id="dub-review-audio"');
+    const refresh = showReview ? action("dub-review-audio", tracks ? t("Volver a revisar", "Review again") : t("Revisar pistas", "Review tracks"), "list", "quiet", 'id="dub-review-audio"') : "";
     if (!tracks?.length) return `<div class="dub-mix-tracks">${refresh}<p class="field-note" role="status">${tracks
       ? t("Este vídeo no tiene pistas de audio.", "This video has no audio tracks.")
       : t("Revisa el vídeo para elegir el audio que se mezclará con la voz.", "Review the video to choose the audio to mix with the voice.")}</p></div>`;
@@ -196,6 +222,7 @@ export function createDubbing(hooks: Hooks) {
     const job = matchingVoices()[0];
     const wav = completedVoice();
     const mux = videoJob();
+    const correction = copyCorrection(mux);
     const { library } = hooks.snapshot();
     const audio = publishedTranslationFile(wav, library);
     const video = publishedTranslationFile(mux, library);
@@ -221,16 +248,14 @@ export function createDubbing(hooks: Hooks) {
       ${wav ? `<fieldset id="dub-video-controls" class="translation-fields" ${disabled ? "disabled" : ""}><legend>${t("2. Copia de vídeo", "2. Video copy")}</legend>
         <label for="dub-video">${t("Vídeo de Biblioteca", "Library video")}<select id="dub-video">${option("", t("Selecciona el vídeo correspondiente", "Select the matching video"), videoChoice())}${videos().map(item => option(item.id, item.name, videoChoice())).join("")}</select></label>
         <label for="dub-mode">${t("Audio en la copia MKV", "Audio in the MKV copy")}<select id="dub-mode">${option("alternate", t("Pista alternativa", "Alternate track"), mode)}${option("replace", t("Solo voz traducida", "Translated voice only"), mode)}${option("mix", t("Voz + original al 20 %", "Voice + original at 20%"), mode)}${option("instrumental", t("Voz + instrumental", "Voice + instrumental"), mode)}</select></label>
-        ${mode === "mix" && videoChoice() ? originalAudioControls() : ""}
+        ${mode === "mix" && videoChoice() ? originalAudioControls(!correction || mux?.error?.code !== "dubbing_audio_changed") : ""}
         ${mode === "instrumental" && videoChoice() ? instrumentalControls() : ""}
-        ${action("dub-queue-video", mux?.state === "error" || mux?.state === "cancelled" || mux?.state === "paused" ? t("Reintentar copia", "Retry copy") : t("Crear copia de vídeo", "Create video copy"), "video", "secondary", !videoChoice() || mode === "mix" && !mixAudio() || mode === "instrumental" && !instrumentalChoice() || pending(mux) && mux?.state !== "paused" ? "disabled" : "")}
-      </fieldset>${video ? translationOutput(video, mode === "instrumental" ? t("Copia con instrumental · MKV", "Copy with instrumental · MKV") : t("Copia de vídeo · MKV", "Video copy · MKV"), t, t("Reproducir copia", "Play copy")) : mux ? `<p class="field-note" role="status">${stateLabel(mux.state, t)} · MKV ${mux.error ? `· ${h(mux.error.code === "dubbing_no_original"
-        ? t("Este vídeo carece de audio original. El WAV sigue disponible.", "This video has no original audio. The WAV remains available.")
-        : mux.error.code === "dubbing_audio_changed"
-          ? t("La pista elegida cambió. Vuelve a revisar las pistas del vídeo. El WAV sigue disponible.", "The selected track changed. Review the video's tracks again. The WAV remains available.")
-          : mux.error.code === "dubbing_instrumental_changed"
-            ? t("El vídeo o el instrumental cambiaron. Exporta un nuevo instrumental para ese vídeo. El WAV sigue disponible.", "The video or instrumental changed. Export a fresh instrumental for this video. The WAV remains available.")
-            : mux.error.message)}` : ""}</p>` : ""}` : ""}`}
+        ${correction ? `<section class="dub-result dub-copy-recovery" aria-labelledby="dub-copy-recovery-title">
+          <div role="status"><h3 id="dub-copy-recovery-title">${t("La copia necesita un cambio", "Change the copy settings")}</h3>
+            <p>${h(correction.message)}</p><p class="field-note">${t("El WAV sincronizado sigue disponible.", "The synchronized WAV is still available.")}</p></div>
+          ${correction.button}</section>`
+        : action("dub-queue-video", mux?.state === "error" || mux?.state === "cancelled" || mux?.state === "paused" ? t("Reintentar copia", "Retry copy") : t("Crear copia de vídeo", "Create video copy"), "video", "secondary", `id="dub-copy" ${!videoChoice() || mode === "mix" && !mixAudio() || mode === "instrumental" && !instrumentalChoice() || pending(mux) && mux?.state !== "paused" ? "disabled" : ""}`)}
+      </fieldset>${video ? translationOutput(video, mode === "instrumental" ? t("Copia con instrumental · MKV", "Copy with instrumental · MKV") : t("Copia de vídeo · MKV", "Video copy · MKV"), t, t("Reproducir copia", "Play copy")) : mux && !correction ? `<p class="field-note" role="status">${stateLabel(mux.state, t)} · MKV ${mux.error ? `· ${h(reviewedFailedTrack(mux) ? t("La pista revisada está disponible para reintentar la copia.", "The reviewed track is available for a retry.") : mux.error.message)}` : ""}</p>` : ""}` : ""}`}
       ${busy ? `<div class="button-group"><p class="field-note" role="status">${t("Preparando operación local…", "Preparing local operation…")}</p>
         ${requestId ? action("dub-cancel", t("Cancelar", "Cancel"), "close", "quiet") : ""}</div>` : ""}
       ${error ? `<p class="asset-error" role="alert">${h(error)}</p>` : ""}
@@ -258,6 +283,17 @@ export function createDubbing(hooks: Hooks) {
     }
     if (actionName === "dub-settings") { hooks.components(); return true; }
     if (actionName === "dub-cancel") { stopSample(); hooks.render(); return true; }
+    if (actionName === "dub-voice-only") {
+      mode = "replace";
+      stopSample();
+      hooks.render();
+      document.getElementById("dub-copy")?.focus();
+      return true;
+    }
+    if (actionName === "dub-focus-video") {
+      document.getElementById("dub-video")?.focus();
+      return true;
+    }
     if (actionName === "dub-edit-cue") {
       const index = Number(button.dataset.index);
       if (!busy && timingIssues().includes(index)) await hooks.focusCue(index);
@@ -267,6 +303,7 @@ export function createDubbing(hooks: Hooks) {
       const videoId = videoChoice();
       if (!videoId || mode !== "mix" || busy || hooks.hasEdits()) return true;
       const previousId = originalAudioId;
+      const previousJob = videoJob();
       await run(async () => {
         audioReview = null;
         originalAudioId = "";
@@ -278,6 +315,9 @@ export function createDubbing(hooks: Hooks) {
           if (requestId !== id || videoChoice() !== videoId) return;
           audioReview = { videoId, tracks };
           originalAudioId = tracks.some(track => track.id === previousId) ? previousId : tracks.length === 1 ? tracks[0].id : "";
+          if (originalAudioId === previousId && previousJob?.error?.code === "dubbing_audio_changed") {
+            audioReview.reviewedFailure = { id: previousJob.id, runId: previousJob.runId };
+          }
         } finally { if (requestId === id) requestId = 0; }
       });
       (document.getElementById("dub-original-audio") ?? document.getElementById("dub-review-audio"))?.focus();
@@ -309,7 +349,7 @@ export function createDubbing(hooks: Hooks) {
         const videoId = videoChoice(), previous = videoJob();
         const track = mode === "mix" ? mixAudio() : undefined;
         const instrumental = mode === "instrumental" ? instrumentalChoice() : undefined;
-        if (!voiceJobId || !videoId || mode === "mix" && !track || mode === "instrumental" && !instrumental) return;
+        if (!voiceJobId || !videoId || mode === "mix" && !track || mode === "instrumental" && !instrumental || copyCorrection(previous)) return;
         if (previous && ["error", "cancelled", "paused"].includes(previous.state)) {
           await hooks.command("job_action", { ids: [previous.id], action: "retry" });
         } else {
