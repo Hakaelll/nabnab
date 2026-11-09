@@ -34,3 +34,4 @@
 .stems-output { display: grid; gap: 10px; margin-top: 16px; }
 .stems-output .section-heading { gap: 8px; flex-wrap: wrap; }
 .stems-output .section-heading h3, .stems-output > p { margin: 0; }
+.stems-result-actions { gap: 6px 10px; }

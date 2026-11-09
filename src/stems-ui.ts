@@ -13,6 +13,8 @@ interface Hooks {
   notify(message: string): void;
   components(): void;
   compare(id: string, group: readonly string[]): void;
+  comparison(): "queue" | "empty" | undefined;
+  restoreComparison(): void;
   playingId(): string | undefined;
   pausePlayback(): void;
   share(ids: string[]): void;
@@ -85,6 +87,7 @@ export function createStemsTool(hooks: Hooks) {
     const listen = (id: string, label: string) => action("stems-compare", label, "audio", current === id ? "secondary" : "quiet",
       `id="stems-listen-${h(id)}" data-id="${h(id)}" aria-pressed="${current === id}"`);
     const source = selected();
+    const comparison = hooks.comparison();
     const [original, vocals, instrumental] = labels();
     return `<section class="asset-review stems-output" aria-labelledby="stems-output-title">
       <div class="section-heading"><h3 id="stems-output-title">${t("Pistas completas", "Full-length stems")}</h3><span>FLAC · ${bytesLabel(files.reduce((total, { item }) => total + item.size, 0))}</span></div>
@@ -93,8 +96,12 @@ export function createStemsTool(hooks: Hooks) {
       </div>
       <p class="field-note">${t("Cambia de pista en el mismo punto. Usa la barra inferior para pausar o buscar.", "Switch tracks at the same position. Use the player below to pause or seek.")}</p>
       ${files.length === 1 ? `<p class="field-note">${t("Solo queda una pista disponible de esta exportación.", "One stem from this export is available.")}</p>` : ""}
-      <div class="button-group stems-tracks">${action("stems-share", files.length === 2 ? t("Enviar las dos pistas", "Send both stems")
-        : t("Enviar pista disponible", "Send available stem"), "arrow", "secondary")}</div>
+      <div class="button-group stems-tracks stems-result-actions">
+        ${comparison ? action("stems-restore", comparison === "queue" ? t("Volver a mi cola", "Return to my queue")
+          : t("Terminar comparación", "End comparison"), comparison === "queue" ? "list" : "close", "secondary") : ""}
+        ${action("stems-share", files.length === 2 ? t("Enviar las dos pistas", "Send both stems")
+          : t("Enviar pista disponible", "Send available stem"), "arrow", comparison ? "quiet" : "secondary")}
+      </div>
     </section>`;
   }
 
@@ -169,6 +176,7 @@ export function createStemsTool(hooks: Hooks) {
     if (requestId) void hooks.command("cancel_file_source_inspection", { requestId }).catch(() => {});
     busy = false; requestId = 0; error = "";
     discard();
+    hooks.restoreComparison();
   }
 
   function trackButtons() {
@@ -305,6 +313,11 @@ export function createStemsTool(hooks: Hooks) {
         }
         return true;
       }
+      case "stems-restore":
+        stop();
+        hooks.restoreComparison();
+        document.getElementById(`stems-listen-${libraryId}`)?.focus({ preventScroll: true });
+        return true;
       case "stems-share": {
         const ids = publishedSet()?.map(({ item }) => item.id);
         if (ids?.length) hooks.share(ids);
@@ -330,6 +343,7 @@ export function createStemsTool(hooks: Hooks) {
       if (!preview && !error) return true;
     } else if (target.id === "stems-source" && target instanceof HTMLSelectElement) {
       libraryId = target.value; start = 0;
+      hooks.restoreComparison();
     } else return false;
     discard(); error = ""; hooks.render();
     return true;

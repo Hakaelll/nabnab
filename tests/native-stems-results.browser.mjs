@@ -17,12 +17,16 @@ await mkdir(output);
 const original = path.join(data, "Mezcla de prueba.mp4");
 const vocals = path.join(output, "Vocals.flac");
 const instrumental = path.join(output, "Instrumental.flac");
+const music = [path.join(data, "01 Música.mp3"), path.join(data, "02 Música.mp3")];
 const ffmpeg = path.join(root, "src-tauri/engines/ffmpeg.exe");
 const encode = (...args) => execFileSync(ffmpeg, ["-hide_banner", "-loglevel", "error", ...args], { windowsHide: true });
 encode("-f", "lavfi", "-i", "color=c=black:s=160x90:r=12:d=21", "-f", "lavfi", "-i", "sine=frequency=480:duration=21",
   "-c:v", "libopenh264", "-c:a", "aac", "-shortest", original);
 for (const [file, frequency] of [[vocals, 320], [instrumental, 660]]) {
   encode("-f", "lavfi", "-i", `sine=frequency=${frequency}:duration=21`, "-c:a", "flac", file);
+}
+for (const [index, file] of music.entries()) {
+  encode("-f", "lavfi", "-i", `sine=frequency=${220 + index * 40}:duration=21`, "-c:a", "libmp3lame", file);
 }
 execFileSync("rustc", ["--edition=2021", "-C", "debuginfo=0", path.join(root, "tests/kdeconnect-cli-fixture.rs"), "-o", path.join(data, "kdeconnect-cli.exe")], { windowsHide: true });
 
@@ -72,11 +76,12 @@ async function close() {
 try {
   const initial = await launch();
   await rpc("save_settings", { settings: { ...initial.settings, folder: output, language: "es", reducedMotion: true, trayEnabled: false, closeToTray: false } });
-  await rpc("import_paths", { paths: [original, vocals, instrumental] });
+  await rpc("import_paths", { paths: [original, vocals, instrumental, ...music] });
   await close();
   const repository = path.join(data, "state-v1.json");
   const fixture = JSON.parse(await readFile(repository, "utf8"));
   const source = fixture.library.find(item => item.name === path.basename(original));
+  const musicIds = music.map(file => fixture.library.find(item => item.name === path.basename(file)).id);
   const files = ["Vocals", "Instrumental"].map(role => {
     const item = fixture.library.find(item => item.name === `${role}.flac`);
     item.parentId = source.id;
@@ -90,6 +95,21 @@ try {
   await launch();
   const errors = [];
   page.on("pageerror", error => errors.push(error.message));
+  const media = page.locator("#audio-engine");
+  const seek = page.locator("#audio-seek");
+  const at = (id, time, paused) => media.evaluate((node, { id, time, paused }) => node.dataset.localPlayer === id
+    && node.readyState >= 2 && !node.seeking && node.paused === paused && Math.abs(node.currentTime - time) < (paused ? 0.2 : 1), { id, time, paused });
+  const savedQueue = () => page.evaluate(() => JSON.parse(localStorage.getItem("nabnab.playback.v1")).queue);
+  await page.locator('[data-page="library"]').click();
+  await page.locator("#library-sort").selectOption("name");
+  for (const id of musicIds) await page.locator(`[data-select-media="${id}"]`).check();
+  await page.locator('[data-action="play-selection"]').click();
+  await wait(() => at(musicIds[0], 0.5, false));
+  await page.locator("#audio-toggle").click();
+  await seek.fill("7");
+  await wait(() => at(musicIds[0], 7, true));
+  const queue = await savedQueue();
+  assert.deepEqual(queue.tracks, musicIds);
   await page.locator('[data-page="tools"]').click();
   await openTool(page, "stems");
   await page.locator("#stems-source").selectOption(source.id);
@@ -103,15 +123,11 @@ try {
     await page.screenshot({ path: path.join(data, `stems-${width}.png`), animations: "disabled" });
   }
   if (!baseline) {
-    const media = page.locator("#audio-engine");
     const engine = await media.elementHandle();
     const listen = label => panel.getByRole("button", { name: label, exact: true });
-    const at = (id, time, paused) => media.evaluate((node, { id, time, paused }) => node.dataset.localPlayer === id
-      && node.readyState >= 2 && !node.seeking && node.paused === paused && Math.abs(node.currentTime - time) < (paused ? 0.2 : 1), { id, time, paused });
     await listen("Original").press("Enter");
     await wait(() => at(source.id, 0.5, false));
     assert.equal(await page.locator("#playback-stage").isVisible(), false);
-    const seek = page.locator("#audio-seek");
     await seek.fill("10");
     await wait(() => at(source.id, 10, false));
     await listen("Voz").press("Enter");
@@ -126,10 +142,12 @@ try {
     await wait(() => at(source.id, 14, true));
     assert.equal(await engine.evaluate(node => node === document.getElementById("audio-engine")), true);
     assert.equal(await media.evaluate(node => Math.round(node.duration)), 21);
-    await panel.scrollIntoViewIfNeeded();
-    const box = await panel.boundingBox();
-    await page.screenshot({ path: path.join(data, "stems-results.png"), animations: "disabled",
-      clip: { x: box.x - 10, y: box.y, width: box.width + 20, height: box.height } });
+    for (const [width, height] of [[1180, 780], [900, 620]]) {
+      await page.setViewportSize({ width, height });
+      await panel.scrollIntoViewIfNeeded();
+      assert.ok(await panel.evaluate(node => node.scrollWidth <= node.clientWidth + 1));
+      await page.screenshot({ path: path.join(data, `stems-active-${width}.png`), animations: "disabled" });
+    }
 
     await panel.getByRole("button", { name: "Enviar las dos pistas" }).press("Enter");
     const dialog = page.locator(".device-share[open]");
@@ -147,9 +165,31 @@ try {
     assert.equal(args[2], "--");
     const paths = [args[1].replace(/^--share=/, ""), ...args.slice(3)].map(url => path.toNamespacedPath(fileURLToPath(url)));
     assert.deepEqual(paths, files.map(item => path.toNamespacedPath(item.path)));
+    assert.deepEqual(await savedQueue(), queue, "Auditioning stems must preserve the saved playback queue.");
+    await dialog.getByRole("button", { name: "Cerrar", exact: true }).press("Enter");
+    await panel.getByRole("button", { name: "Volver a mi cola" }).press("Enter");
+    await wait(() => at(musicIds[0], 7, true));
+    assert.equal(await listen("Original").evaluate(button => button === document.activeElement), true);
+    await page.locator("#audio-toggle").click();
+    await listen("Voz").press("Enter");
+    await wait(() => at(files[0].id, 0.5, false));
+    await page.locator('[data-page="library"]').click();
+    await wait(() => at(musicIds[0], 7.5, false));
+    await page.locator("#audio-next").click();
+    await wait(() => at(musicIds[1], 0.5, false));
+
+    await page.locator("#audio-close").click();
+    await page.locator('[data-page="tools"]').click();
+    await openTool(page, "stems");
+    await page.locator("#stems-source").selectOption(source.id);
+    await listen("Voz").press("Enter");
+    await wait(() => at(files[0].id, 0.5, false));
+    assert.equal(await savedQueue(), null);
+    await panel.getByRole("button", { name: "Terminar comparación" }).press("Enter");
+    assert.equal(await media.getAttribute("data-local-player"), null);
   }
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ baseline, output: data, comparison: !baseline, fileShare: !baseline }));
+  console.log(JSON.stringify({ baseline, output: data, comparison: !baseline, queueRestored: !baseline, fileShare: !baseline }));
 } finally {
   await close();
 }

@@ -3,7 +3,7 @@ import { detailsFor } from "./library-features";
 import type { AudioPlaylist, LocalTrack } from "./library-types";
 import { createMiniPlayer, hasPlayerArtwork, playerArtist } from "./mini-player";
 import type { createSceneControls } from "./music-scene-controls";
-import { audiobookResumePosition, chapterAt, isPlayable, playbackRates, readPlayback, resumePosition, savePlayback } from "./playback-preferences";
+import { audiobookResumePosition, chapterAt, isPlayable, playbackRates, readPlayback, resumePosition, savePlayback, type PlaybackQueue } from "./playback-preferences";
 import { connectPlaybackSignal } from "./playback-signal";
 import { createPlaybackStage, type StageState } from "./playback-stage";
 import { durationLabel } from "./presentation";
@@ -36,6 +36,15 @@ interface Hooks {
   t: Copy;
 }
 
+interface Comparison {
+  queue: PlaybackQueue | null;
+  time: number;
+  playing: boolean;
+  sleep: string;
+  sleepUntil: number;
+  stopAt: number;
+}
+
 export function createAudioPlayer(hooks: Hooks) {
   const { t } = hooks;
   const stored = readPlayback();
@@ -61,6 +70,7 @@ export function createAudioPlayer(hooks: Hooks) {
   let order: number[] = [];
   let cursor = -1;
   let resumeAudioId: string | undefined;
+  let comparison: Comparison | undefined;
   let expectedSource = "";
   let audioSelection: number | null = null;
   let audioChange: { controller: AbortController; play: boolean } | undefined;
@@ -111,7 +121,11 @@ export function createAudioPlayer(hooks: Hooks) {
   }
 
   function saveSession() {
-    savePlayback(preferences, cursor >= 0 ? { tracks, order, cursor, resumeAudioId } : null);
+    savePlayback(preferences, comparison ? comparison.queue : currentQueue());
+  }
+
+  function currentQueue(): PlaybackQueue | null {
+    return cursor >= 0 ? { tracks, order, cursor, resumeAudioId } : null;
   }
 
   function showScenes() {
@@ -290,7 +304,7 @@ export function createAudioPlayer(hooks: Hooks) {
 
   function persist() {
     const item = current();
-    if (!media || !item || !matchesSource() || media.readyState === 0 || resumeChoice || pendingSeek !== null || !Number.isFinite(media.currentTime)) return;
+    if (comparison || !media || !item || !matchesSource() || media.readyState === 0 || resumeChoice || pendingSeek !== null || !Number.isFinite(media.currentTime)) return;
     const position = !media.ended ? media.currentTime
       : isAudiobook(item) ? item.duration ?? media.currentTime : 0;
     const details = detailsFor(item);
@@ -679,6 +693,7 @@ export function createAudioPlayer(hooks: Hooks) {
     const same = currentId() === item.id && Boolean(expectedSource) && !issue;
     trackWheel?.dismiss();
     persist();
+    comparison = undefined;
     tracks = ids.filter(value => isPlayable(hooks.item(value))).slice(0, 2000);
     resumeAudioId = resumeShortAudio && item.kind === "audio" ? item.id : undefined;
     cursor = -1;
@@ -695,7 +710,9 @@ export function createAudioPlayer(hooks: Hooks) {
   }
 
   function add(id: string) {
-    if (!isPlayable(hooks.item(id)) || tracks.length >= 2000) return;
+    if (!isPlayable(hooks.item(id))) return;
+    restoreComparison();
+    if (tracks.length >= 2000) return;
     trackWheel?.dismiss();
     tracks.push(id);
     order.push(tracks.length - 1);
@@ -704,6 +721,7 @@ export function createAudioPlayer(hooks: Hooks) {
   }
 
   function playNext(ids: Iterable<string>) {
+    restoreComparison();
     const playing = current();
     if (playing && isAudiobook(playing)) return 0;
     const upcoming = order.slice(cursor + 1);
@@ -753,6 +771,7 @@ export function createAudioPlayer(hooks: Hooks) {
   }
 
   function close() {
+    if (comparison) { restoreComparison(false); return; }
     cancelAudioChange();
     persist();
     media?.pause();
@@ -965,9 +984,11 @@ export function createAudioPlayer(hooks: Hooks) {
   function playAt(id: string, time: number, resumeShortAudio = false): boolean {
     const item = hooks.item(id);
     if (!isPlayable(item)) return false;
+    const comparing = Boolean(comparison);
     const resumeId = resumeShortAudio && item.kind === "audio" ? id : undefined;
-    if (id !== currentId() || issue) {
+    if (id !== currentId() || issue || comparing) {
       persist();
+      comparison = undefined;
       tracks = [id]; order = [0]; cursor = -1; resumeAudioId = resumeId;
       activate(0, false, false);
     } else if (item.kind === "video") showStage();
@@ -993,7 +1014,15 @@ export function createAudioPlayer(hooks: Hooks) {
     const switching = group.includes(active) && !issue;
     const position = switching ? pendingSeek ?? media.currentTime : 0;
     const autoplay = !switching || !media.paused;
-    persist();
+    if (!comparison) {
+      persist();
+      comparison = {
+        queue: currentQueue(), time: pendingSeek ?? (resumeChoice || media.currentTime),
+        playing: wheelPlaying(), sleep, sleepUntil, stopAt,
+      };
+      clearTimer();
+      sleep = "off";
+    }
     tracks = [id];
     order = [0];
     cursor = -1;
@@ -1001,6 +1030,36 @@ export function createAudioPlayer(hooks: Hooks) {
     activate(0, false, false, false);
     seek(position);
     if (autoplay) void playMedia();
+  }
+
+  function restoreComparison(resume = true) {
+    const previous = comparison;
+    if (!previous) return;
+    comparison = undefined;
+    clearTimer();
+    sleep = "off";
+    const queue = previous.queue;
+    if (!queue) { close(); return; }
+    const available = (index: number) => isPlayable(hooks.item(queue.tracks[index]));
+    const sameTrack = available(queue.order[queue.cursor]);
+    const target = sameTrack ? queue.cursor : queue.order.findIndex(available);
+    if (target < 0) { close(); return; }
+    tracks = queue.tracks;
+    order = queue.order;
+    cursor = -1;
+    resumeAudioId = queue.resumeAudioId;
+    activate(target, false, false, false);
+    if (!sameTrack) return;
+    seek(previous.time);
+    const expired = previous.sleepUntil > 0 && previous.sleepUntil <= Date.now();
+    if (!expired && previous.sleep !== "off") {
+      sleep = previous.sleep;
+      stopAt = previous.stopAt;
+      sleepUntil = previous.sleepUntil;
+      if (sleepUntil) timer = setTimeout(sleepNow, sleepUntil - Date.now());
+      render();
+    }
+    if (resume && previous.playing && !expired) void playMedia();
   }
 
   function shuffleUpcoming() {
@@ -1102,7 +1161,7 @@ export function createAudioPlayer(hooks: Hooks) {
     return true;
   }
 
-  return { mount, render, restore, play, playAt, playChapter, compareTrack, pause: () => media?.pause(), add, playNext, remove, input, click, key, current, nextEntries, seek, persist, detachMini, openFloatingMini,
+  return { mount, render, restore, play, playAt, playChapter, compareTrack, restoreComparison, comparison: () => comparison?.queue ? "queue" : comparison ? "empty" : undefined, pause: () => media?.pause(), add, playNext, remove, input, click, key, current, nextEntries, seek, persist, detachMini, openFloatingMini,
     nativeMiniRestored: (dock: boolean) => { setDetached(false); if (dock) dockMini(); },
     syncDesktopWheel, wheelAction, isExpanded: () => expanded, isDetached: () => detached,
     timeFor: (id: string) => id === currentId() && matchesSource() && media?.readyState ? media.currentTime : undefined,

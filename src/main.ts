@@ -128,7 +128,8 @@ const stickerTool=createStickerTool({command,snapshot:()=>snapshot,refresh,rende
 const upscaleTool=createUpscaleTool({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t,components:()=>{preferences.section='engines';navigate('settings');}});
 const backgroundTool=createBackgroundTool({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t,components:()=>{preferences.section='engines';navigate('settings');}});
 const stemsTool=createStemsTool({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t,components:()=>{preferences.section='engines';navigate('settings');},
-  compare:(id,group)=>audioPlayer.compareTrack(id,group),playingId:()=>audioPlayer.current()?.id,pausePlayback:()=>audioPlayer.pause(),share:ids=>deviceShare.open({ids})});
+  compare:(id,group)=>audioPlayer.compareTrack(id,group),comparison:()=>audioPlayer.comparison(),restoreComparison:()=>audioPlayer.restoreComparison(),
+  playingId:()=>audioPlayer.current()?.id,pausePlayback:()=>audioPlayer.pause(),share:ids=>deviceShare.open({ids})});
 const translationTool=createTranslationTool({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t,
   openTool:mode=>openToolDestination(()=>openLocalTool(mode),"subtitles"),
   components:()=>{preferences.section='engines';navigate('settings');}});
@@ -781,6 +782,7 @@ async function handleAction(action: string, button: HTMLButtonElement): Promise<
   const id=button.dataset.id??"";
   if(action==='open-palette'){palette.open();return;}
   if(action==='tool-catalog-open'){
+    if(localToolModule==='stems')stemsTool.leave();
     showToolCatalog=true;toolCategory="";toolSearch='';renderCurrent();required('#main').scrollTop=0;
     document.getElementById('tool-search')?.focus();return;
   }

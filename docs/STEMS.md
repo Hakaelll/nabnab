@@ -12,6 +12,8 @@ La separación es una estimación. Puede dejar restos de voz en el instrumental 
 
 Selecciona el archivo original en **Separar pistas** para ver su última exportación. Alterna entre Original, Voz e Instrumental sin perder la posición ni el estado de pausa. Usa la barra inferior para pausar o buscar en la pista completa. Las pistas exportadas siguen disponibles aunque desinstales el modelo.
 
+Si ya tenías una cola de reproducción, **Volver a mi cola** recupera la pista que escuchabas, su posición y el estado de pausa. Salir de la herramienta también recupera la cola. Si entraste con el reproductor vacío, **Terminar comparación** detiene la escucha.
+
 **Enviar las dos pistas** abre la revisión de KDE Connect con los dos FLAC. Si solo queda uno en Biblioteca, puedes enviar la pista disponible. Revisa la selección y elige el dispositivo antes de confirmar.
 
 ## Instalación
@@ -29,5 +31,7 @@ El recorrido nativo de Windows verificó la instalación desde Ajustes, el cambi
 [Muestra en Herramientas](stems-preview.png)
 
 La prueba de resultados en WebView2 reproduce un MP4 y dos FLAC sintéticos de 21 segundos, cambia de pista en reproducción y en pausa, y verifica los dos archivos que recibe el simulador de KDE Connect después de confirmar.
+
+La misma prueba prepara dos canciones y verifica que la comparación conserva su orden en disco. Comprueba la recuperación de la primera canción en el segundo 7, en pausa con el botón y en reproducción al salir de Herramientas. También comprueba que se puede avanzar a la segunda canción y terminar una comparación iniciada con la cola vacía. El panel se revisó a 900 y 1180 px.
 
 [Pistas completas en Herramientas](stems-results.png)
