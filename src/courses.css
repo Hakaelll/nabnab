@@ -4,6 +4,10 @@
 .course-tree details { padding: 4px 8px; border: 1px solid var(--edge-quiet); border-radius: 12px; background: var(--secondary); }
 .course-tree summary { cursor: pointer; padding: 8px 4px; font-weight: 600; overflow-wrap: anywhere; }
 .course-tree ul { list-style: none; padding: 0; margin: 8px 0; }
+.course-search-status { margin: -6px 0 0; }
+.course-search-group { padding-top: 8px; border-top: 1px solid var(--edge-quiet); }
+.course-search-group h3 { margin: 0; padding-inline: 8px; color: var(--muted); font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
+.course-search-group ul { margin-bottom: 0; }
 .course-lesson { width: 100%; padding: 10px 12px; border: 1px solid transparent; border-radius: 8px; color: inherit; background: transparent; text-align: left; cursor: pointer; display: grid; gap: 4px; overflow-wrap: anywhere; }
 .course-lesson:hover { background: var(--hover, #1e2126); }
 .course-lesson[aria-current] { background: var(--elevated, #17191d); border-color: var(--border, #2b2e34); }

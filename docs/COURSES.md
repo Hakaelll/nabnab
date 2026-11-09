@@ -2,6 +2,10 @@
 
 La vista Cursos permite importar una carpeta y organiza sus archivos por subcarpetas, con orden natural para nombres numerados. Los archivos se incorporan a la biblioteca común. Cada lección conserva su estado aprendido, sus notas y la posición del reproductor existente. Una nota temporal también crea un marcador en la biblioteca. Guardado y aprendido son estados diferentes. Volver a importar o actualizar materiales conserva las notas y las lecciones anteriores.
 
+Busca por unidad, título de lección o nombre del adjunto. La búsqueda admite texto con o sin tildes y agrupa las coincidencias por unidad, incluidas las que estaban cerradas. Pulsa **Intro** sobre un resultado para abrirlo. Al borrar el texto se recupera la expansión anterior y queda abierta la unidad de la lección elegida.
+
+![Una lección encontrada en una unidad cerrada, con datos de prueba](course-search.png)
+
 **Reproducir lección** abre el primer vídeo o audio disponible en el reproductor compartido. El vídeo vuelve a la lección en pausa. El audio continúa en la barra compacta mientras consultas materiales y notas, y recupera su posición aunque sea una lección corta. **Usar tiempo actual** toma la posición del archivo de la lección cuando está en el reproductor. Pulsa el tiempo de una nota para volver a ese punto.
 
 ![Lección de vídeo y reproductor compacto en Windows con archivos de prueba](course-lesson-playback.png)

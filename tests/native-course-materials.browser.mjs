@@ -98,6 +98,15 @@ try {
   await page.getByRole("heading", { name: title }).waitFor();
   const [course] = await rpc("list_courses");
   assert.equal(course.sections[0].title, "Unidad práctica");
+  const closingUnit = page.locator(".course-tree details").filter({ hasText: "Cierre" });
+  assert.equal(await closingUnit.evaluate(element => element.open), false);
+  const search = page.getByRole("searchbox", { name: "Buscar lección o recurso", exact: true });
+  await search.fill("revisár");
+  await page.getByRole("button", { name: "Revisar el proyecto", exact: true }).press("Enter");
+  const resultTitle = page.getByRole("heading", { name: "Revisar el proyecto", exact: true });
+  assert.ok(await resultTitle.evaluate(element => element === document.activeElement));
+  await search.fill("");
+  assert.equal(await closingUnit.evaluate(element => element.open), true);
   const lessonId = course.sections[0].lessons[0].id;
   await rpc("course_learned", { courseId: course.id, lessonId, learned: true });
   await rpc("save_course_note", { courseId: course.id, lessonId, text: "Nota de estudio", time: null, noteId: null, remove: false });
@@ -124,7 +133,7 @@ try {
   assert.ok(!savedData.includes("token=fixture"));
   const persisted = JSON.parse(savedData);
   assert.equal(persisted.courses.length, 3);
-  console.log("Native course outlines passed for Domestika, Skillshare and Rocketseat. Review, order, notes, progress, attached resources and safe local file selection were verified.");
+  console.log("Native course outlines passed for Domestika, Skillshare and Rocketseat. Search, keyboard focus, review, order, notes, progress and safe file selection were verified.");
 } finally {
   try {
     await page?.evaluate(async () => {

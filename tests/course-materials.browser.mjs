@@ -329,10 +329,33 @@ try {
   await page.locator("#main").evaluate(node => { node.scrollTop = 0; });
   await page.screenshot({path:`${directory}/unit-resources-study-900.png`,animations:"disabled"});
   const search = page.getByRole("searchbox", {name:"Buscar lección o recurso"});
-  await search.fill("plantillas");
-  assert.equal(await unit.getByRole("button", {name: "Recursos de la unidad",exact:true}).isVisible(), true);
-  assert.equal(await unit.getByRole("button", {name:/02 Preparar/}).count(), 0);
+  const extras = page.locator("#course-section-section-2");
+  assert.equal(await extras.evaluate(element => element.open), false);
+  await search.fill("repáso");
+  const repaso = page.getByRole("button", {name:"01 Repaso",exact:true});
+  assert.equal(await repaso.isVisible(), true);
+  await page.getByText("1 resultado", {exact:true}).waitFor();
+  assert.equal(await search.evaluate(input => input === document.activeElement), true);
+  for (const [width,height] of [[900,620],[1180,780]]) {
+    await page.setViewportSize({width,height});
+    assert.ok(await page.locator(".course-layout").evaluate(node => node.scrollWidth <= node.clientWidth + 1));
+    await search.scrollIntoViewIfNeeded();
+    await page.screenshot({path:`${directory}/course-search-${width}.png`,animations:"disabled"});
+  }
   await search.fill("");
+  assert.equal(await extras.evaluate(element => element.open), false);
+  await search.fill("plantillas inexistentes");
+  await page.getByText("No hay coincidencias en este curso.", {exact:true}).waitFor();
+  await search.fill("plantillas");
+  assert.equal(await page.locator(".course-tree").getByRole("button", {name: /^Recursos de la unidad/}).isVisible(), true);
+  await page.locator(".course-tree").getByText("Plantillas de la unidad.zip", {exact:true}).waitFor();
+  assert.equal(await page.locator(".course-tree").getByRole("button", {name:/02 Preparar/}).count(), 0);
+  await search.fill("repaso");
+  await repaso.press("Enter");
+  const studyTitle = page.getByRole("heading", {name:"01 Repaso",exact:true});
+  assert.ok(await studyTitle.evaluate(heading => heading === document.activeElement));
+  await search.fill("");
+  assert.equal(await extras.evaluate(element => element.open), true);
   await page.getByRole("button", {name:/02 Preparar/}).press("Enter");
   assert.equal(await page.getByText("Revisar la plantilla", {exact:true}).count(), 1);
 
