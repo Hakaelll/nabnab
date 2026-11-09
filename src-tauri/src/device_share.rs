@@ -363,6 +363,19 @@ fn public_link(raw: &str) -> Result<String, String> {
     Ok(link)
 }
 
+#[tauri::command]
+pub fn device_share_source_url(state: State<'_, Arc<AppState>>, id: String) -> Option<String> {
+    let guard = state.repository.lock().unwrap();
+    let item = guard.as_ref()?.data.library.iter().find(|item| item.id == id)?;
+    let details = &item.details;
+    let url = crate::public_sources::research_share_url(
+        details.source_url.as_deref()?,
+        details.content_id.as_deref()?,
+        details.attribution.as_deref(),
+    )?;
+    public_link(&url).ok()
+}
+
 fn payload(
     state: &AppState,
     share: Payload,

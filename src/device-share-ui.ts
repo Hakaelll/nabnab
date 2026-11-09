@@ -28,6 +28,7 @@ export function createDeviceShare(hooks: Hooks) {
   let dialog: HTMLDialogElement | undefined;
   let status: Status | null = null, preview: Preview | null = null;
   let mode: Mode = "files", ids: string[] = [], link = "", text = "", label = "", deviceId = "";
+  let sourceUrl: string | null = null;
   let busy: "discover" | "review" | "send" | null = null, generation = 0, error = "";
   let result: { receipt: Receipt; review: Review } | null = null;
 
@@ -110,6 +111,8 @@ export function createDeviceShare(hooks: Hooks) {
             ${removed ? `<p class="field-note">${removed} ${removed === 1 ? t("ya no está en Biblioteca.", "is no longer in Library.") : t("ya no están en Biblioteca.", "are no longer in Library.")}</p>` : ""}
             ${button("exclude-missing", t("Quitar del envío", "Remove from share"), "secondary", Boolean(busy))}</div>` : ""}
           ${ids.length > maxFiles && !unavailable ? `<p class="field-note">${t("Para más de 50 archivos, prepara una colección portátil.", "For more than 50 files, prepare a portable collection.")}</p>` : ""}
+          ${sourceUrl && ids.length === 1 ? `<div class="device-share-source"><span class="field-note">${t("Comparte la ficha pública sin adjuntar la copia.", "Share the public record without attaching the file.")}</span>
+            ${button("source", t("Usar enlace de origen", "Use source link"), "secondary", Boolean(busy))}</div>` : ""}
           ${ids.length > 1 ? `<div class="device-share-package">${button("zip", t("Preparar ZIP de la selección", "Prepare selection ZIP"), "secondary", Boolean(busy || unavailable))}
             ${unavailable ? "" : `<p class="field-note">${t("Podrás revisar el envío en Colección portátil cuando el ZIP esté listo.", "You can review the share in Portable collection once the ZIP is ready.")}</p>`}</div>` : ""}</div>` : mode === "link"
           ? `<label for="share-url">${t("Enlace HTTP o HTTPS", "HTTP or HTTPS link")}<input id="share-url" type="url" maxlength="2048" value="${h(link)}" ${busy ? "disabled" : ""}></label><p class="field-note">${t("Para enlaces privados o con firma, elige el archivo local en Archivos.", "For private or signed links, choose the local file under Files.")}</p>`
@@ -142,9 +145,16 @@ export function createDeviceShare(hooks: Hooks) {
   function refresh(choose = false) {
     return perform("discover", async revision => {
       if (choose) await hooks.command("device_share_choose_cli");
-      const next = await hooks.command<Status>("device_share_status");
+      const id = ids.length === 1 ? ids[0] : undefined;
+      const [next, suggested] = await Promise.all([
+        hooks.command<Status>("device_share_status"),
+        id && hooks.item(id)?.details?.sourceUrl
+          ? hooks.command<string | null>("device_share_source_url", { id }).catch(() => null)
+          : null,
+      ]);
       if (revision !== generation) return;
       status = next;
+      sourceUrl = suggested;
       if (!next.devices.some(device => device.id === deviceId)) deviceId = "";
     });
   }
@@ -153,6 +163,11 @@ export function createDeviceShare(hooks: Hooks) {
     if (name === "close" && busy !== "send") { dialog?.close(); return; }
     if (busy) return;
     if (name === "refresh" || name === "choose") { await refresh(name === "choose"); return; }
+    if (name === "source" && sourceUrl) {
+      mode = "link"; link = sourceUrl; error = ""; draw();
+      dialog?.querySelector<HTMLInputElement>("#share-url")?.focus();
+      return;
+    }
     if (name === "zip" && ids.length > 1 && ids.every(isAvailable)) { const current = ids.slice(); dialog?.close(); hooks.package(current); return; }
     if (name === "exclude-missing") {
       ids = ids.filter(isAvailable); error = ""; draw();
@@ -192,7 +207,7 @@ export function createDeviceShare(hooks: Hooks) {
       dialog.addEventListener("cancel", event => { if (busy === "send") event.preventDefault(); });
       dialog.addEventListener("close", () => {
         if (dialog?.open) return;
-        generation++; busy = null; result = null; discard(); text = link = "";
+        generation++; busy = null; result = null; sourceUrl = null; discard(); text = link = "";
         hooks.afterClose();
       });
       dialog.addEventListener("click", event => {
@@ -214,7 +229,7 @@ export function createDeviceShare(hooks: Hooks) {
     if (dialog.open) return;
     ids = [...new Set(input.ids ?? [])]; label = input.label ?? ""; link = input.url ?? ""; text = input.text ?? "";
     mode = input.text !== undefined ? "text" : input.url !== undefined || !ids.length ? "link" : "files";
-    deviceId = ""; result = null; error = ""; status = null; busy = null; discard();
+    deviceId = ""; result = null; error = ""; status = null; sourceUrl = null; busy = null; discard();
     draw(); dialog.showModal();
     void refresh();
   }

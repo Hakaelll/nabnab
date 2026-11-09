@@ -16,6 +16,7 @@
 .device-share-package { margin-top: 10px; }
 .device-share-missing ul { max-height: 6em; overflow: auto; color: var(--muted); }
 .device-share-missing .button { margin-top: 4px; }
+.device-share-source { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
 .device-share-review { grid-template-columns: minmax(0, 1fr) auto; }
 .device-share-review strong { display: block; margin-top: 3px; overflow-wrap: anywhere; }
 .device-share-review ul, .device-share-review .device-share-footer { grid-column: 1 / -1; }

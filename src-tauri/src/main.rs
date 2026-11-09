@@ -1241,7 +1241,7 @@ fn main() {
             translation::commands::translation_edit, translation::commands::translation_remove,
             translation::commands::queue_translation_export,
             dubbing::dub_sample, dubbing::inspect_dub_video_audio, dubbing::queue_dub_voice, dubbing::queue_dub_video,
-            device_share::device_share_status, device_share::device_share_choose_cli,
+            device_share::device_share_status, device_share::device_share_choose_cli, device_share::device_share_source_url,
             device_share::device_share_prepare, device_share::device_share_send, device_share::device_share_discard,
             file_operations::file_analysis,file_operations::queue_file_analysis,file_operations::file_rename_preview,file_operations::queue_file_rename,file_operations::file_rename_history,file_operations::queue_file_undo,file_operations::file_organize_review,file_operations::cancel_file_operation,
             file_operations::portable_preview_export,file_operations::queue_portable_export,file_operations::portable_choose_import,file_operations::portable_preview_import,file_operations::queue_portable_import,file_operations::cancel_portable_preview,

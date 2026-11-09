@@ -22,6 +22,24 @@ const logFile = path.join(data, "cli-arguments.jsonl");
 await writeFile(file, "Contenido local.\n");
 await writeFile(second, "Otro contenido.\n");
 await writeFile(missing, "Se quitará del disco.\n");
+const catalogEntries = [
+  { id: "arxiv-fixture", name: "Artículo v2.txt", sourceUrl: "https://arxiv.org/abs/2506.08399v2", contentId: "arxiv:2506.08399v2" },
+  { id: "zenodo-fixture", name: "Datos de investigación.txt", sourceUrl: "https://zenodo.org/records/14634897", contentId: "zenodo:14634897:data.csv" },
+  { id: "librivox-fixture", name: "Capítulo de LibriVox.txt", sourceUrl: "https://librivox.org/api/feed/audiobooks/id/65", contentId: "librivox:65:44",
+    catalogUrl: "https://librivox.org/aesops-fables-volume-1-fables-1-25/" },
+  { id: "private-fixture", name: "Copia privada.txt", sourceUrl: "https://example.org/private/secret-path", contentId: "cloud:fixture" },
+  { id: "signed-fixture", name: "Copia con firma.txt", sourceUrl: "https://arxiv.org/abs/2506.08399v2?token=secret", contentId: "arxiv:2506.08399v2" },
+];
+const library = [];
+for (const entry of catalogEntries) {
+  const local = path.join(data, entry.name);
+  const sample = "Fixture local.\n";
+  await writeFile(local, sample);
+  library.push({ id: entry.id, path: local, name: entry.name, kind: "document", size: Buffer.byteLength(sample), addedAt: 1, collections: [], tags: [],
+    details: { contentId: entry.contentId, sourceUrl: entry.sourceUrl,
+      attribution: entry.catalogUrl ? `LibriVox edition #65\nBook: Fables\nSource: ${entry.catalogUrl}\nRights: Fixture.` : null } });
+}
+await writeFile(path.join(data, "state-v1.json"), JSON.stringify({ schemaVersion: 2, settings: { folder: output }, library }));
 
 let child, browser, page, log = "";
 async function wait(check, timeout = 35_000) {
@@ -313,9 +331,49 @@ try {
   const box = await exports.boundingBox();
   await page.screenshot({ path: path.join(data, "sticker-export.png"), animations: "disabled",
     clip: { x: box.x - 10, y: box.y, width: box.width + 20, height: box.height } });
+  await page.locator('[data-page="library"]').click();
+  await page.locator('[data-action="library-section"][data-section="files"]').click();
+  for (const entry of catalogEntries) {
+    await page.locator(`[data-action="inspect-media"][data-id="${entry.id}"]`).click();
+    await page.locator(`[data-action="share-file"][data-id="${entry.id}"]`).click();
+    await choose();
+    assert.equal(await inShare("files").getAttribute("aria-pressed"), "true");
+    const beforeSource = await calls();
+    if (["private-fixture", "signed-fixture"].includes(entry.id)) {
+      assert.equal(await inShare("source").count(), 0);
+      await inShare("link").click();
+      assert.equal(await inShare("url").inputValue(), "");
+      await inShare("files").click();
+      await inShare("review").click();
+      await inShare("send").waitFor();
+      assert.deepEqual(await modal().locator(".device-share-review li > span").allTextContents(), [entry.name]);
+      assert.deepEqual(await calls(), beforeSource);
+    } else {
+      const expected = entry.catalogUrl ?? entry.sourceUrl;
+      if (entry.id === "arxiv-fixture") {
+        for (const [width, height] of [[900, 620], [1180, 780]]) {
+          await page.setViewportSize({ width, height });
+          assert.ok(await modal().evaluate(element => element.scrollWidth <= element.clientWidth + 1));
+          await modal().screenshot({ path: path.join(base, `source-choice-${width}.png`), animations: "disabled" });
+        }
+      }
+      await inShare("source").press("Enter");
+      assert.equal(await inShare("url").evaluate(input => input === document.activeElement), true);
+      assert.equal(await inShare("url").inputValue(), expected);
+      await inShare("review").click();
+      await inShare("send").waitFor();
+      assert.deepEqual(await modal().locator(".device-share-review li > span").allTextContents(), [expected]);
+      assert.deepEqual(await calls(), beforeSource);
+      await inShare("send").click();
+      await modal().getByText("Entregado a KDE Connect", { exact: true }).waitFor();
+      assert.deepEqual(await calls(), [...beforeSource, [`--device=${device}`, `--share=${expected}`]]);
+    }
+    await closeShare();
+    await page.locator('[data-action="close-inspector"]').click();
+  }
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ nativeCliFixture: true, unicodeFile: true, staleFileRejected: true, signedLinkRejected: true, partialHandoffUnconfirmed: true,
-    publicLink: true, textOneArgument: true, ambiguousHandoff: true, replayRejected: true, offlineDeviceRejected: true, collection: true, missingFiles: true, realPortableZip: true, shareFromExportResult: true, shareFromRealSticker: true, outputSurvivesReload: true, output: data }));
+    publicLink: true, catalogLinksFromLibrary: true, privateSourceCopy: true, textOneArgument: true, ambiguousHandoff: true, replayRejected: true, offlineDeviceRejected: true, collection: true, missingFiles: true, realPortableZip: true, shareFromExportResult: true, shareFromRealSticker: true, outputSurvivesReload: true, output: data }));
 } catch (error) {
   console.error(log);
   await page?.screenshot({ path: path.join(base, "failure.png"), animations: "disabled" }).catch(() => {});

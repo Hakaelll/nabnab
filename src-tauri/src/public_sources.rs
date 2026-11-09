@@ -338,6 +338,33 @@ fn source_url(target: &Target) -> String {
     }
 }
 
+pub(crate) fn research_share_url(link: &str, asset_id: &str, attribution: Option<&str>) -> Option<String> {
+    let parsed = target(link).ok()?;
+    if source_url(&parsed) != link {
+        return None;
+    }
+    match parsed {
+        Target::Arxiv(arxiv::ArxivTarget::Article(article))
+            if article.matches_search_entry(asset_id) && arxiv::normalize(asset_id).as_deref() == Some(link) => Some(link.into()),
+        Target::Zenodo(zenodo::ZenodoTarget::Record(id))
+            if asset_id.starts_with(&format!("zenodo:{id}:")) => Some(link.into()),
+        Target::Librivox(librivox::LibrivoxTarget::Edition(id))
+            if asset_id.starts_with(&format!("librivox:{id}:")) => {
+            // Older chapter entries already carry the human-facing catalog page in their attribution.
+            let catalog = attribution?.lines().nth(2)?.strip_prefix(librivox::ATTRIBUTION_SOURCE)?;
+            let parsed = target(catalog).ok()?;
+            if matches!(parsed, Target::Librivox(librivox::LibrivoxTarget::CatalogPage(_)))
+                && source_url(&parsed) == catalog
+            {
+                Some(catalog.into())
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
 pub(crate) fn clean_text(input: &str, max: usize) -> String {
     // These fields are plain text, never trusted HTML. Drop script/style bodies too.
     let lower = input.to_ascii_lowercase();

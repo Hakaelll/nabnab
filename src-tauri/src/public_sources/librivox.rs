@@ -18,6 +18,7 @@ use url::Url;
 
 const ORIGIN: &str = "https://librivox.org";
 const CATALOG: &str = "https://librivox.org/api/feed/audiobooks";
+pub(super) const ATTRIBUTION_SOURCE: &str = "Source: ";
 const SEARCH: &str = "https://librivox.org/search/";
 const RIGHTS: &str = "Public domain in the United States (LibriVox). Check the status in your country: https://librivox.org/pages/public-domain/";
 const SEARCH_SIZE: usize = 20;
@@ -700,7 +701,7 @@ fn chapter_asset(
         .and_then(parsed_link)
         .filter(|url| matches!(url.host_str(), Some("librivox.org" | "www.librivox.org")));
     let mut attribution = format!(
-        "LibriVox edition #{id}\nBook: {book_title}\nSource: {}\nRights: {RIGHTS}",
+        "LibriVox edition #{id}\nBook: {book_title}\n{ATTRIBUTION_SOURCE}{}\nRights: {RIGHTS}",
         catalog_url
             .as_ref()
             .map(Url::as_str)
