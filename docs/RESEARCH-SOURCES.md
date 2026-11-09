@@ -34,10 +34,13 @@ En **Plataformas → Archivos y documentos**, pega un enlace, un identificador o
 - Puedes combinar **Idioma del capítulo**, **Lectura** y la búsqueda de texto. La ficha muestra cuántos capítulos coinciden de los que ya se cargaron. Al entrar desde un catálogo por idioma, la ficha selecciona ese idioma si figura en los capítulos cargados.
 - Marca capítulos individuales o selecciona los visibles. Cambiar de filtro conserva las marcas anteriores y el resumen muestra todo lo que se enviará a Descargas. Biblioteca identifica los archivos como audiolibro, conserva la edición y crea una colección para reunir sus capítulos. El filtro **Audiolibros** está en el selector de contenido de Biblioteca.
 - La ficha indica cuántos capítulos de esa edición tienes disponibles en Biblioteca y los señala en la lista. **Abrir en Estantería** muestra la edición en **Biblioteca → Audio → Audiolibros**. Desde allí puedes elegir un capítulo o continuar donde lo dejaste.
+- En **Copia local**, elige **Sin copia local** para ver qué capítulos te faltan de esa edición. Combínalo con idioma, lector o búsqueda y pulsa **Marcar capítulos sin copia** para añadir los resultados visibles a la selección. Si falta un archivo en disco, su capítulo vuelve a aparecer con este filtro.
 - Antes de añadir los capítulos a Descargas, pulsa **Solo seleccionados** para revisar todas las marcas, incluidas las que quedaron fuera del filtro. Desmarca los capítulos que quieras quitar. Pulsa el botón otra vez para volver a la búsqueda y los filtros anteriores.
 - La búsqueda por título usa la API de audiolibros de 20 en 20. La exploración por idioma usa la lista y la paginación de la [búsqueda pública de LibriVox](https://librivox.org/search). Al abrir una edición, la aplicación lee el RSS y, para los archivos alojados en Internet Archive, reutiliza las comprobaciones de acceso y las descargas de ese adaptador. La ficha conserva la declaración de dominio público de LibriVox para Estados Unidos. Comprueba la situación en tu país.
 
 [Catálogo oficial](https://librivox.org/api/info) · [Dominio público](https://librivox.org/pages/public-domain/)
+
+![Un capítulo sin copia local marcado por idioma y lector en una edición de prueba](librivox-missing-chapters.png)
 
 ## Cursos
 

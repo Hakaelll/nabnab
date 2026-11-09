@@ -20,7 +20,7 @@ After a restart, interrupted jobs are paused for review. Choose **Retry** to run
 ## Sources and courses
 
 - **Research.** Open arXiv PDFs by exact version or review the files and sizes in a Zenodo record. Zenodo shows which files from that version are already in your library and lets you open them directly. Paste a public community link to browse recent records and follow the community in **Library → Sources**. [Research sources](docs/RESEARCH-SOURCES.md) · [Saved copy in Zenodo](docs/zenodo-saved-copy.png)
-- **Audiobooks.** Browse LibriVox editions and review the chapters you want before downloading. [LibriVox workflow](docs/RESEARCH-SOURCES.md) · [Chapter selection](docs/librivox-chapter-review.png)
+- **Audiobooks.** Browse LibriVox editions and filter chapters by language, reader, or local availability before downloading. [LibriVox workflow](docs/RESEARCH-SOURCES.md) · [Missing chapters](docs/librivox-missing-chapters.png)
 - **Media and subscriptions.** Review individual gallery and social attachments, follow podcast RSS feeds, and import or export OPML subscriptions. The BitTorrent workflow offers file selection and requires explicit P2P consent. Telegram attachment selection requires the optional TDLib component and an authorized account. [Sources and tools](docs/EXPANSION.md) · [Podcasts](docs/PODCASTS.md)
 - **Personal servers.** Browse Nextcloud, WebDAV, SFTP, or a network folder that Windows can access. Search the current folder by name, then show only selected files to review their total size and destination. Save a reference or queue a local copy. If a file changes on the server, you can compare the saved and current versions. [Personal servers](docs/PERSONAL-SERVERS.md) · [File selection](docs/personal-server-selected.png)
 

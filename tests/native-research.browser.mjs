@@ -227,6 +227,12 @@ try {
     const openShelf = page.getByRole("button", { name: "Abrir en Estantería", exact: true });
     await openShelf.waitFor();
     assert.equal(await language.inputValue(), "English");
+    const chapterCopies = page.getByRole("combobox", { name: "Copia local" });
+    await chapterCopies.selectOption("saved");
+    await language.selectOption({ label: "Español" });
+    assert.deepEqual(await checkboxes.evaluateAll(boxes => boxes.map(box => box.dataset.fileSourceSelect)), [chapter.id]);
+    await chapterCopies.selectOption("missing");
+    assert.equal(await checkboxes.count(), 0);
     assert.equal(await openShelf.getAttribute("data-id"), chapter.audiobook.bookId);
     await openShelf.press("Enter");
     await page.waitForFunction(() => document.activeElement?.id === "audio-shelf-title");

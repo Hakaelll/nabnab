@@ -506,6 +506,34 @@ try {
       await page.screenshot({ path: `${directory}/librivox-shelf-source-${width}.png` });
     }
     const queueCalls = await page.evaluate(() => window.fileSourceFixture.calls.filter(call => call.cmd === "queue_public_files").length);
+    const chapterCopies = page.getByRole("combobox", { name: "Copia local" });
+    const chapterIds = () => page.locator("[data-file-source-select]").evaluateAll(inputs => inputs.map(input => input.dataset.fileSourceSelect));
+    await chapterCopies.selectOption("saved", { timeout: 3500 });
+    assert.deepEqual(await chapterIds(), ["librivox:52:1"]);
+    await chapterCopies.selectOption("missing");
+    assert.deepEqual(await chapterIds(), ["librivox:52:2", "librivox:52:3"]);
+    await chapterLanguage.selectOption({ label: "Francés" });
+    await narration.selectOption("Second Reader");
+    const markMissing = page.getByRole("button", { name: "Marcar capítulos sin copia" });
+    await markMissing.press("Enter");
+    assert.deepEqual(await chapterIds(), ["librivox:52:2"]);
+    assert.equal(await page.locator("[data-file-source-select]:checked").count(), 1);
+    for (const [width, height] of [[1180, 780], [900, 620]]) {
+      await page.setViewportSize({ width, height });
+      await page.locator(".file-source-filter").evaluate(element => element.scrollIntoView({ block: "start" }));
+      await checkNoHorizontalOverflow(`LibriVox local copy filter ${width}`);
+      await page.screenshot({ path: `${directory}/librivox-missing-chapters-${width}.png` });
+    }
+    await chapterLanguage.selectOption({ label: "Español" });
+    assert.deepEqual(await chapterIds(), []);
+    await review.press("Enter");
+    assert.equal(await chapterCopies.isDisabled(), true);
+    assert.deepEqual(await chapterIds(), ["librivox:52:2"]);
+    await review.press("Enter");
+    assert.equal(await chapterCopies.inputValue(), "missing");
+    assert.equal(await chapterLanguage.inputValue(), "Spanish");
+    assert.equal(await narration.inputValue(), "Second Reader");
+    await page.locator('[data-action="file-source-clear"]').click();
     await openShelf.press("Enter");
     const shelfBook = page.locator(".audio-library").getByRole("heading", { name: "Fixture audiobook", exact: true });
     assert.ok(await shelfBook.evaluate(heading => heading === document.activeElement));
