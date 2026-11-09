@@ -35,6 +35,12 @@ const setup = `
     savedDataset("zenodo-wrong-size",1236,"readme.txt",1024,"v2","md5:"+"c".repeat(32)),
     savedDataset("zenodo-missing-v2",1236,"appendix.zip",100,"v2",null,true)
   );
+  const savedChapter=(id,edition,chapter,missing=false)=>({
+    ...savedPaper(id,"",missing),name:id+".mp3",path:"C:/Books/"+id+".mp3",kind:"audio",duration:90,
+    details:{...savedPaper(id,"").details,contentId:"librivox:"+edition+":"+chapter,platform:"LibriVox",
+      audiobook:{bookId:"librivox:"+edition,bookTitle:"Fixture audiobook",chapter,reader:"Fixture Reader",language:"Spanish"}}
+  });
+  state.library.push(savedChapter("chapter-local",52,1),savedChapter("chapter-missing",52,2,true),savedChapter("chapter-other-edition",53,3));
   state.sources.push({id:"follow-arxiv",name:"Artículos de prueba",url:"https://arxiv.org/search/?field=author&query=Fixture+Author",
     kind:"publicSearch",status:"ready",lastCheck:1,settings:{presetId:null,relativeFolder:"",intervalHours:null,automatic:false,pageSize:20},
     baseline:{inspected:2,total:2,complete:true,cursor:2,hasMore:false},
@@ -448,6 +454,35 @@ try {
     assert.equal(await page.locator("#source-url").inputValue(), "https://librivox.org/search/?language_id=5");
     assert.equal(await page.locator("#source-exploration-limit").getAttribute("step"), "25");
     await page.locator("[data-page='platforms']").click();
+    await page.locator("[data-action='open-fileSources']").first().click();
+    await inspect("https://librivox.org/cuentos/");
+    const editionHeading = page.getByRole("heading", { name: "Fixture audiobook", exact: true });
+    await editionHeading.waitFor();
+    const openShelf = page.getByRole("button", { name: "Abrir en Estantería", exact: true });
+    await openShelf.waitFor({ timeout: 2500 });
+    assert.equal(await page.locator(".file-source-result-heading").getByText("1 capítulo en Biblioteca", { exact: true }).count(), 1);
+    assert.equal(await page.locator(".file-source-list").getByText("En Biblioteca", { exact: true }).count(), 1);
+    const localChapter = page.locator("[data-file-source-select='librivox:52:1']");
+    assert.equal(await localChapter.evaluate(input => document.getElementById(input.getAttribute("aria-describedby"))?.textContent), "En Biblioteca");
+    for (const [width, height] of [[1180, 780], [900, 620]]) {
+      await page.setViewportSize({ width, height });
+      await page.locator(".file-source-result-heading").evaluate(heading => heading.scrollIntoView({ block: "start" }));
+      await checkNoHorizontalOverflow(`LibriVox shelf link ${width}`);
+      await page.screenshot({ path: `${directory}/librivox-shelf-source-${width}.png` });
+    }
+    const queueCalls = await page.evaluate(() => window.fileSourceFixture.calls.filter(call => call.cmd === "queue_public_files").length);
+    await openShelf.press("Enter");
+    const shelfBook = page.locator(".audio-library").getByRole("heading", { name: "Fixture audiobook", exact: true });
+    assert.ok(await shelfBook.evaluate(heading => heading === document.activeElement));
+    assert.deepEqual(await page.locator(".audio-row .audio-track-number").allTextContents(), ["Cap. 1", "Cap. 2"]);
+    assert.equal(await page.evaluate(() => window.fileSourceFixture.calls.filter(call => call.cmd === "queue_public_files").length), queueCalls);
+    assert.equal(await page.locator("html.has-audio-player").count(), 0);
+    for (const [width, height] of [[1180, 780], [900, 620]]) {
+      await page.setViewportSize({ width, height });
+      await checkNoHorizontalOverflow(`Audiobook edition ${width}`, ".audio-library");
+      await page.screenshot({ path: `${directory}/librivox-shelf-book-${width}.png` });
+    }
+    await page.getByRole("button", { name: "Plataformas", exact: true }).click();
     await page.locator("[data-action='open-fileSources']").first().click();
     report.push("arXiv version selection and keyboard return passed. Zenodo file review and LibriVox chapter review across filters passed.");
 

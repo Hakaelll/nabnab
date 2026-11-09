@@ -228,7 +228,7 @@ export function createAudioLibrary(hooks: Hooks) {
       : item.details?.audiobook?.bookTitle || audioTitle(item);
     if (chosen) {
       const detail = music ? albumDetails(selectedAlbum) : "";
-      return `<div class="audio-shelf-trail">${action("audio-shelf-clear", music ? t("Todos los álbumes", "All albums") : t("Todos los libros", "All books"), "back", "quiet")}${!detail && items[0] ? `<strong>${h(titleFor(items[0]))}</strong>` : ""}</div>${detail}`;
+      return `<div class="audio-shelf-trail">${action("audio-shelf-clear", music ? t("Todos los álbumes", "All albums") : t("Todos los libros", "All books"), "back", "quiet")}${!detail && items[0] ? `<h2 id="audio-shelf-title" tabindex="-1">${h(titleFor(items[0]))}</h2>` : ""}</div>${detail}`;
     }
 
     const groups = new Map<string, LibraryItem[]>();
@@ -936,5 +936,15 @@ export function createAudioLibrary(hooks: Hooks) {
     hooks.render();
   }
 
-  return { render, click, input, submit, openArchivePlaylist, bindLyrics, playbackChanged };
+  function selectBook(id: string): boolean {
+    if (!id || !items().some(item => !item.missing && isAudiobook(item) && bookKey(item) === id)) return false;
+    category = "books";
+    book = id;
+    views.books.query = "";
+    views.books.offset = 0;
+    chapterOffset = 0;
+    return true;
+  }
+
+  return { render, click, input, submit, openArchivePlaylist, selectBook, bindLyrics, playbackChanged };
 }

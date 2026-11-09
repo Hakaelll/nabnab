@@ -29,7 +29,7 @@
 .audio-shelf-copy strong { font-size: 13px; font-weight: 600; }
 .audio-shelf-copy span, .audio-shelf-copy small, .audio-continue-copy small { color: var(--muted); font-size: 12px; }
 .audio-shelf-trail { flex-wrap: wrap; min-height: 34px; margin-bottom: 12px; }
-.audio-shelf-trail strong { overflow-wrap: anywhere; font-size: 14px; }
+.audio-shelf-trail h2 { margin: 0; overflow-wrap: anywhere; font-size: 14px; font-weight: 600; }
 .audio-album { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px 16px; margin-bottom: 20px; padding: 14px; border: 1px solid var(--edge-quiet); border-radius: 14px; background: var(--surface); }
 .audio-album-identity { display: flex; align-items: center; gap: 12px; flex: 1 1 170px; min-width: 0; }
 .audio-album-identity > div { display: grid; gap: 3px; min-width: 0; overflow-wrap: anywhere; }

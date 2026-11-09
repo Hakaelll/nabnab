@@ -886,6 +886,12 @@ async function handleAction(action: string, button: HTMLButtonElement, event?: M
     case 'inspect-media':library.detailId=id;if(page!=='library')navigate('library');else renderCurrent();if(snapshot.library.some(item=>item.id===id&&item.kind==='document'))await documents.open(id);const contentHit=libraryContentHits.find(hit=>hit.fileId===id&&(hit.kind==='article'||hit.kind==='ocr'));if(library.query&&contentHit)await openContentHit(contentHit,library.query);else{if(snapshot.library.some(item=>item.id===id&&item.kind==='article'))await articles.open(id);if(snapshot.library.some(item=>item.id===id&&item.details?.ocrRef))await ocr.open(id);}break;
     case 'close-inspector':closeInspector();break;
     case 'open-media':await command('open_media',{id,folder:false});break;
+    case 'open-audiobook':{
+      if(audioLibrary.selectBook(id)){
+        librarySection='audio';navigate('library');
+        document.getElementById('audio-shelf-title')?.focus();
+      }
+    }break;
     case 'play-media':case 'play-selection':case 'play-job':{
       let items = snapshot.library.filter(item=>item.id===id);
       if(action==='play-job'){

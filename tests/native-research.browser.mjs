@@ -224,7 +224,17 @@ try {
     assert.equal(result.item.kind, "audio");
     assert.deepEqual(result.item.details.audiobook, chapter.audiobook);
     assert.equal((await readFile(result.item.path)).length, chapter.size);
-    return { chapter: chapter.audiobook.chapter, language: chapter.audiobook.language, reader: chapter.audiobook.reader, bytes: chapter.size };
+    const openShelf = page.getByRole("button", { name: "Abrir en Estantería", exact: true });
+    await openShelf.waitFor();
+    assert.equal(await language.inputValue(), "English");
+    assert.equal(await openShelf.getAttribute("data-id"), chapter.audiobook.bookId);
+    await openShelf.press("Enter");
+    await page.waitForFunction(() => document.activeElement?.id === "audio-shelf-title");
+    assert.equal(await page.locator("#audio-shelf-title").textContent(), chapter.audiobook.bookTitle);
+    assert.deepEqual(await page.locator(".audio-row .audio-track-number").allTextContents(), ["Cap. 3"]);
+    assert.equal(await page.locator("html.has-audio-player").count(), 0);
+    assert.equal((await getSnapshot()).jobs.length, 1);
+    return { chapter: chapter.audiobook.chapter, language: chapter.audiobook.language, reader: chapter.audiobook.reader, bytes: chapter.size, openedInBookshelf: true };
   });
 
   if (allProviders) await verify("arXiv", async () => {

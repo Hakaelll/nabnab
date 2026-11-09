@@ -54,6 +54,7 @@ label.file-source-row { cursor: pointer; }
 .file-source-row-main strong { display: block; font-weight: 500; overflow-wrap: anywhere; }
 .file-source-row-main small { display: block; color: var(--muted); font-size: 12px; margin-top: 4px; overflow-wrap: anywhere; }
 .file-source-size { font-size: 12px; color: var(--muted); white-space: nowrap; align-self: start; padding-top: 2px; }
+.file-source-chapter-saved { display: block; margin-bottom: 4px; color: var(--text); font-weight: 600; }
 .file-source-list-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; margin: 12px 0 8px; min-height: 30px; }
 .file-source-list-heading > h3 { margin: 0; font-size: 14px; font-weight: 600; }
 .file-source-research-list { display: grid; gap: 6px; border: 0; }

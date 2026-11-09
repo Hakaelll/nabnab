@@ -30,6 +30,7 @@ En **Plataformas → Archivos y documentos**, pega un enlace, un identificador o
 - También puedes buscar por el comienzo del título y filtrar por idioma. Abre la edición correspondiente. Los capítulos muestran número, lector e idioma cuando están disponibles.
 - Puedes combinar **Idioma del capítulo**, **Lectura** y la búsqueda de texto. La ficha muestra cuántos capítulos coinciden de los que ya se cargaron. Al entrar desde un catálogo por idioma, la ficha selecciona ese idioma si figura en los capítulos cargados.
 - Marca capítulos individuales o selecciona los visibles. Cambiar de filtro conserva las marcas anteriores y el resumen muestra todo lo que se enviará a Descargas. Biblioteca identifica los archivos como audiolibro, conserva la edición y crea una colección para reunir sus capítulos. El filtro **Audiolibros** está en el selector de contenido de Biblioteca.
+- La ficha indica cuántos capítulos de esa edición tienes disponibles en Biblioteca y los señala en la lista. **Abrir en Estantería** muestra la edición en **Biblioteca → Audio → Audiolibros**. Desde allí puedes elegir un capítulo o continuar donde lo dejaste.
 - Antes de añadir los capítulos a Descargas, pulsa **Solo seleccionados** para revisar todas las marcas, incluidas las que quedaron fuera del filtro. Desmarca los capítulos que quieras quitar. Pulsa el botón otra vez para volver a la búsqueda y los filtros anteriores.
 - La búsqueda por título usa la API de audiolibros de 20 en 20. La exploración por idioma usa la lista y la paginación de la [búsqueda pública de LibriVox](https://librivox.org/search). Al abrir una edición, la aplicación lee el RSS y, para los archivos alojados en Internet Archive, reutiliza las comprobaciones de acceso y las descargas de ese adaptador. La ficha conserva la declaración de dominio público de LibriVox para Estados Unidos. Comprueba la situación en tu país.
 
@@ -55,7 +56,7 @@ Con `NABNAB_RESEARCH_LANGUAGE_ONLY=1` la prueba se limita a consultar el catálo
 
 Con `NABNAB_RESEARCH_COMMUNITY_ONLY=1`, la prueba nativa consultó 14 registros públicos de una comunidad de Zenodo. Abrió un registro concreto, volvió a la misma fila y guardó el seguimiento manual. Guardar de nuevo con el identificador estable reutilizó la misma fuente y Descargas quedó vacía. La prueba de Edge comprobó la paginación y el regreso con datos simulados a 900 y 1180 px. [Comunidad de prueba](https://zenodo.org/communities/cfa)
 
-Con `NABNAB_RESEARCH_CHAPTER_FILTERS_ONLY=1` la prueba combina idioma y lectura en una edición multilingüe, cambia el filtro y recupera el capítulo marcado con **Solo seleccionados**. La cola descargó únicamente el capítulo 3, leído en español por Alexandria Adair, con 1.048.675 bytes. Biblioteca conservó los datos de ese capítulo y su edición. [Edición multilingüe en LibriVox](https://librivox.org/mini-multilingual-bedtime-stories-2-by-aesop/)
+Con `NABNAB_RESEARCH_CHAPTER_FILTERS_ONLY=1` la prueba combina idioma y lectura en una edición multilingüe, cambia el filtro y recupera el capítulo marcado con **Solo seleccionados**. La cola descargó únicamente el capítulo 3, leído en español por Alexandria Adair, con 1.048.675 bytes. **Abrir en Estantería** enfocó esa edición y mostró el capítulo guardado con el reproductor vacío. La prueba de Edge distingue una edición del mismo título y un archivo ausente a 900 y 1180 px. [Edición multilingüe en LibriVox](https://librivox.org/mini-multilingual-bedtime-stories-2-by-aesop/)
 
 ![Selección de PDF por versión de arXiv](arxiv-versions.png)
 
@@ -76,3 +77,5 @@ Con `NABNAB_RESEARCH_CHAPTER_FILTERS_ONLY=1` la prueba combina idioma y lectura 
 ![Filtros por idioma y lectura en una edición multilingüe de LibriVox](librivox-chapter-filters.png)
 
 ![Capítulo en español seleccionado mientras el filtro de inglés está en pausa](librivox-chapter-review.png)
+
+![Ficha de LibriVox con el capítulo guardado y el acceso a la estantería, con datos de prueba](librivox-shelf-link.png)
