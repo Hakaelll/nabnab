@@ -237,13 +237,21 @@ try {
   await cueSearch.fill("00:00:00.500");
   assert.equal(await page.locator("#translation-cue-0").inputValue(), "Hello.");
   assert.equal(await page.locator("#translation-cue-2").count(), 0);
+  await page.getByRole("button", { name: "Siguiente aviso de doblaje", exact: true }).press("Enter");
+  await page.waitForFunction(() => document.activeElement?.id === "translation-cue-2");
+  await cueSearch.fill("00:00:00.500");
   await page.locator("#translation-save").click();
   await wait(async () => (await rpc("translation_read", { draftId })).revision === 2);
   const reviewed = await rpc("translation_read", { draftId });
   assert.deepEqual(reviewed.original, cues);
   assert.deepEqual(reviewed.translated, ["Hello.", "See you soon.", "Goodbye."]);
-  await page.locator("#dub-open").click();
+  await page.getByRole("button", { name: "Volver a la muestra del segmento 3", exact: true }).press("Enter");
   assert.equal(await page.locator("#translation-draft").inputValue(), draftId);
+  assert.equal(await page.locator("#dub-cue").inputValue(), "3");
+  await page.waitForFunction(() => document.activeElement?.id === "dub-play-sample");
+  await page.locator("#dub-play-sample").press("Enter");
+  await page.locator(".dub-sample").getByText("Goodbye.", { exact: true }).waitFor();
+  await wait(async () => await sample.count() && sample.evaluate(audio => audio.readyState >= 2 && audio.duration > 0));
   await page.locator("#dub-queue-voice").click();
   const wav = await jobOf("dubVoice", 1, "completed");
   const cachedAfter = (await readdir(caches)).filter(name => name.endsWith(".wav")).sort();
@@ -394,7 +402,7 @@ try {
     await page.screenshot({ path: path.join(data, `dubbing-${width}.png`), animations: "disabled" });
     if (width === 1180) await section.screenshot({ path: path.join(data, "dubbing-results.png"), animations: "disabled" });
   }
-  console.log(JSON.stringify({ draftFixture: true, catalogAndPalette: true, editsPreservedBetweenTools: true, sapiSample: true, timingIssue: tooLong.error.technical, reusedCues: 1, synchronizedSeconds: 8.5,
+  console.log(JSON.stringify({ draftFixture: true, catalogAndPalette: true, editsPreservedBetweenTools: true, sapiSample: true, returnedToEditedCue: 3, timingIssue: tooLong.error.technical, reusedCues: 1, synchronizedSeconds: 8.5,
     alternateTracks: 3, failedMixKeptWav: true, selectedMixHz: 710, separatedInstrumentalHz: 540, staleInstrumentalRejected: true,
     mixedTracks: 1, unchangedOriginal: true, shares: 3, viewports: [1180, 900] }));
 } catch (error) {

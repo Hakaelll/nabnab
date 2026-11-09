@@ -38,6 +38,7 @@ export function createDubbing(hooks: Hooks) {
   let originalAudioId = "";
   let instrumentalId = "";
   let player: HTMLAudioElement | null = null, sampleUrl = "", sampleText = "", requestId = 0;
+  let focusSample = false;
   let observed = "";
 
   const voices = () => status?.voices.filter(voice => voice.enabled && voice.language.split("-")[0] === hooks.draft()?.pair.split("-")[1]) ?? [];
@@ -119,6 +120,7 @@ export function createDubbing(hooks: Hooks) {
   }
 
   function stopSample() {
+    focusSample = false;
     player?.pause(); player?.remove(); player = null;
     if (sampleUrl) URL.revokeObjectURL(sampleUrl);
     sampleUrl = ""; sampleText = "";
@@ -138,9 +140,21 @@ export function createDubbing(hooks: Hooks) {
     error = "";
   }
 
+  function selectSampleCue(index: number) {
+    stopSample();
+    sampleCue = index;
+    focusSample = true;
+  }
+
   function bind() {
     const slot = document.getElementById("dub-sample-slot");
     if (slot && player && player.parentElement !== slot) slot.append(player);
+    if (focusSample) requestAnimationFrame(() => {
+      const button = document.querySelector<HTMLButtonElement>("#dub-play-sample:enabled");
+      if (!focusSample || !button) return;
+      focusSample = false;
+      button.focus();
+    });
   }
 
   function originalAudioControls() {
@@ -196,7 +210,7 @@ export function createDubbing(hooks: Hooks) {
         <label for="dub-rate">${t("Ritmo de voz", "Voice rate")}<select id="dub-rate">${[-3,-2,-1,0,1,2,3].map(value => option(String(value), value > 0 ? `+${value}` : String(value), String(rate))).join("")}</select></label>
         <label for="dub-volume">${t("Volumen (%)", "Volume (%)")}<input id="dub-volume" type="number" min="1" max="100" value="${volume}"></label>
         <label for="dub-cue">${t("Segmento de muestra", "Sample cue")}<input id="dub-cue" type="number" min="1" max="${draft.count}" value="${cue + 1}"></label>
-        ${action("dub-sample", t("Escuchar muestra", "Play sample"), "play", "secondary")}
+        ${action("dub-sample", t("Escuchar muestra", "Play sample"), "play", "secondary", `id="dub-play-sample"`)}
       </fieldset>
       ${sampleText ? `<div class="dub-sample"><span>${h(sampleText)}</span><div id="dub-sample-slot"></div></div>` : ""}
       ${job && job.id !== wav?.id ? issues.length ? timingReview(issues)
@@ -338,5 +352,5 @@ export function createDubbing(hooks: Hooks) {
     if (change !== observed && (matchingVoices()[0]?.id === job.id || videoJob()?.id === job.id)) { observed = change; hooks.render(); }
   }
 
-  return { bind, change, click, load, observe, render, resetDraft, stopSample, timingIssues };
+  return { bind, change, click, load, observe, render, resetDraft, selectSampleCue, stopSample, timingIssues };
 }

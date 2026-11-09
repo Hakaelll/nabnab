@@ -69,6 +69,7 @@ export function createTranslationTool(hooks: Hooks) {
   let cueQuery = "";
   let cueMatches: number[] | null = null;
   let warningCursor: number | null = null;
+  let dubbingCueToReview: number | null = null;
   let format: "srt" | "vtt" = "vtt", bilingual = false;
   const edits = new Map<number, string>();
   const warnings = new Set<number>();
@@ -79,6 +80,7 @@ export function createTranslationTool(hooks: Hooks) {
       return cue ? `${timing(cue.start)} – ${timing(cue.end)}` : "";
     },
     focusCue: async index => {
+      dubbingCueToReview = index;
       showCue(index);
       await hooks.openTool("translation");
       requestAnimationFrame(() => document.getElementById(`translation-cue-${index}`)?.focus());
@@ -168,6 +170,7 @@ export function createTranslationTool(hooks: Hooks) {
   async function open(id: string) {
     const result = await hooks.command<Draft>("translation_read", { draftId: id });
     dubbing.resetDraft();
+    dubbingCueToReview = null;
     draft = result; edits.clear(); searchCues(""); warningCursor = null; confirmRemoval = false;
     updateWarnings(result);
     if (!draftIds?.includes(id)) draftIds = [id, ...(draftIds ?? [])];
@@ -175,6 +178,7 @@ export function createTranslationTool(hooks: Hooks) {
 
   function clearDraft() {
     dubbing.resetDraft();
+    dubbingCueToReview = null;
     draft = null; edits.clear(); searchCues(""); warnings.clear(); warningCursor = null; confirmRemoval = false;
   }
 
@@ -273,7 +277,9 @@ export function createTranslationTool(hooks: Hooks) {
         <p class="field-note">${h(current.name)} · ${directionLabel(current.selection.pair)} · ${t("Traducción automática", "Machine translation")}</p></div>
         <div class="button-group translation-review-actions">
           ${action("translation-save", t("Guardar edición", "Save edits"), "check", "secondary", `id="translation-save" ${busy || !edits.size ? "disabled" : ""}`)}
-          ${action("dub-open", t("Crear doblaje", "Create dubbing"), "audio", "quiet", `id="dub-open" ${busy || edits.size ? "disabled" : ""}`)}
+          ${action("dub-open", dubbingCueToReview === null ? t("Crear doblaje", "Create dubbing")
+            : t(`Volver a la muestra del segmento ${dubbingCueToReview + 1}`, `Return to sample for cue ${dubbingCueToReview + 1}`),
+            "audio", "quiet", `id="dub-open" ${busy || edits.size ? "disabled" : ""}`)}
         </div>
       </div>
       <div class="translation-review-status"><p class="field-note">${current.contextualBlocks
@@ -363,7 +369,11 @@ export function createTranslationTool(hooks: Hooks) {
 
   async function click(kind: string, button: HTMLElement) {
     if (kind === "dub-open") {
-      if (!busy && !edits.size) await hooks.openTool("dubbing");
+      if (busy || edits.size) return true;
+      const index = dubbingCueToReview;
+      dubbingCueToReview = null;
+      if (index !== null) dubbing.selectSampleCue(index);
+      await hooks.openTool("dubbing");
       return true;
     }
     if (kind.startsWith("dub-")) return dubbing.click(kind, button);
@@ -398,6 +408,7 @@ export function createTranslationTool(hooks: Hooks) {
         if (busy || !ordered.length) return true;
         const firstShown = cueMatches?.[offset] ?? offset;
         const index = ordered.find(index => index > (warningCursor ?? firstShown - 1)) ?? ordered[0];
+        if (kind === "translation-next-dub-warning") dubbingCueToReview = index;
         showCue(index);
         hooks.render();
         document.getElementById(`translation-cue-${index}`)?.focus();

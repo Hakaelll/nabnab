@@ -162,16 +162,28 @@ try {
     }));
     await page.screenshot({ path: path.join(directory, `dub-timing-editor-${width}.png`) });
   }
+  const backToSample = tool.getByRole("button", { name: "Volver a la muestra del segmento 14", exact: true });
+  assert.equal(await backToSample.isDisabled({ timeout: 2500 }), true);
   await tool.getByRole("button", { name: "Guardar edición", exact: true }).press("Enter");
   await dubNext.waitFor({ state: "detached" });
-  await tool.getByRole("button", { name: "Crear doblaje", exact: true }).press("Enter");
+  for (const [width, height] of [[1180, 780], [900, 620]]) {
+    await page.setViewportSize({ width, height });
+    await tool.locator("#translation-title").evaluate(heading => heading.scrollIntoView({ block: "start" }));
+    assert.ok(await tool.evaluate(element => element.scrollWidth <= element.clientWidth + 1));
+    await page.screenshot({ path: path.join(directory, `return-to-sample-${width}.png`) });
+  }
+  await backToSample.press("Enter");
   await dubbing.locator("#dub-queue-voice").waitFor();
+  assert.equal(await dubbing.getByLabel("Segmento de muestra", { exact: true }).inputValue(), "14");
+  const playSample = dubbing.getByRole("button", { name: "Escuchar muestra", exact: true });
+  await page.waitForFunction(() => document.activeElement?.id === "dub-play-sample");
+  assert.ok(await playSample.evaluate(button => button === document.activeElement));
   assert.equal(await editSecond.count(), 0);
   assert.deepEqual(await page.evaluate(() => window.translationCalls.filter(call => call.command === "translation_edit").at(-1).args), {
     draftId: "fixture", revision: 2, edits: [{ index: 13, text: "See you." }, { index: 1, text: "Hello." }],
   });
   assert.deepEqual(errors, []);
-  console.log("Length and dubbing warnings focus cues across pages and keep edits until save.");
+  console.log("Warnings focus cues across pages, keep edits until save, and return to the last dubbing cue.");
 } finally {
   await browser.close();
 }

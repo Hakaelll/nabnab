@@ -30,9 +30,11 @@ Abre **Herramientas → Subtítulos → Crear doblaje** o búscalo con **Ctrl + 
 
 **Generar WAV sincronizado** añade un trabajo a Descargas. La voz ocupa el intervalo de cada subtítulo y las pausas quedan en silencio. Cuando dos intervalos se superponen, la primera frase dispone de tiempo hasta el comienzo de la siguiente. Si hace falta, la voz se acelera hasta un 25 %. El flujo admite hasta 4096 segmentos en las primeras dos horas de la pista. [Filtro `atempo` de FFmpeg](https://ffmpeg.org/ffmpeg-filters.html#atempo)
 
-Si quedan frases que no caben, el panel muestra hasta 16 avisos por intento. Cada aviso indica el intervalo original y tiene su propio botón **Editar segmento**. En el editor, **Siguiente aviso de doblaje** sigue visible al recorrer la comparación y enfoca la siguiente frase marcada, aunque esté en otra página. Los avisos describen la última síntesis y quedan atrás al guardar una nueva revisión. Vuelve a **Crear doblaje** para comprobar si las frases editadas ya caben.
+Si quedan frases que no caben, el panel muestra hasta 16 avisos por intento. Cada aviso indica el intervalo original y tiene su propio botón **Editar segmento**. En el editor, **Siguiente aviso de doblaje** sigue visible al recorrer la comparación y enfoca la siguiente frase marcada, aunque esté en otra página. Los avisos describen la última síntesis y quedan atrás al guardar una nueva revisión. Guarda la edición y pulsa **Volver a la muestra del segmento**. nabnab selecciona el último segmento que abriste desde un aviso y enfoca **Escuchar muestra** para probar la revisión guardada.
 
 ![Dos avisos de doblaje con acceso a sus segmentos](dubbing-timing-review.png)
+
+![Acceso a la muestra del segmento 14 después de guardar la edición](dubbing-return-to-sample.png)
 
 Cada segmento se reutiliza según su texto, voz, volumen y ritmo. Al editar el borrador, la nueva versión puede aprovechar el audio de los segmentos que conservan esos datos. La caché de voz comparte el espacio administrado con Narración local. El WAV y las copias de vídeo se guardan en el destino seleccionado.
 
@@ -58,4 +60,4 @@ El vídeo de prueba lleva tonos distintos en cada pista. El MKV mezclado contien
 
 La prueba usa un FLAC instrumental sintético con un tono de 540 Hz. Comprueba el silencio inicial, la aparición del tono en el MKV y el rechazo de la mezcla si cambia el vídeo. Verifica que el WAV y el FLAC se conservan. El selector se revisó a 900 y 1180 px.
 
-La prueba del editor en Edge verifica búsqueda, paginación, avisos y foco a 900 y 1180 px. La prueba de Windows busca dos segmentos de un borrador sintético, guarda las dos ediciones y verifica el VTT completo con el filtro activo.
+La prueba del editor en Edge verifica búsqueda, paginación, avisos y foco a 900 y 1180 px. La prueba nativa de doblaje guarda dos correcciones y vuelve a la muestra de la última frase revisada. Comprueba que el foco llega al botón cuando la voz está lista y que la muestra reproduce el texto de la nueva revisión. La prueba de traducción en Windows verifica el VTT completo con el filtro activo.
