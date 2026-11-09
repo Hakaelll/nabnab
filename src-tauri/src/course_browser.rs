@@ -63,8 +63,16 @@ impl CourseLink {
                 (
                     "rocketseat",
                     "app.rocketseat.com.br",
-                    *name,
+                    (*name).to_owned(),
                     format!("/journey/{name}/contents"),
+                )
+            }
+            ("app.rocketseat.com.br", ["classroom", name, ..]) if locale.is_empty() && slug(name) => {
+                (
+                    "rocketseat",
+                    "app.rocketseat.com.br",
+                    format!("classroom:{name}"),
+                    format!("/classroom/{name}"),
                 )
             }
             ("coursera.org" | "www.coursera.org", ["learn", name, ..])
@@ -73,7 +81,7 @@ impl CourseLink {
                 (
                     "coursera",
                     "www.coursera.org",
-                    *name,
+                    (*name).to_owned(),
                     format!("/learn/{name}/home"),
                 )
             }
@@ -82,14 +90,14 @@ impl CourseLink {
                 (
                     "domestika",
                     "www.domestika.org",
-                    number(id)?,
+                    number(id)?.to_owned(),
                     format!("{locale}/courses/{name}"),
                 )
             }
             ("skillshare.com" | "www.skillshare.com", ["classes", name, id, ..]) if slug(name) => (
                 "skillshare",
                 "www.skillshare.com",
-                number(id)?,
+                number(id)?.to_owned(),
                 format!("{locale}/classes/{name}/{id}"),
             ),
             _ => return None,
@@ -105,7 +113,7 @@ impl CourseLink {
     fn selected(provider: &str, input: &str) -> Result<Self, String> {
         Self::parse(input)
             .filter(|link| link.provider == provider)
-            .ok_or_else(|| "Enter an HTTPS course link from the selected platform. For Rocketseat, use the journey URL.".into())
+            .ok_or_else(|| "Enter an HTTPS course link from the selected platform. Rocketseat accepts journey and classroom links.".into())
     }
 }
 
@@ -723,6 +731,54 @@ mod tests {
             assert!(!is_course_page(invalid));
         }
         assert!(CourseLink::selected("rocketseat", "https://www.coursera.org/learn/apis").is_err());
+    }
+
+    #[test]
+    fn rocketseat_classroom_import_keeps_a_separate_stable_course() {
+        const CLASSROOM: &str = "https://app.rocketseat.com.br/classroom/git-e-github";
+        let link = CourseLink::selected(
+            "rocketseat",
+            &format!("{CLASSROOM}/?token=private#lesson"),
+        )
+        .unwrap();
+        let journey = CourseLink::selected(
+            "rocketseat",
+            "https://app.rocketseat.com.br/journey/git-e-github/contents",
+        )
+        .unwrap();
+        assert_eq!(link.page.as_str(), CLASSROOM);
+        assert_eq!(
+            journey.id,
+            format!("rocketseat-{}", digest("rocketseat:git-e-github"))
+        );
+        assert_ne!(link.id, journey.id);
+        assert!(!is_course_page("https://app.rocketseat.com.br.evil.test/classroom/git-e-github"));
+
+        let root = std::env::temp_dir()
+            .join(format!("nabnab-rocketseat-classroom-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("01 Exercises.txt");
+        let contents = b"Authorized classroom exercise";
+        fs::write(&path, contents).unwrap();
+        let mut repo = crate::store::Repository::open(&root, &root).unwrap();
+        let course_id = link.id.clone();
+        for link in [link, CourseLink::selected("rocketseat", CLASSROOM).unwrap()] {
+            let (_, plan) = prepare_review(
+                1, link, "Git e Github".into(), std::slice::from_ref(&path), false, None,
+            )
+            .unwrap();
+            let selected = selected_files(&plan, &[0]).unwrap();
+            let saved = import_selected(&mut repo, plan.link, plan.title, selected, None).unwrap();
+            assert_eq!(saved.url.as_deref(), Some(CLASSROOM));
+            assert_eq!(saved.sections[0].lessons[0].assets[0].title, "01 Exercises.txt");
+            assert_eq!(saved.id, course_id);
+        }
+        assert_eq!(repo.data.courses.len(), 1);
+        assert_eq!(repo.data.library.len(), 1);
+        assert!(repo.data.jobs.is_empty());
+        assert_eq!(fs::read(path).unwrap(), contents);
+        drop(repo);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

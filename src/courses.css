@@ -83,6 +83,8 @@
 @media (max-width: 1000px) { .course-layout { grid-template-columns: minmax(0, 1fr); } }
 @media (min-width: 860px) and (max-width: 1000px) {
   .course-layout--browser { grid-template-columns: minmax(180px, 1fr) minmax(0, 2fr); }
+  .course-browser-steps { grid-template-columns: minmax(0, 1.16fr) minmax(0, 1fr); gap: 16px; }
+  .course-browser-steps > section + section { padding-inline-start: 16px; }
 }
 @media (max-width: 760px) {
   .course-browser-steps { grid-template-columns: minmax(0, 1fr); }

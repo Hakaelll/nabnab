@@ -137,11 +137,28 @@ await page.route(base, async route => {
 
 try {
   await page.goto(base);
-  await page.locator("[data-page='platforms']").click();
+  const classroom = "https://app.rocketseat.com.br/classroom/git-e-github";
+  await page.locator("#url").fill(classroom);
+  await page.locator("#url").press("Enter");
+  const classroomForm = page.locator("#course-browser-form");
+  await classroomForm.waitFor({ timeout: 5000 });
+  assert.equal(await classroomForm.getByLabel("Plataforma", { exact: true }).inputValue(), "rocketseat");
+  assert.equal(await classroomForm.getByLabel("Enlace del curso").inputValue(), classroom);
+  await classroomForm.getByRole("button", { name: "Abrir curso en el navegador" }).click();
+  assert.deepEqual(await page.evaluate(() => window.courseFixture.calls.filter(call => call.cmd === "open_course_site").at(-1)?.args), {
+    provider: "rocketseat", url: classroom,
+  });
+  for (const [width, height] of [[1180, 780], [900, 620]]) {
+    await page.setViewportSize({ width, height });
+    assert.ok(await classroomForm.evaluate(form => form.scrollWidth <= form.clientWidth + 1));
+    await page.screenshot({ path: `${directory}/rocketseat-classroom-${width}.png`, animations: "disabled" });
+  }
+  await page.setViewportSize({ width: 1180, height: 780 });
+  await page.getByRole("button", { name: "Plataformas", exact: true }).click();
   await page.locator("[data-action='open-courses'][data-id='domestika']").click();
   await page.getByRole("heading", { name: "Guardar materiales del curso" }).waitFor();
   for (const [provider, guidance] of [
-    ["rocketseat", /ruta de la formación/],
+    ["rocketseat", /enlace de formación o de aula/],
     ["coursera", /opciones de descarga/],
     ["skillshare", /Proyectos y recursos/],
     ["domestika", /Recursos adicionales/],
@@ -154,7 +171,7 @@ try {
   const url = "https://www.domestika.org/es/courses/24-dibujo";
   await page.getByLabel("Enlace del curso").fill(url);
   await page.getByRole("button", { name: "Abrir curso en el navegador" }).click();
-  assert.deepEqual(await page.evaluate(() => window.courseFixture.calls.find(call => call.cmd === "open_course_site")?.args), {
+  assert.deepEqual(await page.evaluate(() => window.courseFixture.calls.filter(call => call.cmd === "open_course_site").at(-1)?.args), {
     provider: "domestika", url,
   });
   await page.getByLabel("Nombre del curso").fill("Dibujo y composición");

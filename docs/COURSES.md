@@ -28,12 +28,16 @@ Si un documento, subtítulo, imagen o archivo comprimido pertenece a una lecció
 
 | Plataforma | Vía disponible |
 | --- | --- |
-| Rocketseat | Abre la [formación](https://app.rocketseat.com.br/journey/discover/contents). Importa únicamente archivos que se te haya autorizado a guardar. Sus [condiciones de uso](https://www.rocketseat.com.br/termos-de-uso) prohíben descargar las videoclases. |
+| Rocketseat | Pega un enlace de [formación](https://app.rocketseat.com.br/journey/discover/contents) o de [aula](https://app.rocketseat.com.br/classroom/git-e-github). Cada uno tiene su propio índice en nabnab. Abre el enlace en el navegador con tu sesión e importa únicamente archivos que se te haya autorizado a guardar. Sus [condiciones de uso](https://www.rocketseat.com.br/termos-de-uso) prohíben descargar las videoclases. |
 | Coursera | Usa los controles habilitados en cada lección. La [API documentada](https://dev.coursera.com/get-started) requiere credenciales de una organización Business, Campus o Government. Las [condiciones de uso](https://www.coursera.org/about/terms) requieren autorización previa para extraer contenido automáticamente. |
 | Domestika | Guarda los [recursos adicionales](https://support.domestika.org/hc/en-us/articles/360003129937-I-can-t-download-the-additional-resources) desde la web. Los [vídeos offline](https://support.domestika.org/hc/en-us/articles/360003651177-Can-I-download-the-courses) se reproducen en la app de Domestika. |
 | Skillshare | Copia los enlaces a archivos de [Proyectos y recursos → Descargar recursos](https://help.skillshare.com/hc/en-us/articles/217440617-How-do-I-access-class-materials-or-additional-resources), o importa los archivos guardados. Los [vídeos offline](https://help.skillshare.com/hc/en-us/articles/205221147-How-do-I-download-videos-for-offline-viewing) se reproducen en la app de Skillshare. |
 
 En Rocketseat, Coursera y Domestika, la sesión de alumno y la descarga se gestionan en el sitio oficial. El índice local asocia los archivos elegidos con su curso. En Skillshare, el flujo de enlaces directos que se describe abajo permite enviar adjuntos públicos a Descargas después de revisarlos. Los usuarios autorizados de Coursera Business pueden consultar el temario con su token de organización.
+
+![Enlace de aula de Rocketseat pegado desde Inicio, a 900 × 620 con IPC simulado](course-rocketseat-classroom.png)
+
+La prueba de Rocketseat en Edge pega un enlace público de aula en Inicio y comprueba el formulario a 900 y 1180 px. La prueba de Rust importa dos veces el mismo archivo sintético, conserva una sola copia en el índice y distingue el aula de una formación con el mismo nombre en la URL.
 
 ![Apertura del curso e importación de adjuntos, a 1180 × 780 con IPC simulado](course-materials-form.png)
 

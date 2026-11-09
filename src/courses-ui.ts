@@ -6,7 +6,7 @@ import { action, icon, option } from "./views-common";
 import "./courses.css";
 
 const browserCoursePlatforms = {
-  rocketseat: { name: "Rocketseat", host: "app.rocketseat.com.br", path: /^\/journey\/[^/]+/ },
+  rocketseat: { name: "Rocketseat", host: "app.rocketseat.com.br", path: /^\/(?:journey|classroom)\/[a-zA-Z0-9_-]{1,240}(?:\/|$)/ },
   coursera: { name: "Coursera", host: "coursera.org", path: /^\/learn\/[^/]+/ },
   domestika: { name: "Domestika", host: "domestika.org", path: /^\/(?:[a-z]{2}\/)?courses\/\d+-[^/]+/ },
   skillshare: { name: "Skillshare", host: "skillshare.com", path: /^\/(?:[a-z]{2}\/)?classes\/[^/]+\/\d+(?:\/|$)/ },
@@ -155,7 +155,7 @@ export function createCoursesController(hooks: CourseHooks) {
 
   function browserGuidance(source: BrowserCourseProvider): string {
     switch (source) {
-      case "rocketseat": return t("Abre la ruta de la formación. Importa únicamente archivos que Rocketseat o el autor te haya autorizado a guardar.", "Open the training journey. Import only files Rocketseat or the author has authorized you to save.");
+      case "rocketseat": return t("Pega un enlace de formación o de aula. Abre Rocketseat con tu sesión para guardar materiales autorizados.", "Paste a journey or classroom link. Open Rocketseat in your browser session to save authorized materials.");
       case "coursera": return t("Abre el curso con tu sesión y usa las opciones de descarga que el autor haya habilitado en cada lección.", "Open the course in your session and use the download options the author enabled for each lesson.");
       case "domestika": return t("Guarda los adjuntos de Recursos adicionales desde la web. El vídeo sin conexión se abre en la app de Domestika.", "Save attachments from Additional Resources on the website. Offline video plays in the Domestika app.");
       case "skillshare": return t("Ve a Proyectos y recursos y usa Descargar recursos. El vídeo sin conexión se abre en la app de Skillshare.", "Go to Projects & Resources and use Download Resources. Offline video plays in the Skillshare app.");
