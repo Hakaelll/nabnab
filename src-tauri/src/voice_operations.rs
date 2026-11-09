@@ -46,6 +46,21 @@ pub async fn voice_plan_status(state: State<'_, Arc<AppState>>, plan_id: String)
     let (root, _) = crate::file_operations::context(&state)?;
     tokio::task::spawn_blocking(move || voice::plan_status(&root, &plan_id)).await.map_err(|e| e.to_string())?
 }
+
+#[tauri::command]
+pub async fn voice_cache_status(state: State<'_, Arc<AppState>>) -> Result<voice::CacheStatus, String> {
+    let root = crate::config_root(&state)?;
+    tokio::task::spawn_blocking(move || voice::cache_status(&root)).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn clear_voice_cache(webview: tauri::Webview, state: State<'_, Arc<AppState>>) -> Result<voice::CacheStatus, String> {
+    if webview.label() != "main" {
+        return Err("Only the settings view can clear the voice cache.".into());
+    }
+    let root = crate::config_root(&state)?;
+    tokio::task::spawn_blocking(move || voice::clear_cache(&root)).await.map_err(|e| e.to_string())?
+}
 #[tauri::command]
 pub async fn voice_segment_audio(state: State<'_, Arc<AppState>>, plan_id: String, index: usize) -> Result<Vec<u8>, String> {
     let (root, _) = crate::file_operations::context(&state)?;

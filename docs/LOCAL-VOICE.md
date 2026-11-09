@@ -34,6 +34,10 @@ Cada plan admite hasta un millón de caracteres Unicode, 4 MiB de texto y 4.096 
 
 Los planes y el audio intermedio se guardan bajo `voice-plans` y `voice-cache`, en directorios privados de la configuración local. Pueden contener texto y voz de documentos privados elegidos por el usuario. No forman parte de un servicio público. El cliente solo transmite identidades opacas y números de segmento; las rutas de los archivos temporales y de caché se construyen dentro del backend.
 
+En **Ajustes → Sesiones y privacidad → Almacenamiento temporal**, consulta cuánto ocupan los segmentos de narración y doblaje. **Vaciar caché de voz** conserva los planes y las exportaciones. Al reanudar una narración después de vaciarla, nabnab vuelve a generar sus segmentos. Si hay una muestra o un trabajo usando la caché, deja que termine o pausa el trabajo antes de vaciarla.
+
+![Cachés de miniaturas y de voz en Ajustes, con tamaños de prueba](voice-cache-settings.png)
+
 ## Contratos para el host
 
 - `status(root, cancel)` enumera disponibilidad y voces locales. El host añade el estado de activación del componente opcional, separado del estado de cada voz instalada.
@@ -48,6 +52,8 @@ Los comandos del host y la cola conservan la relación con el archivo y la versi
 ## Verificación
 
 Las pruebas unitarias comprueban límites de texto/libro, fronteras Unicode, identidad de planes y configuración, rechazo de cambios del texto guardado, integridad de audio en caché, estado compacto, WAV inválidos o truncados, muestra acotada, concatenación, capítulos con duraciones reales y preservación de la caché al cancelar.
+
+La prueba de caché rechaza el borrado durante el uso y conserva el plan y los archivos ajenos a la caché. En un perfil aislado de Windows se generó una narración con SAPI, se vació la caché desde Ajustes y se volvió a generar una muestra del mismo plan. El WAV exportado conservó sus bytes.
 
 La prueba ignorada `voice::tests::real_desktop_voice_sample_partial_cancel_resume_and_large_plan` requiere `NABNAB_TEST_VOICE=1` y una voz Microsoft Desktop ya instalada. Genera únicamente textos sintéticos a WAV; no reproduce altavoces. Comprueba muestra, preparación de más de 100.000 caracteres sin síntesis masiva, disponibilidad de un segmento antes del resultado final, cancelación, reanudación y conservación de bytes de segmentos completos. Debe ejecutarse fuera del sandbox cuando las restricciones de acceso a componentes del sistema impidan enumerar las voces; eso no implica necesitar permisos de administrador de Windows.
 

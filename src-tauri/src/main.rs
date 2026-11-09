@@ -1307,6 +1307,8 @@ fn main() {
             styled_captions::styled_caption_close,
             cache_status,
             clear_cache,
+            voice_operations::voice_cache_status,
+            voice_operations::clear_voice_cache,
             export_diagnostics,
             engine_status,
             repair_engines,

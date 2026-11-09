@@ -2,15 +2,16 @@ use super::{cancelled, hash, wave};
 use serde::{Deserialize, Serialize};
 use std::{
     fs::{self, File, OpenOptions},
-    io::{Read, Write},
+    io::{ErrorKind, Read, Write},
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU64, Ordering},
         Mutex,
     },
 };
-use tokio::sync::watch;
+use tokio::sync::{watch, RwLock};
 pub(super) static WRITE_LOCK: Mutex<()> = Mutex::new(());
+pub(super) static IN_USE: RwLock<()> = RwLock::const_new(());
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -30,6 +31,68 @@ pub(super) fn directory(root: &Path, name: &str) -> Result<PathBuf, String> {
 }
 pub(super) fn valid_id(id: &str) -> bool {
     id.len() == 64 && id.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+#[derive(Default, Serialize)]
+pub(crate) struct CacheStatus {
+    bytes: u64,
+    files: usize,
+}
+
+fn managed_file(path: &Path) -> bool {
+    let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
+        return false;
+    };
+    match path.extension().and_then(|extension| extension.to_str()) {
+        Some("wav" | "json") => valid_id(stem),
+        Some("pending") => stem
+            .strip_prefix("voice-")
+            .and_then(|suffix| suffix.split_once('-'))
+            .is_some_and(|(stamp, sequence)| {
+                [stamp, sequence].iter().all(|field| !field.is_empty() && field.bytes().all(|b| b.is_ascii_digit()))
+            }),
+        _ => false,
+    }
+}
+
+fn cache_files(root: &Path) -> Result<Vec<(PathBuf, u64)>, String> {
+    let path = root.join("voice-cache");
+    let path = match fs::symlink_metadata(&path) {
+        Ok(_) => crate::library::authorized_path(&path)?,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error.to_string()),
+    };
+    let mut files = Vec::new();
+    for entry in fs::read_dir(path).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let path = entry.path();
+        if managed_file(&path) {
+            match fs::symlink_metadata(&path) {
+                Ok(meta) if meta.is_file() && !crate::library::is_link(&meta) => files.push((path, meta.len())),
+                Ok(_) => {}
+                Err(error) if error.kind() == ErrorKind::NotFound => {}
+                Err(error) => return Err(error.to_string()),
+            }
+        }
+    }
+    Ok(files)
+}
+
+pub(crate) fn cache_status(root: &Path) -> Result<CacheStatus, String> {
+    let files = cache_files(root)?;
+    Ok(CacheStatus { bytes: files.iter().map(|(_, bytes)| bytes).sum(), files: files.len() })
+}
+
+pub(crate) fn clear_cache(root: &Path) -> Result<CacheStatus, String> {
+    let _guard = IN_USE.try_write().map_err(|_| "Voice audio is in use. Let the preview or job finish, or pause the job before clearing the cache.")?;
+    for (path, _) in cache_files(root)? {
+        match fs::remove_file(path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == ErrorKind::NotFound => {}
+            Err(error) => return Err(format!("Could not clear the voice cache: {error}")),
+        }
+    }
+    Ok(CacheStatus::default())
 }
 pub(super) fn read_json<T: serde::de::DeserializeOwned>(
     path: &Path,

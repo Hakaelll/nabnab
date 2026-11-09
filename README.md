@@ -51,7 +51,7 @@ The animated character field on Home cycles through eleven patterns. The sidebar
 - **Documents and captures.** Search scanned pages after local OCR, or read a saved PDF or EPUB and add bookmarks. Capture a monitor, window, or region, with separate controls for microphone and system audio. [Local documents](docs/DOCUMENTS.md) · [Screen capture](docs/SCREEN-CAPTURE.md)
 - **Send to device.** Review files, a portable ZIP, a public link, or a selected passage from an archived article, PDF, or EPUB before handing the request to KDE Connect. nabnab reports whether the KDE Connect command accepted the request and keeps the details visible if the handoff is uncertain. Follow the transfer and confirm receipt in KDE Connect. [KDE Connect setup and status](docs/DEVICE-SHARE.md) · [Portable collections](docs/PORTABLE-COLLECTIONS.md)
 
-Open **Settings → Components** to check download size, installed size, requirements, and licenses before installing an optional component. Local processing runs on your computer. To inspect or clear the thumbnail cache, open **Settings → Sessions and privacy**. [Engines and privacy](docs/NETWORK.md)
+Open **Settings → Components** to check download size, installed size, requirements, and licenses before installing an optional component. Local processing runs on your computer. To inspect or clear the thumbnail cache or reusable speech segments, open **Settings → Sessions and privacy → Temporary storage**. [Engines and privacy](docs/NETWORK.md) · [Local voice](docs/LOCAL-VOICE.md)
 
 ## Browser extension and local automation
 
@@ -82,7 +82,7 @@ The installer is written to `src-tauri/target/release/bundle/nsis/`. For fronten
 
 Development builds keep file and line numbers in Rust backtraces. If you need to inspect Rust types and variables in a debugger, run `$env:CARGO_PROFILE_DEV_DEBUG = '2'` in PowerShell before building. This creates larger debug files. [Cargo profiles](https://doc.rust-lang.org/cargo/reference/profiles.html#debug)
 
-To see how much space you can reclaim, run the dry run first. Close the development app before cleaning. The next development build recreates `src-tauri/target/debug/`. Manage the app's thumbnail cache separately in **Settings → Sessions and privacy**.
+To see how much space you can reclaim, run the dry run first. Close the development app before cleaning. The next development build recreates `src-tauri/target/debug/`. Manage app caches separately in **Settings → Sessions and privacy**.
 
 ```powershell
 cargo clean --dry-run --profile dev --manifest-path src-tauri/Cargo.toml

@@ -7,7 +7,7 @@ import { createRequire } from "node:module";
 const { chromium } = createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODULE || "playwright");
 const browser = await chromium.launch({headless:true,channel:"msedge"});
 const base = process.env.NABNAB_UI_URL || "http://127.0.0.1:1420/";
-const directory = "artifacts/section-design";
+const directory = process.env.NABNAB_SECTION_ARTIFACTS || "artifacts/section-design";
 await mkdir(directory,{recursive:true});
 const before = process.argv.includes("--before");
 const page = await browser.newPage({viewport:{width:1180,height:780}});
@@ -25,7 +25,7 @@ const jobs=[
 {id:"failed",title:"Colección de imágenes",state:"error",provider:"Wikimedia Commons",source:{kind:"publicFile",selection:{sourceUrl:"https://commons.wikimedia.org/wiki/File:Fixture.jpg",filename:"Fixture.jpg",assetId:"commons:fixture",collection:"Referencias",author:null,license:null,attribution:null,sha256:null,version:null,size:null}},progress:null,outputs:[],error:{code:"network",message:"La conexión se interrumpió. Puedes reintentar el trabajo.",technical:"UI fixture only",retryable:true,retryAfter:null}}
 ].map((job,index)=>({...job,runId:1,createdAt:Date.now()-index*60000,updatedAt:Date.now(),folder:settings.folder,thumbnail:null,attempt:1,groupId:null}));
 const state={settings,library,jobs,collections:["Entrevistas","Lecturas"],drafts:[],sources:[],rules:[],presets:[],smartCollections:[]};
-window.sectionFixture={state,calls:[]};
+window.sectionFixture={state,calls:[],voiceCache:{bytes:67108864,files:24}};
 mockIPC(async(cmd,args={})=>{
 window.sectionFixture.calls.push({cmd,args});
 if(cmd==="startup")return {...structuredClone(state),folder:settings.folder,enginesReady:true,engineError:null};
@@ -39,6 +39,8 @@ if(cmd==="engine_status")return ["yt-dlp","FFmpeg","ffprobe","Deno"].map(name=>(
 if(cmd==="optional_components"||cmd==="sessions_status"||cmd==="list_courses"||cmd==="ocr_models"||cmd==="translation_drafts"||cmd==="personal_archive_list")return [];
 if(cmd==="ocr_status")return {installed:false,enabled:false};
 if(cmd==="cache_status")return {bytes:0,files:0};
+if(cmd==="voice_cache_status")return {...window.sectionFixture.voiceCache};
+if(cmd==="clear_voice_cache")return window.sectionFixture.voiceCache={bytes:0,files:0};
 if(cmd==="cloud_status")return ["drive","onedrive","dropbox"].map(provider=>({provider,configured:false,connected:false,accountId:null,scope:"Read selected files",redirectUri:"http://127.0.0.1:53687/callback"}));
 if(cmd==="bridge_status")return {enabled:false,clients:[],port:49587};
 if(cmd==="save_settings"){state.settings=args.settings;return structuredClone(state);}
@@ -61,6 +63,32 @@ async function capture(section,width,height){
 }
 try{
   await page.goto(base);await page.locator("#url").waitFor();
+  await page.locator('[data-page="settings"]').click();
+  await page.locator('[data-action="settings-section"][data-section="sessions"]').click();
+  const thumbnails = page.getByRole("heading", { name: "Caché de miniaturas" });
+  const speech = page.getByRole("region", { name: "Caché de voz" });
+  for (const [width, height] of [[1180, 780], [900, 620]]) {
+    await page.setViewportSize({ width, height });
+    await (before ? thumbnails : speech).scrollIntoViewIfNeeded();
+    assert.ok(await page.locator(".settings-content").evaluate(element => element.scrollWidth <= element.clientWidth + 1));
+    await page.screenshot({ path: `${directory}/voice-cache-${before ? "before" : "after"}-${width}.png` });
+  }
+  if (!before) {
+    const clearSpeech = speech.getByRole("button", { name: "Vaciar caché de voz…" });
+    assert.match(await speech.innerText({ timeout: 3000 }), /64\.0 MB/);
+    await clearSpeech.press("Space");
+    const confirm = page.getByRole("dialog", { name: "¿Vaciar la caché de voz?" });
+    assert.ok(await confirm.getByRole("button", { name: "Cancelar" }).evaluate(element => document.activeElement === element));
+    await page.keyboard.press("Escape");
+    assert.equal(await page.evaluate(() => window.sectionFixture.calls.filter(call => call.cmd === "clear_voice_cache").length), 0);
+    await clearSpeech.press("Space");
+    await confirm.getByRole("button", { name: "Vaciar caché de voz", exact: true }).press("Space");
+    await speech.getByText("Caché vacía").waitFor();
+    assert.equal(await clearSpeech.isDisabled(), true);
+    assert.ok(await speech.getByRole("heading").evaluate(element => document.activeElement === element));
+    assert.deepEqual(await page.evaluate(() => window.sectionFixture.calls.filter(call => ["clear_voice_cache", "clear_cache"].includes(call.cmd)).map(call => call.cmd)), ["clear_voice_cache"]);
+    checks.push("Voice cache usage, confirmation, and keyboard focus are independent of thumbnails.");
+  }
   for(const size of [[1180,780],[900,620]])for(const section of ["downloads","library","tools","platforms","settings"])await capture(section,...size);
   for (const [width,height] of [[1180,780],[900,620]]) {
     await page.setViewportSize({width,height});

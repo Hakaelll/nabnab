@@ -46,20 +46,43 @@ export function settingsView(snapshot: Snapshot, view: SettingsView, t: Copy, de
       const limit = cache && cache !== "unavailable" && cache.maxBytes && cache.maxFiles
         ? t(`Hasta ${bytesLabel(cache.maxBytes)} o ${cache.maxFiles} miniaturas.`, `Up to ${bytesLabel(cache.maxBytes)} or ${cache.maxFiles} thumbnails.`)
         : "";
+      const voiceCache = view.voiceCache;
+      const voiceUsage = view.voiceCacheClearing ? t("Vaciando caché…", "Clearing cache…")
+        : voiceCache === "unavailable" ? t("No se pudo consultar la caché.", "The cache could not be read.")
+        : !voiceCache ? t("Consultando caché…", "Checking cache…")
+        : voiceCache.files ? t(`${bytesLabel(voiceCache.bytes)} en uso`, `${bytesLabel(voiceCache.bytes)} used`)
+        : t("Caché vacía", "Cache is empty");
       content=`<div class="settings-prose"><p>${t("Las sesiones se importan solo con tu permiso y se protegen mediante Windows. Nunca se incluyen en los diagnósticos.", "Sessions are imported only with your permission and protected by Windows. They are never included in diagnostics.")}</p><form id="session-form" class="inline-form"><label>${t("Sitio", "Site")}<select id="session-site">${sessionSites.map(site=>option(site.id,site.label,"youtube")).join("")}</select></label><button class="button secondary" type="submit" ${!desktop?'disabled':''}>${t("Importar archivo de cookies", "Import cookie file")}</button></form>${view.sessions?.length?`<ul class="simple-list">${view.sessions.map(session=>`<li><span>${h(sessionSites.find(site=>site.id===session.site)?.label??session.site)}</span>${action("revoke-session",t("Eliminar sesión", "Remove session"),"close","quiet",`data-site="${h(session.site)}"`)}</li>`).join("")}</ul>`:`<p class="field-note">${t("No hay sesiones guardadas.", "No saved sessions.")}</p>`}<hr><p>${t("Sin telemetría, fuentes remotas ni servicios de conversión externos. No se vigila el portapapeles. La biblioteca y las herramientas preparadas funcionan sin conexión.", "No telemetry, remote fonts or external conversion services. The clipboard is not monitored. The library and prepared tools work offline.")}</p>
-        <section class="preference-group" aria-labelledby="thumbnail-cache-heading">
-          <h3 id="thumbnail-cache-heading" tabindex="-1">${t("Caché de miniaturas", "Thumbnail cache")}</h3>
-          <p class="field-note"><strong>${usage}</strong>${cache && cache !== "unavailable" ? ` · ${cache.files} ${t("miniaturas", "thumbnails")}` : ""}</p>
-          <p>${limit} ${t("nabnab retira las miniaturas más antiguas al alcanzar el límite. Si vuelves a necesitarlas, las genera de nuevo.", "nabnab removes the oldest thumbnails when the limit is reached. It regenerates them when needed.")}</p>
-          ${action("clear-cache",t("Vaciar miniaturas…", "Clear thumbnails…"),undefined,"secondary",desktop && cache && cache !== "unavailable" && cache.files ? "" : "disabled")}
-          <dialog id="thumbnail-cache-confirm" class="thumbnail-cache-confirm" aria-labelledby="thumbnail-cache-confirm-title" aria-describedby="thumbnail-cache-confirm-description">
-            <h2 id="thumbnail-cache-confirm-title">${t("¿Vaciar la caché de miniaturas?", "Clear the thumbnail cache?")}</h2>
-            <p id="thumbnail-cache-confirm-description">${t("nabnab volverá a generar las miniaturas que necesites. Tus archivos y sesiones se conservan.", "nabnab regenerates thumbnails when needed. Your files and sessions are kept.")}</p>
-            <form method="dialog" class="button-group">
-              <button class="button secondary" autofocus>${t("Cancelar", "Cancel")}</button>
-              ${action("confirm-clear-cache",t("Vaciar miniaturas", "Clear thumbnails"),undefined,"primary")}
-            </form>
-          </dialog>
+        <section class="preference-group" aria-labelledby="cache-storage-heading">
+          <h3 id="cache-storage-heading">${t("Almacenamiento temporal", "Temporary storage")}</h3>
+          <section class="cache-storage-row" aria-labelledby="thumbnail-cache-heading">
+            <div><h4 id="thumbnail-cache-heading" tabindex="-1">${t("Caché de miniaturas", "Thumbnail cache")}</h4>
+            <p class="field-note"><strong>${usage}</strong>${cache && cache !== "unavailable" ? ` · ${cache.files} ${t("miniaturas", "thumbnails")}` : ""}</p>
+            <p>${limit} ${t("nabnab retira las miniaturas más antiguas al alcanzar el límite.", "nabnab removes the oldest thumbnails when the limit is reached.")}</p></div>
+            ${action("clear-cache",t("Vaciar miniaturas…", "Clear thumbnails…"),undefined,"secondary",desktop && cache && cache !== "unavailable" && cache.files ? "" : "disabled")}
+            <dialog id="thumbnail-cache-confirm" class="cache-confirm" aria-labelledby="thumbnail-cache-confirm-title" aria-describedby="thumbnail-cache-confirm-description">
+              <h2 id="thumbnail-cache-confirm-title">${t("¿Vaciar la caché de miniaturas?", "Clear the thumbnail cache?")}</h2>
+              <p id="thumbnail-cache-confirm-description">${t("nabnab volverá a generar las miniaturas que necesites. Tus archivos y sesiones se conservan.", "nabnab regenerates thumbnails when needed. Your files and sessions are kept.")}</p>
+              <form method="dialog" class="button-group">
+                <button class="button secondary" autofocus>${t("Cancelar", "Cancel")}</button>
+                ${action("confirm-clear-cache",t("Vaciar miniaturas", "Clear thumbnails"),undefined,"primary")}
+              </form>
+            </dialog>
+          </section>
+          <section class="cache-storage-row" aria-labelledby="voice-cache-heading">
+            <div><h4 id="voice-cache-heading" tabindex="-1">${t("Caché de voz", "Voice cache")}</h4>
+            <p class="field-note" role="status"><strong>${voiceUsage}</strong></p>
+            <p>${t("Segmentos reutilizables de narración y doblaje.", "Reusable narration and dubbing segments.")}</p></div>
+            ${action("clear-voice-cache", t("Vaciar caché de voz…", "Clear voice cache…"), undefined, "secondary", desktop && voiceCache && voiceCache !== "unavailable" && voiceCache.files && !view.voiceCacheClearing ? "" : "disabled")}
+            <dialog id="voice-cache-confirm" class="cache-confirm" aria-labelledby="voice-cache-confirm-title" aria-describedby="voice-cache-confirm-description">
+              <h2 id="voice-cache-confirm-title">${t("¿Vaciar la caché de voz?", "Clear the voice cache?")}</h2>
+              <p id="voice-cache-confirm-description">${t("Se conservan los borradores y los archivos exportados. Al reanudar una narración, los segmentos guardados se volverán a generar.", "Drafts and exported files are kept. When you resume a narration, nabnab regenerates its saved segments.")}</p>
+              <form method="dialog" class="button-group">
+                <button class="button secondary" autofocus>${t("Cancelar", "Cancel")}</button>
+                ${action("confirm-clear-voice-cache", t("Vaciar caché de voz", "Clear voice cache"), undefined, "primary")}
+              </form>
+            </dialog>
+          </section>
         </section>
         <section class="preference-group" aria-labelledby="diagnostics-heading">
           <h3 id="diagnostics-heading">${t("Diagnóstico", "Diagnostics")}</h3>

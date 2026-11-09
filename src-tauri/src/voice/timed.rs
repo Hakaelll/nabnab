@@ -123,6 +123,7 @@ pub async fn sample(
     cancel: watch::Receiver<bool>,
     run_id: u64,
 ) -> Result<Sample, String> {
+    let _cache = cache::IN_USE.read().await;
     let text = draft
         .translated
         .get(index)
@@ -182,6 +183,7 @@ pub async fn render(
     run_id: u64,
     emit: impl Fn(Progress) + Send + Sync + Clone + 'static,
 ) -> Result<std::path::PathBuf, String> {
+    let _cache = cache::IN_USE.read().await;
     let (slots, duration) = slots(draft)?;
     let (_, language) = draft.selection.pair.languages();
     let fingerprint = fingerprint(root, settings, language, cancel.clone()).await?;

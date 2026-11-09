@@ -1,4 +1,5 @@
 mod cache;
+pub(crate) use cache::{cache_status, clear_cache, CacheStatus};
 pub(crate) mod timed;
 mod wave;
 use crate::{
@@ -500,6 +501,7 @@ pub fn plan_status(root: &Path, id: &str) -> Result<PlanStatus, String> {
     })
 }
 pub fn segment_audio(root: &Path, id: &str, index: usize) -> Result<Vec<u8>, String> {
+    let _cache = cache::IN_USE.try_read().map_err(|_| "Wait for the voice cache to finish clearing.")?;
     let plan = load_plan(root, id, false)?;
     let segment = plan
         .segments
@@ -673,6 +675,7 @@ pub async fn sample(
     run_id: u64,
     emit: impl Fn(Progress) + Send + Sync + Clone + 'static,
 ) -> Result<Sample, String> {
+    let _cache = cache::IN_USE.read().await;
     let plan = load_plan(root, id, false)?;
     current_voice(root, &plan, cancel.clone()).await?;
     let first = plan
@@ -835,6 +838,7 @@ pub async fn execute(
     run_id: u64,
     emit: impl Fn(Progress) + Send + Sync + Clone + 'static,
 ) -> Result<VoiceOutput, String> {
+    let _cache = cache::IN_USE.read().await;
     cancelled(&cancel)?;
     let plan = load_plan(root, id, false)?;
     let _active = ActiveGuard::new(id)?;
@@ -1064,8 +1068,33 @@ mod tests {
         cache::publish(&root, &key, &input, &cancel).unwrap();
         assert_eq!(
             segment_audio(&root, &plan.id, 0).unwrap(),
-            fs::read(input).unwrap()
+            fs::read(&input).unwrap()
         );
+        let cache_dir = cache::directory(&root, "voice-cache").unwrap();
+        let pending = cache_dir.join("voice-10-2.pending");
+        let unrelated = cache_dir.join("my-export.wav");
+        fs::write(&pending, b"unfinished").unwrap();
+        fs::write(&unrelated, b"untouched").unwrap();
+        let status = serde_json::to_value(cache_status(&root).unwrap()).unwrap();
+        assert_eq!(status["files"], 3);
+        assert!(status["bytes"].as_u64().unwrap() > 4410);
+
+        let active = cache::IN_USE.try_read().unwrap();
+        assert!(clear_cache(&root).is_err());
+        assert!(pending.is_file());
+        drop(active);
+
+        let empty = serde_json::json!({"bytes": 0, "files": 0});
+        assert_eq!(serde_json::to_value(clear_cache(&root).unwrap()).unwrap(), empty);
+        assert_eq!(serde_json::to_value(cache_status(&root).unwrap()).unwrap(), empty);
+        assert_eq!(serde_json::to_value(clear_cache(&root).unwrap()).unwrap(), empty);
+        assert_eq!(fs::read(unrelated).unwrap(), b"untouched");
+        assert_eq!(plan_status(&root, &plan.id).unwrap().completed, 0);
+        assert_eq!(read_plan(&root, &plan.id).unwrap().text, plan.text);
+        assert!(segment_audio(&root, &plan.id, 0).is_err());
+
+        cache::publish(&root, &key, &input, &cancel).unwrap();
+        assert_eq!(segment_audio(&root, &plan.id, 0).unwrap(), fs::read(input).unwrap());
         fs::remove_dir_all(root).unwrap();
     }
     #[test]

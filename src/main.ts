@@ -42,7 +42,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { startGraphics,handleEmblemClick } from "./graphics";
 import { errorLabel, errorDetails, isCancelled, searchKey } from "./presentation";
-import { activeStates, cancellableStates, defaultToolOptions, initialSettings, sourceUrls, type BridgeStatus, type Copy, type DownloadView, type EngineStatus, type HomeState, type Job, type LibraryView, type Page, type SessionStatus, type Settings, type SettingsSection, type SettingsView, type ThumbnailCacheStatus, type Snapshot, type Startup, type ToolKind, type ToolOptions, type ToolsView, type Media } from "./contracts";
+import { activeStates, cancellableStates, defaultToolOptions, initialSettings, sourceUrls, type BridgeStatus, type Copy, type DownloadView, type EngineStatus, type HomeState, type Job, type LibraryView, type Page, type SessionStatus, type Settings, type SettingsSection, type SettingsView, type ThumbnailCacheStatus, type VoiceCacheStatus, type Snapshot, type Startup, type ToolKind, type ToolOptions, type ToolsView, type Media } from "./contracts";
 import { downloadsView, homeView, icon, jobInspector, libraryView, mediaInspector, settingsView, stateLabel, toolsView } from "./views";
 import { needsPersonalCopyReview } from "./views-downloads";
 import { filteredLibrary } from "./views-library";
@@ -82,7 +82,7 @@ const library: LibraryView = { query: "", filter: "all", sort: "newest", layout:
 type LocalToolModule = ReturnType<typeof localToolGroups>[number]["items"][number][0];
 let localToolModule: "media" | LocalToolModule = "media";
 const tools: ToolsView = { kind: "convert", ids: new Set(), options: defaultToolOptions("convert"), picking: false };
-const preferences: SettingsView = { section: "general", engines: null, sessions: null, bridge: null, pairing: null, cache: null, working: false };
+const preferences: SettingsView = { section: "general", engines: null, sessions: null, bridge: null, pairing: null, cache: null, voiceCache: null, voiceCacheClearing: false, working: false };
 const t: Copy = (spanish, english) => snapshot.settings.language === "es" ? spanish : english;
 let librarySection:'files'|'collections'|'sources'|'later'|'references'|'audio'|'archives'='files';
 let quickPreset='';
@@ -716,12 +716,14 @@ async function loadSettingsSection(): Promise<void> {
   else if(section==='automation')await automation.open();
   else if(section==='connections')await Promise.all([fileSources.loadConnections(),personalServers.load()]);
   else if(section==='sessions'){
-    const [sessions,cache]=await Promise.all([
+    const [sessions,cache,voiceCache]=await Promise.all([
       command<SessionStatus[]>("sessions_status"),
       command<ThumbnailCacheStatus>("cache_status").catch(()=>"unavailable" as const),
+      command<VoiceCacheStatus>("voice_cache_status").catch(()=>"unavailable" as const),
     ]);
     preferences.sessions=sessions;
     preferences.cache=cache;
+    if (!preferences.voiceCacheClearing) preferences.voiceCache=voiceCache;
   }
   else if(section==='browser')preferences.bridge=await command<BridgeStatus>("bridge_status");
   if(page==='settings'&&section===preferences.section)renderCurrent();
@@ -955,6 +957,30 @@ async function handleAction(action: string, button: HTMLButtonElement, event?: M
         required("#thumbnail-cache-heading").focus();
       }
       notify(t("Caché de miniaturas vaciada.", "Thumbnail cache cleared."),"success");
+      break;
+    }
+    case 'clear-voice-cache':{
+      required<HTMLDialogElement>("#voice-cache-confirm").showModal();
+      break;
+    }
+    case 'confirm-clear-voice-cache':{
+      if (preferences.voiceCacheClearing) break;
+      required<HTMLDialogElement>("#voice-cache-confirm").close();
+      preferences.voiceCacheClearing = true;
+      renderCurrent();
+      try {
+        preferences.voiceCache = await command<VoiceCacheStatus>("clear_voice_cache");
+        notify(t("Caché de voz vaciada.", "Voice cache cleared."), "success");
+      } catch (error) {
+        preferences.voiceCache = await command<VoiceCacheStatus>("voice_cache_status").catch(() => "unavailable" as const);
+        throw error;
+      } finally {
+        preferences.voiceCacheClearing = false;
+        if (page === "settings" && preferences.section === "sessions") {
+          renderCurrent();
+          required("#voice-cache-heading").focus();
+        }
+      }
       break;
     }
     case 'revoke-session':await command('revoke_session',{site:button.dataset.site??""});await loadSettingsSection();notify(t("Sesión eliminada.", "Session removed."),'success');break;
