@@ -512,11 +512,49 @@ try {
     await page.getByRole("button", {name:/Estudio.*Nextcloud/}).click();
     await page.evaluate(() => {
       const fixture = window.fileSourceFixture;
-      fixture.personalExtras = ["removed.txt","stable.txt"].map(name => ({path:["Docs",name],directory:false,stamp:{...fixture.personalStamp},mime:"text/plain"}));
+      fixture.personalExtras = ["removed.txt","stable.txt","Guía de mezcla.pdf"].map(name => ({path:["Docs",name],directory:false,stamp:{...fixture.personalStamp},mime:"text/plain"}));
     });
     await page.getByRole("button", {name:"Docs",exact:true}).click();
     const notes = page.getByRole("checkbox", {name:/notes.pdf/});
     const stable = page.getByRole("checkbox", {name:/stable.txt/});
+    await page.locator(".personal-servers .file-source-result-heading").scrollIntoViewIfNeeded();
+    await page.screenshot({path:`${directory}/personal-folder-before.png`});
+    const folderSearch = page.getByRole("searchbox", {name:"Buscar en esta carpeta",exact:true});
+    const onlySelected = page.getByRole("button", {name:"Solo seleccionados",exact:true});
+    await folderSearch.waitFor({timeout:5000});
+    assert.equal(await onlySelected.isDisabled(), true);
+    const browseCount = () => page.evaluate(() => window.fileSourceFixture.calls.filter(call => call.cmd === "personal_server_browse").length);
+    const initialBrowses = await browseCount();
+    await notes.check();
+    await stable.check();
+    await folderSearch.pressSequentially("guia");
+    assert.equal(await folderSearch.evaluate(input => input === document.activeElement), true);
+    assert.equal(await page.getByRole("checkbox", {name:/Guía de mezcla.pdf/}).count(), 1);
+    assert.equal(await notes.count(), 0);
+    assert.match(await page.locator(".personal-folder-filter [role=status]").innerText(), /2 seleccionados fuera de la búsqueda/);
+    await onlySelected.press("Enter");
+    assert.equal(await onlySelected.getAttribute("aria-pressed"), "true");
+    assert.equal(await notes.isChecked(), true);
+    assert.equal(await stable.isChecked(), true);
+    assert.equal(await page.getByRole("checkbox", {name:/Guía de mezcla.pdf/}).count(), 0);
+    for (const [width,height] of [[1180,780],[900,620]]) {
+      await page.setViewportSize({width,height});
+      await page.locator(".personal-servers .file-source-result-heading").evaluate(panel => panel.scrollIntoView({block:"start"}));
+      await checkNoHorizontalOverflow(`Personal selection review ${width}`);
+      await page.screenshot({path:`${directory}/personal-selected-${width}.png`,animations:"disabled"});
+    }
+    await notes.press("Space");
+    assert.equal(await notes.count(), 0);
+    assert.equal(await stable.evaluate(input => input === document.activeElement), true);
+    await stable.press("Space");
+    await page.getByText("No hay archivos seleccionados.", {exact:true}).waitFor();
+    assert.equal(await onlySelected.evaluate(button => button === document.activeElement), true);
+    await onlySelected.press("Enter");
+    assert.equal(await folderSearch.inputValue(), "guia");
+    await folderSearch.fill("sin coincidencias");
+    await page.getByText("Ningún archivo o carpeta coincide con la búsqueda.", {exact:true}).waitFor();
+    await folderSearch.fill("");
+    assert.equal(await browseCount(), initialBrowses, "Filtering uses the folder listing already loaded.");
     await notes.check();
     await stable.check();
     await page.getByRole("checkbox", {name:/removed.txt/}).check();
@@ -524,6 +562,7 @@ try {
     await page.setViewportSize({width:900,height:620});
     await reloadFolder.scrollIntoViewIfNeeded();
     await page.screenshot({path:`${directory}/personal-refresh-before-900.png`});
+    await folderSearch.fill("stable");
     await page.evaluate(() => { window.fileSourceFixture.personalOffline = true; });
     await reloadFolder.press("Enter");
     await page.getByRole("alert").filter({hasText:"Folder offline in fixture."}).waitFor();
@@ -538,6 +577,9 @@ try {
     const selectionChanges = page.getByRole("region", {name:"La selección cambió"});
     await selectionChanges.waitFor();
     assert.equal(await reloadFolder.evaluate(button => button === document.activeElement), true);
+    assert.equal(await folderSearch.inputValue(), "stable");
+    assert.equal(await notes.count(), 0);
+    await folderSearch.fill("");
     assert.equal(await notes.isChecked(), false);
     assert.equal(await stable.isChecked(), true);
     assert.equal(await selectionChanges.getByText("Versión distinta", {exact:true}).count(), 1);

@@ -26,6 +26,7 @@ const remote = path.join(docs, file);
 const original = "Edición A\n" + "a".repeat(210_000);
 const replacement = "Edición B\n" + "b".repeat(210_000);
 await writeFile(remote, original);
+await writeFile(path.join(docs, "Inventario.txt"), "Este archivo debe quedar fuera de la selección.\n");
 
 const location = path.toNamespacedPath(mount);
 const id = createHash("sha256").update(JSON.stringify(["nas", location, ""])).digest("hex");
@@ -433,8 +434,19 @@ try {
   await page.locator('[data-action="open-fileSources"][data-id="personal"]').click();
   await button(/Archivo de prueba.*NAS/).click();
   await button("Lecturas").click();
-  await page.getByRole("checkbox", { name: /Cuaderno ñ\.txt/ }).check();
+  const query = page.getByRole("searchbox", { name: "Buscar en esta carpeta", exact: true });
+  await query.fill("cuaderno n");
+  const cuaderno = page.getByRole("checkbox", { name: /Cuaderno ñ\.txt/ });
+  await cuaderno.check();
+  await query.fill("inventario");
+  assert.equal(await cuaderno.count(), 0);
+  await button("Solo seleccionados").press("Enter");
+  assert.equal(await cuaderno.isChecked(), true);
+  assert.equal(await page.getByRole("checkbox", { name: /Inventario\.txt/ }).count(), 0);
+  assert.equal((await rpc("get_snapshot")).jobs.length, 0);
   await button("Indexar referencia").click();
+  const indexed = await wait(async () => (await rpc("personal_servers_status")).references[0]);
+  assert.deepEqual(indexed.selection.path, ["Lecturas", file]);
   await button("Referencias guardadas").click();
   await selectReference();
   await button("Obtener copia local").click();

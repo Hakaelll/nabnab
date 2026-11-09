@@ -1,5 +1,5 @@
 import { escapeHtml as h, type Copy } from "./contracts";
-import { bytesLabel } from "./presentation";
+import { bytesLabel, searchKey } from "./presentation";
 import { action, icon } from "./views-common";
 
 type Kind = "webdav" | "sftp" | "nas";
@@ -38,6 +38,8 @@ export function createPersonalServers(hooks: Hooks) {
   let path: string[] = [];
   let entries: Entry[] | null = null;
   let selected = new Set<number>();
+  let folderQuery = "";
+  let onlySelected = false;
   let pendingRefresh: Entry[] = [];
   let selectionChanges: SelectionChange[] = [];
   let referenceId = "";
@@ -91,6 +93,7 @@ export function createPersonalServers(hooks: Hooks) {
   async function browse(id: string, folder: string[], review: Review | null = null, preserveSelection = false) {
     if (busy) return;
     const previous = preserveSelection && !review ? entries ? selectedEntries() : pendingRefresh : [];
+    if (!preserveSelection) { folderQuery = ""; onlySelected = false; }
     pendingRefresh = previous;
     selectionChanges = [];
     serverId = id;
@@ -240,6 +243,38 @@ export function createPersonalServers(hooks: Hooks) {
     </section>`;
   }
 
+  function folderContents() {
+    if (!entries) return "";
+    const needle = searchKey(folderQuery.trim());
+    const visible = entries.flatMap((entry, index) => {
+      const name = entry.path.at(-1) ?? "";
+      return (onlySelected ? selected.has(index) : searchKey(name).includes(needle)) ? [{ entry, index, name }] : [];
+    });
+    const hidden = selected.size - visible.filter(({ index }) => selected.has(index)).length;
+    const searchLabel = t("Buscar en esta carpeta", "Search this folder");
+    const count = `${visible.length} ${visible.length === 1 ? t("resultado", "result") : t("resultados", "results")}`;
+    const outsideSearch = hidden === 1 ? t("1 seleccionado fuera de la búsqueda", "1 selected outside search")
+      : `${hidden} ${t("seleccionados fuera de la búsqueda", "selected outside search")}`;
+    const empty = onlySelected ? t("No hay archivos seleccionados.", "No files selected.")
+      : needle ? t("Ningún archivo o carpeta coincide con la búsqueda.", "No files or folders match the search.")
+        : t("Esta carpeta no contiene archivos visibles.", "This folder has no visible files.");
+    return `${entries.length || needle || onlySelected ? `<div class="file-source-filter personal-folder-filter">
+      <label>${icon("search")}<input type="search" id="personal-folder-query" value="${h(onlySelected ? "" : folderQuery)}"
+        aria-label="${searchLabel}" placeholder="${searchLabel}" maxlength="255" ${onlySelected ? "disabled" : disabled()}></label>
+      ${action("personal-only-selected", t("Solo seleccionados", "Selected only"), "check", "secondary",
+        `id="personal-only-selected" aria-pressed="${onlySelected}" aria-controls="personal-folder-entries" ${!onlySelected && !selected.size ? "disabled" : disabled()}`)}
+      <span role="status">${count}${hidden ? ` · ${outsideSearch}` : ""}</span>
+    </div>` : ""}
+    <div id="personal-folder-entries" class="file-source-list" role="group" aria-label="${t("Archivos del servidor", "Server files")}">
+      ${visible.length ? visible.map(({ entry, index, name }) => entry.directory
+        ? `<button class="file-source-entry" data-action="personal-folder" data-index="${index}" ${disabled()}><span>${icon("folder")} ${h(name)}</span>${icon("arrow")}</button>`
+        : `<label class="file-source-row ${selected.has(index) ? "is-selected" : ""}"><input id="personal-file-${index}" type="checkbox" data-personal-file="${index}" ${selected.has(index) ? "checked" : ""} ${disabled()}>
+          <span class="file-source-file-icon">${icon("file")}</span><span class="file-source-row-main"><strong>${h(name)}</strong>${entry.mime ? `<small>${h(entry.mime)}</small>` : ""}</span>
+          <span class="file-source-size">${entry.stamp.size === null ? t("Tamaño desconocido", "Unknown size") : bytesLabel(entry.stamp.size)}</span></label>`).join("")
+        : `<p class="file-source-empty">${empty}</p>`}
+    </div>`;
+  }
+
   function renderBrowser() {
     const server = activeServer();
     return `<section class="personal-servers">${reviewing ? "" : `<div class="page-heading"><div><h2>${t("Servidores personales", "Personal servers")}</h2>
@@ -249,13 +284,7 @@ export function createPersonalServers(hooks: Hooks) {
       ${server ? `<div class="file-source-results"><div class="file-source-result-heading"><div><span class="file-source-eyebrow">${t("Origen remoto", "Remote source")}</span><h2>${h(server.name)}</h2><p class="path">${h(server.location)}</p>${path.length ? `<p class="field-note">${t("Carpeta", "Folder")} · ${h(label(path))}</p>` : ""}</div>
         <div class="button-group">${path.length ? action("personal-parent", t("Subir carpeta", "Parent folder"), undefined, "quiet", disabled()) : ""}${action("personal-reload", t("Actualizar", "Refresh"), "retry", "quiet", `id="personal-reload" ${disabled()}`)}</div></div>
         ${referenceReview(server)}${selectionReview()}
-        ${entries?.length ? `<div class="file-source-list" role="group" aria-label="${t("Archivos del servidor", "Server files")}">${entries.map((entry, index) => {
-          const name = h(entry.path.at(-1) ?? "");
-          return entry.directory ? `<button class="file-source-entry" data-action="personal-folder" data-index="${index}" ${disabled()}><span>${icon("folder")} ${name}</span>${icon("arrow")}</button>`
-            : `<label class="file-source-row ${selected.has(index) ? "is-selected" : ""}"><input id="personal-file-${index}" type="checkbox" data-personal-file="${index}" ${selected.has(index) ? "checked" : ""} ${disabled()}>
-              <span class="file-source-file-icon">${icon("file")}</span><span class="file-source-row-main"><strong>${name}</strong>${entry.mime ? `<small>${h(entry.mime)}</small>` : ""}</span>
-              <span class="file-source-size">${entry.stamp.size === null ? t("Tamaño desconocido", "Unknown size") : bytesLabel(entry.stamp.size)}</span></label>`;
-        }).join("")}</div>` : entries ? `<p class="file-source-empty">${t("Esta carpeta no contiene archivos visibles.", "This folder has no visible files.")}</p>` : ""}
+        ${folderContents()}
         ${review()}</div>` : referenceReview()}</section>`;
   }
 
@@ -289,6 +318,11 @@ export function createPersonalServers(hooks: Hooks) {
       return true;
     }
     if (!(element instanceof HTMLInputElement) || !element.id.startsWith("personal-")) return false;
+    if (element.id === "personal-folder-query") {
+      folderQuery = element.value;
+      hooks.render();
+      return true;
+    }
     const key = element.id.slice("personal-".length);
     if (key === "name" || key === "root" || key === "username" || key === "host" || key === "port") {
       draft[key] = element.value;
@@ -304,6 +338,11 @@ export function createPersonalServers(hooks: Hooks) {
           selectionChanges = selectionChanges.filter(item => item.path !== key);
         } else selected.delete(index);
         hooks.render();
+        if (onlySelected && !element.checked) {
+          const remaining = [...selected].sort((left, right) => left - right);
+          const next = remaining.find(candidate => candidate > index) ?? remaining.at(-1);
+          document.getElementById(next === undefined ? "personal-only-selected" : `personal-file-${next}`)?.focus();
+        }
       }
       return true;
     }
@@ -356,6 +395,11 @@ export function createPersonalServers(hooks: Hooks) {
         hooks.openDownload(id);
       } break;
       case "personal-destination": hooks.chooseFolder(); break;
+      case "personal-only-selected":
+        onlySelected = !onlySelected;
+        hooks.render();
+        if (!onlySelected && !selected.size) document.getElementById("personal-folder-query")?.focus({ preventScroll: true });
+        break;
       case "personal-add": {
         const kind = element.dataset.kind;
         if (kind === "webdav" || kind === "sftp" || kind === "nas") {
@@ -413,6 +457,7 @@ export function createPersonalServers(hooks: Hooks) {
           reviewing = reference ? { kind: "reference", id: reference.id, selection: reference.selection } : null;
         }
         selected.clear();
+        onlySelected = false;
         hooks.notify(t("Referencias guardadas en Biblioteca.", "References saved in Library."), "success");
       }); break;
       case "personal-copy":
@@ -424,6 +469,7 @@ export function createPersonalServers(hooks: Hooks) {
           await hooks.command("personal_server_copy", { selections: files, referenceId: useReference ? reference?.id : null,
             clientRequest: crypto.randomUUID() });
           selected.clear();
+          onlySelected = false;
           referenceId = "";
           await hooks.refresh();
           hooks.notify(t("Copia añadida a Descargas.", "Copy added to Downloads."), "success");

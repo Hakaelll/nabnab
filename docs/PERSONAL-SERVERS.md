@@ -8,6 +8,10 @@ Abre **Plataformas → Archivos y documentos → Servidores personales**. Las co
 
 Abre la conexión, navega por carpetas y marca archivos. **Indexar referencia** guarda los metadatos en **Biblioteca → Referencias**. Una referencia depende del servidor y no contiene una copia. **Copiar a mi biblioteca** muestra el destino y envía la selección a Descargas. Las referencias guardadas también ofrecen **Obtener copia local**.
 
+**Buscar en esta carpeta** filtra por nombre, también si escribes sin tildes. El filtro usa el listado que ya está cargado y conserva las marcas de los archivos que oculta. Pulsa **Solo seleccionados** para revisar esas marcas, el tamaño total y el destino antes de copiar. Pulsa el botón otra vez para recuperar la búsqueda.
+
+![Revisión de dos archivos marcados en un servidor de prueba a 900 píxeles](personal-server-selected.png)
+
 Si pulsas **Actualizar** en la carpeta, se conservan las marcas cuyos metadatos visibles coinciden con el listado anterior, aunque cambie el orden. Los archivos modificados o ausentes quedan fuera de la selección. Vuelve a marcar un archivo modificado para elegir la versión actual. Si la carpeta está inaccesible, puedes actualizar de nuevo para recuperar las marcas que todavía coincidan. Al copiar o indexar, nabnab comprueba que los metadatos seleccionados corresponden al último listado.
 
 ![Selección de servidor después de actualizar una carpeta con un archivo modificado y otro ausente](personal-server-refresh.png)
@@ -41,6 +45,8 @@ La prueba también cortó una copia HTTPS después de 96.000 bytes. Verificó el
 La prueba de la copia montada pausa el lector de Windows tras 65.536 bytes. Comprueba que una carpeta desconectada conserva esos bytes, que la copia continúa desde ese punto y que un reemplazo con el mismo tamaño y fecha invalida el parcial. La prueba de escritorio introduce un parcial de tamaño conocido en el trabajo y verifica el aviso, las acciones y el archivo publicado al volver a conectar la carpeta de prueba.
 
 La prueba de Edge simula una carpeta desconectada y luego cambia, elimina y reordena sus archivos. Verifica las marcas y los avisos a 900 y 1180 px. En Windows, después de cargar un listado nuevo, los comandos de copia e indexación rechazan la selección antigua sin crear trabajos ni modificar la referencia guardada.
+
+Edge también comprueba que escribir y cambiar de vista mantiene el foco y usa el mismo listado. En WebView2, una carpeta montada de prueba contiene dos archivos. El ensayo busca por nombre, revisa la selección, guarda una referencia y verifica los bytes del único archivo copiado.
 
 ![Copia de una carpeta montada interrumpida con 64 KB guardados, en Descargas](personal-server-mounted-resume.png)
 
