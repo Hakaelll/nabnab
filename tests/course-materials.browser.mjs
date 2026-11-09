@@ -84,7 +84,9 @@ const setup = `
     if (cmd === "preview_course_materials") {
       if (fixture.cancel) return null;
       const id = fixture.calls.length;
-      fixture.plan = {id, provider:args.provider, title:args.title, url:args.url, folder:args.folder, lessonId:args.lessonId};
+      fixture.plan = {id, provider:args.provider, title:args.title, url:args.url, folder:args.folder, lessonId:args.lessonId, unitId:args.unitId};
+      if (args.unitId) return {id, provider:args.provider, title:args.title, groups:[{title:"Descargas",
+        files:[{id:5,name:"Plantillas de la unidad.zip",kind:"file",size:16384},{id:6,name:"Guía de color.pdf",kind:"document",size:2048}]}]};
       if (args.lessonId) return {id, provider:args.provider, title:args.title, groups:[{title:"Descargas",
         files:[{id:3,name:"Material de referencia.pdf",kind:"document",size:4096},{id:4,name:"Recursos opcionales.zip",kind:"file",size:8192}]}]};
       if (fixture.many) return {id, provider:args.provider, title:args.title, groups:[{title:"02 Extras",
@@ -101,6 +103,15 @@ const setup = `
       const plan = fixture.plan;
       if (!plan || plan.id !== args.reviewId) throw Error("Fixture review expired.");
       fixture.plan = null;
+      if (plan.unitId) {
+        const course = fixture.courses.find(course => course.url === plan.url);
+        const section = course.sections.find(section => section.id === plan.unitId);
+        const item = {...state.library[0],id:"unit-templates",name:"Plantillas de la unidad.zip",kind:"file",path:"C:/Downloads/Plantillas de la unidad.zip"};
+        state.library.push(item);
+        section.lessons.push({id:"unit-resources-"+section.id,title:"Unit resources",learned:false,notes:[],assets:
+          args.ids.includes(5) ? [{id:"unit-asset",title:item.name,kind:"file",status:"local",libraryId:item.id,urlRef:null,jobIds:[]}] : []});
+        return structuredClone(course);
+      }
       if (plan.lessonId) {
         const course = fixture.courses.find(course => course.url === plan.url);
         const lesson = course.sections.flatMap(section => section.lessons).find(lesson => lesson.id === plan.lessonId);
@@ -286,6 +297,44 @@ try {
     await page.screenshot({path:`${directory}/attachment-study-${width}x${height}.png`,animations:"disabled"});
   }
   await page.setViewportSize({width:900,height:620});
+  const unit = page.locator(".course-tree details").filter({ hasText: "01 Fundamentos" });
+  const addResources = unit.getByRole("button", { name: "Añadir recursos a la unidad" });
+  await addResources.press("Enter", { timeout: 4500 });
+  await heading.waitFor();
+  assert.match(await page.locator(".course-review").innerText(), /Recursos para la unidad 01 Fundamentos/);
+  await page.getByRole("button", {name:"Volver",exact:true}).click();
+  assert.equal(await addResources.evaluate(node => node === document.activeElement), true);
+  await addResources.press("Enter");
+  await page.getByRole("checkbox", {name:/^Plantillas de la unidad/}).press("Space");
+  assert.match(await page.locator(".course-review-footer output").innerText(), /1 archivo/);
+  for (const [width,height] of [[900,620],[1180,780]]) {
+    await page.setViewportSize({width,height});
+    assert.ok(await page.locator(".course-review").evaluate(node => node.scrollWidth <= node.clientWidth + 1));
+    await page.screenshot({path:`${directory}/unit-resources-review-${width}.png`,animations:"disabled"});
+  }
+  await page.getByRole("button", {name:"Añadir a la unidad",exact:true}).press("Enter");
+  await page.getByRole("heading", { name: "Recursos de la unidad", exact: true }).waitFor();
+  assert.equal(await unit.getByRole("button", {name: "Recursos de la unidad",exact:true}).getAttribute("aria-current"), "true");
+  await page.getByText("Plantillas de la unidad.zip", {exact:true}).waitFor();
+  assert.equal(await page.getByText("Guía de color.pdf", {exact:true}).count(), 0);
+  assert.match(await page.locator("#course-heading + p").innerText(), /2 lecciones/);
+  await page.waitForFunction(() => document.activeElement.id === "course-materials-heading");
+  const unitTarget = await page.evaluate(() => window.courseFixture.calls.filter(call => call.cmd === "preview_course_materials").at(-1).args);
+  assert.equal(unitTarget.unitId, "section-1");
+  assert.equal(unitTarget.lessonId, null);
+  await page.getByText("Recursos añadidos a la unidad.", {exact:true}).waitFor();
+  await page.locator("[data-action='dismiss-message']").click();
+  await page.setViewportSize({width:900,height:620});
+  await page.locator("#main").evaluate(node => { node.scrollTop = 0; });
+  await page.screenshot({path:`${directory}/unit-resources-study-900.png`,animations:"disabled"});
+  const search = page.getByRole("searchbox", {name:"Buscar lección o recurso"});
+  await search.fill("plantillas");
+  assert.equal(await unit.getByRole("button", {name: "Recursos de la unidad",exact:true}).isVisible(), true);
+  assert.equal(await unit.getByRole("button", {name:/02 Preparar/}).count(), 0);
+  await search.fill("");
+  await page.getByRole("button", {name:/02 Preparar/}).press("Enter");
+  assert.equal(await page.getByText("Revisar la plantilla", {exact:true}).count(), 1);
+
   await page.evaluate(() => { window.courseFixture.many = true; });
   await page.getByRole("button", { name: "Añadir carpeta", exact: true }).click();
   await heading.waitFor();

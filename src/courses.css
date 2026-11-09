@@ -1,6 +1,6 @@
 .course-layout { display: grid; grid-template-columns: minmax(200px, 1fr) minmax(0, 2fr); gap: 24px; align-items: start; }
 .course-tree { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
-.course-tree [data-action="course-select-section"] { max-width: 100%; height: auto; white-space: normal; text-align: start; }
+.course-tree :is([data-action="course-select-section"], [data-action="course-add-unit-resources"]) { max-width: 100%; height: auto; white-space: normal; text-align: start; }
 .course-tree details { padding: 4px 8px; border: 1px solid var(--edge-quiet); border-radius: 12px; background: var(--secondary); }
 .course-tree summary { cursor: pointer; padding: 8px 4px; font-weight: 600; overflow-wrap: anywhere; }
 .course-tree ul { list-style: none; padding: 0; margin: 8px 0; }
@@ -8,6 +8,8 @@
 .course-lesson:hover { background: var(--hover, #1e2126); }
 .course-lesson[aria-current] { background: var(--elevated, #17191d); border-color: var(--border, #2b2e34); }
 .course-lesson small { color: var(--muted, #b2b5bd); }
+.course-unit-resources > span { display: flex; align-items: center; gap: 8px; }
+.course-unit-resources svg { width: 14px; height: 14px; flex: none; color: var(--muted); }
 .course-study { min-width: 0; }
 .course-study .page-heading { align-items: flex-start; }
 .course-study h2 { font-size: 20px; overflow-wrap: anywhere; }

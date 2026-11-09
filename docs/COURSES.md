@@ -39,6 +39,16 @@ En Rocketseat, Coursera y Domestika, la sesión de alumno y la descarga se gesti
 
 La prueba de Rocketseat en Edge pega un enlace público de aula en Inicio y comprueba el formulario a 900 y 1180 px. La prueba de Rust importa dos veces el mismo archivo sintético, conserva una sola copia en el índice y distingue el aula de una formación con el mismo nombre en la URL.
 
+### Recursos por unidad de Domestika
+
+Guarda los archivos habilitados en **Recursos adicionales** desde tu sesión de Domestika. Abre la unidad correspondiente en el curso de nabnab y pulsa **Añadir recursos a la unidad**. Revisa el nombre de la unidad, marca los archivos y confirma con **Añadir a la unidad**. Los archivos quedan en su ubicación original y aparecen en **Recursos de la unidad**, junto a las lecciones. Puedes buscar por el nombre del archivo y volver a la lección con sus notas y su progreso. [Recursos adicionales de Domestika](https://support.domestika.org/hc/en-us/articles/360003408898-I-can-t-download-the-additional-resources-from-the-app) · [Condiciones de uso](https://www.domestika.org/es/terms)
+
+![Selección de un ZIP para una unidad de Domestika con datos de prueba](course-domestika-unit.png)
+
+Las pruebas usan materiales sintéticos. Rust verifica la asociación tras reabrir el índice, la importación repetida, el rechazo de unidades ajenas al destino y la conservación de notas y progreso. Edge comprueba la selección, la búsqueda y el foco a 900 y 1180 px con IPC simulado.
+
+### Revisión de archivos guardados
+
 ![Apertura del curso e importación de adjuntos, a 1180 × 780 con IPC simulado](course-materials-form.png)
 
 ![Aviso al arrastrar archivos sobre el curso, a 900 × 620 con un evento simulado](course-materials-drop.png)

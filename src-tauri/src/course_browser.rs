@@ -166,7 +166,7 @@ fn material_paths(paths: &[PathBuf], attachments_only: bool) -> Result<Vec<PathB
     paths.dedup();
     if paths.is_empty() || paths.len() > 200 {
         return Err(if attachments_only {
-            "Choose between 1 and 200 documents, captions, images or archives for the lesson."
+            "Choose between 1 and 200 documents, captions, images or archives."
         } else {
             "Choose between 1 and 200 supported course files."
         }
@@ -204,11 +204,22 @@ struct ReviewedFile {
     modified: SystemTime,
 }
 
+enum AttachmentTarget {
+    Lesson(String),
+    Unit(String),
+}
+
+const UNIT_RESOURCES: &str = "unit-resources-";
+
+fn unit_resources_id(section: &str) -> String {
+    format!("{UNIT_RESOURCES}{section}")
+}
+
 struct Plan {
     id: u32,
     link: CourseLink,
     title: String,
-    lesson_id: Option<String>,
+    target: Option<AttachmentTarget>,
     files: Vec<ReviewedFile>,
     created: Instant,
 }
@@ -249,7 +260,7 @@ fn prepare_review(
     title: String,
     paths: &[PathBuf],
     folder: bool,
-    lesson_id: Option<String>,
+    target: Option<AttachmentTarget>,
 ) -> Result<(Review, Plan), String> {
     let root = if folder {
         paths
@@ -261,7 +272,7 @@ fn prepare_review(
     };
     let mut groups = BTreeMap::<PathBuf, ReviewGroup>::new();
     let mut files = Vec::new();
-    for path in material_paths(paths, lesson_id.is_some())? {
+    for path in material_paths(paths, target.is_some())? {
         let metadata = fs::metadata(&path).map_err(|error| error.to_string())?;
         if !metadata.is_file() || metadata.len() == 0 {
             continue;
@@ -333,7 +344,7 @@ fn prepare_review(
             id,
             link,
             title,
-            lesson_id,
+            target,
             files,
             created: Instant::now(),
         },
@@ -468,7 +479,11 @@ fn merge_material_sections(sections: &mut Vec<CourseSection>, added: Vec<CourseS
     {
         section
             .lessons
-            .sort_by_cached_key(|lesson| (natural_key(&lesson.title), lesson.id.clone()));
+            .sort_by_cached_key(|lesson| (
+                lesson.id.starts_with(UNIT_RESOURCES),
+                natural_key(&lesson.title),
+                lesson.id.clone(),
+            ));
         for lesson in &mut section.lessons {
             lesson
                 .assets
@@ -482,7 +497,7 @@ fn import_selected(
     link: CourseLink,
     title: String,
     selected: Vec<library::LibraryItem>,
-    lesson_id: Option<&str>,
+    target: Option<&AttachmentTarget>,
 ) -> Result<Course, String> {
     let mut course = repo
         .data
@@ -511,13 +526,17 @@ fn import_selected(
                 .filter_map(move |asset| Some((asset.library_id.as_deref()?, lesson.id.as_str())))
         })
         .collect();
-    if let Some(target) = lesson_id {
+    let target_id = target.map(|target| match target {
+        AttachmentTarget::Lesson(id) => id.clone(),
+        AttachmentTarget::Unit(section) => unit_resources_id(section),
+    });
+    if let Some(target_id) = &target_id {
         if selected.iter().any(|item| {
             attached
                 .get(item.id.as_str())
-                .is_some_and(|other| *other != target)
+                .is_some_and(|other| *other != target_id.as_str())
         }) {
-            return Err("A selected file already belongs to another lesson in this course.".into());
+            return Err("A selected file already belongs to another lesson or unit in this course.".into());
         }
     }
     let mut included = HashSet::new();
@@ -527,15 +546,34 @@ fn import_selected(
             !attached.contains_key(item.id.as_str()) && included.insert(item.id.as_str())
         })
         .collect();
-    if let Some(target) = lesson_id {
-        let lesson = course.sections.iter_mut().filter(|section| {
-            section.id.starts_with("section-") || link.provider == "coursera" && section.id.starts_with("coursera-module-")
-        })
-            .flat_map(|section| &mut section.lessons).find(|lesson| lesson.id == target)
-            .ok_or("This lesson is no longer available. Open the course and choose the attachments again.")?;
-        lesson.assets.extend(additions.into_iter().map(local_asset));
-    } else {
-        merge_material_sections(&mut course.sections, material_sections(additions));
+    match target {
+        Some(AttachmentTarget::Lesson(id)) => {
+            let lesson = course.sections.iter_mut().filter(|section| {
+                section.id.starts_with("section-") || link.provider == "coursera" && section.id.starts_with("coursera-module-")
+            })
+                .flat_map(|section| &mut section.lessons)
+                .find(|lesson| lesson.id == *id && !lesson.id.starts_with(UNIT_RESOURCES))
+                .ok_or("This lesson is no longer available. Open the course and choose the attachments again.")?;
+            lesson.assets.extend(additions.into_iter().map(local_asset));
+        }
+        Some(AttachmentTarget::Unit(section_id)) => {
+            let section = course.sections.iter_mut().find(|section| {
+                link.provider == "domestika" && section.id == *section_id && section.id.starts_with("section-")
+            }).ok_or("This Domestika unit is no longer available. Open the course and choose the resources again.")?;
+            let id = unit_resources_id(section_id);
+            if let Some(entry) = section.lessons.iter_mut().find(|lesson| lesson.id == id) {
+                entry.assets.extend(additions.into_iter().map(local_asset));
+            } else {
+                section.lessons.push(CourseLesson {
+                    id,
+                    title: "Unit resources".into(),
+                    learned: false,
+                    assets: additions.into_iter().map(local_asset).collect(),
+                    notes: Vec::new(),
+                });
+            }
+        }
+        None => merge_material_sections(&mut course.sections, material_sections(additions)),
     }
     let mut known: HashSet<_> = repo
         .data
@@ -565,9 +603,16 @@ pub async fn preview_course_materials(
     title: String,
     folder: bool,
     lesson_id: Option<String>,
+    unit_id: Option<String>,
     dropped_paths: Option<Vec<PathBuf>>,
 ) -> Result<Option<Review>, String> {
     let link = CourseLink::selected(&provider, &url)?;
+    let target = match (lesson_id, unit_id) {
+        (Some(id), None) => Some(AttachmentTarget::Lesson(id)),
+        (None, Some(id)) if link.provider == "domestika" => Some(AttachmentTarget::Unit(id)),
+        (None, None) => None,
+        _ => return Err("Choose one valid destination for the course resources.".into()),
+    };
     let title = label(&title, 240);
     if title.is_empty() {
         return Err("Enter the name to use for this course.".into());
@@ -589,10 +634,10 @@ pub async fn preview_course_materials(
                         .map(|folder| vec![folder])
                 } else {
                     dialog
-                        .set_title(if lesson_id.is_some() {
-                            "Choose attachments for this lesson"
-                        } else {
-                            "Choose authorized course files"
+                        .set_title(match &target {
+                            Some(AttachmentTarget::Lesson(_)) => "Choose attachments for this lesson",
+                            Some(AttachmentTarget::Unit(_)) => "Choose resources for this unit",
+                            None => "Choose authorized course files",
                         })
                         .blocking_pick_files()
                 };
@@ -616,7 +661,7 @@ pub async fn preview_course_materials(
         } else {
             folder
         };
-        prepare_review(id, link, title, &paths, folder, lesson_id).map(Some)
+        prepare_review(id, link, title, &paths, folder, target).map(Some)
     })
     .await
     .map_err(|_| "Course file review failed.")??;
@@ -664,7 +709,7 @@ pub async fn import_course_materials(
         plan.link,
         plan.title,
         selected,
-        plan.lesson_id.as_deref(),
+        plan.target.as_ref(),
     )
 }
 
@@ -801,10 +846,10 @@ mod tests {
                 }],
             }],
         }).unwrap();
-        let target = Some("coursera-lesson-fixture");
-        let (_, plan) = prepare_review(1, link, "Fixture".into(), &[path], false, target.map(str::to_owned)).unwrap();
+        let target = AttachmentTarget::Lesson("coursera-lesson-fixture".into());
+        let (_, plan) = prepare_review(1, link, "Fixture".into(), &[path], false, Some(target)).unwrap();
         let selected = selected_files(&plan, &[0]).unwrap();
-        let saved = import_selected(&mut repo, plan.link, plan.title, selected, target).unwrap();
+        let saved = import_selected(&mut repo, plan.link, plan.title, selected, plan.target.as_ref()).unwrap();
         let lesson = &saved.sections[0].lessons[0];
         assert!(lesson.learned);
         assert_eq!(lesson.assets[0].title, "Saved handout.txt");
@@ -925,7 +970,7 @@ mod tests {
             "Drawing".into(),
             &[video],
             false,
-            Some(lesson_id.clone())
+            Some(AttachmentTarget::Lesson(lesson_id.clone()))
         )
         .is_err());
         let (review, plan) = prepare_review(
@@ -934,7 +979,7 @@ mod tests {
             "Drawing".into(),
             &[handout],
             false,
-            Some(lesson_id.clone()),
+            Some(AttachmentTarget::Lesson(lesson_id.clone())),
         )
         .unwrap();
         assert_eq!(review.groups[0].files.len(), 1);
@@ -944,7 +989,7 @@ mod tests {
             link(),
             "Drawing".into(),
             attachments.clone(),
-            Some("missing-lesson")
+            Some(&AttachmentTarget::Lesson("missing-lesson".into()))
         )
         .is_err());
         assert_eq!(repo.data.library.len(), 4);
@@ -953,7 +998,7 @@ mod tests {
             plan.link,
             plan.title,
             attachments.clone(),
-            plan.lesson_id.as_deref(),
+            plan.target.as_ref(),
         )
         .unwrap();
         let lesson = &with_attachment.sections[0].lessons[0];
@@ -968,7 +1013,7 @@ mod tests {
             link(),
             "Drawing".into(),
             attachments.clone(),
-            Some(other)
+            Some(&AttachmentTarget::Lesson(other.clone()))
         )
         .is_err());
         let repeated =
@@ -976,12 +1021,44 @@ mod tests {
         assert_eq!(repeated.sections[1].lessons.len(), 1);
         assert_eq!(repeated.sections[0].lessons[0].assets.len(), 3);
         assert_eq!(repo.data.library.len(), 5);
+
+        let unit_id = repeated.sections[0].id.clone();
+        let unit_resource = nested.join("Unit templates.zip");
+        fs::write(&unit_resource, b"Authorized material from another folder").unwrap();
+        assert!(prepare_review(
+            4, link(), "Drawing".into(), &[nested.join("Lesson.mp4")],
+            false, Some(AttachmentTarget::Unit(unit_id.clone())),
+        ).is_err());
+        let (_, plan) = prepare_review(
+            4, link(), "Drawing".into(), &[unit_resource],
+            false, Some(AttachmentTarget::Unit(unit_id.clone())),
+        ).unwrap();
+        assert_eq!(plan.files.len(), 1);
+        let files = selected_files(&plan, &[0]).unwrap();
+        assert!(import_selected(&mut repo, link(), "Drawing".into(), files.clone(),
+            Some(&AttachmentTarget::Unit("section-missing".into()))).is_err());
+        assert_eq!(repo.data.library.len(), 5);
+        for _ in 0..2 {
+            let course = import_selected(&mut repo, link(), "Drawing".into(), files.clone(), plan.target.as_ref()).unwrap();
+            let unit = &course.sections[0];
+            assert_eq!(unit.lessons.len(), 3);
+            assert_eq!(unit.lessons[2].id, unit_resources_id(&unit_id));
+            assert_eq!(unit.lessons[2].assets.len(), 1);
+            assert_eq!(unit.lessons[2].assets[0].title, "Unit templates.zip");
+            assert!(unit.lessons[0].learned);
+            assert_eq!(unit.lessons[0].notes[0].text, "Keep this");
+        }
+        assert!(import_selected(&mut repo, link(), "Drawing".into(), files,
+            Some(&AttachmentTarget::Unit(repeated.sections[1].id.clone()))).is_err());
+        assert_eq!(repo.data.library.len(), 6);
+        assert!(repo.data.jobs.is_empty());
         drop(repo);
         let reopened = crate::store::Repository::open(&root, &nested).unwrap();
         let lesson = &reopened.data.courses[0].sections[0].lessons[0];
         assert_eq!(lesson.id, lesson_id);
         assert_eq!(lesson.assets[2].title, "Materials and references.txt");
         assert_eq!(lesson.notes[0].text, "Keep this");
+        assert_eq!(reopened.data.courses[0].sections[0].lessons[2].assets[0].title, "Unit templates.zip");
         drop(reopened);
         let root = std::fs::canonicalize(&root).unwrap();
         assert!(root.starts_with(std::fs::canonicalize(std::env::temp_dir()).unwrap()));
