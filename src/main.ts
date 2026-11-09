@@ -892,6 +892,12 @@ async function handleAction(action: string, button: HTMLButtonElement, event?: M
         document.getElementById('audio-shelf-title')?.focus();
       }
     }break;
+    case 'open-audiobook-catalog':{
+      if(!/^[1-9]\d{0,19}$/.test(id))break;
+      platformModule='fileSources';navigate('platforms');
+      await fileSources.open(`https://librivox.org/api/feed/audiobooks/id/${id}`);
+      (document.querySelector<HTMLElement>('.file-source-result-heading h2[tabindex]')??document.getElementById('file-source-url'))?.focus();
+    }break;
     case 'play-media':case 'play-selection':case 'play-job':{
       let items = snapshot.library.filter(item=>item.id===id);
       if(action==='play-job'){

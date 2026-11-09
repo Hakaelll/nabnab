@@ -58,6 +58,25 @@ function bookKey(item: LibraryItem) {
   return item.details?.audiobook?.bookId ?? item.id;
 }
 
+function adjacentChapters(group: readonly LibraryItem[], current: LibraryItem): LibraryItem[] {
+  const number = current.details?.audiobook?.chapter;
+  if (number === undefined) return [current];
+  const available = new Map([[number, current]]);
+  for (const item of group) {
+    const chapter = item.details?.audiobook?.chapter;
+    if (chapter !== undefined && !available.has(chapter) && isPlayable(item)) available.set(chapter, item);
+  }
+  let first = number;
+  while (available.has(first - 1)) first--;
+  const adjacent: LibraryItem[] = [];
+  for (let chapter = first; ; chapter++) {
+    const item = available.get(chapter);
+    if (!item) break;
+    adjacent.push(item);
+  }
+  return adjacent;
+}
+
 function chapterResume(details: LibraryDetails, chapter: Chapter) {
   const saved = details.chapterPositions?.find(point => point.start === chapter.start && point.end === chapter.end);
   const position = saved?.position ?? details.playbackPosition;
@@ -265,14 +284,14 @@ export function createAudioLibrary(hooks: Hooks) {
 
   function continueBook(items: LibraryItem[]) {
     if (category !== "books") return "";
-    const chapters = items.filter(item => !item.missing && (!book || bookKey(item) === book)).sort(compareChapters);
+    const chapters = items.filter(item => !book || bookKey(item) === book).sort(compareChapters);
     const books = new Map<string, LibraryItem[]>();
     for (const chapter of chapters) {
       const key = bookKey(chapter);
       const group = books.get(key);
       if (group) group.push(chapter); else books.set(key, [chapter]);
     }
-    const recent = chapters.filter(item => (item.details?.playbackPosition ?? 0) > 0)
+    const recent = chapters.filter(item => !item.missing && (item.details?.playbackPosition ?? 0) > 0)
       .sort((left, right) => (right.details?.lastPlayedAt ?? 0) - (left.details?.lastPlayedAt ?? 0));
     const reviewed = new Set<string>();
     for (const last of recent) {
@@ -280,10 +299,32 @@ export function createAudioLibrary(hooks: Hooks) {
       if (reviewed.has(key)) continue;
       reviewed.add(key);
       const group = books.get(key) ?? [];
-      const next = audiobookChapterComplete(last.details?.playbackPosition ?? 0, last.duration)
-        ? group.slice(group.indexOf(last) + 1).find(item => !audiobookChapterComplete(item.details?.playbackPosition ?? 0, item.duration))
+      const completed = audiobookChapterComplete(last.details?.playbackPosition ?? 0, last.duration);
+      const adjacent = completed ? adjacentChapters(group, last) : [last];
+      const next = completed
+        ? adjacent.slice(adjacent.indexOf(last) + 1).find(item => !audiobookChapterComplete(item.details?.playbackPosition ?? 0, item.duration))
         : last;
-      if (!next) continue;
+      if (!next) {
+        const end = adjacent.at(-1)?.details?.audiobook?.chapter;
+        if (end === undefined) continue;
+        let later = Infinity, known = Infinity;
+        for (const item of group) {
+          const chapter = item.details?.audiobook?.chapter;
+          if (chapter === undefined || chapter <= end) continue;
+          known = Math.min(known, chapter);
+          if (!item.missing) later = Math.min(later, chapter);
+        }
+        const missingThrough = Number.isFinite(later) ? later - 1 : known;
+        if (!Number.isFinite(missingThrough)) continue;
+        const missing = missingThrough === end + 1
+          ? t(`Falta el capítulo ${end + 1} en Biblioteca.`, `Chapter ${end + 1} is missing from Library.`)
+          : t(`Faltan los capítulos ${end + 1}–${missingThrough} en Biblioteca.`, `Chapters ${end + 1}–${missingThrough} are missing from Library.`);
+        const source = /^librivox:([1-9]\d{0,19})$/.exec(key)?.[1];
+        return `<section class="audio-continue" aria-label="${t("Audiolibro incompleto", "Incomplete audiobook")}">
+          ${cover(last, "book")}<div class="audio-continue-copy"><span>${t("Audiolibro incompleto", "Incomplete audiobook")}</span>
+          <h2>${h(last.details?.audiobook?.bookTitle ?? audioTitle(last))}</h2><small>${h(missing)}</small></div>
+          ${source ? action("open-audiobook-catalog", t("Ver edición en LibriVox", "View LibriVox edition"), "link", "secondary", `data-id="${source}"`) : ""}</section>`;
+      }
       const chapter = next.details?.audiobook;
       const title = chapter?.bookTitle ?? audioTitle(next);
       const position = audiobookResumePosition(next.details?.playbackPosition ?? 0, next.duration);
@@ -622,8 +663,9 @@ export function createAudioLibrary(hooks: Hooks) {
   function playTrack(id: string) {
     const { byCategory, results } = filterTracks(items());
     const item = results.find(item => item.id === id);
-    if (!item) return;
-    const ids = (category === "books" ? byCategory.filter(candidate => bookKey(candidate) === bookKey(item)).sort(compareChapters) : results).map(item => item.id);
+    if (!isPlayable(item)) return;
+    const queue = category === "books" ? adjacentChapters(byCategory.filter(candidate => bookKey(candidate) === bookKey(item)), item) : results;
+    const ids = queue.map(item => item.id);
     player.play(ids, ids.indexOf(id));
   }
 

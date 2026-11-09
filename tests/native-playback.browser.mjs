@@ -17,6 +17,7 @@ const desktopMiniKey = process.env.NABNAB_PLAYBACK_DESKTOP_MINI_KEY === "1";
 const desktopRestore = process.env.NABNAB_PLAYBACK_DESKTOP_RESTORE === "1";
 const windowsMedia = process.env.NABNAB_PLAYBACK_WINDOWS_MEDIA === "1";
 const embeddedBookOnly = process.env.NABNAB_PLAYBACK_EMBEDDED_BOOK === "1";
+const bookGapOnly = process.env.NABNAB_PLAYBACK_BOOK_GAP === "1";
 const lyricsOnly = process.env.NABNAB_PLAYBACK_LYRICS === "1";
 const miniWheelOnly = process.env.NABNAB_PLAYBACK_MINI_WHEEL === "1";
 const albumOnly = process.env.NABNAB_PLAYBACK_ALBUM === "1";
@@ -458,6 +459,42 @@ async function verifyBookContinuation(ids) {
   await wait(async () => (await playing()).id === ids[1] && !(await playing()).paused);
   assert.equal(await page.locator(".audio-next li").count(), 1);
   console.log("Native audiobook continuation retained the completed chapter across restart and opened the next chapter.");
+}
+
+async function verifyBookGap() {
+  const numbers = [1, 2, 4];
+  const paths = numbers.map(number => path.join(data, `Capítulo ${number}.wav`));
+  for (const file of paths) encode("-f", "lavfi", "-i", "sine=frequency=440:duration=4", "-c:a", "pcm_s16le", file);
+  const imported = await rpc("import_paths", { paths });
+  const ids = paths.map(file => imported.library.find(item => path.basename(item.path) === path.basename(file)).id);
+  await shutdown();
+  const stateFile = path.join(data, "state-v1.json");
+  const state = JSON.parse(await readFile(stateFile, "utf8"));
+  for (const [index, id] of ids.entries()) {
+    state.library.find(item => item.id === id).details.audiobook = {
+      bookId: "librivox:1", bookTitle: "Lectura de prueba", chapter: numbers[index], reader: null, language: "Spanish",
+    };
+  }
+  await writeFile(stateFile, JSON.stringify(state));
+  await launch();
+  await openBooks();
+  const playChapter = id => page.locator(`[data-action="audio-play"][data-id="${id}"]`).click();
+  const gap = () => page.getByText("Falta el capítulo 3 en Biblioteca.", { exact: true });
+  await playChapter(ids[1]);
+  await wait(async () => { const sample = await playing(); return sample.id === ids[1] && !sample.paused && sample.duration > 0; });
+  await page.locator("#audio-engine").evaluate(media => { media.currentTime = media.duration - 0.2; });
+  await gap().waitFor();
+  assert.equal((await playing()).id, ids[1]);
+  assert.equal((await playing()).paused, true);
+  assert.equal(await page.locator(".audio-next li").count(), 0);
+  await shutdown();
+  await launch();
+  await openBooks();
+  await gap().waitFor();
+  await playChapter(ids[2]);
+  await wait(async () => { const sample = await playing(); return sample.id === ids[2] && !sample.paused; });
+  assert.equal((await rpc("get_snapshot")).jobs.length, 0);
+  console.log("WebView2 stopped at the chapter gap, restored the notice after restart and played chapter 4 on request.");
 }
 
 async function verifyCoursePlayback(videoId, musicId, audioId, handoutId) {
@@ -1745,6 +1782,7 @@ try {
   if (miniWheelOnly) await verifyFloatingMiniWheel();
   else if (lyricsOnly) await verifyLocalLyrics();
   else if (embeddedBookOnly) await verifyEmbeddedBook();
+  else if (bookGapOnly) await verifyBookGap();
   else if (albumOnly) await verifyAlbumPlayback(initial);
   else await verifyPlayback(initial);
 } catch (error) {

@@ -16,6 +16,10 @@ En **Ajustes → Sesiones y privacidad → Caché de miniaturas** puedes ver cu�
 
 La **Estantería** de audiolibros agrupa capítulos de LibriVox y reconoce archivos M4B. **Continuar** recupera el punto guardado del capítulo o abre el siguiente si el anterior llegó al final. La cola de capítulos se limita al libro que estás escuchando. El minirreproductor ofrece velocidad, retroceso de 15 segundos y temporizador por minutos o al final del capítulo. Los marcadores se guardan en Biblioteca. Si hay capítulos incrustados, se puede saltar a ellos.
 
+Al reproducir un libro desde la Estantería, la cola se forma con los capítulos consecutivos disponibles alrededor del que elijas. Si tienes los capítulos 1, 2 y 4, la escucha iniciada en el 1 se detiene después del 2. El aviso identifica el capítulo que falta. **Ver edición en LibriVox** abre su ficha para revisar los capítulos. También puedes elegir el capítulo 4 directamente en la Estantería.
+
+![Aviso tras terminar el capítulo 2 cuando el capítulo 3 falta, con datos de prueba](audio-audiobook-gap.png)
+
 Abre un M4B desde la **Estantería** para ver sus capítulos antes de reproducirlo. **Reproducir** abre el capítulo desde el inicio y **Retomar** vuelve al punto guardado de ese capítulo. **Continuar audiolibro** indica el nombre del último capítulo y el tiempo transcurrido dentro de él. Los puntos se conservan al cerrar nabnab y al pasar a otro capítulo desde el índice.
 
 Selecciona pistas para crear una lista, añadirlas a una existente o editar sus etiquetas. Puedes cambiar el orden y quitar entradas desde **Listas → Editar lista**. La previsualización de etiquetas muestra los campos que cambiarán. **Guardar etiquetas** actualiza la base de nabnab. **Crear copias con etiquetas** usa la cola para generar archivos nuevos y compara la huella de los flujos de audio antes de incorporarlos a Biblioteca. Se probaron MP3, M4A, M4B, FLAC, OGG y Opus con los motores de producción. Los originales se conservan.
@@ -35,6 +39,8 @@ La prueba de interfaz reproduce un WAV silencioso en Edge con almacenamiento de 
 Con `NABNAB_PLAYBACK_LYRICS=1`, `tests/native-playback.browser.mjs` abre dos LRC locales. Comprueba el desplazamiento de tiempo declarado en el archivo, las líneas simultáneas y el cambio de letra al pasar de pista. La revisión visual se hizo a 900 y 1180 px.
 
 Con `NABNAB_PLAYBACK_EMBEDDED_BOOK=1`, `tests/native-playback.browser.mjs` importa un M4B local de tres capítulos, guarda dos puntos de escucha y comprueba ambos tras reiniciar nabnab. También verifica que el resumen cambia al retomar y pausar otro capítulo. La revisión visual se hizo a 900 y 1180 px. [Índice de capítulos en Windows](audio-embedded-chapters.png)
+
+Con `NABNAB_PLAYBACK_BOOK_GAP=1`, la prueba de Windows usa tres WAV sintéticos. Comprueba que la cola se detiene en el capítulo 2, que el aviso vuelve a aparecer tras reiniciar y que el capítulo 4 sigue disponible para reproducirlo manualmente. En Edge se comprobó el aviso a 900 y 1180 px y la apertura de la ficha con teclado usando datos simulados.
 
 Con `NABNAB_PLAYBACK_ALBUM=1`, la prueba nativa importa MP3 sintéticos de dos discos en orden distinto al del álbum. Comprueba que un archivo ausente queda fuera de la reproducción, que un filtro de la tabla no limita el álbum y que ponerlo a continuación conserva la pista activa y el orden al recargar WebView2. La cabecera se revisó a 900 y 1180 px.
 

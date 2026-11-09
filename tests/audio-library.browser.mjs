@@ -56,6 +56,7 @@ const setup = `
     if(cmd==="plugin:window|is_maximized")return false;
     if(cmd==="startup")return {...copy(state),folder:settings.folder,enginesReady:true,engineError:null};
     if(cmd==="get_snapshot")return copy(state);
+    if(cmd==="public_source_inspect")return {provider:"librivox",sourceUrl:args.url,title:"Libro de prueba en LibriVox",description:null,rights:null,entries:[],assets:[],nextCursor:null,warnings:[]};
     if(cmd==="local_timezone")return "Romance Standard Time";
     if(cmd==="thumbnail"){
       const design=args.id==="archive"?'<circle cx="50" cy="50" r="34" fill="none" stroke="#e5e5e7" stroke-width="5"/><circle cx="50" cy="50" r="8" fill="#e5e5e7"/>':'<path d="M20 20h60v60H20zM20 46h60M48 20v60" stroke="#b2b5bd" stroke-width="4" fill="none"/>';
@@ -455,6 +456,39 @@ try {
   await page.waitForFunction(() => document.getElementById("audio-engine").src.endsWith("/chapter2") && !document.getElementById("audio-engine").paused);
   assert.deepEqual(await trackTitles(), ["Capítulo 1", "Capítulo 2", "Capítulo 3"]);
   assert.deepEqual(await page.locator(".audio-next li strong").allTextContents(), ["Capítulo 3"]);
+  await page.evaluate(async () => {
+    const { state } = window.audioFixture;
+    const third = state.library.find(item => item.id === "chapter3");
+    third.missing = true;
+    const fourth = structuredClone(third);
+    Object.assign(fourth, { id:"chapter4", name:"Capítulo 4.wav", path:"C:/fixture/Capítulo 4.wav", missing:false });
+    fourth.details.audiobook.chapter = 4;
+    state.library.push(fourth);
+    const { emit } = await import("/node_modules/@tauri-apps/api/event.js");
+    await emit("library-update");
+  });
+  await page.locator("[data-action='audio-play'][data-id='chapter4']").waitFor();
+  await page.locator("[data-action='audio-play'][data-id='chapter2']").click();
+  assert.deepEqual(await page.locator(".audio-next li strong").allTextContents(), []);
+  await page.locator("#audio-engine").evaluate(el => { el.currentTime=9.8; });
+  const missingChapter = page.getByText("Falta el capítulo 3 en Biblioteca.", { exact: true });
+  await missingChapter.waitFor();
+  assert.equal(await page.locator("#audio-engine").evaluate(el => el.paused && el.src.endsWith("/chapter2")), true);
+  assert.equal(await page.getByRole("button", { name:/Continuar · Libro de prueba · Capítulo 4/ }).count(), 0);
+  for (const [width,height] of [[1180,780],[900,620]]) {
+    await page.setViewportSize({width,height});
+    await missingChapter.scrollIntoViewIfNeeded();
+    assert.ok(await page.locator(".audio-library").evaluate(el => el.scrollWidth <= el.clientWidth + 1));
+    await page.screenshot({path:`${directory}/audiobook-gap-${width}.png`});
+  }
+  await page.getByRole("button", { name:"Ver edición en LibriVox", exact:true }).press("Enter");
+  const edition = page.getByRole("heading", { name:"Libro de prueba en LibriVox", exact:true });
+  assert.ok(await edition.evaluate(heading => heading === document.activeElement));
+  assert.equal(await page.evaluate(() => window.audioFixture.calls.filter(call => call.cmd === "public_source_inspect").at(-1).args.url), "https://librivox.org/api/feed/audiobooks/id/1");
+  assert.equal(await page.evaluate(() => window.audioFixture.calls.filter(call => call.cmd === "queue_public_files").length), 0);
+  await page.getByRole("button", { name:"Biblioteca", exact:true }).click();
+  await page.locator("[data-action='audio-play'][data-id='chapter4']").click();
+  await page.waitForFunction(() => document.getElementById("audio-engine").src.endsWith("/chapter4") && !document.getElementById("audio-engine").paused);
   await page.evaluate(async () => {
     const { state } = window.audioFixture;
     const book = structuredClone(state.library.find(item => item.id === "chapter1"));

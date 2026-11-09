@@ -387,7 +387,7 @@ export function createFileSources(hooks: FileSourceHooks) {
       ${hasPage ? `<div class="file-source-results"><div class="file-source-result-heading"><div>
         <span class="file-source-eyebrow">${isPublic ? zenodoHistory ? t("Zenodo · Historial de versiones", "Zenodo · Version history")
           : zenodoCommunity ? t("Zenodo · Comunidad", "Zenodo · Community") : h(publicPage ? publicNames[publicPage.provider] : "") : h(cloudName(provider))}</span>
-        <h2${isPublic && (catalogReturn || zenodoHistory) ? ' tabindex="-1"' : ""}>${h(isPublic ? publicTitle : trail.at(-1)?.name ?? t("Mis archivos", "My files"))}</h2>${isPublic ? zenodoSummary() : ""}
+        <h2${isPublic && (catalogReturn || zenodoHistory || chapters && !isSearch) ? ' tabindex="-1"' : ""}>${h(isPublic ? publicTitle : trail.at(-1)?.name ?? t("Mis archivos", "My files"))}</h2>${isPublic ? zenodoSummary() : ""}
         ${localCount ? `<p class="field-note">${localCount === 1 ? t("1 capítulo en Biblioteca", "1 chapter in Library")
           : t(`${localCount} capítulos en Biblioteca`, `${localCount} chapters in Library`)}</p>` : ""}</div>
         ${bookId && localCount ? action("open-audiobook", t("Abrir en Estantería", "Open in Bookshelf"), "library", "secondary", `data-id="${h(bookId)}" ${busy ? "disabled" : ""}`) : ""}
