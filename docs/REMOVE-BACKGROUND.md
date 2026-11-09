@@ -12,6 +12,12 @@ Select **Zoom preview 2×** to inspect the same area in both panes. Scroll eithe
 
 Adjust the mask by up to eight pixels in either direction and select the amount of smoothing. Generate a new preview after changing an export setting. Choose a transparent background or a solid color, then export a PNG or lossless WebP. The queued result preserves the stored pixel dimensions and is linked to the original in Library. The source stays intact.
 
+For a transparent export, select **Create sticker** next to the file in **Latest export**. You can also open a completed cutout job in **Downloads** and select the same action. The sticker editor starts with that file selected and lets you choose a profile before generating a preview. [Sticker export](STICKERS.md)
+
+![Create sticker beside a transparent cutout in Latest export](background-to-sticker.png)
+
+The Windows test starts with a synthetic export and opens it from both entry points. It checks the layout at 900 and 1180 px, focus after keyboard activation, and the absence of the shortcut on solid or missing outputs. It runs FFmpeg to export the WebP and checks that the cutout's transparency survives.
+
 The model estimates the subject, so check fine details, shadows and similarly colored objects before exporting. It accepts still images up to 64 MiB, 8192 pixels per side and 24 million pixels total. The preview uses a smaller display copy when the long side exceeds 640 pixels.
 
 Inference uses the system's `Windows.AI.MachineLearning` API on CPU. The worker runs in a separate process under nabnab's processing limit so cancellation can stop it. Windows x64 with Windows ML and nabnab's bundled FFmpeg are required. The model comes from rembg's `v0.0.0` release. Its SHA-256 starts with `309c8469`. U²-Net is published under Apache-2.0. [Model source](https://github.com/danielgatis/rembg/blob/main/rembg/sessions/u2netp.py) · [U²-Net license](https://github.com/xuebinqin/U-2-Net/blob/master/LICENSE) · [Windows ML CPU device](https://learn.microsoft.com/en-us/uwp/api/windows.ai.machinelearning.learningmodeldevicekind)

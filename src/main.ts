@@ -793,6 +793,11 @@ async function handleAction(action: string, button: HTMLButtonElement, event?: M
   }
   if(action==='share-open'){deviceShare.open();return;}
   if(action==='share-file'){deviceShare.open({ids:[id]});return;}
+  if(action==='sticker-from-cutout'){
+    if(stickerTool.selectInput(id))await openToolDestination(()=>openLocalTool('stickers'),'image');
+    else notify(t('El recorte no está disponible o Stickers está ocupado.','The cutout is unavailable or Stickers is busy.'));
+    return;
+  }
   if(action==='share-selected'){deviceShare.open({ids:[...library.selected]});return;}
   if(action==='share-collection'){
     const collection=button.dataset.collection??'';

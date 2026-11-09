@@ -20,13 +20,14 @@ export type ToolOptions =
   | {kind:'audioProcess';operation:'normalize'|'silence'|'denoise';profile:'podcast'|'broadcast'|'music'}
   | {kind:'imageConvert';format:'jpg'|'png'|'webp';width:number;quality:number;stripMetadata:boolean};
 export type ToolKind = ToolOptions["kind"];
+export type BackgroundFill = { kind: "transparent" } | { kind: "solid"; rgb: number[] };
 export type JobSource = {kind:"webArchive";reference:string;format:"html"|"epub"|"md";collection:string;tags:string[];parentId:string|null}
   | {kind:"voice";planId:string}
   | {kind:"capture";captureId:string}
   | {kind:"imageAssets";libraryIds:string[];options:{kind:string};inputHashes:string[]}
   | {kind:"sticker";selection:{libraryId:string;options:{profile:"telegramImage"|"telegramVideo"|"whatsappImage"|"whatsappAnimated"}}}
   | {kind:"upscale";selection:{libraryId:string;options:{model:"photo"|"illustration";scale:number;tile:number}}}
-  | {kind:"background";selection:{libraryId:string;options:{format:"png"|"webp"}}}
+  | {kind:"background";selection:{libraryId:string;options:{format:"png"|"webp";fill:BackgroundFill}}}
   | {kind:"stems";selection:{libraryId:string;inputHash:string}}
   | {kind:"captionTranslation";selection:{input:{libraryId:string;trackId:string};pair:"es-en"|"en-es";sourceHash:string}}
   | {kind:"captionTranslationExport";options:{draftId:string;revision:number;format:"srt"|"vtt";bilingual:boolean}}

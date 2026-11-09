@@ -91,6 +91,17 @@ export function createStickerTool(hooks: Hooks) {
     playAnimation = false;
   }
 
+  function selectInput(id: string) {
+    if (busy || !items().some(item => item.id === id)) return false;
+    libraryId = id;
+    start = "0";
+    sourceOpen = false;
+    if (!motion() && profiles[profile].duration !== null) profile = profile === "telegramVideo" ? "telegramImage" : "whatsappImage";
+    invalidate();
+    error = "";
+    return true;
+  }
+
   function options(): Options {
     return {
       profile, crop: crop ? { horizontal, vertical } : null, outline,
@@ -258,9 +269,13 @@ export function createStickerTool(hooks: Hooks) {
       return true;
     }
     if (target.name === "sticker-input") {
-      libraryId = target.value; start = "0"; sourceOpen = false;
-      if (!motion() && profiles[profile].duration !== null) profile = profile === "telegramVideo" ? "telegramImage" : "whatsappImage";
-    } else switch (target.id) {
+      if (selectInput(target.value)) {
+        hooks.render();
+        document.getElementById("sticker-profile")?.focus({ preventScroll: true });
+      }
+      return true;
+    }
+    switch (target.id) {
       case "sticker-profile":
         profile = target.value as Profile;
         duration = String(Math.min(Number(duration) || 1.5, profiles[profile].duration ?? 10));
@@ -276,7 +291,6 @@ export function createStickerTool(hooks: Hooks) {
     invalidate();
     error = "";
     hooks.render();
-    if (target.name === "sticker-input") document.getElementById("sticker-profile")?.focus({ preventScroll: true });
     return true;
   }
 
@@ -293,5 +307,5 @@ export function createStickerTool(hooks: Hooks) {
     }
     return true;
   }
-  return { render, click, input, submit };
+  return { render, click, input, submit, selectInput };
 }

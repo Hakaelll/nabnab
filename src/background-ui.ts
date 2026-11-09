@@ -1,12 +1,11 @@
 import "./background.css";
-import { escapeHtml as h, type Copy, type Snapshot } from "./contracts";
+import { escapeHtml as h, type BackgroundFill, type Copy, type Snapshot } from "./contracts";
 import { imageExports } from "./image-exports";
 import { isCancelled } from "./presentation";
 import { action, icon, option } from "./views-common";
 
 type Format = "png" | "webp";
 type Surface = "grid" | "light" | "dark";
-type Fill = { kind: "transparent" } | { kind: "solid"; rgb: number[] };
 interface Component { id: string; installed: boolean; enabled: boolean; available: boolean; size: number }
 interface Preview { previewId: number; dimensions: { width: number; height: number }; result: number[]; mask: number[] }
 interface Hooks {
@@ -47,7 +46,7 @@ export function createBackgroundTool(hooks: Hooks) {
   }
 
   function options() {
-    const fill: Fill = transparent ? { kind: "transparent" }
+    const fill: BackgroundFill = transparent ? { kind: "transparent" }
       : { kind: "solid", rgb: [1, 3, 5].map(offset => Number.parseInt(color.slice(offset, offset + 2), 16)) };
     return { format, fill, edge, softness };
   }

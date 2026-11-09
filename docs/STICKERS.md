@@ -2,6 +2,8 @@
 
 Open **Tools → Image and composition → Stickers**. Choose an image, GIF or video from Library, or use the existing Import file action. Keep the framing or choose a square crop and move its horizontal or vertical position. The optional white outline follows the source alpha and the crop edges. Transparent padding gives every export a 512 × 512 canvas.
 
+To start with a cutout, export a transparent PNG or WebP in **Remove background**. Select **Create sticker** in **Latest export** or in the completed job's details in **Downloads**. Stickers opens with the cutout selected. Generate a new preview, then queue the export when you are ready. [Remove background](REMOVE-BACKGROUND.md)
+
 | Profile | Output | File limit | Duration |
 | --- | --- | --- | --- |
 | Telegram image | Transparent WebP | 512 KB | Single frame |
@@ -20,4 +22,4 @@ Choose the destination and select **Queue export**. Changes to the source or opt
 - In Telegram, open **@Stickers**, choose a compatible pack, and attach the WebP or WebM file. [Telegram import formats](https://core.telegram.org/import-stickers)
 - For WhatsApp, import the WebP into a compatible pack app, then add the pack from the phone. A pack contains 3–30 stickers and uses a single sticker type. [WhatsApp pack requirements](https://github.com/WhatsApp/stickers/blob/main/Android/README.md#sticker-art-and-app-requirements)
 
-The tool runs offline with the included FFmpeg and FFprobe. It accepts PNG, JPEG, WebP, BMP, GIF, MP4, M4V, MOV, MKV and WebM, with input limits of 512 MiB and 24 million pixels per frame. Animated input uses GIF or video. Transparent source regions are preserved. Subject segmentation is a separate tool.
+The tool runs offline with the included FFmpeg and FFprobe. It accepts PNG, JPEG, WebP, BMP, GIF, MP4, M4V, MOV, MKV and WebM, with input limits of 512 MiB and 24 million pixels per frame. Animated input uses GIF or video. Transparent source regions are preserved.

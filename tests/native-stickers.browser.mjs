@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { openTool } from "./tool-navigation.mjs";
 import { execFileSync, spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { copyFile, mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createRequire } from "node:module";
 
@@ -11,6 +12,27 @@ await mkdir(base, { recursive: true });
 const data = await mkdtemp(path.join(base, "native-run-"));
 const output = path.join(data, "output");
 await mkdir(output);
+const original = path.join(data, "Original del recorte.png");
+const cutout = path.join(output, "Recorte transparente.png");
+const solid = path.join(output, "Fondo sólido.png");
+const missing = path.join(output, "Recorte ausente.png");
+const ffmpeg = path.join(root, "src-tauri/engines/ffmpeg.exe");
+for (const [filter, file] of [
+  ["color=c=0x344056:s=480x400", original],
+  ["color=c=black@0:s=480x400,format=rgba,drawbox=x=105:y=85:w=270:h=230:color=0x8bd6c5@1:t=fill:replace=1", cutout],
+]) execFileSync(ffmpeg, ["-nostdin", "-v", "error", "-f", "lavfi", "-i", filter, "-frames:v", "1", file], { windowsHide: true });
+await copyFile(original, solid);
+const originalBytes = await readFile(original), cutoutBytes = await readFile(cutout);
+const item = async (id, file, parentId = null) => ({ id, parentId, name: path.basename(file), path: file, kind: "image",
+  size: (await stat(file).catch(() => null))?.size ?? 0, width: 480, height: 400, addedAt: 1, collections: [], tags: [] });
+const inputHash = createHash("sha256").update(originalBytes).digest("hex");
+const published = (id, file, fill) => ({ id, runId: 1, clientRequest: id, title: path.basename(file), createdAt: 1, updatedAt: 1,
+  state: "completed", source: { kind: "background", selection: { libraryId: "cutout-original", inputHash, options: { fill, format: "png", edge: 0, softness: 1 } } },
+  folder: output, provider: "Local", outputs: [file], attempt: 1, groupId: "cutout-fixture-batch" });
+await writeFile(path.join(data, "state-v1.json"), JSON.stringify({ schemaVersion: 2, settings: { folder: output },
+  library: [await item("cutout-original", original), await item("cutout-transparent", cutout, "cutout-original"), await item("cutout-solid", solid, "cutout-original"), await item("cutout-missing", missing, "cutout-original")],
+  jobs: [published("cutout-job", cutout, { kind: "transparent" }), published("cutout-solid-job", solid, { kind: "solid", rgb: [52, 64, 86] }), published("cutout-missing-job", missing, { kind: "transparent" })],
+}));
 const { chromium } = createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODULE || "playwright");
 const port = Number(process.env.NABNAB_STICKER_DEBUG_PORT || 9248);
 const endpoint = `http://127.0.0.1:${port}`;
@@ -199,8 +221,57 @@ try {
   assert.ok(animatedBytes.length <= 500000);
   assert.deepEqual(await readFile(animation.path), animatedBytes);
   assert.deepEqual(await readFile(clip), clipBytes);
+
+  await module.getByRole("button", { name: "Generar muestra" }).click();
+  await play.waitFor();
+  await openTool(page, "background");
+  const exports = page.getByRole("region", { name: "Última exportación", exact: true });
+  const create = exports.getByRole("button", { name: "Crear sticker · Recorte transparente.png" });
+  await create.waitFor();
+  assert.equal(await exports.getByRole("button", { name: /^Crear sticker/ }).count(), 1);
+  assert.equal(await exports.getByText("Fondo sólido.png", { exact: true }).count(), 1);
+  assert.equal(await exports.getByText("Recorte ausente.png", { exact: true }).count(), 0);
+  const beforeCutout = (await rpc("get_snapshot")).jobs.length;
+  for (const [width, height] of [[900, 620], [1180, 780]]) {
+    await page.setViewportSize({ width, height });
+    assert.ok(await exports.evaluate(element => element.scrollWidth <= element.clientWidth + 1));
+    await exports.screenshot({ path: path.join(base, `cutout-handoff-${width}.png`), animations: "disabled" });
+  }
+  await create.press("Enter");
+  assert.equal(await module.locator(".sticker-source > span").textContent(), path.basename(cutout));
+  assert.equal(await module.getByRole("heading", { name: "Stickers" }).evaluate(heading => heading === document.activeElement), true);
+  assert.equal(await page.locator("#sticker-profile").inputValue(), "whatsappImage");
+  assert.equal(await image.count(), 0, "The prior animation preview must be invalidated");
+  assert.equal(await submit.isDisabled(), true);
+  assert.equal((await rpc("get_snapshot")).jobs.length, beforeCutout);
+
+  await page.getByRole("button", { name: "Descargas", exact: true }).click();
+  await page.locator('[data-filter="completed"]').click();
+  await page.locator('[data-action="inspect-job"][data-id="cutout-job"]').click();
+  await page.getByRole("button", { name: "Crear sticker · Recorte transparente.png" }).click();
+  assert.equal(await module.locator(".sticker-source > span").textContent(), path.basename(cutout));
+  await module.getByRole("button", { name: "Generar muestra" }).click();
+  await image.waitFor();
+  const previewBytes = Buffer.from((await image.getAttribute("src")).split(",")[1], "base64");
+  assert.deepEqual(await image.evaluate(async element => {
+    await element.decode();
+    const canvas = document.createElement("canvas"); canvas.width = canvas.height = 512;
+    const ctx = canvas.getContext("2d"); ctx.drawImage(element, 0, 0);
+    return [ctx.getImageData(80, 256, 1, 1).data[3], ctx.getImageData(256, 256, 1, 1).data[3]];
+  }), [0, 255]);
+  await submit.click();
+  const sticker = await wait(async () => {
+    const snapshot = await rpc("get_snapshot");
+    const job = snapshot.jobs.find(job => job.source.kind === "sticker" && job.source.selection.libraryId === "cutout-transparent");
+    if (job?.state === "error") throw Error(JSON.stringify(job.error));
+    return job?.state === "completed" && snapshot.library.find(item => item.path === job.outputs[0]);
+  });
+  assert.equal(sticker.parentId, "cutout-transparent");
+  assert.deepEqual(await readFile(sticker.path), previewBytes);
+  assert.deepEqual(await readFile(cutout), cutoutBytes);
+  assert.deepEqual(await readFile(original), originalBytes);
   assert.deepEqual(errors, []);
-  console.log("Verified still and animated WebP previews, paused alpha inspection, queue output and original bytes.");
+  console.log("Verified still and animated WebP exports and the cutout handoff from Tools and Downloads with preserved transparency and source files.");
 } finally {
   try { await page?.evaluate(async () => { const { getCurrentWindow } = await import("/node_modules/@tauri-apps/api/window.js"); await getCurrentWindow().close(); }); } catch {}
   if (child?.exitCode === null) {
