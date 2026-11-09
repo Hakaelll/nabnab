@@ -154,6 +154,52 @@ try {
   await page.getByRole("button", {name:"Todos los álbumes"}).press("Enter");
   assert.equal(await page.evaluate(() => document.activeElement?.querySelector("strong")?.textContent), "Nocturno");
   await page.getByRole("button", {name:"Grupos anteriores"}).press("Enter");
+  await page.evaluate(async () => {
+    const { state } = window.audioFixture;
+    const missing = structuredClone(state.library.find(item => item.id === "second"));
+    missing.id = "album-missing";
+    missing.missing = true;
+    missing.details.audio.title = "Pista ausente";
+    state.library.push(missing);
+    const { emit } = await import("/node_modules/@tauri-apps/api/event.js");
+    await emit("library-update");
+  });
+  await page.getByText("Pista ausente", { exact: true }).waitFor();
+  await page.locator(".audio-shelf-item").filter({ hasText: "Sesiones" }).press("Enter");
+  const album = page.getByRole("region", { name: "Sesiones" });
+  await page.locator("#audio-query").fill("Segunda pista");
+  assert.deepEqual(await trackTitles(), ["Segunda pista"]);
+  assert.match(await album.innerText(), /Conjunto[\s\S]*3 pistas · 0:30 · 1 ausente/);
+  const playAlbum = album.getByRole("button", { name: "Reproducir álbum" });
+  await playAlbum.press("Enter");
+  await page.waitForFunction(() => { const media=document.getElementById("audio-engine"); return media.dataset.localPlayer==="first"&&!media.paused; });
+  assert.deepEqual(await page.locator(".audio-next li strong").allTextContents(), ["Segunda pista", "Tercera pista"]);
+  assert.equal(await playAlbum.evaluate(button => button === document.activeElement), true);
+  for (const [width, height] of [[900, 620], [1180, 780]]) {
+    await page.setViewportSize({ width, height });
+    assert.ok(await album.evaluate(node => node.scrollWidth <= node.clientWidth + 1));
+    await album.screenshot({ path: `${directory}/album-${width}.png`, animations: "disabled" });
+  }
+  await page.getByRole("button", {name:"Todos los álbumes"}).press("Enter");
+  await page.locator("#audio-query").clear();
+  await page.locator("[data-action='audio-play'][data-id='archive']").click();
+  await page.waitForFunction(() => { const media=document.getElementById("audio-engine"); return media.dataset.localPlayer==="archive"&&!media.paused; });
+  await page.locator(".audio-shelf-item").filter({ hasText: "Sesiones" }).press("Enter");
+  await page.locator("#audio-query").fill("sin resultados");
+  assert.deepEqual(await trackTitles(), []);
+  await album.getByRole("button", { name: "Álbum a continuación" }).press("Enter");
+  assert.deepEqual(await page.locator(".audio-next li strong").allTextContents(), ["Primera pista", "Segunda pista", "Tercera pista", "Improvisación", "Toma nocturna"]);
+  assert.equal(await page.locator("#audio-engine").evaluate(media => media.dataset.localPlayer === "archive" && !media.paused), true);
+  await page.locator("#audio-close").click();
+  await page.getByRole("button", {name:"Todos los álbumes"}).press("Enter");
+  await page.locator("#audio-query").clear();
+  await page.evaluate(async () => {
+    const { state } = window.audioFixture;
+    state.library = state.library.filter(item => item.id !== "album-missing");
+    const { emit } = await import("/node_modules/@tauri-apps/api/event.js");
+    await emit("library-update");
+  });
+  await page.getByText("Pista ausente", { exact: true }).waitFor({ state: "hidden" });
   await page.locator("#audio-artist").selectOption(JSON.stringify("Rafael"));
   assert.deepEqual(await page.locator(".audio-track strong").allTextContents(), ["Segunda pista"]);
   await page.locator("#audio-artist").selectOption("");

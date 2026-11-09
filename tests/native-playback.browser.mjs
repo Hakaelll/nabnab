@@ -19,6 +19,7 @@ const windowsMedia = process.env.NABNAB_PLAYBACK_WINDOWS_MEDIA === "1";
 const embeddedBookOnly = process.env.NABNAB_PLAYBACK_EMBEDDED_BOOK === "1";
 const lyricsOnly = process.env.NABNAB_PLAYBACK_LYRICS === "1";
 const miniWheelOnly = process.env.NABNAB_PLAYBACK_MINI_WHEEL === "1";
+const albumOnly = process.env.NABNAB_PLAYBACK_ALBUM === "1";
 const fixtureArtist = windowsMedia ? `Laboratorio nabnab · ${path.basename(data)}` : "Laboratorio nabnab";
 const fixtureTitle = desktopRestore
   ? "Señal para la cola · Grabación completa de prueba para un título largo que debe dejar visibles todos los controles del minirreproductor"
@@ -1685,11 +1686,66 @@ async function verifyPlayback(initial) {
   await verifyBookContinuation(bookIds);
 }
 
+async function verifyAlbumPlayback(initial) {
+  const titles = ["Apertura", "Interludio", "Cierre", "Toma ausente"];
+  const albumFiles = titles.map((title, index) => path.join(data, `Álbum ${index + 1} ${title}.mp3`));
+  for (const [index, file] of albumFiles.entries()) {
+    encode("-f", "lavfi", "-i", `sine=frequency=${330 + index * 40}:duration=18`, "-c:a", "libmp3lame",
+      "-metadata", `title=${titles[index]}`, "-metadata", "artist=Solista de prueba", "-metadata", "album_artist=Conjunto de prueba",
+      "-metadata", "album=Sesión en dos discos", "-metadata", `disc=${index < 2 ? 1 : 2}`, "-metadata", `track=${index % 2 + 1}`, file);
+  }
+  await rpc("save_settings", { settings: { ...initial.settings, folder: output, language: "es", reducedMotion: true, trayEnabled: false, closeToTray: false } });
+  const snapshot = await rpc("import_paths", { paths: [music, albumFiles[2], albumFiles[0], albumFiles[1], albumFiles[3]] });
+  const first = snapshot.library.find(item => item.name === path.basename(albumFiles[0]));
+  const unrelated = snapshot.library.find(item => item.name === path.basename(music));
+  assert.equal(first.details.audio.albumArtist, "Conjunto de prueba");
+  await rename(albumFiles[3], `${albumFiles[3]}.moved`);
+  const openAudio = async () => {
+    await page.locator('[data-page="library"]').click();
+    await page.locator('[data-action="library-section"][data-section="audio"]').click();
+  };
+  const openAlbum = () => page.locator(".audio-shelf-item").filter({ hasText: "Sesión en dos discos" }).press("Enter");
+  const next = () => page.locator(".audio-next li strong").allTextContents();
+  const engine = page.locator("#audio-engine");
+  const active = id => page.waitForFunction(id => { const media = document.querySelector("#audio-engine"); return media.dataset.localPlayer === id && !media.paused; }, id);
+  await page.reload();
+  await openAudio();
+  await openAlbum();
+  const album = page.getByRole("region", { name: "Sesión en dos discos" });
+  await page.locator("#audio-query").fill("Interludio");
+  assert.deepEqual(await page.locator(".audio-track strong").allTextContents(), ["Interludio"]);
+  assert.match(await album.innerText(), /3 pistas.*1 ausente/);
+  await album.getByRole("button", { name: "Reproducir álbum" }).press("Enter");
+  await active(first.id);
+  assert.deepEqual(await next(), titles.slice(1, 3));
+  for (const [width, height] of [[900, 620], [1180, 780]]) {
+    await page.setViewportSize({ width, height });
+    assert.ok(await album.evaluate(node => node.scrollWidth <= node.clientWidth + 1));
+    await album.screenshot({ path: path.join(base, `album-${width}.png`), animations: "disabled" });
+  }
+  await page.getByRole("button", { name: "Todos los álbumes" }).click();
+  await page.locator("#audio-query").clear();
+  await page.locator(`[data-action="audio-play"][data-id="${unrelated.id}"]`).click();
+  await active(unrelated.id);
+  const current = await engine.elementHandle();
+  await openAlbum();
+  await album.getByRole("button", { name: "Álbum a continuación" }).press("Enter");
+  assert.deepEqual(await next(), titles.slice(0, 3));
+  assert.equal(await current.evaluate((node, id) => node === document.querySelector("#audio-engine") && node.dataset.localPlayer === id && !node.paused, unrelated.id), true);
+  await page.reload();
+  await openAudio();
+  await page.waitForFunction(id => document.querySelector("#audio-engine").dataset.localPlayer === id, unrelated.id);
+  assert.deepEqual(await next(), titles.slice(0, 3));
+  assert.equal((await rpc("get_snapshot")).jobs.length, 0);
+  console.log("Verified album order, unavailable tracks, playback continuity and the persisted queue in WebView2.");
+}
+
 try {
   const initial = await launch();
   if (miniWheelOnly) await verifyFloatingMiniWheel();
   else if (lyricsOnly) await verifyLocalLyrics();
   else if (embeddedBookOnly) await verifyEmbeddedBook();
+  else if (albumOnly) await verifyAlbumPlayback(initial);
   else await verifyPlayback(initial);
 } catch (error) {
   console.error(log);

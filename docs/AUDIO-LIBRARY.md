@@ -2,6 +2,10 @@
 
 En **Biblioteca → Audio** puedes alternar entre Música, Podcasts, Audiolibros y Listas. En Música, elige una tarjeta de **Álbumes** para ver sus pistas, ordenadas por disco y número. La estantería usa portadas locales o incrustadas cuando están disponibles. También puedes filtrar por artista, álbum o género. Si un archivo antiguo aparece sin etiquetas, selecciónalo y usa **Leer etiquetas pendientes**.
 
+Al abrir un álbum, la cabecera muestra su artista, la duración disponible y cuántas pistas faltan en disco. **Reproducir álbum** empieza por la primera pista disponible. **Álbum a continuación** coloca las demás en la cola sin interrumpir la pista actual. Ambas acciones usan el orden de disco y pista como base y abarcan el álbum aunque hayas filtrado la tabla. El reproductor aplica su preferencia de reproducción aleatoria al iniciar la escucha.
+
+![Cabecera de un álbum de dos discos con archivos de prueba](audio-album-playback.png)
+
 Al cambiar entre Música, Podcasts y Audiolibros, cada vista recuerda su búsqueda, página y selección mientras nabnab está abierto. El resumen indica cuántas pistas marcadas quedan fuera de la página actual. Las acciones de selección se aplican a la vista activa.
 
 El minirreproductor permanece visible al cambiar de sección. La cola **A continuación** es independiente de Descargas. En música, puedes activar el modo aleatorio y alternar entre repetir toda la cola o repetir una pista. Los controles multimedia de Windows muestran el título, el artista y la carátula disponible. Utilizan la misma cola aunque la ventana principal esté minimizada.
@@ -31,6 +35,8 @@ La prueba de interfaz reproduce un WAV silencioso en Edge con almacenamiento de 
 Con `NABNAB_PLAYBACK_LYRICS=1`, `tests/native-playback.browser.mjs` abre dos LRC locales. Comprueba el desplazamiento de tiempo declarado en el archivo, las líneas simultáneas y el cambio de letra al pasar de pista. La revisión visual se hizo a 900 y 1180 px.
 
 Con `NABNAB_PLAYBACK_EMBEDDED_BOOK=1`, `tests/native-playback.browser.mjs` importa un M4B local de tres capítulos, guarda dos puntos de escucha y comprueba ambos tras reiniciar nabnab. También verifica que el resumen cambia al retomar y pausar otro capítulo. La revisión visual se hizo a 900 y 1180 px. [Índice de capítulos en Windows](audio-embedded-chapters.png)
+
+Con `NABNAB_PLAYBACK_ALBUM=1`, la prueba nativa importa MP3 sintéticos de dos discos en orden distinto al del álbum. Comprueba que un archivo ausente queda fuera de la reproducción, que un filtro de la tabla no limita el álbum y que ponerlo a continuación conserva la pista activa y el orden al recargar WebView2. La cabecera se revisó a 900 y 1180 px.
 
 ![Biblioteca de audio y minirreproductor persistente con datos de prueba](audio-library-preview.png)
 
