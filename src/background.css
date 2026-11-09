@@ -8,17 +8,36 @@
 .background-fields > label { flex: 1 1 115px; min-width: 0; }
 .background-fields input[type="range"] { min-height: 30px; margin: 0; padding: 0; accent-color: var(--action); }
 .background-fields input[type="color"] { padding: 4px 8px; }
+.background-view-actions { justify-content: flex-end; flex-wrap: wrap; margin: 8px 0; }
 .background-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 10px 0; }
+.background-pair[data-overlay="true"] { grid-template-columns: minmax(0, 1fr); }
 .background-pair figure { margin: 0; min-width: 0; }
 .background-pair figcaption { font-size: 12px; font-weight: 600; color: var(--muted); }
 .background-pair .asset-preview-image { position: relative; aspect-ratio: var(--background-ratio); max-height: 380px; overflow: hidden; margin: 4px 0 0; border-radius: 8px; }
-.background-pair .asset-preview-image img { position: absolute; inset: 0 auto auto 0; width: 100%; height: 100%; max-width: none; object-fit: contain; }
+.background-pair[data-overlay="true"] .asset-preview-image { margin-inline: auto; }
+.background-pair .asset-preview-image > * { position: absolute; inset: 0 auto auto 0; width: 100%; height: 100%; max-width: none; }
+.background-pair img { object-fit: contain; }
 .background-pair[data-zoomed="true"] .asset-preview-image { overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--muted) transparent; }
-.background-pair[data-zoomed="true"] .asset-preview-image img { width: 200%; height: 200%; }
+.background-pair[data-zoomed="true"] .asset-preview-image > * { width: 200%; height: 200%; }
+.background-review { --background-mask-ink: #ce7488; }
+.background-mask-overlay {
+  background: var(--background-mask-ink);
+  opacity: 0.55;
+  pointer-events: none;
+  forced-color-adjust: none;
+  mask-image: var(--background-mask), var(--background-mask);
+  mask-mode: alpha, luminance;
+  mask-size: contain;
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-composite: subtract;
+}
 .background-pair .asset-preview-image:focus-visible { outline: 2px solid var(--action); outline-offset: 2px; }
 .background-pair [data-surface="light"] { background: #ededee; }
 .background-pair [data-surface="dark"] { background: #101114; }
 .background-review-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
 .background-review-controls label { flex-direction: row; align-items: center; flex-wrap: wrap; }
-.background-review [data-action="background-zoom"][aria-pressed="true"] { background: var(--surface); border-color: var(--action); color: var(--text); }
+.background-mask-key { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.background-mask-key::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--background-mask-ink); forced-color-adjust: none; }
+.background-view-actions [aria-pressed="true"] { background: var(--surface); border-color: var(--action); color: var(--text); }
 .background-empty { margin: 10px 0 0; min-height: 100px; display: grid; place-items: center; padding: 14px; text-align: center; color: var(--muted); border: 1px dashed var(--border); border-radius: 8px; }

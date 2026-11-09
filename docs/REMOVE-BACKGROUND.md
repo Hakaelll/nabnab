@@ -6,7 +6,11 @@ Open **Tools → Image and composition → Remove background**. Choose a still P
 
 ![Windows ML cutout next to its opacity mask](background-preview.png)
 
-Select **Zoom preview 2×** to inspect the same area in both panes. Scroll either pane or focus it and use the arrow keys. The position stays in sync when you switch viewing surfaces. Zoom uses the existing preview and leaves the exported image at its original dimensions.
+Select **Overlay mask** to see a larger cutout with the removed area tinted pink. The tint fades along partially transparent edges. Select it again to return to the separate mask. Both layouts use the same preview and export settings.
+
+![A preview with the removed area tinted pink around the leaves](background-mask-overlay.png)
+
+Select **Zoom preview 2×** to inspect the edges. Scroll the preview or focus it and use the arrow keys. The two panes scroll together in the side-by-side view. nabnab keeps the current area in view when you switch layouts or viewing surfaces. The export keeps its original dimensions.
 
 ![Synchronized cutout and mask zoom with a synthetic preview](background-edge-zoom.png)
 
@@ -17,6 +21,8 @@ For a transparent export, select **Create sticker** next to the file in **Latest
 ![Create sticker beside a transparent cutout in Latest export](background-to-sticker.png)
 
 The Windows test starts with a synthetic export and opens it from both entry points. It checks the layout at 900 and 1180 px, focus after keyboard activation, and the absence of the shortcut on solid or missing outputs. It runs FFmpeg to export the WebP and checks that the cutout's transparency survives.
+
+The Edge interface test uses a synthetic cutout and mask at 900 and 1180 px. It checks that the overlay tints the removed area, leaves the subject visible, keeps the pan position, and submits the same approved preview and export options.
 
 The model estimates the subject, so check fine details, shadows and similarly colored objects before exporting. It accepts still images up to 64 MiB, 8192 pixels per side and 24 million pixels total. The preview uses a smaller display copy when the long side exceeds 640 pixels.
 

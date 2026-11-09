@@ -97,6 +97,54 @@ try {
   await zoom.press("Space");
   assert.equal(await zoom.getAttribute("aria-pressed"), "false");
   assert.equal(await result.count(), 0);
+  const overlay = tool.getByRole("button", { name: "Superponer máscara" });
+  const frame = tool.locator("#background-result");
+  const tint = frame.locator(".background-mask-overlay");
+  for (const [width, height] of [[900, 620], [1180, 780]]) {
+    await page.setViewportSize({ width, height });
+    const pairedWidth = (await frame.boundingBox()).width;
+    await overlay.press("Space", { timeout: 3000 });
+    assert.equal(await overlay.getAttribute("aria-pressed"), "true");
+    assert.ok(await overlay.evaluate(element => element === document.activeElement));
+    assert.equal(await tool.locator("#background-mask").count(), 0);
+    assert.ok((await frame.boundingBox()).width > pairedWidth * 1.8);
+    assert.deepEqual(await tint.boundingBox(), await frame.locator("img").boundingBox());
+    assert.ok(await tool.evaluate(element => element.scrollWidth <= element.clientWidth + 1));
+    const png = (await frame.screenshot()).toString("base64");
+    const [background, leaf] = await page.evaluate(async png => {
+      const image = new Image();
+      image.src = `data:image/png;base64,${png}`;
+      await image.decode();
+      const canvas = document.createElement("canvas");
+      canvas.width = image.width;
+      canvas.height = image.height;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(image, 0, 0);
+      return [[0.15, 0.15], [0.4, 0.19]].map(([x, y]) => {
+        return [...ctx.getImageData(Math.floor(x * image.width), Math.floor(y * image.height), 1, 1).data];
+      });
+    }, png);
+    assert.ok(background[0] > background[1] + 25, `Removed area has no pink tint: ${background}`);
+    assert.ok(leaf[1] > leaf[0], `The mask changed the green subject: ${leaf}`);
+    await tool.locator(".background-review").scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `${directory}/overlay-${width}.png` });
+    await overlay.press("Space");
+    assert.equal(await overlay.getAttribute("aria-pressed"), "false");
+    assert.equal(await tool.locator("#background-mask").count(), 1);
+  }
+  await overlay.press("Space");
+  await zoom.press("Space");
+  const fraction = frame => frame.evaluate(element => element.scrollLeft / (element.scrollWidth - element.clientWidth));
+  const beforePan = await fraction(result);
+  await result.evaluate(element => element.addEventListener("scrollend", () => { element.dataset.panFinished = "true"; }, { once: true }));
+  await result.press("ArrowLeft");
+  await tool.locator('#background-result[data-pan-finished="true"]').waitFor({ timeout: 3000 });
+  const overlayPan = await fraction(result);
+  assert.ok(overlayPan < beforePan);
+  await overlay.press("Space");
+  const pairedPan = await fraction(result);
+  assert.ok(Math.abs(pairedPan - overlayPan) < 0.005, `Pan changed from ${overlayPan} to ${pairedPan}`);
+  assert.deepEqual(await position(result), await position(mask));
   await tool.getByRole("button", { name: "Exportar en la cola" }).click();
   const calls = await page.evaluate(() => window.backgroundCalls);
   assert.equal(calls.filter(call => call.command === "background_preview").length, 1);
@@ -105,7 +153,7 @@ try {
   });
   assert.equal(calls.find(call => call.command === "queue_background").args.previewId, 42);
   assert.deepEqual(errors, []);
-  console.log("Cutout and mask zoom and pan together in both directions without changing export settings.");
+  console.log("Cutout and mask stay aligned in paired and overlay views without changing export settings.");
 } finally {
   await browser.close();
 }
