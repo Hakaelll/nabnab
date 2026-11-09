@@ -12,7 +12,9 @@ Abre la conexión, navega por carpetas y marca archivos. **Indexar referencia** 
 
 ![Revisión de dos archivos marcados en un servidor de prueba a 900 píxeles](personal-server-selected.png)
 
-Si pulsas **Actualizar** en la carpeta, se conservan las marcas cuyos metadatos visibles coinciden con el listado anterior, aunque cambie el orden. Los archivos modificados o ausentes quedan fuera de la selección. Vuelve a marcar un archivo modificado para elegir la versión actual. Si la carpeta está inaccesible, puedes actualizar de nuevo para recuperar las marcas que todavía coincidan. Al copiar o indexar, nabnab comprueba que los metadatos seleccionados corresponden al último listado.
+Si pulsas **Actualizar** en la carpeta, se conservan las marcas cuyos metadatos visibles coinciden con el listado anterior, aunque cambie el orden. Los archivos modificados o ausentes quedan fuera de la selección. Vuelve a marcar un archivo modificado para elegir la versión actual. Si falla la consulta, **Carpeta no disponible** aparece junto a la ruta y muestra cuántas marcas quedan pendientes de verificar. Pulsa **Volver a intentar** para consultar esa carpeta de nuevo. Al copiar o indexar, nabnab comprueba que los metadatos seleccionados corresponden al último listado.
+
+![Carpeta inaccesible con tres marcas pendientes de comprobar y el foco en Volver a intentar](personal-server-offline.png)
 
 ![Selección de servidor después de actualizar una carpeta con un archivo modificado y otro ausente](personal-server-refresh.png)
 

@@ -246,6 +246,20 @@ label.file-source-row { cursor: pointer; }
 }
 .personal-folder-filter > [role="status"] { flex-basis: 100%; }
 .personal-folder-filter > label > svg { top: 50%; transform: translateY(-50%); }
+.personal-folder-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+  padding: 16px;
+  border: 1px solid var(--edge-quiet);
+  border-radius: 16px;
+  background: var(--secondary);
+}
+.personal-folder-error > div { flex: 1 1 230px; min-width: 0; overflow-wrap: anywhere; }
+.personal-folder-error h3 { margin: 0; font-size: 16px; }
+.personal-folder-error p { margin: 6px 0 0; }
 .personal-reference-review {
   padding: 16px;
   margin-bottom: 16px;

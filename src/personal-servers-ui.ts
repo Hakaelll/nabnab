@@ -13,6 +13,7 @@ interface Reference { id: string; serverName: string; selection: PersonalSelecti
 interface Review { kind: "reference" | "copy"; id: string; selection: PersonalSelection }
 interface ServerStatus { servers: Server[]; references: Reference[] }
 interface Challenge { challenge: number; fingerprint: string }
+type Operation = "read" | "probe" | "save" | "copy";
 
 interface Hooks {
   command<T>(name: string, args?: Record<string, unknown>): Promise<T>;
@@ -44,8 +45,8 @@ export function createPersonalServers(hooks: Hooks) {
   let selectionChanges: SelectionChange[] = [];
   let referenceId = "";
   let reviewing: Review | null = null;
-  let error = "";
-  let busy: "read" | "probe" | "save" | "copy" | null = null;
+  let error: { operation: Operation; message: string } | null = null;
+  let busy: Operation | null = null;
   let sequence = 0;
   let requestId = 0;
   let cancelled = false;
@@ -54,6 +55,7 @@ export function createPersonalServers(hooks: Hooks) {
     : kind === "sftp" ? "SFTP" : t("Carpeta de red / NAS", "Network folder / NAS");
   const activeServer = () => status?.servers.find(server => server.id === serverId);
   const activeReference = () => status?.references.find(reference => reference.id === referenceId);
+  const folderError = () => !cancelled && error?.operation === "read" ? error.message : null;
   const disabled = () => busy ? "disabled" : "";
   const label = (value: string[]) => value.join("/");
   const sameStamp = (left: Stamp, right: Stamp) => left.size === right.size && left.modified === right.modified && left.etag === right.etag;
@@ -72,17 +74,18 @@ export function createPersonalServers(hooks: Hooks) {
     trust = null;
   };
 
-  async function run(kind: NonNullable<typeof busy>, task: () => Promise<void>) {
+  async function run(kind: Operation, task: () => Promise<void>) {
     if (busy) return;
     busy = kind;
     requestId = Date.now() * 1000 + ++sequence % 1000;
     cancelled = false;
-    error = "";
+    error = null;
     hooks.render();
     try { await task(); }
     catch (failure) {
-      error = typeof failure === "string" ? failure : failure instanceof Error ? failure.message
+      const message = typeof failure === "string" ? failure : failure instanceof Error ? failure.message
         : t("No se pudo completar la operación.", "Could not complete the operation.");
+      error = { operation: kind, message };
     } finally { busy = null; hooks.render(); }
   }
 
@@ -120,6 +123,7 @@ export function createPersonalServers(hooks: Hooks) {
       const index = reviewedIndex();
       if (index >= 0) selected.add(index);
     });
+    if (folderError()) document.getElementById("personal-reload")?.focus();
   }
 
   async function openReview(review: Review) {
@@ -127,7 +131,7 @@ export function createPersonalServers(hooks: Hooks) {
     hooks.openBrowser();
     const { serverId, path } = review.selection;
     await browse(serverId, path.slice(0, -1), review);
-    document.getElementById("personal-reference-review-title")?.focus();
+    if (!folderError()) document.getElementById("personal-reference-review-title")?.focus();
   }
 
   function input(id: string, text: string, value: string, attributes = "") {
@@ -164,8 +168,8 @@ export function createPersonalServers(hooks: Hooks) {
     </form>` : ""}`;
   }
 
-  function feedback() {
-    return `${error ? `<div class="file-source-error" role="alert">${icon("error")}<span>${h(error)}</span></div>` : ""}
+  function feedback(inlineFolderError = false) {
+    return `${error && !inlineFolderError ? `<div class="file-source-error" role="alert">${icon("error")}<span>${h(error.message)}</span></div>` : ""}
       ${busy ? `<div class="file-source-progress" role="status"><span>${busy === "probe" ? t("Consultando la huella…", "Reading the fingerprint…") : busy === "read" ? t("Consultando la carpeta…", "Reading the folder…") : t("Guardando…", "Saving…")}</span>${busy === "read" || busy === "probe" ? action("personal-cancel", t("Cancelar", "Cancel"), "close", "quiet") : ""}</div>` : ""}`;
   }
 
@@ -207,6 +211,7 @@ export function createPersonalServers(hooks: Hooks) {
     const changedVersion = current?.etag && stored.etag && current.etag !== stored.etag;
     const message = busy === "read" ? t("Consultando la carpeta…", "Reading the folder…")
       : !server && !error ? t("La conexión ya no está configurada.", "The connection is no longer configured.")
+      : folderError() ? t("La comparación sigue pendiente.", "The comparison is still pending.")
       : !entries ? t("Actualiza la carpeta para volver a consultar este archivo.", "Refresh the folder to check this file again.")
       : !current ? t("El archivo ya no aparece en esta carpeta.", "The file is no longer listed in this folder.")
       : changedVersion ? t("El identificador de versión es distinto.", "The version identifier differs.")
@@ -275,16 +280,29 @@ export function createPersonalServers(hooks: Hooks) {
     </div>`;
   }
 
+  function unavailableFolder(message: string) {
+    const pending = pendingRefresh.length;
+    return `<section class="personal-folder-error" aria-labelledby="personal-folder-error-title">
+      <div role="alert"><h3 id="personal-folder-error-title">${t("Carpeta no disponible", "Folder unavailable")}</h3>
+        <p>${h(message)}</p>
+        ${pending ? `<p class="field-note">${pending === 1 ? t("1 archivo pendiente de verificar.", "1 file to check again.")
+          : t(`${pending} archivos pendientes de verificar.`, `${pending} files to check again.`)}</p>` : ""}
+      </div>
+      ${action("personal-reload", t("Volver a intentar", "Try again"), "retry", "secondary", 'id="personal-reload"')}
+    </section>`;
+  }
+
   function renderBrowser() {
     const server = activeServer();
+    const failure = server ? folderError() : null;
     return `<section class="personal-servers">${reviewing ? "" : `<div class="page-heading"><div><h2>${t("Servidores personales", "Personal servers")}</h2>
       <p>${t("Explora una raíz autorizada. Guarda referencias remotas o copia archivos a Biblioteca.", "Browse an authorized root. Save remote references or copy files to Library.")}</p></div>
       ${action("personal-references", t("Referencias guardadas", "Saved references"), "link", "quiet", disabled())}</div>
-      ${setup()}${serverList(false)}`}${feedback()}
+      ${setup()}${serverList(false)}`}${feedback(Boolean(failure))}
       ${server ? `<div class="file-source-results"><div class="file-source-result-heading"><div><span class="file-source-eyebrow">${t("Origen remoto", "Remote source")}</span><h2>${h(server.name)}</h2><p class="path">${h(server.location)}</p>${path.length ? `<p class="field-note">${t("Carpeta", "Folder")} · ${h(label(path))}</p>` : ""}</div>
-        <div class="button-group">${path.length ? action("personal-parent", t("Subir carpeta", "Parent folder"), undefined, "quiet", disabled()) : ""}${action("personal-reload", t("Actualizar", "Refresh"), "retry", "quiet", `id="personal-reload" ${disabled()}`)}</div></div>
+        <div class="button-group">${path.length ? action("personal-parent", t("Subir carpeta", "Parent folder"), undefined, "quiet", disabled()) : ""}${failure ? "" : action("personal-reload", t("Actualizar", "Refresh"), "retry", "quiet", `id="personal-reload" ${disabled()}`)}</div></div>
         ${referenceReview(server)}${selectionReview()}
-        ${folderContents()}
+        ${failure ? unavailableFolder(failure) : folderContents()}
         ${review()}</div>` : referenceReview()}</section>`;
   }
 
@@ -406,7 +424,7 @@ export function createPersonalServers(hooks: Hooks) {
           const previous = editor;
           cleanDraft();
           if (previous !== kind) editor = kind;
-          error = "";
+          error = null;
           hooks.render();
           document.getElementById("personal-name")?.focus();
         }

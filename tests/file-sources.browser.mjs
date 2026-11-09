@@ -625,7 +625,18 @@ try {
     await folderSearch.fill("stable");
     await page.evaluate(() => { window.fileSourceFixture.personalOffline = true; });
     await reloadFolder.press("Enter");
-    await page.getByRole("alert").filter({hasText:"Folder offline in fixture."}).waitFor();
+    const folderError = page.getByRole("alert").filter({hasText:"Folder offline in fixture."});
+    await folderError.waitFor();
+    for (const [width, height] of [[1180, 780], [900, 620]]) {
+      await page.setViewportSize({width,height});
+      await folderError.scrollIntoViewIfNeeded();
+      await checkNoHorizontalOverflow(`Personal folder failure ${width}`);
+      await page.screenshot({path:`${directory}/personal-offline-${width}.png`});
+    }
+    const offlineFolder = page.getByRole("region", {name:"Carpeta no disponible"});
+    await offlineFolder.getByText("3 archivos pendientes de verificar.", {exact:true}).waitFor({timeout:3500});
+    const retryFolder = offlineFolder.getByRole("button", {name:"Volver a intentar"});
+    assert.equal(await retryFolder.evaluate(button => button === document.activeElement), true);
     assert.equal(await page.locator(".personal-review").count(), 0);
     await page.evaluate(() => {
       const fixture = window.fileSourceFixture;
@@ -633,7 +644,7 @@ try {
       fixture.personalStamp = {...fixture.personalStamp,etag:'"version-reselected"'};
       fixture.personalExtras.shift();
     });
-    await reloadFolder.press("Enter");
+    await retryFolder.press("Enter");
     const selectionChanges = page.getByRole("region", {name:"La selección cambió"});
     await selectionChanges.waitFor();
     assert.equal(await reloadFolder.evaluate(button => button === document.activeElement), true);

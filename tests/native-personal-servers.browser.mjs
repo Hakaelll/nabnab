@@ -457,7 +457,11 @@ try {
   await rename(mount, offline);
   await selectReference();
   await button("Revisar en servidor").click();
-  await page.locator(".personal-servers [role=alert]").waitFor();
+  const unavailable = page.getByRole("region", { name: "Carpeta no disponible" });
+  await unavailable.getByRole("alert").waitFor();
+  const retryFolder = unavailable.getByRole("button", { name: "Volver a intentar" });
+  await page.waitForFunction(() => document.activeElement?.id === "personal-reload");
+  assert.equal((await rpc("get_snapshot")).jobs.length, 1);
   assert.equal(await page.getByRole("checkbox", { name: /Cuaderno ñ\.txt/ }).count(), 0);
   const offlineFile = path.join(offline, "Lecturas", file);
   const previous = await stat(offlineFile);
@@ -466,7 +470,7 @@ try {
   await utimes(newFile, previous.atime, previous.mtime);
   await rename(newFile, offlineFile);
   await rename(offline, mount);
-  await button("Actualizar").click();
+  await retryFolder.press("Enter");
   await comparison().getByRole("status").filter({ hasText: "El identificador de versión es distinto." }).waitFor();
   const previousSelection = first.source.selection;
   const savedReference = (await rpc("personal_servers_status")).references[0];
