@@ -21,10 +21,18 @@
 .translation-review-status, .translation-warning-nav { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
 .translation-review-status { justify-content: space-between; margin-top: 8px; }
 .translation-review-status .field-note { margin: 0; }
+.translation-cue-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-block: 12px; }
+.translation-cue-filter .search-control { flex: 1 1 210px; min-width: 0; max-width: none; }
+.translation-cue-filter svg { flex: none; }
+.translation-cue-filter > span { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.translation-cue-empty { margin: 0; padding: 14px 0; border-block-start: 1px solid var(--edge-quiet); }
 .translation-warning-nav > span { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .translation-warning { color: var(--text); padding-inline-start: 8px; border-inline-start: 2px solid var(--action); }
 .translation-pagination, .translation-confirm { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
-#translation-export > .translation-fields { margin-top: 12px; }
+#translation-export { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--edge-quiet); }
+#translation-export > .translation-fields { margin-top: 10px; }
+#translation-export .toggle { display: flex; flex-direction: row; align-items: center; gap: 8px; min-height: 38px; }
+#translation-export .toggle input { margin: 0; }
 .translation-output { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding-block: 12px; border-top: 1px solid var(--edge-quiet); }
 .translation-output > div:first-child { flex: 1 1 170px; min-width: 0; overflow-wrap: anywhere; }
 .translation-output p.field-note { margin: 0 0 4px; }

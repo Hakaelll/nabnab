@@ -12,6 +12,10 @@ El motor agrupa segmentos cercanos cuando puede recuperar cada traducción en or
 
 **Siguiente aviso** abre la página del próximo segmento y enfoca su traducción. Cada aviso distingue una línea larga de una lectura demasiado rápida y se actualiza al editar. Las correcciones que hagas en páginas distintas se guardan juntas al pulsar **Guardar edición**.
 
+**Buscar segmentos** encuentra texto del original o de la traducción, identificadores y horas de inicio o fin. Puedes escribir una parte del tiempo, como `01:44`. Las marcas de tiempo y el orden se conservan al filtrar. Las ediciones pendientes siguen disponibles al cambiar de búsqueda. Si saltas a un aviso de longitud o doblaje, el editor limpia la búsqueda y enfoca el segmento. **Exportar borrador completo** incluye todos los segmentos.
+
+![Búsqueda por tiempo en un borrador sintético a 900 píxeles](translation-cue-search.png)
+
 ![Aviso de velocidad de lectura en un borrador de prueba](translation-reading-warning.png)
 
 ## Componentes
@@ -53,3 +57,5 @@ El recorrido nativo de Windows instaló las dos direcciones desde Ajustes, con u
 El vídeo de prueba lleva tonos distintos en cada pista. El MKV mezclado contiene el tono de la segunda pista durante una pausa del doblaje. La prueba también solicita una pista que ya no coincide con el vídeo y comprueba que se conserva el WAV publicado.
 
 La prueba usa un FLAC instrumental sintético con un tono de 540 Hz. Comprueba el silencio inicial, la aparición del tono en el MKV y el rechazo de la mezcla si cambia el vídeo. Verifica que el WAV y el FLAC se conservan. El selector se revisó a 900 y 1180 px.
+
+La prueba del editor en Edge verifica búsqueda, paginación, avisos y foco a 900 y 1180 px. La prueba de Windows busca dos segmentos de un borrador sintético, guarda las dos ediciones y verifica el VTT completo con el filtro activo.

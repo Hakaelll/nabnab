@@ -23,7 +23,7 @@ const setup = `
     error: { code: "dubbing_timing", technical: "DUB_TIMING 2, 14", message: "Some cues do not fit." } };
   const snapshot = { settings, jobs: [job, dub], library: [], collections: [], drafts: [], sources: [], rules: [], smartCollections: [], presets: [], audioPlaylists: [] };
   const calls = window.translationCalls = [];
-  const original = Array.from({ length: 15 }, (_, index) => ({ identifier: "escena-" + (index + 1), start: index * 8, end: index * 8 + (index === 13 ? 0.8 : 5), text: "Segmento original " + (index + 1) }));
+  const original = Array.from({ length: 15 }, (_, index) => ({ identifier: "escena-" + (index + 1), start: index * 8, end: index * 8 + (index === 13 ? 0.8 : 5), text: index === 2 ? "<i>Aquí continúa</i> la escena." : "Segmento original " + (index + 1) }));
   const translated = original.map((cue, index) => "Cue " + (index + 1));
   translated[0] = "This line is deliberately wider than the suggested line width.";
   translated[13] = "Too many words for a short interval.";
@@ -62,6 +62,34 @@ try {
   const next = tool.getByRole("button", { name: "Siguiente aviso", exact: true });
   const first = tool.locator("#translation-cue-0");
   const second = tool.locator("#translation-cue-13");
+  await page.setViewportSize({ width: 900, height: 620 });
+  await tool.locator("#translation-title").evaluate(node => node.scrollIntoView({ block: "start" }));
+  await page.screenshot({ path: path.join(directory, "editor-before-900.png") });
+  const search = tool.getByRole("searchbox", { name: "Buscar segmentos", exact: true });
+  await search.waitFor({ timeout: 4500 });
+  await search.pressSequentially("aqui continua");
+  assert.equal(await search.evaluate(input => input === document.activeElement), true);
+  assert.deepEqual(await tool.locator(".translation-cues textarea").evaluateAll(fields => fields.map(field => field.id)), ["translation-cue-2"]);
+  await search.fill("escena-14");
+  assert.equal(await second.isVisible(), true);
+  await search.fill("00:01:44");
+  assert.equal(await second.isVisible(), true);
+  await search.fill("segmento original");
+  assert.equal(await tool.locator(".translation-pagination > span").innerText(), "1–12 / 14");
+  await tool.getByRole("button", { name: "Siguiente", exact: true }).click();
+  assert.deepEqual(await tool.locator(".translation-cues textarea").evaluateAll(fields => fields.map(field => field.id)), ["translation-cue-13", "translation-cue-14"]);
+  assert.equal(await tool.locator(".translation-pagination > span").innerText(), "13–14 / 14");
+  await search.fill("sin coincidencias");
+  await tool.getByText("Ningún segmento coincide con la búsqueda.", { exact: true }).waitFor();
+  assert.equal(await tool.locator(".translation-cues textarea").count(), 0);
+  await search.fill("00:01:44");
+  for (const [width, height] of [[1180, 780], [900, 620]]) {
+    await page.setViewportSize({ width, height });
+    await tool.locator("#translation-title").evaluate(node => node.scrollIntoView({ block: "start" }));
+    assert.ok(await tool.evaluate(element => element.scrollWidth <= element.clientWidth + 1));
+    await page.screenshot({ path: path.join(directory, `editor-search-${width}.png`) });
+  }
+  await search.fill("");
   assert.equal(await count.innerText(), "2 avisos de longitud");
   await next.press("Enter");
   assert.ok(await first.evaluate(input => input === document.activeElement));
@@ -92,8 +120,10 @@ try {
   await second.fill("Brief.");
   assert.equal(await count.innerText(), "0 avisos de longitud");
   assert.equal(await next.isDisabled(), true);
-  await tool.getByRole("button", { name: "Anterior", exact: true }).click();
+  await search.fill("a short line");
   assert.equal(await first.inputValue(), "A short line.");
+  await search.fill("brief");
+  assert.equal(await second.inputValue(), "Brief.");
   await tool.getByRole("button", { name: "Guardar edición", exact: true }).click();
   const calls = await page.evaluate(() => window.translationCalls);
   assert.deepEqual(calls.find(call => call.command === "translation_edit").args, {
@@ -110,7 +140,10 @@ try {
   assert.equal(await tool.locator(".translation-pagination > span").innerText(), "13–15 / 15");
   const dubNext = tool.getByRole("button", { name: "Siguiente aviso de doblaje", exact: true });
   await second.fill("See you.");
+  await search.fill("See you.");
+  assert.equal(await second.inputValue(), "See you.");
   await dubNext.press("Enter");
+  assert.equal(await search.inputValue(), "");
   const other = tool.locator("#translation-cue-1");
   assert.ok(await other.evaluate(input => input === document.activeElement));
   await other.fill("Hello.");

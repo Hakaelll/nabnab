@@ -230,10 +230,18 @@ try {
   assert.equal(await page.locator("#translation-draft").isDisabled(), true);
   assert.equal(await page.locator("#dub-queue-voice").isDisabled(), true);
   await page.getByRole("button", { name: "Editar traducción", exact: true }).click();
-  assert.equal(await page.locator("#translation-cue-0").inputValue(), "Hello.");
+  const cueSearch = page.getByRole("searchbox", { name: "Buscar segmentos", exact: true });
+  await cueSearch.fill("tercero");
+  assert.equal(await page.locator("#translation-cue-0").count(), 0);
   assert.equal(await page.locator("#translation-cue-2").inputValue(), "Goodbye.");
+  await cueSearch.fill("00:00:00.500");
+  assert.equal(await page.locator("#translation-cue-0").inputValue(), "Hello.");
+  assert.equal(await page.locator("#translation-cue-2").count(), 0);
   await page.locator("#translation-save").click();
   await wait(async () => (await rpc("translation_read", { draftId })).revision === 2);
+  const reviewed = await rpc("translation_read", { draftId });
+  assert.deepEqual(reviewed.original, cues);
+  assert.deepEqual(reviewed.translated, ["Hello.", "See you soon.", "Goodbye."]);
   await page.locator("#dub-open").click();
   assert.equal(await page.locator("#translation-draft").inputValue(), draftId);
   await page.locator("#dub-queue-voice").click();
@@ -366,8 +374,12 @@ try {
   await shareOutput(wav);
   await shareOutput(replaced);
   await page.getByRole("button", { name: "Editar traducción", exact: true }).click();
+  assert.equal(await cueSearch.inputValue(), "00:00:00.500");
+  assert.equal(await page.locator(".translation-cues textarea").count(), 1);
   await page.locator("#translation-export-button").click();
   const exported = await jobOf("captionTranslationExport", 0, "completed");
+  assert.equal(await readFile(exported.outputs[0], "utf8"),
+    "WEBVTT\n\nprimero\n00:00:00.500 --> 00:00:02.000\nHello.\n\nsegundo\n00:00:03.000 --> 00:00:05.500\nSee you soon.\n\ntercero\n00:00:06.000 --> 00:00:08.500\nGoodbye.\n\n");
   await shareOutput(exported);
   assert.deepEqual(errors, []);
   await page.locator("#dub-open").click();
