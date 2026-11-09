@@ -17,7 +17,7 @@ const setup = `
   globalThis.isTauri = true;
   mockWindows("main");
   const settings = { folder: "C:/Fixture", language: "es", reducedMotion: true, reducedTransparency: true, sidebarExpanded: true, trayEnabled: false };
-  const image = { id: "crop", path: "C:/Fixture/Paisaje.png", name: "Paisaje.png", kind: "image", width: 240, height: 180, size: 9000, addedAt: 1, missing: false, collections: [], tags: [] };
+  const image = { id: "crop", path: "C:/Fixture/Paisaje.png", name: "Paisaje.png", kind: "image", width: null, height: null, size: 9000, addedAt: 1, missing: false, collections: [], tags: [] };
   const snapshot = { settings, jobs: [], library: [image], collections: [], drafts: [], sources: [], rules: [], smartCollections: [], presets: [], audioPlaylists: [] };
   const calls = window.upscaleCalls = [];
   function sample(soft) {
@@ -41,6 +41,8 @@ const setup = `
     if (command === "startup") return { ...snapshot, folder: settings.folder, enginesReady: true, engineError: null };
     if (command === "get_snapshot") return snapshot;
     if (command === "optional_components") return [{ id: "upscale", installed: true, enabled: true, available: true }];
+    if (command === "image_assets_inspect") return { images: [{ id: image.id, name: image.name, width: 240, height: 180 }] };
+    if (command === "thumbnail" && args.stored) return "data:image/png;base64," + btoa(String.fromCharCode(...sample(false)));
     if (command === "upscale_preview") return { previewId: 17, before: sample(true), after: sample(false), cropWidth: 120, cropHeight: 90, cropX: 30, cropY: 20, dimensions: { width: 240, height: 180, outputWidth: 960, outputHeight: 720 }, peakRgbaBytes: 2937600 };
     if (command === "queue_upscale") return [];
   }, { shouldMockEvents: true });
@@ -60,6 +62,38 @@ try {
   await tool.getByRole("button", { name: "Elegir imágenes" }).click();
   await tool.getByRole("checkbox", { name: "Paisaje.png" }).check();
   await tool.getByRole("button", { name: "Cerrar lista" }).click();
+  await page.setViewportSize({ width: 900, height: 620 });
+  const review = tool.locator(".upscale-review");
+  await review.evaluate(node => node.scrollIntoView({ block: "start" }));
+  await page.screenshot({ path: path.join(directory, "crop-overview-before.png") });
+  const map = tool.getByRole("button", { name: "Colocar recorte en la imagen" });
+  await map.waitFor({ timeout: 4500 });
+  await map.locator("img").evaluate(img => img.decode());
+  const horizontal = tool.getByRole("slider", { name: /Posición horizontal/ });
+  const vertical = tool.getByRole("slider", { name: /Posición vertical/ });
+  await map.click({ position: { x: 8, y: 8 } });
+  assert.equal(await horizontal.inputValue(), "0");
+  assert.equal(await vertical.inputValue(), "0");
+  await horizontal.press("ArrowRight");
+  assert.equal(await horizontal.inputValue(), "1");
+  assert.equal(await horizontal.evaluate(control => control === document.activeElement), true);
+  await map.press("Enter");
+  assert.equal(await horizontal.inputValue(), "50");
+  assert.equal(await vertical.inputValue(), "50");
+  const overview = await map.boundingBox();
+  await map.click({ position: { x: overview.width - 8, y: overview.height - 8 } });
+  assert.equal(await horizontal.inputValue(), "100");
+  assert.equal(await vertical.inputValue(), "100");
+  const crop = await map.locator(".upscale-crop-window").boundingBox();
+  const repositioned = await map.boundingBox();
+  assert.ok(Math.abs(crop.x + crop.width - repositioned.x - repositioned.width) < 2);
+  assert.ok(Math.abs(crop.y + crop.height - repositioned.y - repositioned.height) < 2);
+  for (const [width, height] of [[900, 620], [1180, 780]]) {
+    await page.setViewportSize({ width, height });
+    await review.evaluate(node => node.scrollIntoView({ block: "start" }));
+    assert.ok(await review.evaluate(node => node.scrollWidth <= node.clientWidth + 1));
+    await page.screenshot({ path: path.join(directory, `crop-overview-${width}.png`) });
+  }
   await tool.getByRole("button", { name: "Generar muestra" }).click();
   const pair = tool.locator(".upscale-pair");
   await pair.waitFor();
@@ -114,6 +148,7 @@ try {
   await tool.getByRole("button", { name: "Ampliar en la cola" }).click();
   const requests = await page.evaluate(() => window.upscaleCalls);
   assert.equal(requests.filter(call => call.command === "upscale_preview").length, 1);
+  assert.deepEqual(requests.find(call => call.command === "upscale_preview").args.anchor, {x:100,y:100});
   assert.equal(requests.find(call => call.command === "queue_upscale").args.previewId, 17);
   assert.deepEqual(errors, []);
   console.log("The same crop stays aligned, responds to pointer and keyboard input, and keeps its original queue approval.");

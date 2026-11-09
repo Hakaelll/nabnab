@@ -992,8 +992,9 @@ async fn thumbnail(
     app: AppHandle,
     state: State<'_, Arc<AppState>>,
     id: String,
+    stored: Option<bool>,
 ) -> Result<String, String> {
-    support::thumbnail(&app, state.inner(), &id).await
+    support::thumbnail(&app, state.inner(), &id, stored.unwrap_or(false)).await
 }
 #[tauri::command]
 fn cache_status(state: State<Arc<AppState>>) -> Result<support::CacheStatus, String> {

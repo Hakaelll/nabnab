@@ -18,6 +18,8 @@ interface Preview {
   dimensions: { width: number; height: number; outputWidth: number; outputHeight: number };
   peakRgbaBytes: number;
 }
+interface ImageSize { width: number; height: number }
+type Overview = { id: string; kind: "loading" | "unavailable" } | ({ id: string; kind: "ready"; url: string } & ImageSize);
 interface Hooks {
   snapshot(): Snapshot;
   command<T>(name: string, args?: Record<string, unknown>): Promise<T>;
@@ -29,6 +31,7 @@ interface Hooks {
 }
 
 const MAX_BATCH = 12;
+const SAMPLE_SIDE = 160;
 
 function pngUrl(data: number[]) {
   let binary = "";
@@ -42,6 +45,7 @@ export function createUpscaleTool(hooks: Hooks) {
   let ids: string[] = [], query = "", sampleId = "", picking = false;
   let settings: Options = { model: "photo", scale: 4, tile: 64 };
   let anchor = { x: 50, y: 50 };
+  let overview: Overview | null = null;
   let preview: (Omit<Preview, "before" | "after"> & { before: string; after: string }) | null = null;
   let comparisonMode: "pair" | "wipe" = "pair";
   let split = 50;
@@ -57,12 +61,67 @@ export function createUpscaleTool(hooks: Hooks) {
   const mib = (value: number) => `${new Intl.NumberFormat(t("es", "en"), { maximumFractionDigits: 1 }).format(value / 1048576)} MiB`;
 
   async function load() {
+    loadOverview(true);
     try { component = (await hooks.command<Component[]>("optional_components")).find(entry => entry.id === "upscale") ?? null; }
     catch (cause) { error = cause instanceof Error ? cause.message : String(cause); }
     hooks.render();
   }
 
   function invalidate() { preview = null; split = 50; error = ""; }
+
+  function loadOverview(refresh = false) {
+    if (!sampleId) { overview = null; return; }
+    if (overview?.id === sampleId && (!refresh || overview.kind === "loading")) return;
+    const pending: Overview = { id: sampleId, kind: "loading" };
+    overview = pending;
+    const requestId = Date.now() * 1000 + 714;
+    void hooks.command<{ images: ImageSize[] }>("image_assets_inspect", { ids: [pending.id], stitch: false, requestId }).then(async ({ images }) => {
+      if (overview !== pending) return;
+      const size = images[0];
+      if (!size) throw new Error("Missing image dimensions.");
+      const url = await hooks.command<string>("thumbnail", { id: pending.id, stored: true });
+      if (overview !== pending) return;
+      overview = { id: pending.id, kind: "ready", url, ...size };
+      hooks.render();
+    }).catch(() => {
+      if (overview !== pending) return;
+      overview = { id: pending.id, kind: "unavailable" };
+      hooks.render();
+    });
+  }
+
+  function cropSelector() {
+    const sample = selected().find(item => item.id === sampleId);
+    const map = overview?.id === sampleId ? overview : null;
+    const size = map?.kind === "ready" ? map : sample;
+    const width = size?.width ?? 0, height = size?.height ?? 0;
+    const frameWidth = Math.min(width, SAMPLE_SIDE), frameHeight = Math.min(height, SAMPLE_SIDE);
+    const x = Math.floor((width - frameWidth) * anchor.x / 100), y = Math.floor((height - frameHeight) * anchor.y / 100);
+    const controlsDisabled = busy || !valid();
+    const horizontal = t("Posición horizontal", "Horizontal position"), vertical = t("Posición vertical", "Vertical position");
+    const canPlace = width > SAMPLE_SIDE || height > SAMPLE_SIDE;
+    return `<div class="upscale-crop-selector">
+      ${map?.kind === "ready" && width && height ? `<div class="upscale-crop-overview">
+        <button type="button" id="upscale-crop-map" data-action="upscale-place-crop" class="upscale-crop-map"
+          aria-label="${t("Colocar recorte en la imagen", "Place crop on the image")}" aria-describedby="upscale-crop-help"
+          ${controlsDisabled || !canPlace ? "disabled" : ""}
+          style="--overview-ratio:${width / height};--crop-left:${100 * x / width}%;--crop-top:${100 * y / height}%;--crop-width:${100 * frameWidth / width}%;--crop-height:${100 * frameHeight / height}%">
+          <img src="${h(map.url)}" alt="" decoding="async"><span class="upscale-crop-window" aria-hidden="true"></span>
+        </button>
+        <p id="upscale-crop-help" class="field-note">${canPlace
+          ? t("Haz clic para situar el recorte. Intro lo centra.", "Click to place the crop. Enter centers it.")
+          : t("La muestra cubre toda la imagen.", "The preview covers the whole image.")}</p>
+      </div>` : ""}
+      <div class="upscale-fields upscale-anchors">
+        <label for="upscale-x">${horizontal} · ${anchor.x}%<input id="upscale-x" aria-label="${horizontal}" type="range" min="0" max="100" step="1" value="${anchor.x}"
+          ${controlsDisabled || width && width <= SAMPLE_SIDE ? "disabled" : ""}></label>
+        <label for="upscale-y">${vertical} · ${anchor.y}%<input id="upscale-y" aria-label="${vertical}" type="range" min="0" max="100" step="1" value="${anchor.y}"
+          ${controlsDisabled || height && height <= SAMPLE_SIDE ? "disabled" : ""}></label>
+        ${width && height ? `<p role="status" class="field-note upscale-crop-coordinates">${frameWidth} × ${frameHeight} px · x=${x}, y=${y}</p>` : ""}
+        ${map?.kind === "unavailable" ? `<p class="field-note">${t("Miniatura no disponible. Usa los controles de posición.", "Thumbnail unavailable. Use the position controls.")}</p>` : ""}
+      </div>
+    </div>`;
+  }
 
   async function run(task: () => Promise<void>) {
     if (busy) return;
@@ -139,6 +198,7 @@ export function createUpscaleTool(hooks: Hooks) {
     if (current.length !== ids.length && !busy) {
       ids = current.map(item => item.id);
       if (!ids.includes(sampleId)) sampleId = ids[0] ?? "";
+      loadOverview();
       invalidate();
     }
     const status = ready() ? "" : `<div class="upscale-component"><div><strong>Real-ESRGAN · Vulkan</strong>
@@ -153,10 +213,7 @@ export function createUpscaleTool(hooks: Hooks) {
           <div class="section-heading"><h3 id="upscale-preview-title">${t("Muestra del recorte", "Crop preview")}</h3>
             <div class="button-group">${action("upscale-preview", t("Generar muestra", "Generate preview"), "image", "secondary", !ready() || !valid() || busy ? "disabled" : "")}
             ${requestId ? action("upscale-cancel", t("Cancelar muestra", "Cancel preview"), "close", "quiet") : ""}</div></div>
-          ${comparison()}<div class="upscale-fields upscale-anchors">
-            <label for="upscale-x">${t("Posición horizontal", "Horizontal position")} · ${anchor.x}%<input id="upscale-x" type="range" min="0" max="100" step="1" value="${anchor.x}" ${busy || !valid() ? "disabled" : ""}></label>
-            <label for="upscale-y">${t("Posición vertical", "Vertical position")} · ${anchor.y}%<input id="upscale-y" type="range" min="0" max="100" step="1" value="${anchor.y}" ${busy || !valid() ? "disabled" : ""}></label>
-          </div>
+          ${ids.length ? cropSelector() : ""}${comparison()}
           ${busy ? `<p role="status" class="field-note">${requestId ? t("Procesando la muestra en este equipo…", "Processing the preview on this device…") : t("Añadiendo a la cola…", "Adding to the queue…")}</p>` : ""}
           ${error ? `<p role="alert" class="asset-error">${h(error)}</p>` : ""}
         </section>
@@ -167,9 +224,24 @@ export function createUpscaleTool(hooks: Hooks) {
       </form>${imageExports(hooks.snapshot(), "upscale", t)}</section>`;
   }
 
-  async function click(kind: string) {
+  async function click(kind: string, event?: MouseEvent) {
     switch (kind) {
       case "upscale-component": hooks.components(); return true;
+      case "upscale-place-crop": {
+        const map = document.getElementById("upscale-crop-map");
+        if (busy || !map || overview?.kind !== "ready" || overview.id !== sampleId) return true;
+        const { width, height } = overview;
+        const bounds = map.getBoundingClientRect();
+        const position = (fraction: number, pixels: number) => pixels <= SAMPLE_SIDE ? 50
+          : Math.round(Math.min(1, Math.max(0, (fraction * pixels - SAMPLE_SIDE / 2) / (pixels - SAMPLE_SIDE))) * 100);
+        anchor = event?.detail ? {
+          x: position((event.clientX - bounds.left) / bounds.width, width),
+          y: position((event.clientY - bounds.top) / bounds.height, height),
+        } : { x: 50, y: 50 };
+        invalidate(); hooks.render();
+        document.getElementById("upscale-crop-map")?.focus({ preventScroll: true });
+        return true;
+      }
       case "upscale-compare-pair":
       case "upscale-compare-wipe":
         comparisonMode = kind === "upscale-compare-pair" ? "pair" : "wipe";
@@ -223,6 +295,7 @@ export function createUpscaleTool(hooks: Hooks) {
       case "upscale-y": anchor = { ...anchor, y: Number(target.value) }; break;
       default: return false;
     }
+    loadOverview();
     invalidate(); hooks.render(); return true;
   }
 

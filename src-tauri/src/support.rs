@@ -31,7 +31,7 @@ fn cache_file(name: &str) -> bool {
     let Some(stem) = name.strip_suffix(".jpg").filter(|_| name.len() < 180) else {
         return false;
     };
-    let mut fields = stem.rsplit('-');
+    let mut fields = stem.strip_suffix("-stored").unwrap_or(stem).rsplit('-');
     let last = fields.next().unwrap_or_default();
     let decimal = |value: &str| !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit());
     if !decimal(last) {
@@ -45,8 +45,12 @@ fn cache_file(name: &str) -> bool {
         && fields.clone().next().is_some()
         && fields.all(|field| !field.is_empty() && field.bytes().all(|b| b.is_ascii_hexdigit()))
 }
-pub fn thumbnail_path(root: &Path, item: &library::LibraryItem) -> Result<PathBuf, String> {
-    let selected = item.details.audio_cover.as_deref().map(library::authorized_path).transpose()?;
+pub fn thumbnail_path(root: &Path, item: &library::LibraryItem, stored: bool) -> Result<PathBuf, String> {
+    if stored && item.kind != "image" {
+        return Err("Choose an image to view its stored pixels.".into());
+    }
+    let cover_path = if stored { None } else { item.details.audio_cover.as_deref() };
+    let selected = cover_path.map(library::authorized_path).transpose()?;
     let input = selected.as_deref().unwrap_or(&item.path);
     let metadata = fs::metadata(input)
         .map_err(|_| "The file was not found. Locate it in the library.")?;
@@ -63,7 +67,8 @@ pub fn thumbnail_path(root: &Path, item: &library::LibraryItem) -> Result<PathBu
         let hash = format!("{:x}", Sha256::digest(path.to_string_lossy().as_bytes()));
         format!("-{}", &hash[..16])
     }).unwrap_or_default();
-    Ok(root.join(format!("{}-{}-{stamp}{cover}.jpg", item.id, metadata.len())))
+    let variant = if stored { "-stored" } else { &cover };
+    Ok(root.join(format!("{}-{}-{stamp}{variant}.jpg", item.id, metadata.len())))
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -165,7 +170,7 @@ fn trim(root: &Path, keep: Option<&Path>, max_files: usize, max_bytes: u64) -> R
     Err("The thumbnail cache could not be brought within its limits.".into())
 }
 
-pub async fn thumbnail(app: &AppHandle, state: &Arc<AppState>, id: &str) -> Result<String, String> {
+pub async fn thumbnail(app: &AppHandle, state: &Arc<AppState>, id: &str, stored: bool) -> Result<String, String> {
     let item = {
         let guard = state.repository.lock().unwrap();
         guard
@@ -182,8 +187,9 @@ pub async fn thumbnail(app: &AppHandle, state: &Arc<AppState>, id: &str) -> Resu
         && !item.details.audio.as_ref().is_some_and(|tags| tags.embedded_cover) {
         return Err("This audio file has no indexed embedded cover.".into());
     }
-    let input = library::authorized_path(item.details.audio_cover.as_deref().unwrap_or(&item.path))?;
     let root = cache_root(state)?;
+    let source = if stored { &item.path } else { item.details.audio_cover.as_ref().unwrap_or(&item.path) };
+    let input = library::authorized_path(source)?;
     let _permit = slots().acquire().await.map_err(|e| e.to_string())?;
     let cache = match checked_cache(&root)? {
         Some(cache) => cache,
@@ -199,7 +205,7 @@ pub async fn thumbnail(app: &AppHandle, state: &Arc<AppState>, id: &str) -> Resu
             checked_cache(&root)?.ok_or("The thumbnail cache is unavailable.")?
         }
     };
-    let output = thumbnail_path(&root, &item)?;
+    let output = thumbnail_path(&root, &item, stored)?;
     let exists = match fs::symlink_metadata(&output) {
         Ok(meta) if meta.is_file() && !library::is_link(&meta) => {
             if meta.len() == 0 {
@@ -214,7 +220,18 @@ pub async fn thumbnail(app: &AppHandle, state: &Arc<AppState>, id: &str) -> Resu
     if !exists {
         let engines = dependencies::engine_root(app)?;
         let (_sender, cancel) = watch::channel(false);
-        let args=["-hide_banner","-v","error","-nostdin","-n","-protocol_whitelist","file","-format_whitelist","mov,matroska,webm,avi,mp3,aac,ogg,wav,flac,asf,mpeg,mpegts,image2,jpeg_pipe,png_pipe,webp_pipe,bmp_pipe,gif","-i"].into_iter().map(str::to_owned).chain([input.to_string_lossy().into_owned(),"-vf".into(),"scale=320:180:force_original_aspect_ratio=decrease".into(),"-frames:v".into(),"1".into(),"-q:v".into(),"5".into(),output.to_string_lossy().into_owned()]).collect();
+        let mut args = ["-hide_banner", "-v", "error", "-nostdin", "-n", "-protocol_whitelist", "file",
+            "-format_whitelist", "mov,matroska,webm,avi,mp3,aac,ogg,wav,flac,asf,mpeg,mpegts,image2,jpeg_pipe,png_pipe,webp_pipe,bmp_pipe,gif"]
+            .map(str::to_owned).to_vec();
+        if stored {
+            args.push("-noautorotate".into());
+        }
+        args.extend(["-i".into(), input.to_string_lossy().into_owned(), "-vf".into(),
+            "scale=320:180:force_original_aspect_ratio=decrease".into(), "-frames:v".into(), "1".into()]);
+        if stored {
+            args.extend(["-map_metadata".into(), "-1".into()]);
+        }
+        args.extend(["-q:v".into(), "5".into(), output.to_string_lossy().into_owned()]);
         if let Err(e) = engine::tool(&engines, "ffmpeg.exe", args, cancel).await {
             let _ = fs::remove_file(&output);
             return Err(failure::sanitize(&e));
@@ -230,7 +247,8 @@ pub async fn thumbnail(app: &AppHandle, state: &Arc<AppState>, id: &str) -> Resu
             return Err(error);
         }
     }
-    Ok(format!("http://nabmedia.localhost/thumbnail/{id}"))
+    let mode = if stored { "stored/" } else { "" };
+    Ok(format!("http://nabmedia.localhost/thumbnail/{mode}{id}"))
 }
 pub fn diagnostics(
     state: &AppState,
@@ -258,6 +276,7 @@ mod tests {
     #[test]
     fn cache_only_accepts_generated_image_names() {
         assert!(cache_file("abc-12-345.jpg"));
+        assert!(cache_file("abc-12-345-stored.jpg"));
         assert!(cache_file("abc-12-345-a0123456789bcdef.jpg"));
         for name in [
             "../abc.jpg",

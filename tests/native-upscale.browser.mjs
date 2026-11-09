@@ -1,17 +1,18 @@
 import assert from "node:assert/strict";
 import { openTool } from "./tool-navigation.mjs";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { cp, mkdir, mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createRequire } from "node:module";
 
 const root = path.resolve(import.meta.dirname, "..");
-const base = path.join(root, "artifacts/upscale");
+const base = path.resolve(process.env.NABNAB_UPSCALE_ARTIFACTS ?? path.join(root, "artifacts/upscale"));
+const overviewOnly = process.argv.includes("--overview-only");
 await mkdir(base, { recursive: true });
 const data = await mkdtemp(path.join(base, "native-run-"));
 const output = path.join(data, "output");
 await mkdir(output);
-const runtime = process.env.NABNAB_TEST_UPSCALE_RUNTIME;
+const runtime = overviewOnly ? undefined : process.env.NABNAB_TEST_UPSCALE_RUNTIME;
 if (runtime) {
   await mkdir(path.join(data, "components"));
   await cp(runtime, path.join(data, "components/upscale-2022-04-24"), { recursive: true });
@@ -40,8 +41,49 @@ function rpc(command, args = {}) {
   }, { command, args });
 }
 
-try {
-  child = spawn(path.join(root, "src-tauri/target/debug/nabnab.exe"), [], {
+async function verifyCropOverview(input) {
+  const file = path.join(data, "Horizonte EXIF.jpg");
+  execFileSync(path.join(root, "src-tauri/engines/ffmpeg.exe"),
+    ["-v", "error", "-i", input, "-frames:v", "1", file], { windowsHide: true });
+  const jpeg = await readFile(file);
+  const exif = Buffer.from("ffe1002245786966000049492a0008000000010012010300010000000600000000000000", "hex");
+  await writeFile(file, Buffer.concat([jpeg.subarray(0, 2), exif, jpeg.subarray(2)]));
+  const imported = await rpc("import_paths", { paths: [file] });
+  const item = imported.library.find(entry => entry.name === "Horizonte EXIF.jpg");
+  assert.equal(item.kind, "image");
+  await page.locator('[data-page="tools"]').click();
+  await openTool(page, "upscale");
+  const tool = page.locator(".upscale-tool");
+  await tool.getByRole("button", { name: "Elegir imágenes" }).click();
+  await tool.getByRole("checkbox", { name: item.name }).check();
+  await tool.getByRole("button", { name: "Cerrar lista" }).click();
+  const map = tool.getByRole("button", { name: "Colocar recorte en la imagen" });
+  const displayed = await map.locator("img").evaluate(async img => {
+    await img.decode();
+    return [img.naturalWidth, img.naturalHeight];
+  });
+  const gallery = await rpc("thumbnail", { id: item.id });
+  const regular = await page.evaluate(async url => {
+    const img = new Image();
+    img.src = url;
+    await img.decode();
+    return [img.naturalWidth, img.naturalHeight];
+  }, gallery);
+  assert.ok(displayed[0] > displayed[1], JSON.stringify(displayed));
+  assert.ok(regular[0] < regular[1], JSON.stringify(regular));
+  assert.equal((await rpc("cache_status")).files, 2);
+  const horizontal = tool.getByRole("slider", { name: "Posición horizontal" });
+  assert.equal(await tool.getByRole("slider", { name: "Posición vertical" }).isDisabled(), true);
+  await horizontal.press("End");
+  assert.match(await tool.locator(".upscale-crop-coordinates").innerText(), /160 × 150 px · x=80, y=0/);
+  await page.setViewportSize({ width: 900, height: 620 });
+  await map.screenshot({ path: path.join(data, "stored-crop.png"), animations: "disabled" });
+  assert.deepEqual(errors, []);
+  console.log(JSON.stringify({ displayed, regular, crop: "160 × 150 at (80, 0)", cacheFiles: 2, generatedModelOutputs: 0 }));
+}
+
+async function verify() {
+  child = spawn(process.env.NABNAB_UPSCALE_TEST_EXE || path.join(root, "src-tauri/target/debug/nabnab.exe"), [], {
     cwd: root, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
     env: { ...process.env, NABNAB_TEST_DATA_DIR: data, WEBVIEW2_USER_DATA_FOLDER: path.join(data, "webview"),
       WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${new URL(endpoint).port}` },
@@ -59,24 +101,26 @@ try {
   await rpc("save_settings", { settings: { ...initial.settings, folder: output, language: "es", reducedMotion: true, trayEnabled: false, closeToTray: false } });
   const status = async () => (await rpc("optional_components")).find(item => item.id === "upscale");
   assert.equal((await status()).installed, Boolean(runtime));
-  await page.locator('[data-page="tools"]').click();
-  await openTool(page, "upscale");
-  if (!runtime) await page.getByRole("button", { name: "Ver componentes" }).click();
-  else {
-    await page.locator('[data-page="settings"]').click();
-    await page.locator('[data-action="settings-section"][data-section="engines"]').click();
+  if (!overviewOnly) {
+    await page.locator('[data-page="tools"]').click();
+    await openTool(page, "upscale");
+    if (!runtime) await page.getByRole("button", { name: "Ver componentes" }).click();
+    else {
+      await page.locator('[data-page="settings"]').click();
+      await page.locator('[data-action="settings-section"][data-section="engines"]').click();
+    }
+    const component = page.locator(".component-row").filter({ hasText: "Real-ESRGAN · ncnn Vulkan" });
+    if (!runtime) await component.getByRole("button", { name: "Instalar", exact: true }).click();
+    await component.getByRole("button", { name: "Desactivar", exact: true }).waitFor({ timeout: 180000 });
+    assert.equal((await status()).installedSize, 43636188);
+    if (!runtime) assert.deepEqual(await readdir(path.join(data, "components/local-previews")), []);
+    await component.getByRole("button", { name: "Desactivar", exact: true }).click();
+    await component.getByRole("button", { name: "Activar", exact: true }).waitFor();
+    assert.equal((await status()).installed, true);
+    assert.equal((await status()).enabled, false);
+    await component.getByRole("button", { name: "Activar", exact: true }).click();
+    await component.getByRole("button", { name: "Desactivar", exact: true }).waitFor();
   }
-  const component = page.locator(".component-row").filter({ hasText: "Real-ESRGAN · ncnn Vulkan" });
-  if (!runtime) await component.getByRole("button", { name: "Instalar", exact: true }).click();
-  await component.getByRole("button", { name: "Desactivar", exact: true }).waitFor({ timeout: 180000 });
-  assert.equal((await status()).installedSize, 43636188);
-  if (!runtime) assert.deepEqual(await readdir(path.join(data, "components/local-previews")), []);
-  await component.getByRole("button", { name: "Desactivar", exact: true }).click();
-  await component.getByRole("button", { name: "Activar", exact: true }).waitFor();
-  assert.equal((await status()).installed, true);
-  assert.equal((await status()).enabled, false);
-  await component.getByRole("button", { name: "Activar", exact: true }).click();
-  await component.getByRole("button", { name: "Desactivar", exact: true }).waitFor();
 
   const fixture = Buffer.from(await page.evaluate(() => {
     const canvas = document.createElement("canvas");
@@ -95,6 +139,10 @@ try {
   }), "base64");
   const paths = ["Horizonte sintético.png", "Copia del horizonte.png"].map(name => path.join(data, name));
   for (const file of paths) await writeFile(file, fixture);
+  if (overviewOnly) {
+    await verifyCropOverview(paths[0]);
+    return;
+  }
   const imported = await rpc("import_paths", { paths });
   const ids = imported.library.filter(item => /horizonte/i.test(item.name)).map(item => item.id);
   assert.equal(ids.length, 2);
@@ -140,6 +188,10 @@ try {
   for (const file of paths) assert.deepEqual(await readFile(file), fixture);
   assert.deepEqual(errors, []);
   console.log(`Verified Windows component ${runtime ? "with verified local files" : "install"}, disable and enable, matched crop and two queued Vulkan outputs.`);
+}
+
+try {
+  await verify();
 } catch (error) {
   if (nativeLog || child?.exitCode != null) console.error(`Native exit ${child?.exitCode}\n${nativeLog}`);
   throw error;

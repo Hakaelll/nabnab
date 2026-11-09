@@ -71,6 +71,7 @@ pub fn serve(app: &AppHandle, request: Request<Vec<u8>>) -> Response<Vec<u8>> {
     }
     let raw_path = request.uri().path().trim_start_matches('/');
     let thumbnail = raw_path.starts_with("thumbnail/");
+    let stored = raw_path.strip_prefix("thumbnail/stored/");
     let audio = match request.uri().query() {
         Some(query) if !thumbnail => {
             let Some(id) = query
@@ -83,11 +84,7 @@ pub fn serve(app: &AppHandle, request: Request<Vec<u8>>) -> Response<Vec<u8>> {
         }
         _ => None,
     };
-    let id = if thumbnail {
-        raw_path.trim_start_matches("thumbnail/")
-    } else {
-        raw_path
-    };
+    let id = stored.or_else(|| raw_path.strip_prefix("thumbnail/")).unwrap_or(raw_path);
     if id.is_empty()
         || id.len() > 100
         || !id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
@@ -102,7 +99,7 @@ pub fn serve(app: &AppHandle, request: Request<Vec<u8>>) -> Response<Vec<u8>> {
             .and_then(|r| {
                 r.data.library.iter().find(|i| i.id == id).map(|item| {
                     if thumbnail {
-                        crate::support::thumbnail_path(&r.root().join("thumbnail-cache"), item).ok()
+                        crate::support::thumbnail_path(&r.root().join("thumbnail-cache"), item, stored.is_some()).ok()
                     } else {
                         (audio.is_none() || item.kind == "video").then(|| item.path.clone())
                     }

@@ -772,13 +772,13 @@ document.addEventListener("click",event=>{
   if(!target||target.disabled)return;const destination=target.dataset.page;
   if(isPage(destination)){openPage(destination);return;}const action=target.dataset.action;
   if(event.detail > 0 && target.hasAttribute("data-open-on-double-click")) return;
-  if(action)void handleAction(action,target).catch(showError);
+  if(action)void handleAction(action,target,event).catch(showError);
 });
 document.addEventListener("dblclick", event => {
   const file = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("[data-open-on-double-click]") : null;
   if (file && !file.disabled) void handleAction("play-media", file).catch(showError);
 });
-async function handleAction(action: string, button: HTMLButtonElement): Promise<void> {
+async function handleAction(action: string, button: HTMLButtonElement, event?: MouseEvent): Promise<void> {
   const id=button.dataset.id??"";
   if(action==='open-palette'){palette.open();return;}
   if(action==='tool-catalog-open'){
@@ -836,7 +836,7 @@ async function handleAction(action: string, button: HTMLButtonElement): Promise<
   if(action==='open-torrents'||action==='open-torrent'){platformModule='torrent';navigate('platforms');await torrents.load();renderCurrent();return;}
   if(action==='platform-back'){showPlatformsCatalog();return;}
   if(await automation.click(action,button)||await screenCapture.click(action,button)||await voice.click(action,button))return;
-  if(await imageAssets.click(action,button)||await stickerTool.click(action)||await upscaleTool.click(action)||await backgroundTool.click(action)||await stemsTool.click(action,button)||await translationTool.click(action,button)||await fileOrganization.click(action,button)||await portable.click(action,button))return;
+  if(await imageAssets.click(action,button)||await stickerTool.click(action)||await upscaleTool.click(action,event)||await backgroundTool.click(action)||await stemsTool.click(action,button)||await translationTool.click(action,button)||await fileOrganization.click(action,button)||await portable.click(action,button))return;
   if(await articles.click(action,button)||await ocr.click(action,button)||await documentEdits.click(action))return;
   if(audioPlayer.click(action,button)||await audioLibrary.click(action,button)||await personalArchives.click(action,button))return;
   if(await personalServers.handleClick(action,button)||await fileSources.handleClick(action,button))return;
