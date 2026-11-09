@@ -26,7 +26,7 @@ Si ya tenías una cola de reproducción, **Volver a mi cola** recupera la pista 
 
 El paquete usa Spleeter de Deezer en FP16, convertido para sherpa-onnx 2.0.1. La inferencia se ejecuta en un proceso de nabnab con un hilo configurado para el modelo. Utiliza el FFmpeg de la aplicación para decodificar, conservar la alineación a nivel de muestra, limitar picos y comprimir los FLAC. Funciona sin conexión después de instalarlo. [Conversión y modelo](https://k2-fsa.github.io/sherpa/onnx/source-separation/models.html) · [Paquete del motor](https://github.com/k2-fsa/sherpa-onnx/releases/tag/v2.0.1) · [Artículo de Spleeter y licencia del modelo](https://github.com/deezer/spleeter/blob/master/paper.md)
 
-La cola comparte el límite de procesamiento con ampliación y transcripción. Cancelar la muestra o la tarea detiene su proceso. Los fragmentos de inferencia solapados acotan la memoria y los archivos intermedios se eliminan al terminar. El límite de 30 minutos por archivo acota el espacio temporal.
+La cola comparte el límite de procesamiento con ampliación y transcripción. Cancelar la muestra o la tarea detiene su proceso. Los fragmentos de inferencia solapados acotan la memoria y los archivos intermedios se eliminan al terminar. Si cierras nabnab por la fuerza, el siguiente inicio retira los temporales que quedaron en la carpeta privada de previsualizaciones. Las pistas exportadas siguen disponibles en Biblioteca. El límite de 30 minutos por archivo acota el espacio temporal.
 
 ## Verificación
 

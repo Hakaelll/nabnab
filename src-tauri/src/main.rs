@@ -221,6 +221,9 @@ fn open_repository(app: &AppHandle, state: &AppState) -> Result<store::Settings,
     let default = app.path().download_dir().map_err(|e| e.to_string())?;
     let repo = store::Repository::open(&root, &default)?;
     sessions::cleanup(&root)?;
+    if let Err(error) = workspaces::cleanup(&root) {
+        let _ = app.emit("app-warning", error);
+    }
     if let Err(error) = support::trim_thumbnail_cache(&root) {
         let _ = app.emit("app-warning", error);
     }

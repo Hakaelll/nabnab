@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { openTool } from "./tool-navigation.mjs";
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, stat, symlink, unlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,6 +14,14 @@ await mkdir(base, { recursive: true });
 const data = await mkdtemp(path.join(base, "results-run-"));
 const output = path.join(data, "output");
 await mkdir(output);
+const previews = path.join(data, "local-previews");
+const abandoned = path.join(previews, `${Date.now()}-0`);
+const junction = path.join(previews, `${Date.now()}-1`);
+await mkdir(abandoned, { recursive: true });
+await writeFile(path.join(abandoned, "sample.wav"), "unfinished");
+await mkdir(path.join(previews, "notes"));
+await writeFile(path.join(previews, "notes", "README.txt"), "keep");
+await symlink(output, junction, "junction");
 const original = path.join(data, "Mezcla de prueba.mp4");
 const vocals = path.join(output, "Vocals.flac");
 const instrumental = path.join(output, "Instrumental.flac");
@@ -75,6 +83,10 @@ async function close() {
 
 try {
   const initial = await launch();
+  await assert.rejects(stat(abandoned), { code: "ENOENT" });
+  assert.equal(await readFile(path.join(previews, "notes", "README.txt"), "utf8"), "keep");
+  assert.deepEqual(await readFile(path.join(junction, "Vocals.flac")), await readFile(vocals));
+  await unlink(junction);
   await rpc("save_settings", { settings: { ...initial.settings, folder: output, language: "es", reducedMotion: true, trayEnabled: false, closeToTray: false } });
   await rpc("import_paths", { paths: [original, vocals, instrumental, ...music] });
   await close();
