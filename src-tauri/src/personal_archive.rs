@@ -572,78 +572,185 @@ fn filtered_rows(
     Ok(rows)
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DatedMediaReview {
-    files: usize,
-    bytes: u64,
-    skipped_post_files: usize,
+fn selected_categories(
+    provider: Provider,
+    categories: Vec<Category>,
+    sensitive: Vec<Category>,
+) -> Result<HashSet<Category>, String> {
+    if categories.iter().any(|category| category.sensitive())
+        || sensitive.iter().any(|category| !category.sensitive())
+    {
+        return Err("Select messages and contacts separately.".into());
+    }
+    let selected = categories.into_iter().chain(sensitive).collect::<HashSet<_>>();
+    if selected.is_empty()
+        || selected.iter().any(|category| !provider.categories().contains(category))
+    {
+        return Err("Select at least one category included by this provider.".into());
+    }
+    Ok(selected)
 }
 
-async fn review_dated_media(
+struct PreparedSelection<'a> {
+    incoming: Records,
+    imported_formats: BTreeMap<Category, Vec<Format>>,
+    media_entries: Vec<&'a Entry>,
+    first_error: Option<String>,
+    skipped_files: usize,
+}
+
+async fn prepare_selection<'a>(
     root: &Path,
-    plan: &Plan,
+    plan: &'a Plan,
+    scratch: &Scratch,
+    selected: &HashSet<Category>,
     from: Option<u64>,
     to: Option<u64>,
     cancel: watch::Receiver<bool>,
-) -> Result<DatedMediaReview, String> {
-    if !plan.zipped
-        || !(plan.provider.is_meta() || plan.provider == Provider::X)
-        || (from.is_none() && to.is_none())
+) -> Result<PreparedSelection<'a>, String> {
+    let date_filter = from.is_some() || to.is_some();
+    let entries = plan
+        .entries
+        .iter()
+        .filter(|entry| {
+            selected.contains(&entry.classification.category)
+                && entry.classification.format != Format::Unsupported
+                && (entry.classification.format != Format::Media || !date_filter)
+        })
+        .collect::<Vec<_>>();
+    let mut text_bytes = 0;
+    let mut media_bytes = 0;
+    for entry in &entries {
+        if entry.classification.format == Format::Media {
+            media_bytes += entry.size;
+        } else {
+            if entry.size > MAX_TEXT {
+                return Err("A selected metadata file exceeds 8 MiB.".into());
+            }
+            text_bytes += entry.size;
+        }
+    }
+    if text_bytes > MAX_TEXT_TOTAL
+        || media_bytes > MAX_MEDIA
+        || text_bytes + media_bytes > MAX_MEDIA
     {
-        return Err(
-            "Choose a supported ZIP and at least one date to review its post attachments.".into(),
-        );
+        return Err("Choose fewer categories or a smaller export. One import can extract up to 256 MiB, including up to 32 MiB of metadata.".into());
+    }
+    extract(root, plan, scratch, &entries, cancel.clone()).await?;
+    let mut incoming = Records::new();
+    let mut imported_formats = BTreeMap::<Category, Vec<Format>>::new();
+    let mut media_entries = Vec::new();
+    let mut first_error = None;
+    let mut skipped_files = plan
+        .entries
+        .iter()
+        .filter(|entry| {
+            selected.contains(&entry.classification.category)
+                && entry.classification.format == Format::Unsupported
+        })
+        .count();
+    for entry in entries {
+        cancelled(&cancel)?;
+        let category = entry.classification.category;
+        if entry.classification.format == Format::Media {
+            media_entries.push(entry);
+            continue;
+        }
+        let rows = match filtered_rows(plan, scratch, entry, from, to) {
+            Ok(rows) => rows,
+            Err(error) => {
+                first_error.get_or_insert(error);
+                skipped_files += 1;
+                continue;
+            }
+        };
+        if !rows.is_empty() {
+            let formats = imported_formats.entry(category).or_default();
+            if !formats.contains(&entry.classification.format) {
+                formats.push(entry.classification.format);
+            }
+            incoming.entry(category).or_default().extend(rows);
+        }
+        if incoming.values().map(Vec::len).sum::<usize>() + media_entries.len() > MAX_RECORDS {
+            return Err("Too many indexed records. Choose a narrower date range.".into());
+        }
+    }
+    if date_filter && selected.contains(&Category::Media) {
+        if let Some(posts) = incoming.get(&Category::Posts) {
+            media_entries = dated_post_media(plan, posts);
+            if text_bytes + media_entries.iter().map(|entry| entry.size).sum::<u64>() > MAX_MEDIA {
+                return Err("The selected posts and their media exceed 256 MiB. Choose a narrower date range.".into());
+            }
+        }
+    }
+    if incoming.values().map(Vec::len).sum::<usize>() + media_entries.len() > MAX_RECORDS {
+        return Err("Too many indexed records. Choose a narrower date range.".into());
+    }
+    Ok(PreparedSelection {
+        incoming,
+        imported_formats,
+        media_entries,
+        first_error,
+        skipped_files,
+    })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RangeReview {
+    records: BTreeMap<Category, usize>,
+    attachments: usize,
+    attachment_bytes: u64,
+    skipped_files: usize,
+}
+
+async fn review_range(
+    root: &Path,
+    plan: &Plan,
+    categories: Vec<Category>,
+    from: Option<u64>,
+    to: Option<u64>,
+    cancel: watch::Receiver<bool>,
+) -> Result<RangeReview, String> {
+    let selected = selected_categories(plan.provider, categories, Vec::new())?;
+    if from.is_none() && to.is_none() {
+        return Err("Choose at least one date to review the import range.".into());
     }
     if queue::digest(plan.path.clone(), cancel.clone()).await? != plan.fingerprint {
         return Err("The export changed after preview. Choose it again.".into());
     }
-    let entries: Vec<_> = plan
-        .entries
-        .iter()
-        .filter(|entry| {
-            entry.classification.category == Category::Posts
-                && entry.classification.format != Format::Unsupported
-        })
-        .collect();
-    if entries.iter().any(|entry| entry.size > MAX_TEXT)
-        || entries.iter().map(|entry| entry.size).sum::<u64>() > MAX_TEXT_TOTAL
-    {
-        return Err("The selected post metadata exceeds the import limits of 8 MiB per file and 32 MiB in total.".into());
-    }
     let scratch = Scratch::new(root)?;
-    extract(root, plan, &scratch, &entries, cancel.clone()).await?;
-    let mut posts = Vec::new();
-    let mut skipped_post_files = 0;
-    for entry in entries {
-        cancelled(&cancel)?;
-        match filtered_rows(plan, &scratch, entry, from, to) {
-            Ok(rows) => posts.extend(rows),
-            Err(_) => skipped_post_files += 1,
-        }
-        if posts.len() > MAX_RECORDS {
-            return Err("Too many indexed records. Choose a narrower date range.".into());
-        }
-    }
+    let prepared = prepare_selection(root, plan, &scratch, &selected, from, to, cancel.clone()).await?;
     if queue::digest(plan.path.clone(), cancel).await? != plan.fingerprint {
         return Err("The export changed during review. Choose it again.".into());
     }
-    let media = dated_post_media(plan, &posts);
-    Ok(DatedMediaReview {
-        files: media.len(),
-        bytes: media.iter().map(|entry| entry.size).sum(),
-        skipped_post_files,
+    let records = selected
+        .into_iter()
+        .filter(|category| *category != Category::Media)
+        .map(|category| {
+            let count = prepared.incoming.get(&category).map_or(0, |rows| {
+                rows.iter().map(|row| row.id.as_str()).collect::<HashSet<_>>().len()
+            });
+            (category, count)
+        })
+        .collect();
+    Ok(RangeReview {
+        records,
+        attachments: prepared.media_entries.len(),
+        attachment_bytes: prepared.media_entries.iter().map(|entry| entry.size).sum(),
+        skipped_files: prepared.skipped_files,
     })
 }
 
 #[tauri::command]
-pub async fn personal_archive_review_media(
+pub async fn personal_archive_review_range(
     state: State<'_, Arc<AppState>>,
     fingerprint: String,
+    categories: Vec<Category>,
     from: Option<String>,
     to: Option<String>,
     request_id: u64,
-) -> Result<DatedMediaReview, String> {
+) -> Result<RangeReview, String> {
     let plan = state
         .personal_archive
         .plan
@@ -651,11 +758,11 @@ pub async fn personal_archive_review_media(
         .unwrap()
         .clone()
         .filter(|plan| plan.fingerprint == fingerprint)
-        .ok_or("Preview the export again before reviewing attachments.")?;
+        .ok_or("Preview the export again before reviewing the date range.")?;
     let (from, to) = date_range(&from, &to)?;
     let root = crate::config_root(&state)?;
     let cancel = file_sources::begin(&state, request_id)?;
-    let result = review_dated_media(&root, &plan, from, to, cancel).await;
+    let result = review_range(&root, &plan, categories, from, to, cancel).await;
     file_sources::finish(&state, request_id);
     result
 }
@@ -703,113 +810,20 @@ async fn import(
 ) -> Result<ImportResult, String> {
     let account = label(&selection.account)?;
     let destination = label(&selection.destination)?;
-    if selection
-        .categories
-        .iter()
-        .any(|category| category.sensitive())
-        || selection
-            .sensitive
-            .iter()
-            .any(|category| !category.sensitive())
-    {
-        return Err("Select messages and contacts separately.".into());
-    }
-    let selected = selection
-        .categories
-        .into_iter()
-        .chain(selection.sensitive)
-        .collect::<HashSet<_>>();
-    if selected.is_empty()
-        || selected
-            .iter()
-            .any(|category| !plan.provider.categories().contains(category))
-    {
-        return Err("Select at least one category included by this provider.".into());
-    }
+    let selected = selected_categories(plan.provider, selection.categories, selection.sensitive)?;
     let (from, to) = date_range(&selection.from, &selection.to)?;
     if queue::digest(plan.path.clone(), cancel.clone()).await? != plan.fingerprint {
         return Err("The export changed after preview. Choose it again.".into());
     }
-    let date_filter = from.is_some() || to.is_some();
-    let entries = plan
-        .entries
-        .iter()
-        .filter(|entry| {
-            selected.contains(&entry.classification.category)
-                && entry.classification.format != Format::Unsupported
-                && (entry.classification.format != Format::Media || !date_filter)
-        })
-        .collect::<Vec<_>>();
-    let mut text_bytes = 0;
-    let mut media_bytes = 0;
-    for entry in &entries {
-        if entry.classification.format == Format::Media {
-            media_bytes += entry.size;
-        } else {
-            if entry.size > MAX_TEXT {
-                return Err("A selected metadata file exceeds 8 MiB.".into());
-            }
-            text_bytes += entry.size;
-        }
-    }
-    if text_bytes > MAX_TEXT_TOTAL
-        || media_bytes > MAX_MEDIA
-        || text_bytes + media_bytes > MAX_MEDIA
-    {
-        return Err("Choose fewer categories or a smaller export. One import can extract up to 256 MiB, including up to 32 MiB of metadata.".into());
-    }
     let scratch = Scratch::new(root)?;
-    extract(root, &plan, &scratch, &entries, cancel.clone()).await?;
-    let mut incoming = Records::new();
-    let mut imported_formats = BTreeMap::<Category, Vec<Format>>::new();
-    let mut media_entries = Vec::new();
-    let mut first_error = None;
-    let mut skipped_files = plan
-        .entries
-        .iter()
-        .filter(|entry| {
-            selected.contains(&entry.classification.category)
-                && entry.classification.format == Format::Unsupported
-        })
-        .count();
-    for entry in entries {
-        cancelled(&cancel)?;
-        let category = entry.classification.category;
-        if entry.classification.format == Format::Media {
-            media_entries.push(entry);
-            continue;
-        }
-        let rows = match filtered_rows(&plan, &scratch, entry, from, to) {
-            Ok(rows) => rows,
-            Err(error) => {
-                first_error.get_or_insert(error);
-                skipped_files += 1;
-                continue;
-            }
-        };
-        if !rows.is_empty() {
-            let formats = imported_formats.entry(category).or_default();
-            if !formats.contains(&entry.classification.format) {
-                formats.push(entry.classification.format);
-            }
-            incoming.entry(category).or_default().extend(rows);
-        }
-        if incoming.values().map(Vec::len).sum::<usize>() + media_entries.len() > MAX_RECORDS {
-            return Err("Too many indexed records. Choose a narrower date range.".into());
-        }
-    }
-    if date_filter && selected.contains(&Category::Media) {
-        if let Some(posts) = incoming.get(&Category::Posts) {
-            media_entries = dated_post_media(&plan, posts);
-            if text_bytes + media_entries.iter().map(|entry| entry.size).sum::<u64>() > MAX_MEDIA {
-                return Err("The selected posts and their media exceed 256 MiB. Choose a narrower date range.".into());
-            }
-        }
-    }
-    if incoming.values().map(Vec::len).sum::<usize>() + media_entries.len() > MAX_RECORDS {
-        return Err("Too many indexed records. Choose a narrower date range.".into());
-    }
-    if date_filter {
+    let PreparedSelection {
+        mut incoming,
+        mut imported_formats,
+        media_entries,
+        first_error,
+        skipped_files,
+    } = prepare_selection(root, &plan, &scratch, &selected, from, to, cancel.clone()).await?;
+    if from.is_some() || to.is_some() {
         extract(root, &plan, &scratch, &media_entries, cancel.clone()).await?;
     }
     let mut copies = Vec::new();
@@ -1838,12 +1852,24 @@ mod tests {
         let from = Some("2024-06-01".to_string());
         let to = from.clone();
         let (start, end) = date_range(&from, &to).unwrap();
-        let review = review_dated_media(&root, &plan, start, end, cancel.clone())
+        let review = review_range(
+            &root, &plan, vec![Category::Posts, Category::Media], start, end, cancel.clone(),
+        )
             .await
             .unwrap();
-        assert_eq!(review.files, 2);
-        assert_eq!(review.bytes, (files[4].1.len() + files[5].1.len()) as u64);
-        assert_eq!(review.skipped_post_files, 1);
+        assert_eq!(review.records, BTreeMap::from([(Category::Posts, 1)]));
+        assert_eq!(review.attachments, 2);
+        assert_eq!(review.attachment_bytes, (files[4].1.len() + files[5].1.len()) as u64);
+        assert_eq!(review.skipped_files, 2);
+        let posts = review_range(&root, &plan, vec![Category::Posts], start, end, cancel.clone())
+            .await
+            .unwrap();
+        assert_eq!(posts.records, review.records);
+        assert_eq!(posts.attachments, 0);
+        assert!(review_range(&root, &plan, vec![Category::Messages], start, end, cancel.clone())
+            .await
+            .is_err_and(|error| error.contains("Select messages and contacts separately")));
+        assert!(load_index(&root).unwrap().is_empty());
         assert!(!root.join("personal-archive-media").exists());
         let messages = preview
             .categories

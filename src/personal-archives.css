@@ -109,10 +109,15 @@
 .archive-search-dates > p { margin-top: 8px; }
 #archive-import-form { display: grid; gap: 13px; justify-items: start; }
 #archive-import-form > :is(fieldset, .archive-fields) { width: 100%; }
-#archive-media-review-result:empty { display: none; }
-#archive-media-review-result { padding: 5px 9px; border-radius: 6px; background: var(--hover); }
-#archive-media-review-result:focus-visible { outline-offset: 2px; }
-#archive-media-review-result small { display: block; color: var(--muted); }
+#archive-range-review-result:empty { display: none; }
+#archive-range-review-result {
+  display: grid; gap: 8px; width: 100%; padding: 10px 12px;
+  border-inline-start: 2px solid var(--border); background: var(--hover);
+}
+#archive-range-review-result:focus-visible { outline-offset: 2px; }
+#archive-range-review-result dl { display: flex; flex-wrap: wrap; gap: 8px 24px; margin: 0; }
+#archive-range-review-result dd { margin: 0; font-variant-numeric: tabular-nums; }
+#archive-range-review-result :is(dt, small) { color: var(--muted); }
 .archive-import-footer {
   display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
   gap: 12px 18px; width: 100%; padding-top: 12px; border-top: 1px solid var(--border);

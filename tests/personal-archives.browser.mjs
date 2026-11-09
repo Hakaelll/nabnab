@@ -70,7 +70,12 @@ const setup = `
         preview("likes",null,"absent",false,[]),preview("bookmarks",null,"unsupported",false,["unsupported"]),
         imports===0?preview("media",0,"empty"):{...preview("media",2,"available",false,["media"]),files:3,bytes:6252},preview("messages",null,"requiresSelection",true)]};
     }
-    if(cmd==="personal_archive_review_media") return {files:2,bytes:4096,skippedPostFiles:0};
+    if(cmd==="personal_archive_review_range") return {
+      records:Object.fromEntries(args.categories.filter(key=>key!=="media").map(key=>[key,3])),
+      attachments:args.categories.includes("posts")&&args.categories.includes("media")?2:0,
+      attachmentBytes:args.categories.includes("posts")&&args.categories.includes("media")?4096:0,
+      skippedFiles:0,
+    };
     if(cmd==="personal_archive_import"){
       const selected=args.selection;
       const all=[...selected.categories,...selected.sensitive];
@@ -326,28 +331,40 @@ try {
     await page.locator("#archive-account").fill("Cuenta de prueba");
     await page.locator("#archive-destination").fill(destination);
     if (destination === "Archivo 2025") {
-      const calculate = page.getByRole("button", {name:"Calcular adjuntos"});
-      const summary = page.locator("#archive-media-review-result");
+      const calculate = page.getByRole("button", {name:"Revisar intervalo"});
+      const summary = page.locator("#archive-range-review-result");
       assert.equal(await calculate.isDisabled(), true);
       await page.locator("#archive-from").fill("2025-01-08");
+      await page.locator("input[value='messages']").check();
       await calculate.press("Enter");
       await page.getByText("2 adjuntos en el intervalo · 4 KB", {exact:true}).waitFor();
-      assert.equal(await page.locator("#archive-selection-summary").innerText(), "2 categorías · 4 archivos · 6 KB");
+      await summary.getByText("Publicaciones", {exact:true}).waitFor();
+      await summary.getByText("3 registros", {exact:true}).waitFor();
+      assert.equal(await summary.getByText("Mensajes", {exact:true}).count(), 0);
+      assert.match(await page.locator("#archive-selection-summary").innerText(), /3 categorías.*1 con datos privados/);
       assert.equal(await summary.evaluate(node => node === document.activeElement), true);
-      const request = (await calls()).find(call => call.cmd === "personal_archive_review_media").args;
+      const request = (await calls()).find(call => call.cmd === "personal_archive_review_range").args;
       assert.equal(request.from, "2025-01-08");
       assert.equal(request.to, null);
-      assert.deepEqual(Object.keys(request).sort(), ["fingerprint", "from", "requestId", "to"]);
+      assert.deepEqual([...request.categories].sort(), ["media", "posts"]);
+      assert.deepEqual(Object.keys(request).sort(), ["categories", "fingerprint", "from", "requestId", "to"]);
       for (const [width,height] of [[1180,890],[900,620]]) {
         await page.setViewportSize({width,height});
-        await calculate.scrollIntoViewIfNeeded();
+        await summary.scrollIntoViewIfNeeded();
         const bounds = await summary.boundingBox();
         assert.ok(bounds && bounds.y >= 0 && bounds.y + bounds.height < height);
         await page.screenshot({path:`${directory}/dated-media-${width}.png`});
       }
       await page.locator("input[value='media']").uncheck();
       assert.equal(await summary.textContent(), "");
+      assert.equal(await calculate.isEnabled(), true);
+      await calculate.click();
+      await summary.getByText("3 registros", {exact:true}).waitFor();
+      assert.equal(await summary.getByText(/adjuntos en el intervalo/).count(), 0);
+      await page.locator("input[value='posts']").uncheck();
       assert.equal(await calculate.isDisabled(), true);
+      assert.equal(await summary.textContent(), "");
+      await page.locator("input[value='posts']").check();
       await page.locator("input[value='media']").check();
       await calculate.click();
       await page.getByText("2 adjuntos en el intervalo · 4 KB", {exact:true}).waitFor();
@@ -471,7 +488,7 @@ try {
   assert.equal(await importSelection.isDisabled(), true);
   assert.equal((await calls()).filter(call => call.cmd === "personal_archive_records" && call.args.category === "contacts").length, 0);
   assert.deepEqual(errors, []);
-  console.log("Verified dated attachment reviews, archived X threads and attachments, privacy, Spotify history, local playlist matching and cancellable media previews at 900 and 1180 px in Edge.");
+  console.log("Verified date range reviews, archived X threads and attachments, privacy, Spotify history, local playlist matching and cancellable media previews at 900 and 1180 px in Edge.");
 } finally {
   await browser.close();
 }

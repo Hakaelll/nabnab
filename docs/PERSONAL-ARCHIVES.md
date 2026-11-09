@@ -35,9 +35,9 @@ For Instagram and Facebook JSON exports, select **Posts** and **Media** to see a
 
 When filtering an X, Instagram or Facebook ZIP by date, select **Posts** and **Media** to copy the attachments linked to posts in that interval. Loose media, attachments from other dates and undated private media are skipped. Importing a narrower interval adds to the previous import of the same package. To copy loose media, import its category without a date interval.
 
-Select **Calculate attachments** to see how many linked files the interval selects and their total uncompressed size, including files copied by an earlier import. Nabnab reads public post metadata and the ZIP index for this calculation. Changing the dates or either category clears the result.
+Select **Review date range** to count matching records in each selected public category. For linked attachments, the review shows their count and uncompressed size, including files copied by an earlier import. The review reads the selected public metadata and leaves messages and contacts for the confirmed import. It also reports files it will skip. Changing the dates or a public category clears the result.
 
-![Attachment count and size before importing a date range](personal-archive-date-review.png)
+![Public record counts and linked attachment size before importing a date range](personal-archive-date-review.png)
 
 ![Archived X thread opened in Windows with synthetic data](personal-archive-thread.png)
 
@@ -64,4 +64,4 @@ Verification uses synthetic exports. The Windows tests exercise selective ZIP ex
 
 The Facebook ZIP fixture verifies that the post keeps its identity across imports and that a same-name file from a different folder, an absent file, and a private photo stay out of its attachments. The native Instagram fixture verifies the attachment order, image decoding, and focus restoration at 900 and 1180 pixels.
 
-The Windows date-range tests use synthetic X and Facebook ZIPs. They check exclusion of an orphan and an attachment from the following day, preservation of a previous private import, and unchanged media size after repeating the same dated selection. The date instructions and submit button were checked in Edge with simulated archive data at both window widths.
+The Windows date-range tests use synthetic X and Facebook ZIPs. They check the matching post count, attachment size, skipped files, and rejection of private categories in the review. They also check exclusion of an orphan and an attachment from the following day, preservation of a previous private import, and unchanged media size after repeating the same dated selection. The date review was checked in Edge with simulated archive data at both window widths.

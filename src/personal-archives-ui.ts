@@ -30,7 +30,12 @@ interface CategoryPreview {
   formats: Format[];
 }
 interface Preview { source: string; fingerprint: string; bytes: number; categories: CategoryPreview[]; datedPostMedia?: boolean }
-interface DatedMediaReview { files: number; bytes: number; skippedPostFiles: number }
+interface RangeReview {
+  records: Partial<Record<Category, number>>;
+  attachments: number;
+  attachmentBytes: number;
+  skippedFiles: number;
+}
 interface Archive {
   id: string;
   provider: Provider;
@@ -116,7 +121,7 @@ export function createPersonalArchives(hooks: Hooks) {
   let provider: Provider = "instagram";
   let archives: Archive[] = [];
   let preview: Preview | null = null;
-  let mediaReview: DatedMediaReview | null = null;
+  let rangeReview: RangeReview | null = null;
   let archiveId = "";
   let category: Category | null = null;
   let result: RecordPage | null = null;
@@ -213,33 +218,40 @@ export function createPersonalArchives(hooks: Hooks) {
       const file = await hooks.command<Preview | null>("personal_archive_choose", { provider, requestId });
       if (!file) return;
       preview = file;
-      mediaReview = null;
+      rangeReview = null;
       included.clear();
       for (const item of file.categories) if (!item.sensitive && selectable(item)) included.add(item.category);
     });
   }
 
-  const canReviewMedia = () => Boolean(preview?.datedPostMedia && (draft.from || draft.to) && included.has("posts") && included.has("media"));
+  const publicSelection = () => [...included].filter(category => !privateCategory(category));
+  const canReviewRange = () => Boolean(preview && (draft.from || draft.to) && publicSelection().length);
 
-  function resetMediaReview() {
-    mediaReview = null;
-    document.getElementById("archive-media-review-result")?.replaceChildren();
-    const button = document.getElementById("archive-review-media");
-    if (button instanceof HTMLButtonElement) button.disabled = busy || !canReviewMedia();
+  function resetRangeReview() {
+    rangeReview = null;
+    document.getElementById("archive-range-review-result")?.replaceChildren();
+    const button = document.getElementById("archive-review-range");
+    if (button instanceof HTMLButtonElement) button.disabled = busy || !canReviewRange();
   }
 
-  async function reviewMedia() {
-    if (!preview || !canReviewMedia()) return;
+  async function reviewRange() {
+    if (!preview || !canReviewRange()) return;
+    if (draft.from && draft.to && draft.from > draft.to) {
+      error = t("La fecha inicial debe ser anterior o igual a la final.", "The start date must be on or before the end date.");
+      hooks.render();
+      document.getElementById("archive-from")?.focus();
+      return;
+    }
     const fingerprint = preview.fingerprint;
     await run(async () => {
-      mediaReview = null;
+      rangeReview = null;
       requestId = Date.now() * 1000 + 401;
       hooks.render();
-      mediaReview = await hooks.command<DatedMediaReview>("personal_archive_review_media", {
-        fingerprint, from: draft.from || null, to: draft.to || null, requestId,
+      rangeReview = await hooks.command<RangeReview>("personal_archive_review_range", {
+        fingerprint, categories: publicSelection(), from: draft.from || null, to: draft.to || null, requestId,
       });
     });
-    if (visible && mediaReview) document.getElementById("archive-media-review-result")?.focus();
+    if (visible) document.getElementById(rangeReview ? "archive-range-review-result" : "archive-review-range")?.focus();
   }
 
   function categoryRow(item: CategoryPreview) {
@@ -298,6 +310,20 @@ export function createPersonalArchives(hooks: Hooks) {
     if (submit instanceof HTMLButtonElement) submit.disabled = busy || !included.size;
   }
 
+  function rangeSummary(review: RangeReview) {
+    const recordCounts = categoryKeys.map(category => {
+      const count = review.records[category];
+      if (count === undefined) return "";
+      return `<div><dt>${h(name(category))}</dt><dd>${number(count)} ${count === 1 ? t("registro", "record") : t("registros", "records")}</dd></div>`;
+    }).join("");
+    const attachments = included.has("media")
+      ? `<div><dt>${h(name("media"))}</dt><dd>${number(review.attachments)} ${review.attachments === 1 ? t("adjunto en el intervalo", "attachment in range") : t("adjuntos en el intervalo", "attachments in range")} · ${bytesLabel(review.attachmentBytes)}</dd></div>`
+      : "";
+    return `<strong>${t("Registros públicos en el intervalo", "Public records in range")}</strong>
+      <dl>${recordCounts}${attachments}</dl>
+      ${review.skippedFiles ? `<small>${h(omittedFiles(review.skippedFiles))}</small>` : ""}`;
+  }
+
   function importForm() {
     const omissions = selectionOmissions();
     return `<section class="archive-panel" aria-labelledby="archive-import-title">
@@ -328,15 +354,14 @@ export function createPersonalArchives(hooks: Hooks) {
           ${preview.datedPostMedia
             ? t("Marca Publicaciones y Multimedia para incluir los adjuntos vinculados del intervalo. Los tamaños de arriba corresponden al archivo completo.", "Select Posts and Media to include linked attachments in the date range. The sizes above are for the entire archive.")
             : t("Si aplicas un intervalo, se omite el contenido multimedia sin fecha.", "Applying a date range skips undated media.")}</p>
-        ${preview.datedPostMedia ? `<div id="archive-media-review-result" role="status" tabindex="-1">${mediaReview ? `<strong>${number(mediaReview.files)} ${mediaReview.files === 1 ? t("adjunto en el intervalo", "attachment in range") : t("adjuntos en el intervalo", "attachments in range")} · ${bytesLabel(mediaReview.bytes)}</strong>
-          ${mediaReview.skippedPostFiles ? `<small>${t("Archivos de publicaciones que no se pudieron leer", "Unreadable post files")} · ${number(mediaReview.skippedPostFiles)}</small>` : ""}` : ""}</div>` : ""}
+        <div id="archive-range-review-result" role="status" tabindex="-1">${rangeReview ? rangeSummary(rangeReview) : ""}</div>
         <footer class="archive-import-footer">
           <div class="archive-import-summary"><strong>${t("Selección de importación", "Import selection")}</strong>
             <output id="archive-selection-summary" aria-atomic="true">${h(selectionSummary())}</output>
             <small id="archive-selection-skipped" role="status" ${omissions ? "" : "hidden"}>${h(omissions)}</small>
             <small>${t("Tamaño de origen sin comprimir, antes de aplicar fechas.", "Uncompressed source size before applying dates.")}</small></div>
           <div class="archive-actions">
-            ${preview.datedPostMedia ? action("archive-review-media", t("Calcular adjuntos", "Calculate attachments"), "list", "secondary", `id="archive-review-media" ${busy || !canReviewMedia() ? "disabled" : ""}`) : ""}
+            ${action("archive-review-range", t("Revisar intervalo", "Review date range"), "list", "secondary", `id="archive-review-range" ${busy || !canReviewRange() ? "disabled" : ""}`)}
             <button type="submit" id="archive-import-submit" class="button primary" ${busy || !included.size ? "disabled" : ""}>${t("Importar selección", "Import selection")}</button>
           </div>
         </footer>
@@ -735,7 +760,7 @@ export function createPersonalArchives(hooks: Hooks) {
       case "archive-new":
         discardMediaPreview(); postAttachments = null; adding = true; error = ""; hooks.render(); document.getElementById("archive-provider")?.focus(); break;
       case "archive-choose": await choose(); break;
-      case "archive-review-media": await reviewMedia(); break;
+      case "archive-review-range": await reviewRange(); break;
       case "archive-close-form":
         adding = false; preview = null; error = ""; hooks.render();
         document.querySelector<HTMLElement>('[data-action="archive-new"]')?.focus({ preventScroll: true }); break;
@@ -860,7 +885,7 @@ export function createPersonalArchives(hooks: Hooks) {
     if (!(target instanceof HTMLInputElement)) return false;
     if (target.form?.id === "archive-import-form" && Object.hasOwn(draft, target.name)) {
       draft[target.name as keyof typeof draft] = target.value;
-      if (target.name === "from" || target.name === "to") resetMediaReview();
+      if (target.name === "from" || target.name === "to") resetRangeReview();
       return true;
     }
     if (target.form?.id === "archive-search-form" && (target.name === "query" || target.name === "from" || target.name === "to")) {
@@ -874,7 +899,7 @@ export function createPersonalArchives(hooks: Hooks) {
     if (target instanceof HTMLSelectElement && target.id === "archive-provider") {
       provider = target.value as Provider;
       preview = null;
-      mediaReview = null;
+      rangeReview = null;
       included.clear();
       error = "";
       hooks.render();
@@ -882,7 +907,7 @@ export function createPersonalArchives(hooks: Hooks) {
       const key = preview?.categories.find(item => item.category === target.value && selectable(item))?.category;
       if (!key) return false;
       if (target.checked) included.add(key); else included.delete(key);
-      if (key === "posts" || key === "media") resetMediaReview();
+      if (!privateCategory(key)) resetRangeReview();
       syncImportSelection();
     } else if (target instanceof HTMLInputElement && target.name === "archive-record") {
       const row = result?.rows.find(item => item.id === target.value);
@@ -924,12 +949,12 @@ export function createPersonalArchives(hooks: Hooks) {
         requestId = Date.now() * 1000 + 401;
         hooks.render();
         const { archive, skippedFiles } = await hooks.command<{ archive: Archive; skippedFiles: number }>("personal_archive_import", {
-          requestId, selection: { ...draft, fingerprint, categories: [...included].filter(key => !privateCategory(key)),
+          requestId, selection: { ...draft, fingerprint, categories: publicSelection(),
             sensitive: [...included].filter(privateCategory) },
         });
         archives = [...archives.filter(item => item.id !== archive.id), archive];
         loaded = true;
-        preview = null; mediaReview = null; adding = false; included.clear();
+        preview = null; rangeReview = null; adding = false; included.clear();
         draft = { account: "", destination: "", from: "", to: "" };
         await open(archive.id);
         if (skippedFiles) hooks.notify(t(`Exportación importada. Archivos incompatibles omitidos: ${number(skippedFiles)}.`, `Export imported. Unsupported files skipped: ${number(skippedFiles)}.`), "info");
