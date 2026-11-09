@@ -60,6 +60,7 @@ interface CourseHooks {
   notify(text: string, kind?: "info" | "success" | "error"): void;
   showError(error: unknown): void;
   openLibrary(id: string): void;
+  locateFile(id: string): Promise<void>;
   player: Pick<ReturnType<typeof createAudioPlayer>, "play" | "playAt" | "playFrom" | "current" | "timeFor">;
   t: Copy;
 }
@@ -91,12 +92,17 @@ export function createCoursesController(hooks: CourseHooks) {
   const selected = new Set<string>();
   const current = () => courses.find(course => course.id === courseId);
   const currentLesson = () => current()?.sections.flatMap(section => section.lessons).find(lesson => lesson.id === lessonId);
-  const local = (asset: CourseAsset) => {
+  const indexed = (asset: CourseAsset) => {
     const { library, jobs } = hooks.getSnapshot();
-    const indexed = asset.libraryId ? library.find(item => item.id === asset.libraryId && !item.missing) : undefined;
-    if (indexed || !asset.jobIds.length) return indexed;
+    const linked = asset.libraryId ? library.find(item => item.id === asset.libraryId) : undefined;
+    if (linked && !linked.missing || !asset.jobIds.length) return linked;
     const outputs = jobs.filter(job => job.state === "completed" && asset.jobIds.includes(job.id)).flatMap(job => job.outputs);
-    return library.find(item => !item.missing && outputs.includes(item.path));
+    const copies = library.filter(item => outputs.includes(item.path));
+    return copies.find(item => !item.missing) ?? linked ?? copies[0];
+  };
+  const local = (asset: CourseAsset) => {
+    const item = indexed(asset);
+    return item?.missing ? undefined : item;
   };
   function lessonMedia(lesson?: CourseLesson) {
     for (const asset of lesson?.assets ?? []) {
@@ -107,9 +113,10 @@ export function createCoursesController(hooks: CourseHooks) {
   const active = (asset: CourseAsset) => asset.jobIds.some(id => hooks.getSnapshot().jobs.some(job => job.id === id && ["pending", "paused", "analyzing", "ready", "downloading", "processing", "verifying"].includes(job.state)));
   const failed = (asset: CourseAsset) => asset.jobIds.some(id => hooks.getSnapshot().jobs.some(job => job.id === id && job.state === "error"));
   const available = (asset: CourseAsset) => asset.status === "downloadable" && !local(asset) && !active(asset);
-  function status(asset: CourseAsset) {
-    if (local(asset)) return t("Guardado", "Saved");
+  function status(asset: CourseAsset, item: LibraryItem | undefined) {
+    if (item && !item.missing) return t("Guardado", "Saved");
     if (active(asset)) return t("En cola", "Queued");
+    if (item?.missing) return t("Archivo ausente", "Missing file");
     if (asset.status === "drm") return "DRM";
     if (asset.status === "downloadable") return failed(asset) ? t("Descarga fallida", "Download failed") : t("Descarga autorizada disponible", "Authorized download available");
     if (asset.id.startsWith("coursera-item-")) return t("Consultar en Coursera", "View in Coursera");
@@ -125,6 +132,20 @@ export function createCoursesController(hooks: CourseHooks) {
     if (kind === "assignment") return t("Actividad", "Assignment");
     if (kind === "course-item") return t("Material del curso", "Course material");
     return t("Adjunto", "Attachment");
+  }
+
+  function materialRow(asset: CourseAsset, localStudy: boolean): string {
+    const item = indexed(asset);
+    const titleId = `course-material-title-${asset.id}`;
+    const fileAttributes = item ? `id="course-file-${h(asset.id)}" data-id="${h(item.id)}" aria-describedby="${h(titleId)}"` : "";
+    return `<article class="source-item">
+      ${localStudy && asset.status !== "downloadable" ? "" : `<label><input type="checkbox" data-course-asset="${h(asset.id)}"
+        ${selected.has(asset.id) ? "checked" : ""} ${available(asset) ? "" : "disabled"} aria-label="${h(t("Seleccionar ", "Select ") + asset.title)}"></label>`}
+      <div class="source-item-main"><strong id="${h(titleId)}">${h(asset.title)}</strong>
+        <span>${h(materialKind(asset.kind, localStudy))} · ${h(status(asset, item))}</span>${asset.restriction ? `<small>${h(asset.restriction)}</small>` : ""}</div>
+      ${item?.missing ? action("course-locate-file", t("Localizar archivo", "Locate file"), "folder", "secondary", `${fileAttributes} ${busy ? "disabled" : ""}`)
+        : item ? action("course-open-file", t("Ver en biblioteca", "View in library"), undefined, "quiet", fileAttributes) : ""}
+    </article>`;
   }
 
   async function reload(): Promise<void> { courses = await hooks.command<Course[]>("list_courses"); }
@@ -539,7 +560,7 @@ export function createCoursesController(hooks: CourseHooks) {
       ${!showQueue ? "" : `<div class="selection-toolbar"><span>${queueable.length === 1 ? t("1 material seleccionado", "1 material selected") : `${queueable.length} ${t("materiales seleccionados", "materials selected")}`}</span>${action("course-queue", t("Añadir a la cola", "Add to queue"), "add", "primary", busy || !queueable.length ? "disabled" : "")}${action("course-clear", t("Quitar selección", "Clear selection"), undefined, "quiet")}</div>`}
       <div class="course-layout${browserAssisted ? " course-layout--browser" : ""}">${renderCourseTree(course, localStudy, Boolean(resourceCount))}<section class="course-study">${lesson ? `<div class="page-heading"><h2 id="course-study-title" tabindex="-1">${h(lessonTitle(lesson))}</h2>${action("course-learned", resourceLesson ? (lesson.learned ? t("Marcar pendiente", "Mark as pending") : t("Marcar revisado", "Mark as reviewed")) : (lesson.learned ? t("Marcar pendiente de aprender", "Mark as not learned") : t("Marcar aprendida", "Mark as learned")), "check", "quiet", `aria-pressed="${lesson.learned}" ${busy ? "disabled" : ""}`)}</div>
       ${item ? lessonPlayback(item) : ""}
-      <div class="course-materials-heading"><h3 id="course-materials-heading" tabindex="-1">${t("Materiales", "Materials")}</h3>${browserAssisted && !resourceLesson ? action("course-add-attachments", t("Añadir adjuntos", "Add attachments"), "add", "quiet", `id="course-add-attachments" ${busy ? "disabled" : ""}`) : ""}</div><div class="source-items">${lesson.assets.map(asset => { const item = local(asset); return `<article class="source-item">${localStudy && asset.status !== "downloadable" ? "" : `<label><input type="checkbox" data-course-asset="${h(asset.id)}" ${selected.has(asset.id) ? "checked" : ""} ${available(asset) ? "" : "disabled"} aria-label="${h(t("Seleccionar ", "Select ") + asset.title)}"></label>`}<div class="source-item-main"><strong>${h(asset.title)}</strong><span>${h(materialKind(asset.kind, localStudy))} · ${h(status(asset))}</span>${asset.restriction ? `<small>${h(asset.restriction)}</small>` : ""}</div>${item ? action("course-open-file", t("Ver en biblioteca", "View in library"), undefined, "quiet", `data-id="${h(item.id)}"`) : ""}</article>`; }).join("")}</div>
+      <div class="course-materials-heading"><h3 id="course-materials-heading" tabindex="-1">${t("Materiales", "Materials")}</h3>${browserAssisted && !resourceLesson ? action("course-add-attachments", t("Añadir adjuntos", "Add attachments"), "add", "quiet", `id="course-add-attachments" ${busy ? "disabled" : ""}`) : ""}</div><div class="source-items">${lesson.assets.map(asset => materialRow(asset, localStudy)).join("")}</div>
       <h3>${unitResource ? t("Notas de la unidad", "Unit notes") : resourceLesson ? t("Notas de este adjunto", "Attachment notes") : t("Notas de esta lección", "Lesson notes")}</h3><form id="course-note" class="settings-form"><label>${t("Nota", "Note")}<textarea id="course-note-text" rows="3" maxlength="4000" required>${h(noteText)}</textarea></label><div class="form-grid"><label>${t("Tiempo en segundos, opcional", "Time in seconds, optional")}<input id="course-note-time" type="number" min="0" step="0.1" value="${h(noteTime)}"></label><div class="button-group">${item ? action("course-note-now", t("Usar tiempo actual", "Use current time"), undefined, "quiet", player.current()?.id === item.id ? "" : "disabled") : ""}<button class="button secondary" type="submit" ${busy ? "disabled" : ""}>${t("Guardar nota", "Save note")}</button></div></div></form>
       ${lesson.notes.map(note => `<article class="course-note"><p>${h(note.text)}</p><div class="button-group">${note.time === null ? "" : item ? action("course-note-seek", `${note.time.toFixed(1)} s`, "play", "quiet", `data-time="${note.time}"`) : `<span class="field-note">${note.time.toFixed(1)} s</span>`}${action("course-note-remove", t("Eliminar nota", "Remove note"), "close", "quiet", `data-id="${h(note.id)}" ${busy ? "disabled" : ""}`)}</div></article>`).join("")}` : `<div class="empty-state"><h2>${t("Elige una lección", "Choose a lesson")}</h2><p>${t("Guardado y aprendido son estados independientes.", "Saved and learned are separate states.")}</p></div>`}</section></div>`;
   }
@@ -788,6 +809,17 @@ export function createCoursesController(hooks: CourseHooks) {
       case "course-refresh": if (course?.url) await perform(async () => { if (course.provider === "udemy") await hooks.command("inspect_course", { url: course.url, limit }); else await hooks.command("inspect_member_course", { provider: course.provider, url: course.url, productId: course.id.replace(/^(hotmart|kiwify)-/, ""), slug: course.slug ?? "", limit }); }); break;
       case "course-learned": if (course && lesson) await perform(async () => { await hooks.command("course_learned", { courseId: course.id, lessonId: lesson.id, learned: !lesson.learned }); }); break;
       case "course-open-file": if (element.dataset.id) hooks.openLibrary(element.dataset.id); return true;
+      case "course-locate-file": {
+        const id = element.dataset.id;
+        if (!id || busy) return true;
+        await perform(async () => {
+          await hooks.locateFile(id);
+          await reload();
+          return false;
+        });
+        document.getElementById(element.id)?.focus({ preventScroll: true });
+        return true;
+      }
       case "course-resume": {
         const next = course && resumableLesson(course);
         if (!next || busy) return true;

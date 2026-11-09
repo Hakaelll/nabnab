@@ -324,7 +324,7 @@ pub(super) fn enqueue(
                         queue::JobState::Pending | queue::JobState::Paused
                     )
                     || job.state == queue::JobState::Completed
-                        && job.outputs.iter().any(|path| path.is_file()))
+                        && job.outputs.iter().any(|path| super::course_output_exists(repo, path)))
         }) {
             continue;
         }
@@ -473,6 +473,21 @@ mod tests {
                 "duplicate-fixture"
             )
             .is_err());
+            let download = root.join("Guide.pdf");
+            std::fs::write(&download, b"local fixture PDF").unwrap();
+            let item = crate::library::index(&download, None, None, None).unwrap();
+            let library_id = item.id.clone();
+            let published_path = item.path.clone();
+            repo.data.library.push(item);
+            repo.data.jobs[0].state = queue::JobState::Completed;
+            repo.data.jobs[0].outputs = vec![published_path.clone()];
+            let moved = root.join("Guide renamed.pdf");
+            std::fs::rename(download, &moved).unwrap();
+            assert!(!super::super::course_output_exists(&repo, &published_path));
+            assert_eq!(super::super::course_index(&repo)[0].sections[0].lessons[0].assets[0].library_id.as_deref(), Some(library_id.as_str()));
+            crate::library::locate(&mut repo, &library_id, &moved, None).unwrap();
+            assert!(super::super::course_output_exists(&repo, &published_path));
+            assert!(enqueue(&mut repo, &course, std::slice::from_ref(&id), "moved-fixture").is_err());
             let lesson = &mut repo.data.courses[0].sections[0].lessons[0];
             lesson.learned = true;
             lesson.notes.push(super::super::CourseNote {
@@ -577,6 +592,7 @@ mod tests {
             drop(repo);
             let reopened = Repository::open(&root, &root).unwrap();
             assert_eq!(jobs_for(&reopened, &id).next().unwrap().id, jobs[0].id);
+            assert_eq!(super::super::course_index(&reopened)[0].sections[0].lessons[0].assets[0].library_id.as_deref(), Some(library_id.as_str()));
             assert_eq!(
                 reopened.data.courses[0].sections[1].lessons[0].assets[1].title,
                 "Reference.pdf"

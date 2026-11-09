@@ -929,10 +929,30 @@ async fn locate_media(
     state: State<'_, Arc<AppState>>,
     id: String,
 ) -> Result<Snapshot, String> {
-    let paths = pick_paths(app, false).await?;
-    if let Some(path) = paths.first() {
+    let (extension, probe) = {
+        let guard = state.repository.lock().unwrap();
+        let item = guard.as_ref().ok_or("Open the app first.")?.data.library.iter()
+            .find(|item| item.id == id).ok_or("This library item no longer exists.")?;
+        let extension = item.path.extension().and_then(|ext| ext.to_str()).map(str::to_owned);
+        (extension, matches!(item.kind.as_str(), "audio" | "video"))
+    };
+    let picker = app.clone();
+    let selected = tauri::async_runtime::spawn_blocking(move || {
+        let dialog = picker.dialog().file().set_title("Locate moved file");
+        let dialog = if let Some(ext) = extension { dialog.add_filter("Original file type", &[&ext]) } else { dialog };
+        dialog.blocking_pick_file()
+    }).await.map_err(|error| error.to_string())?;
+    if let Some(file) = selected {
+        let path = file.into_path().map_err(|_| "Choose a local file.")?;
+        let mut info = None;
+        if probe {
+            if let Ok(root) = dependencies::engine_root(&app) {
+                let (_sender, cancel) = watch::channel(false);
+                info = media::probe(&root, &path, cancel).await.ok();
+            }
+        }
         let mut guard = state.repository.lock().unwrap();
-        library::locate(guard.as_mut().ok_or("Open the app first.")?, &id, path)?;
+        library::locate(guard.as_mut().ok_or("Open the app first.")?, &id, &path, info.as_ref())?;
     }
     snapshot(&state)
 }

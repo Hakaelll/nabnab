@@ -36,6 +36,10 @@ Para conservar el orden del curso, guarda cada unidad en una carpeta numerada y 
 
 Si un documento, subtítulo, imagen o archivo comprimido pertenece a una lección ya importada, ábrela y usa **Materiales → Añadir adjuntos**. La revisión muestra la lección de destino y permite marcar archivos aunque tengan otro nombre o estén en otra carpeta. Al confirmar con **Añadir a la lección**, se vinculan a la lección existente. Repetir la importación conserva la asociación. Los vídeos y audios se incorporan desde **Añadir archivos guardados** o **Añadir carpeta**.
 
+Si cambias de carpeta un archivo que sigue en Biblioteca, abre la lección o los recursos de la unidad y elige **Localizar archivo** junto a **Archivo ausente**. Selecciona el mismo archivo en su nueva ubicación. El vínculo, las notas y el punto de reproducción se conservan. Si recuperas un adjunto descargado, nabnab lo sigue reconociendo en el curso al volver a abrirlo.
+
+![Localizar un audio movido desde la lección, con datos de prueba](course-moved-material.png)
+
 | Plataforma | Vía disponible |
 | --- | --- |
 | Rocketseat | Pega un enlace de [formación](https://app.rocketseat.com.br/journey/discover/contents) o de [aula](https://app.rocketseat.com.br/classroom/git-e-github). Cada uno tiene su propio índice en nabnab. Abre el enlace en el navegador con tu sesión e importa únicamente archivos que se te haya autorizado a guardar. Sus [condiciones de uso](https://www.rocketseat.com.br/termos-de-uso) prohíben descargar las videoclases. |
@@ -82,6 +86,8 @@ Las pruebas usan materiales sintéticos. Rust verifica la asociación tras reabr
 ![Revisión de adjuntos para una lección existente, a 900 × 620 con IPC simulado](course-lesson-attachments.png)
 
 `tests/native-course-materials.browser.mjs` abre un perfil aislado de Windows y comprueba que el comando de revisión rechaza un archivo local cuando no hay un arrastre nativo que lo autorice. La biblioteca y los cursos quedan vacíos y el perfil temporal se elimina al terminar. Ejecuta `node tests/native-course-materials.browser.mjs` con Vite en el puerto 1420 y el ejecutable de depuración actualizado. El recorrido de arrastre entre ventanas sigue pendiente de comprobar con el Explorador.
+
+La prueba de Edge simula cancelar el selector y recuperar el audio de una lección a 900 y 1180 px. Comprueba el foco, la nota y la posición guardada. Las pruebas Rust mueven archivos reales de prueba, reabren el índice y comprueban que el adjunto recuperado no se vuelve a añadir a Descargas.
 
 ### Temario de Coursera Business
 

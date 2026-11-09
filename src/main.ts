@@ -195,7 +195,7 @@ const audioPlayer=createAudioPlayer({
     return minimized!==true&&visible!==false;
   },
 });
-const courses=createCoursesController({command,getSnapshot:()=>snapshot,refresh,render:renderCurrent,notify,showError,t,player:audioPlayer,openLibrary:id=>{librarySection='files';library.detailId=id;navigate('library');if(snapshot.library.some(i=>i.id===id&&i.kind==='document'))void documents.open(id);}});
+const courses=createCoursesController({command,getSnapshot:()=>snapshot,refresh,render:renderCurrent,notify,showError,t,player:audioPlayer,locateFile:locateMedia,openLibrary:id=>{librarySection='files';library.detailId=id;navigate('library');if(snapshot.library.some(i=>i.id===id&&i.kind==='document'))void documents.open(id);}});
 const audioLibrary=createAudioLibrary({
   snapshot: () => snapshot, command, refresh, render: renderCurrent, notify, showError, t, player: audioPlayer,
   invalidateCover: id => { thumbnailUrls.delete(id); },
@@ -569,6 +569,12 @@ function applySnapshot(next: Snapshot): void {
   renderCurrent();
 }
 async function refresh(): Promise<void> { applySnapshot(await command<Snapshot>("get_snapshot")); }
+async function locateMedia(id: string): Promise<void> {
+  const next = await command<Snapshot>("locate_media", { id });
+  thumbnailUrls.delete(id);
+  applySnapshot(next);
+  renderInspector(true);
+}
 function navigate(next: Page): void {
   if(next!=='tools'){voice.deactivate();stemsTool.leave();}
   else if(localToolModule!=='stems')stemsTool.leave();
@@ -920,7 +926,7 @@ async function handleAction(action: string, button: HTMLButtonElement, event?: M
     }
     case 'reveal-media':await command('open_media',{id,folder:true});break;
     case 'copy-path':{const item=snapshot.library.find(item=>item.id===id);if(item)await copyText(item.path);break;}
-    case 'locate-media':thumbnailUrls.delete(id);applySnapshot(await command<Snapshot>('locate_media',{id}));renderInspector(true);break;
+    case 'locate-media':await locateMedia(id);break;
     case 'remove-media':applySnapshot(await command<Snapshot>('remove_library',{id}));notify(t("Quitado de la biblioteca. El archivo se conserva en el disco.", "Removed from library. The file is kept on disk."),'success');break;
     case 'tool-media':setToolInput([id]);break;
     case 'tools-selected':setToolInput([...library.selected]);break;

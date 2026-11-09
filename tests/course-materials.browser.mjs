@@ -26,6 +26,14 @@ const setup = `
     if (cmd === "startup") return {...structuredClone(state),folder:settings.folder,enginesReady:true,engineError:null};
     if (cmd === "get_snapshot") return structuredClone(state);
     if (cmd === "list_courses") return structuredClone(fixture.courses);
+    if (cmd === "locate_media") {
+      if (fixture.relocate) {
+        const item = state.library.find(item => item.id === args.id);
+        item.missing = false;
+        item.path = "C:/Fixture/Moved/lesson.wav";
+      }
+      return structuredClone(state);
+    }
     if (cmd === "open_course_site") return;
     if (cmd === "inspect_coursera_course") {
       if (args.token === "expired-fixture") throw Error("Coursera Business returned HTTP 401.");
@@ -563,6 +571,39 @@ try {
     assert.ok(await page.locator(".course-resume").evaluate(node => node.scrollWidth <= node.clientWidth + 1));
     await page.screenshot({path:`${directory}/course-resume-${width}.png`,animations:"disabled"});
   }
+  await page.evaluate(async () => {
+    const { state, courses } = window.courseFixture;
+    state.library.find(item => item.id === "lesson-audio").missing = true;
+    const lesson = courses.find(item => item.id === "business-course").sections[1].lessons[0];
+    lesson.notes.push({ id:"saved-note", text:"Nota guardada antes de mover el audio.", time:18, bookmarkId:null });
+    const { emit } = await import("/node_modules/@tauri-apps/api/event.js");
+    await emit("library-update");
+  });
+  await page.getByRole("button", { name:"Todos los cursos" }).click();
+  await page.locator('[data-action="course-open"][data-id="business-course"]').click();
+  const recap = page.locator("#course-section-coursera-module-a");
+  if (!await recap.evaluate(details => details.open)) await recap.locator("summary").click();
+  await page.locator(".course-tree").getByRole("button", { name:"Comprobar el resultado" }).click();
+  const row = page.locator(".course-study .source-item").filter({ hasText:"Lección de prueba.wav" });
+  await row.getByText("Lección de audio · Archivo ausente").waitFor();
+  for (const [width,height] of [[900,620],[1180,780]]) {
+    await page.setViewportSize({width,height});
+    await row.scrollIntoViewIfNeeded();
+    assert.ok(await row.evaluate(node => node.scrollWidth <= node.clientWidth + 1));
+    await page.screenshot({path:`${directory}/course-moved-${width}.png`,animations:"disabled"});
+  }
+  const locate = row.getByRole("button", { name:"Localizar archivo" });
+  await locate.press("Space", { timeout:3000 });
+  await locate.waitFor();
+  assert.ok(await locate.evaluate(element => element === document.activeElement));
+  await page.evaluate(() => { window.courseFixture.relocate = true; });
+  await locate.press("Space");
+  const openFile = row.getByRole("button", { name:"Ver en biblioteca" });
+  await openFile.waitFor();
+  assert.ok(await openFile.evaluate(element => element === document.activeElement));
+  await page.locator(".course-study .course-playback").getByText(/Guardado en 0:18/).waitFor();
+  await page.getByText("Nota guardada antes de mover el audio.").waitFor();
+  assert.deepEqual(await page.evaluate(() => window.courseFixture.calls.filter(call => call.cmd === "locate_media").map(call => call.args.id)), ["lesson-audio", "lesson-audio"]);
   assert.deepEqual(errors, []);
   console.log("Browser-assisted import, Skillshare attachment queueing and Coursera Business outline review passed at two widths.");
 } finally {

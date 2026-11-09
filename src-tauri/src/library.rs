@@ -95,6 +95,16 @@ fn path_key(path: &Path) -> String {
     value
 }
 
+pub(crate) fn path_id(path: &Path) -> String {
+    format!("{:x}", Sha256::digest(path_key(path).as_bytes()))
+}
+
+pub(crate) fn indexed_output<'a>(items: &'a [LibraryItem], path: &Path) -> Option<&'a LibraryItem> {
+    let id = path_id(path);
+    items.iter().find(|item| item.id == id)
+        .or_else(|| items.iter().find(|item| item.path == path))
+}
+
 fn public_origin(source: Option<String>) -> Option<String> {
     source
         .and_then(|value| crate::model::validate_url(&value).ok())
@@ -147,7 +157,7 @@ pub fn index(
             .and_then(|v| u32::try_from(v).ok())
             .filter(|v| *v > 0 && *v <= 65_536)
     };
-    let id = format!("{:x}", Sha256::digest(path_key(&path).as_bytes()));
+    let id = path_id(&path);
     let mut details = crate::library_features::LibraryDetails {
         audio: info.filter(|_| kind == "audio").map(crate::audio_library::from_probe),
         chapters: info
@@ -212,7 +222,7 @@ pub fn index_file(file: &Path) -> Result<LibraryItem, String> {
     let path = authorized_path(file)?;
     let metadata = fs::metadata(&path).map_err(|e| e.to_string())?;
     if !metadata.is_file() || metadata.len() == 0 { return Err("The downloaded file is empty or not a regular file.".into()); }
-    Ok(LibraryItem { id: format!("{:x}", Sha256::digest(path_key(&path).as_bytes())), name: path.file_name().ok_or("Missing filename.")?.to_string_lossy().into_owned(), path, kind: "file".into(), size: metadata.len(), duration: None, width: None, height: None, video_codec: None, audio_codec: None, container: None, added_at: crate::queue::now(), source: None, parent_id: None, collections: vec![], tags: vec![], content_hash: None, details: Default::default() })
+    Ok(LibraryItem { id: path_id(&path), name: path.file_name().ok_or("Missing filename.")?.to_string_lossy().into_owned(), path, kind: "file".into(), size: metadata.len(), duration: None, width: None, height: None, video_codec: None, audio_codec: None, container: None, added_at: crate::queue::now(), source: None, parent_id: None, collections: vec![], tags: vec![], content_hash: None, details: Default::default() })
 }
 
 fn collect_files(
@@ -370,7 +380,7 @@ pub fn remove(repository: &mut Repository, id: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub fn locate(repository: &mut Repository, id: &str, path: &Path) -> Result<(), String> {
+pub fn locate(repository: &mut Repository, id: &str, path: &Path, info: Option<&Value>) -> Result<(), String> {
     let position = repository
         .data
         .library
@@ -378,12 +388,19 @@ pub fn locate(repository: &mut Repository, id: &str, path: &Path) -> Result<(), 
         .position(|item| item.id == id)
         .ok_or("This library item no longer exists.")?;
     let previous = repository.data.library[position].clone();
-    let mut replacement = index(
-        path,
-        None,
-        previous.source.clone(),
-        previous.parent_id.clone(),
-    )?;
+    let mut replacement = if previous.kind == "file" {
+        let same_extension = match (previous.path.extension(), path.extension()) {
+            (Some(old), Some(new)) => old.eq_ignore_ascii_case(new),
+            (None, None) => true,
+            _ => false,
+        };
+        if !same_extension {
+            return Err("Choose the original file with the same extension.".into());
+        }
+        index_file(path)?
+    } else {
+        index(path, info, None, None)?
+    };
     if repository
         .data
         .library
@@ -399,7 +416,14 @@ pub fn locate(repository: &mut Repository, id: &str, path: &Path) -> Result<(), 
     replacement.added_at = previous.added_at;
     replacement.collections = previous.collections.clone();
     replacement.tags = previous.tags.clone();
+    replacement.source = previous.source.clone();
+    replacement.parent_id = previous.parent_id.clone();
     replacement.details = previous.details.clone();
+    for track in &mut replacement.details.tracks {
+        if track.path.as_deref() == Some(previous.path.as_path()) {
+            track.path = Some(replacement.path.clone());
+        }
+    }
     repository.data.library[position] = replacement;
     if let Err(error) = repository.save() {
         repository.data.library[position] = previous;
@@ -551,6 +575,7 @@ mod tests {
         let mut repository = Repository::open(&root.join("data"), &root).unwrap();
         import_paths(&mut repository, &[original.clone()]).unwrap();
         let id = repository.data.library[0].id.clone();
+        repository.data.library[0].details.playback_position = 18.0;
         update(
             &mut repository,
             &id,
@@ -562,13 +587,32 @@ mod tests {
         fs::rename(&original, &moved).unwrap();
         assert!(!repository.data.library[0].path.is_file());
         assert!(index(&original, None, None, None).is_err());
-        locate(&mut repository, &id, &moved).unwrap();
+        let info = serde_json::json!({"format":{"duration":"60"},"streams":[{"codec_type":"video","codec_name":"h264"}]});
+        locate(&mut repository, &id, &moved, Some(&info)).unwrap();
         let item = &repository.data.library[0];
         assert_eq!(item.id, id);
         assert_eq!(item.collections, vec!["Films"]);
         assert_eq!(item.tags, vec!["travel"]);
+        assert_eq!(item.duration, Some(60.0));
+        assert_eq!(item.details.playback_position, 18.0);
         assert_eq!(item.path, fs::canonicalize(&moved).unwrap());
         assert_eq!(fs::read(&moved).unwrap(), b"original");
+        let archive = root.join("resources.zip");
+        fs::write(&archive, b"course resource fixture").unwrap();
+        let mut attachment = index_file(&archive).unwrap();
+        attachment.source = Some("https://www.domestika.org/".into());
+        let attachment_id = attachment.id.clone();
+        let original_path = attachment.path.clone();
+        repository.data.library.push(attachment);
+        let renamed = root.join("project-files.ZIP");
+        fs::rename(&archive, &renamed).unwrap();
+        assert!(locate(&mut repository, &attachment_id, &moved, None).is_err());
+        locate(&mut repository, &attachment_id, &renamed, None).unwrap();
+        let attachment = indexed_output(&repository.data.library, &original_path).unwrap();
+        assert_eq!(attachment.id, attachment_id);
+        assert_eq!(attachment.path, fs::canonicalize(&renamed).unwrap());
+        assert_eq!(attachment.source.as_deref(), Some("https://www.domestika.org/"));
+        assert!(!can_open(attachment));
         drop(repository);
         fs::remove_dir_all(root).unwrap();
     }

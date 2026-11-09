@@ -1269,10 +1269,7 @@ async fn md5_digest(file: PathBuf, cancel: watch::Receiver<bool>) -> Result<Stri
         .map_err(|e| e.to_string())?
 }
 fn target_item(mut item: library::LibraryItem, target: PathBuf) -> library::LibraryItem {
-    let key = target.to_string_lossy().into_owned();
-    #[cfg(windows)]
-    let key = key.to_lowercase();
-    item.id = format!("{:x}", Sha256::digest(key.as_bytes()));
+    item.id = library::path_id(&target);
     item.name = target
         .file_name()
         .unwrap_or_default()

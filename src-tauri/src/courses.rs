@@ -345,6 +345,10 @@ fn save_course(repo: &mut crate::store::Repository, mut course: Course) -> Resul
 pub fn list_courses(state: State<Arc<AppState>>) -> Result<Vec<Course>, String> {
     let guard = state.repository.lock().unwrap();
     let repo = guard.as_ref().ok_or("Open the app first.")?;
+    Ok(course_index(repo))
+}
+
+fn course_index(repo: &crate::store::Repository) -> Vec<Course> {
     let mut courses = repo.data.courses.clone();
     for asset in courses.iter_mut().flat_map(|course| &mut course.sections)
         .flat_map(|section| &mut section.lessons).flat_map(|lesson| &mut lesson.assets) {
@@ -362,16 +366,16 @@ pub fn list_courses(state: State<Arc<AppState>>) -> Result<Vec<Course>, String> 
                         .find(|job| job.id == *id && job.state == queue::JobState::Completed)
                 })
                 .flat_map(|job| &job.outputs)
-                .find_map(|path| {
-                    repo.data
-                        .library
-                        .iter()
-                        .find(|item| item.path == *path && item.path.is_file())
-                        .map(|item| item.id.clone())
-                });
+                .filter_map(|path| library::indexed_output(&repo.data.library, path))
+                .max_by_key(|item| item.path.is_file())
+                .map(|item| item.id.clone());
         }
     }
-    Ok(courses)
+    courses
+}
+
+fn course_output_exists(repo: &crate::store::Repository, path: &Path) -> bool {
+    path.is_file() || library::indexed_output(&repo.data.library, path).is_some_and(|item| item.path.is_file())
 }
 
 #[tauri::command]
@@ -1060,7 +1064,7 @@ pub fn queue_course_assets(
                         )
                         || job.state == queue::JobState::Completed
                             && !job.outputs.is_empty()
-                            && job.outputs.iter().all(|path| path.is_file()))
+                            && job.outputs.iter().all(|path| course_output_exists(repo, path)))
             })
         });
         if active

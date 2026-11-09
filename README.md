@@ -28,7 +28,7 @@ After a restart, interrupted jobs are paused for review. Choose **Retry** to run
 
 Open **Platforms → Courses** to organize lessons and keep notes, progress, and playback position together. Create an outline for Rocketseat, Domestika, or Skillshare and attach files you have already saved. Domestika resources can sit alongside the lessons in their unit. Skillshare can also review supported direct attachment links. [Manual outlines](docs/course-manual-outline.png) · [Domestika unit resources](docs/course-domestika-unit.png)
 
-Search the course by unit, lesson, or attachment name, including units you have collapsed. When you open a different lesson, the course can offer to resume your most recent unfinished audio or video lesson from its saved position, even after a restart. [Course search](docs/course-search.png) · [Lesson resume](docs/course-resume.png)
+Search the course by unit, lesson, or attachment name, including units you have collapsed. When you open a different lesson, the course can offer to resume your most recent unfinished audio or video lesson from its saved position, even after a restart. If a file you moved is still indexed in Library, use **Locate file** from the lesson to recover it and keep your notes and saved position. [Course search](docs/course-search.png) · [Lesson resume](docs/course-resume.png) · [Moved material](docs/course-moved-material.png)
 
 Udemy, Hotmart, and Kiwify use separate authorized connections. With a Coursera Business organization token, you can import modules, lessons, and material names. nabnab follows supported continuation links and shows **Partial outline** if it cannot reach the end. [Courses and provider limits](docs/COURSES.md) · [Coursera outline status](docs/course-coursera-pagination.png)
 
