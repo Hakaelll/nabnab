@@ -18,6 +18,7 @@ const desktopRestore = process.env.NABNAB_PLAYBACK_DESKTOP_RESTORE === "1";
 const windowsMedia = process.env.NABNAB_PLAYBACK_WINDOWS_MEDIA === "1";
 const embeddedBookOnly = process.env.NABNAB_PLAYBACK_EMBEDDED_BOOK === "1";
 const bookGapOnly = process.env.NABNAB_PLAYBACK_BOOK_GAP === "1";
+const courseResumeOnly = process.env.NABNAB_PLAYBACK_COURSE_RESUME === "1";
 const lyricsOnly = process.env.NABNAB_PLAYBACK_LYRICS === "1";
 const miniWheelOnly = process.env.NABNAB_PLAYBACK_MINI_WHEEL === "1";
 const albumOnly = process.env.NABNAB_PLAYBACK_ALBUM === "1";
@@ -550,6 +551,44 @@ async function verifyCoursePlayback(videoId, musicId, audioId, handoutId) {
   await wait(async () => (await playing()).id === audioId && (await playing()).time >= 4.95);
   assert.equal((await playing()).paused, true);
   console.log("Course lessons use the shared engine, timed notes target the video, and short audio resumes after restart.");
+}
+
+async function verifyCourseResume() {
+  const audio = audioSamples[0].file;
+  const imported = await rpc("import_paths", { paths: [video, audio, handout] });
+  const idFor = file => imported.library.find(item => path.basename(item.path) === path.basename(file)).id;
+  const videoId = idFor(video), audioId = idFor(audio);
+  await rpc("library_playback", { id: audioId, position: 5 });
+  await new Promise(resolve => setTimeout(resolve, 20));
+  await rpc("library_playback", { id: videoId, position: 8 });
+  const saved = (await rpc("get_snapshot")).library;
+  assert.ok(saved.find(item => item.id === videoId).details.lastPlayedAt > saved.find(item => item.id === audioId).details.lastPlayedAt);
+  await shutdown();
+  await seedPlaybackFixtures(videoId, audioId, idFor(handout), []);
+  const stateFile = path.join(data, "state-v1.json");
+  const state = JSON.parse(await readFile(stateFile, "utf8"));
+  state.courses[0].sections[0].lessons.reverse();
+  await writeFile(stateFile, JSON.stringify(state));
+  await launch();
+  await page.getByRole("button", { name: "Plataformas", exact: true }).click();
+  await page.locator('.platform-shortcuts [data-action="open-courses"]').click();
+  await page.getByRole("button", { name: /Taller de composición/ }).click();
+  const resume = page.getByRole("button", { name: "Retomar lección", exact: true });
+  assert.match(await page.locator(".course-resume").innerText(), /Encuadre y proporción[\s\S]*Guardado en 0:08/);
+  assert.equal((await playing()).id, undefined);
+  await resume.press("Enter");
+  await wait(async () => { const sample = await playing(); return sample.id === videoId && sample.time >= 8 && !sample.paused; });
+  await clickStage("back");
+  await page.getByRole("heading", { name: "Encuadre y proporción", exact: true }).waitFor();
+  await page.getByText("Nota anterior", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "Marcar aprendida", exact: true }).press("Enter");
+  assert.match(await page.locator(".course-resume").innerText(), /Ejercicio de escucha[\s\S]*Guardado en 0:05/);
+  await resume.press("Enter");
+  await wait(async () => { const sample = await playing(); return sample.id === audioId && sample.time >= 5 && !sample.paused; });
+  assert.equal(await stage().isVisible(), false);
+  assert.equal(await page.locator("#course-study-title").evaluate(heading => heading === document.activeElement), true);
+  assert.equal((await rpc("get_snapshot")).jobs.length, 0);
+  console.log("Course resume chose the newest unfinished video after restart and resumed short audio when the video was marked learned.");
 }
 
 async function downloadDuringPlayback(itemId) {
@@ -1783,6 +1822,7 @@ try {
   else if (lyricsOnly) await verifyLocalLyrics();
   else if (embeddedBookOnly) await verifyEmbeddedBook();
   else if (bookGapOnly) await verifyBookGap();
+  else if (courseResumeOnly) await verifyCourseResume();
   else if (albumOnly) await verifyAlbumPlayback(initial);
   else await verifyPlayback(initial);
 } catch (error) {

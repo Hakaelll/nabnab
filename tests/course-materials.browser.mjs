@@ -20,7 +20,7 @@ const setup = `
   mockWindows("main");
   const settings = {folder:"C:/Downloads/nabnab-fixture",language:"es",networkLimit:3,processingLimit:1,reducedMotion:true,reducedTransparency:true,sidebarExpanded:true,trayEnabled:false,closeToTray:false,startWithWindows:false};
   const state = {settings,jobs:[],library:[],collections:[],drafts:[],sources:[],rules:[],smartCollections:[],presets:[]};
-  const fixture = window.courseFixture = {calls:[],courses:[],cancel:true};
+  const fixture = window.courseFixture = {state,calls:[],courses:[],cancel:true};
   mockIPC(async (cmd, args = {}) => {
     fixture.calls.push({cmd,args:structuredClone(args)});
     if (cmd === "startup") return {...structuredClone(state),folder:settings.folder,enginesReady:true,engineError:null};
@@ -539,6 +539,30 @@ try {
   await page.waitForFunction(() => document.querySelector(".course-outline-status")?.textContent === "3 páginas consultadas");
   await page.getByText("Comprobar el origen", {exact:true}).waitFor();
   assert.equal(await business.evaluate(details => details.open), false);
+  await page.evaluate(async () => {
+    const { state, courses } = window.courseFixture;
+    const course = courses.find(item => item.id === "business-course");
+    course.sections[1].lessons[0].assets.push({ id:"resume-asset", title:"Lección de prueba.wav", kind:"audio", status:"local", libraryId:"lesson-audio", urlRef:null, jobIds:[] });
+    state.library.push({ id:"lesson-audio", name:"Lección de prueba.wav", path:"C:/Fixture/lesson.wav", kind:"audio", duration:60, size:512, missing:false, collections:[], tags:[],
+      details:{playbackPosition:18,lastPlayedAt:100,chapters:[],tracks:[],bookmarks:[]} });
+    const { emit } = await import("/node_modules/@tauri-apps/api/event.js");
+    await emit("library-update");
+  });
+  await page.getByRole("button", { name:"Plataformas", exact:true }).click();
+  await page.locator("[data-action='open-courses'][data-id='coursera']").click();
+  await page.locator('[data-action="course-open"][data-id="business-course"]').click();
+  const resume = page.getByRole("button", { name:"Retomar lección", exact:true });
+  await resume.waitFor({timeout:2500});
+  await page.locator(".course-resume").getByText("Comprobar el resultado", {exact:true}).waitFor();
+  await page.locator(".course-resume").getByText("Guardado en 0:18", {exact:true}).waitFor();
+  assert.equal(await page.locator("html.has-audio-player").count(), 0);
+  for (const [width,height] of [[900,620],[1180,780]]) {
+    await page.setViewportSize({width,height});
+    await page.locator("#main").evaluate(node => { node.scrollTop = 0; });
+    await resume.scrollIntoViewIfNeeded();
+    assert.ok(await page.locator(".course-resume").evaluate(node => node.scrollWidth <= node.clientWidth + 1));
+    await page.screenshot({path:`${directory}/course-resume-${width}.png`,animations:"disabled"});
+  }
   assert.deepEqual(errors, []);
   console.log("Browser-assisted import, Skillshare attachment queueing and Coursera Business outline review passed at two widths.");
 } finally {

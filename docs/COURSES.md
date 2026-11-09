@@ -8,6 +8,12 @@ Busca por unidad, título de lección o nombre del adjunto. La búsqueda admite 
 
 **Reproducir lección** abre el primer vídeo o audio disponible en el reproductor compartido. El vídeo vuelve a la lección en pausa. El audio continúa en la barra compacta mientras consultas materiales y notas, y recupera su posición aunque sea una lección corta. **Usar tiempo actual** toma la posición del archivo de la lección cuando está en el reproductor. Pulsa el tiempo de una nota para volver a ese punto.
 
+Si la lección pendiente con la posición guardada más reciente es distinta de la que tienes abierta, **Retomar lección** muestra su nombre y el punto de escucha o visionado. Al pulsar el botón se abre esa lección y se reproduce desde ese punto. Cuando ninguna posición tiene fecha, se usa el orden del temario.
+
+La prueba `NABNAB_PLAYBACK_COURSE_RESUME=1` en Windows comprueba que el curso reanuda un vídeo local tras reiniciar y propone el audio pendiente al marcar el vídeo como aprendido.
+
+![Una lección pendiente con su posición guardada, con datos de prueba](course-resume.png)
+
 ![Lección de vídeo y reproductor compacto en Windows con archivos de prueba](course-lesson-playback.png)
 
 Para Udemy, importa una sesión desde Ajustes → Sesiones y abre el enlace de un curso al que tengas acceso. El explorador hace únicamente peticiones GET al curso, currículo y detalles de lecciones autorizados. No ejecuta el extractor de curso de yt-dlp, que puede intentar inscribir una cuenta. Solo ofrece las URL de `download_urls` que entregue Udemy; excluye DRM y materiales marcados como no descargables. El límite inicial es 100 lecciones, editable hasta 1000. Un currículo parcial se identifica en el título.

@@ -701,7 +701,7 @@ export function createAudioLibrary(hooks: Hooks) {
         const details = detailsFor(item);
         const chapter = details.chapters[index];
         if (!chapter) break;
-        player.playChapter(id, chapterResume(details, chapter));
+        player.playFrom(id, chapterResume(details, chapter));
         document.getElementById(`audio-chapter-${index}`)?.focus({ preventScroll: true });
       } break;
       case "audio-chapters-back":

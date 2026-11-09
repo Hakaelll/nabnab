@@ -51,6 +51,7 @@ interface ResourceReview {
   links: string[]; checks: ResourceCheck[]; selected: Set<number>;
 }
 interface OutlineReview { course: Course; request: { provider: string; url: string; title: string; text: string } }
+interface LessonResume { sectionId: string; lesson: CourseLesson; item: LibraryItem; position: number }
 interface CourseHooks {
   command<T>(name: string, args?: Record<string, unknown>): Promise<T>;
   getSnapshot(): { library: LibraryItem[]; jobs: Job[] };
@@ -59,7 +60,7 @@ interface CourseHooks {
   notify(text: string, kind?: "info" | "success" | "error"): void;
   showError(error: unknown): void;
   openLibrary(id: string): void;
-  player: Pick<ReturnType<typeof createAudioPlayer>, "play" | "playAt" | "current" | "timeFor">;
+  player: Pick<ReturnType<typeof createAudioPlayer>, "play" | "playAt" | "playFrom" | "current" | "timeFor">;
   t: Copy;
 }
 
@@ -97,7 +98,12 @@ export function createCoursesController(hooks: CourseHooks) {
     const outputs = jobs.filter(job => job.state === "completed" && asset.jobIds.includes(job.id)).flatMap(job => job.outputs);
     return library.find(item => !item.missing && outputs.includes(item.path));
   };
-  const lessonMedia = (lesson?: CourseLesson) => lesson?.assets.map(local).find(isPlayable);
+  function lessonMedia(lesson?: CourseLesson) {
+    for (const asset of lesson?.assets ?? []) {
+      const item = local(asset);
+      if (isPlayable(item)) return item;
+    }
+  }
   const active = (asset: CourseAsset) => asset.jobIds.some(id => hooks.getSnapshot().jobs.some(job => job.id === id && ["pending", "paused", "analyzing", "ready", "downloading", "processing", "verifying"].includes(job.state)));
   const failed = (asset: CourseAsset) => asset.jobIds.some(id => hooks.getSnapshot().jobs.some(job => job.id === id && job.state === "error"));
   const available = (asset: CourseAsset) => asset.status === "downloadable" && !local(asset) && !active(asset);
@@ -409,17 +415,47 @@ export function createCoursesController(hooks: CourseHooks) {
     </section>`;
   }
 
-  function lessonPlayback(item: LibraryItem): string {
+  function lessonArtwork(item: LibraryItem): string {
     const video = item.kind === "video";
     const thumbnail = video || item.details?.audioCover || item.details?.audio?.embeddedCover;
+    return `<span class="course-playback-art" aria-hidden="true"${thumbnail ? ` data-thumbnail-id="${h(item.id)}"` : ""}>${icon(video ? "video" : "audio")}</span>`;
+  }
+
+  function lessonPlayback(item: LibraryItem): string {
     const position = resumePosition(item.details?.playbackPosition ?? 0, item.duration);
     const timing = [item.duration != null ? durationLabel(item.duration) : "",
       position ? `${t("Guardado en", "Saved at")} ${durationLabel(position)}` : ""].filter(Boolean).join(" · ");
     return `<div class="course-playback">
-      <span class="course-playback-art" aria-hidden="true"${thumbnail ? ` data-thumbnail-id="${h(item.id)}"` : ""}>${icon(video ? "video" : "audio")}</span>
-      <div class="course-playback-copy"><span>${video ? t("Vídeo de la lección", "Lesson video") : t("Audio de la lección", "Lesson audio")}</span><strong>${h(item.name)}</strong>${timing ? `<small>${h(timing)}</small>` : ""}</div>
+      ${lessonArtwork(item)}
+      <div class="course-playback-copy"><span>${item.kind === "video" ? t("Vídeo de la lección", "Lesson video") : t("Audio de la lección", "Lesson audio")}</span><strong>${h(item.name)}</strong>${timing ? `<small>${h(timing)}</small>` : ""}</div>
       ${action("course-play", t("Reproducir lección", "Play lesson"), "play", "primary")}
     </div>`;
+  }
+
+  function resumableLesson(course: Course): LessonResume | undefined {
+    let latest: LessonResume | undefined;
+    for (const section of course.sections) {
+      if (section.id === skillshareResourceSection) continue;
+      for (const lesson of section.lessons) {
+        if (lesson.learned || isUnitResource(lesson)) continue;
+        const item = lessonMedia(lesson);
+        const position = item && resumePosition(item.details?.playbackPosition ?? 0, item.duration);
+        if (!item || !position) continue;
+        if (!latest || (item.details?.lastPlayedAt ?? 0) > (latest.item.details?.lastPlayedAt ?? 0)) {
+          latest = { sectionId: section.id, lesson, item, position };
+        }
+      }
+    }
+    return latest;
+  }
+
+  function courseResume(course: Course) {
+    const next = resumableLesson(course);
+    if (!next || next.lesson.id === lessonId) return "";
+    return `<section class="course-playback course-resume" aria-label="${t("Retomar curso", "Resume course")}">
+      ${lessonArtwork(next.item)}<div class="course-playback-copy"><span>${t("Retomar curso", "Resume course")}</span>
+      <strong>${h(next.lesson.title)}</strong><small>${t("Guardado en", "Saved at")} ${durationLabel(next.position)}</small></div>
+      ${action("course-resume", t("Retomar lección", "Resume lesson"), "play", "primary", busy ? "disabled" : "")}</section>`;
   }
 
   const unitResourcesTitle = () => t("Recursos de la unidad", "Unit resources");
@@ -497,6 +533,7 @@ export function createCoursesController(hooks: CourseHooks) {
     const item = lessonMedia(lesson);
     const queueable = course.sections.flatMap(section => section.lessons).flatMap(lesson => lesson.assets).filter(asset => selected.has(asset.id) && available(asset));
     return `<div class="page-heading"><div>${action("course-back", t("Todos los cursos", "All courses"), undefined, "quiet")}<h1 id="course-heading" tabindex="-1">${h(course.title)}</h1><p>${h(course.provider === "local" ? t("Archivos locales", "Local files") : courseProviderName(course.provider))} · ${courseCounts}</p></div>${browserAssisted ? `<div class="button-group">${action("course-browser-open", t("Abrir curso en el navegador", "Open course in browser"), "arrow", "quiet", busy ? "disabled" : "")}${action("course-add-folder", t("Añadir carpeta", "Add folder"), "folder", "secondary", `id="course-add-folder" ${busy ? "disabled" : ""}`)}${action("course-add-materials", t("Añadir archivos guardados", "Add saved files"), "add", "primary", `id="course-add-materials" ${busy ? "disabled" : ""}`)}</div>` : course.url ? action("course-refresh", t("Actualizar materiales", "Refresh materials"), "retry", "quiet", busy ? "disabled" : "") : ""}</div>
+      ${courseResume(course)}
       ${course.provider === "skillshare" ? skillshareEntry(course) : course.provider === "coursera" ? courseraForm(course) : ""}
       ${hasManualOutline(course.provider) ? outlineForm(course) : ""}
       ${!showQueue ? "" : `<div class="selection-toolbar"><span>${queueable.length === 1 ? t("1 material seleccionado", "1 material selected") : `${queueable.length} ${t("materiales seleccionados", "materials selected")}`}</span>${action("course-queue", t("Añadir a la cola", "Add to queue"), "add", "primary", busy || !queueable.length ? "disabled" : "")}${action("course-clear", t("Quitar selección", "Clear selection"), undefined, "quiet")}</div>`}
@@ -751,6 +788,19 @@ export function createCoursesController(hooks: CourseHooks) {
       case "course-refresh": if (course?.url) await perform(async () => { if (course.provider === "udemy") await hooks.command("inspect_course", { url: course.url, limit }); else await hooks.command("inspect_member_course", { provider: course.provider, url: course.url, productId: course.id.replace(/^(hotmart|kiwify)-/, ""), slug: course.slug ?? "", limit }); }); break;
       case "course-learned": if (course && lesson) await perform(async () => { await hooks.command("course_learned", { courseId: course.id, lessonId: lesson.id, learned: !lesson.learned }); }); break;
       case "course-open-file": if (element.dataset.id) hooks.openLibrary(element.dataset.id); return true;
+      case "course-resume": {
+        const next = course && resumableLesson(course);
+        if (!next || busy) return true;
+        lessonId = next.lesson.id;
+        noteText = "";
+        noteTime = "";
+        clearSearch();
+        const section = document.getElementById(`course-section-${next.sectionId}`);
+        if (section instanceof HTMLDetailsElement) section.open = true;
+        player.playFrom(next.item.id, next.position, true);
+        if (next.item.kind === "audio") document.getElementById("course-study-title")?.focus();
+        return true;
+      }
       case "course-play": {
         const item = lessonMedia(lesson);
         if (item) player.play([item.id], 0, true);

@@ -308,8 +308,8 @@ export function createAudioPlayer(hooks: Hooks) {
     const position = !media.ended ? media.currentTime
       : isAudiobook(item) ? item.duration ?? media.currentTime : 0;
     const details = detailsFor(item);
-    const playedAudio = item.kind === "audio" && media.currentTime > 0;
-    if (details.playbackPosition === position && (!playedAudio || details.lastPlayedAt)) return;
+    const hasProgress = position > 0;
+    if (details.playbackPosition === position && (!hasProgress || details.lastPlayedAt)) return;
     let chapterPositions = details.chapterPositions;
     if (isAudiobook(item) && details.chapters.length) {
       const points = chapterPositions?.length ? [position] : [details.playbackPosition, position];
@@ -320,7 +320,7 @@ export function createAudioPlayer(hooks: Hooks) {
         chapterPositions = [...previous, { start: chapter.start, end: chapter.end, position: point }];
       }
     }
-    item.details = { ...details, chapterPositions, playbackPosition: position, lastPlayedAt: playedAudio ? Date.now() : details.lastPlayedAt };
+    item.details = { ...details, chapterPositions, playbackPosition: position, lastPlayedAt: hasProgress ? Date.now() : details.lastPlayedAt };
     lastSaved = Date.now();
     return hooks.command<void>("library_playback", { id: item.id, position }).catch(hooks.showError);
   }
@@ -1001,9 +1001,9 @@ export function createAudioPlayer(hooks: Hooks) {
     return true;
   }
 
-  function playChapter(id: string, position: number) {
+  function playFrom(id: string, position: number, resumeShortAudio = false) {
     if (id === currentId()) persist();
-    if (!playAt(id, position)) return;
+    if (!playAt(id, position, resumeShortAudio)) return;
     if (media?.paused) void playMedia();
     hooks.render();
   }
@@ -1161,7 +1161,7 @@ export function createAudioPlayer(hooks: Hooks) {
     return true;
   }
 
-  return { mount, render, restore, play, playAt, playChapter, compareTrack, restoreComparison, comparison: () => comparison?.queue ? "queue" : comparison ? "empty" : undefined, pause: () => media?.pause(), add, playNext, remove, input, click, key, current, nextEntries, seek, persist, detachMini, openFloatingMini,
+  return { mount, render, restore, play, playAt, playFrom, compareTrack, restoreComparison, comparison: () => comparison?.queue ? "queue" : comparison ? "empty" : undefined, pause: () => media?.pause(), add, playNext, remove, input, click, key, current, nextEntries, seek, persist, detachMini, openFloatingMini,
     nativeMiniRestored: (dock: boolean) => { setDetached(false); if (dock) dockMini(); },
     syncDesktopWheel, wheelAction, isExpanded: () => expanded, isDetached: () => detached,
     timeFor: (id: string) => id === currentId() && matchesSource() && media?.readyState ? media.currentTime : undefined,

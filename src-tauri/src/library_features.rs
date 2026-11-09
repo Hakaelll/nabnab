@@ -410,7 +410,7 @@ pub fn library_playback(
     }
     edit_item(&state, &id, |item| {
         save_playback_position(item, position);
-        if item.kind == "audio" && position > 0.0 {
+        if matches!(item.kind.as_str(), "audio" | "video") && item.details.playback_position > 0.0 {
             item.details.last_played_at = Some(crate::queue::now());
         }
         Ok(())
