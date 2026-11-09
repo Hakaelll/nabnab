@@ -6,7 +6,7 @@ import {createRequire} from "node:module";
 
 const {chromium}=createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODULE||"playwright");
 const base=process.env.NABNAB_UI_URL||"http://127.0.0.1:1420/";
-const directory="artifacts/documents-advanced";
+const directory=process.env.NABNAB_DOCUMENT_UI_ARTIFACTS||"artifacts/documents-advanced";
 await mkdir(directory,{recursive:true});
 await writeFile(`${directory}/result.json`,JSON.stringify({status:"running",evidence:"Frontend IPC fixtures only"},null,2));
 const setup=String.raw`
@@ -48,6 +48,9 @@ const setup=String.raw`
     if(cmd==="ocr_save_text")return job("ocrText",args);
     if(cmd==="document_info")return {pages:2,copy:true,assemble:true,print:true};
     if(cmd==="document_page")return {page:args.page,pages:2,png,text:args.page===1?ocr.pages[0]?.text??"":"",textAvailable:args.page===1};
+    if(cmd==="device_share_status")return {state:"ready",devices:[{id:"paired-reader",name:"Teléfono de prueba"}],share:true,shareText:true};
+    if(cmd==="device_share_prepare")return {token:"document-review",device:{id:args.deviceId,name:"Teléfono de prueba"},entries:[{name:args.selection.text,bytes:14}],total:14};
+    if(cmd==="device_share_send")return "handedOff";
     if(cmd==="library_playback"){const file=state.library.find(file=>file.id===args.id);file.details.playbackPosition=args.position;return;}
     if(cmd==="thumbnail")return dataUrl;
     if(cmd==="document_edit_info")return {pages:2,width:612,height:792,forms:true,signatures:true,edit:true,bookmarks:[{title:"Sección de prueba",page:1,level:1}],bookmarksTruncated:false};
@@ -149,6 +152,43 @@ try{
       assert.equal((await calls("queue_document_edit")).length,1);assert.equal((await last("cancel_document_edit_preview")).requestId,(await last("document_edit_preview")).requestId);
 
       await page.locator('[data-page="library"]').click();await page.locator('[data-action="inspect-media"][data-id="pdf"]').click();
+      const excerpt=page.locator(".document-page-text").getByRole("textbox",{name:"Texto seleccionable de la página"});
+      const shareExcerpt=page.getByRole("button",{name:"Enviar texto seleccionado"});
+      const disclosure=page.locator(".document-page-text > summary");
+      await disclosure.press("Enter");
+      await excerpt.waitFor();
+      assert.equal(await excerpt.getAttribute("readonly"),"");
+      assert.equal(await shareExcerpt.isDisabled(),true);
+      await disclosure.press("Tab");
+      assert.equal(await excerpt.evaluate(field=>field===document.activeElement),true);
+      await page.keyboard.press("Shift+ArrowRight");
+      await page.waitForFunction(()=>!document.querySelector('[data-action="document-share-selection"]').disabled);
+      await page.keyboard.press("ArrowLeft");
+      await page.waitForFunction(()=>document.querySelector('[data-action="document-share-selection"]').disabled);
+      for(let i=0;i<"Texto original".length;i++)await page.keyboard.press("Shift+ArrowRight");
+      assert.equal(await excerpt.evaluate(field=>field.value.slice(field.selectionStart,field.selectionEnd)),"Texto original");
+      assert.deepEqual(await calls("device_share_status"),[]);
+      await screenshot("reader-selection",page.locator(".document-page-text"));
+      if(width===900)await shareExcerpt.press("Enter");else await shareExcerpt.click();
+      const share=page.locator(".device-share[open]");
+      assert.equal(await share.locator("#share-text-value").inputValue(),"Texto original");
+      await share.locator("#share-device").selectOption("paired-reader");
+      assert.deepEqual(await calls("device_share_prepare"),[]);
+      await share.locator("#share-review").click();
+      await share.locator("#share-send").waitFor();
+      assert.deepEqual((await last("device_share_prepare")).selection,{kind:"text",text:"Texto original"});
+      assert.deepEqual(await calls("device_share_send"),[]);
+      await share.locator("#share-send").click();
+      await share.getByRole("heading",{name:"Entregado a KDE Connect"}).waitFor();
+      assert.deepEqual(await last("device_share_send"),{token:"document-review"});
+      await share.locator("#share-close").click();
+      assert.equal(await shareExcerpt.evaluate(button=>document.activeElement===button),true);
+      await page.locator('[data-action="document-next"]').click();
+      await page.getByText(/No hay texto extraíble/).waitFor();
+      assert.equal(await shareExcerpt.count(),0);
+      await page.locator('[data-action="document-previous"]').click();
+      await excerpt.waitFor();
+      assert.equal(await shareExcerpt.isDisabled(),true);
       await page.locator('#ocr-review-page').waitFor();assert.equal(await page.locator('#ocr-corrected-text').getAttribute("readonly"),"");
       assert.equal(await page.locator('#ocr-corrected-text').inputValue(),"Texto original útil que ya estaba en la primera página.");
       await page.locator('#ocr-review-page').selectOption("2");await page.locator('#ocr-search').fill("Hola mundo");await page.locator('#ocr-search-form button').click();
@@ -166,7 +206,7 @@ try{
       assert.equal(await page.locator('#ocr-corrected-text').inputValue(),"Texto original útil que ya estaba en la primera página.");assert.equal(await page.locator('[data-action="ocr-remove-generated"]').isDisabled(),true);
       assert.equal(await page.evaluate(()=>window.documentsFixture.state.library[0].path),"C:/Fixture originals/Informe escaneado.pdf");
       await assertNoOverflow();assert.deepEqual(errors,[]);assert.deepEqual(await page.evaluate(()=>window.documentsFixture.unexpected),[]);
-      results.push({width,height,evidence:"Rendered frontend with IPC fixtures; native engines and permissions tested separately",checks:["component missing vs disabled","no implicit model install","keyboard order and checkbox activation","cancelled model consent leaves queue empty","selected region and PDF options","PDF acknowledgement","preview and consent gates","option changes invalidate preview","queued approval ID","preview cancellation","original text readonly","phrase word boxes","correction drops boxes","clipboard","save corrected result","remove generated index keeps original","no global or panel horizontal overflow"],pageErrors:errors});
+      results.push({width,height,evidence:"Rendered frontend with IPC fixtures; native engines and permissions tested separately",checks:["component missing vs disabled","no implicit model install","keyboard order and checkbox activation","cancelled model consent leaves queue empty","selected region and PDF options","PDF acknowledgement","preview and consent gates","option changes invalidate preview","queued approval ID","preview cancellation","document excerpt selection and confirmation","no stale excerpt when changing pages","original text readonly","phrase word boxes","correction drops boxes","clipboard","save corrected result","remove generated index keeps original","no global or panel horizontal overflow"],pageErrors:errors});
     }catch(error){await page.screenshot({path:`${directory}/failure-${width}.png`,fullPage:true}).catch(()=>{});await writeFile(`${directory}/failure-${width}.json`,JSON.stringify({error:String(error),errors,calls:await page.evaluate(()=>window.documentsFixture?.calls??[])},null,2));await writeFile(`${directory}/result.json`,JSON.stringify({status:"failed",width,error:String(error),errors,evidence:"Frontend IPC fixtures only"},null,2));throw error;}
     finally{await page.close();}
   }

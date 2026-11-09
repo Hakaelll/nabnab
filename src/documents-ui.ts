@@ -1,7 +1,7 @@
 import { escapeHtml as h, type Copy, type LibraryItem, type Snapshot } from "./contracts";
 import { action, option } from "./views-common";
 
-interface Hooks { command:<T>(name:string,args?:Record<string,unknown>)=>Promise<T>; snapshot:()=>Snapshot; render:()=>void; refresh:()=>Promise<void>; t:Copy }
+interface Hooks { command:<T>(name:string,args?:Record<string,unknown>)=>Promise<T>; snapshot:()=>Snapshot; render:()=>void; refresh:()=>Promise<void>; share:(input:{ids:string[];text:string;label:string})=>void; t:Copy }
 interface Page { page:number; pages:number; png:number[]; text:string; textAvailable:boolean }
 interface Hit { page:number; excerpt:string }
 interface Info { pages:number; copy:boolean; assemble:boolean; print:boolean }
@@ -32,15 +32,38 @@ export function documentToolsPanel(snapshot:Snapshot,t:Copy):string{
 function supportsDocumentReader(item:Pick<LibraryItem,'kind'|'name'>|undefined):boolean{
   return item?.kind==='document'&&/\.(pdf|epub)$/i.test(item.name);
 }
+
+function pageText(item: LibraryItem, page: Page, t: Copy): string {
+  const heading = t("Texto de esta página", "Text on this page");
+  const hintId = "document-excerpt-hint";
+  return `<details class="document-page-text"><summary>${heading}</summary>${page.textAvailable ? `
+    <textarea id="document-text-${h(item.id)}-${page.page}" rows="5" readonly aria-label="${t("Texto seleccionable de la página", "Selectable page text")}" aria-describedby="${hintId}">
+${h(page.text.replace(/\f\s*$/u, ""))}</textarea>
+    <div class="document-excerpt-actions">
+      <p class="field-note" id="${hintId}">${t("Selecciona el fragmento que quieras enviar.", "Select the passage you want to share.")}</p>
+      ${action("document-share-selection", t("Enviar texto seleccionado", "Share selected text"), "arrow", "secondary", `data-id="${h(item.id)}" data-page="${page.page}" disabled`)}
+    </div>` : `<p class="field-note">${t("No hay texto extraíble o el documento no permite copiarlo. La lectura no aplica OCR.", "There is no extractable text, or copying is not permitted. The reader does not perform OCR.")}</p>`}</details>`;
+}
+
+function selectedPassage(field: HTMLTextAreaElement): string {
+  const text = field.value.slice(field.selectionStart, field.selectionEnd);
+  return text.trim() ? text : "";
+}
+
 export function documentReaderPanel(item:LibraryItem,t:Copy):string{
   if(!supportsDocumentReader(item))return `<p class="field-note">${t("Documento guardado. Ábrelo con el sistema para leer este formato.","Document saved. Open it with the system to read this format.")}</p>`;
   const active=readerId===item.id;
   const page=active?readerPage:null;
   const bookmarks=item.details?.bookmarks??[];
-  return `<section class="document-reader" aria-label="${t("Lector local", "Local reader")}"><div class="button-group">${action("document-open",t("Abrir lector", "Open reader"),"library","secondary",`data-id="${h(item.id)}" ${readerBusy&&active?'disabled':''}`)}${page?action("document-previous",t("Anterior", "Previous"),undefined,"quiet",`data-id="${h(item.id)}" ${page.page<=1||readerBusy?'disabled':''}`):""}${page?`<span aria-live="polite">${t("Página", "Page")} ${page.page} / ${page.pages}</span>${action("document-next",t("Siguiente", "Next"),undefined,"quiet",`data-id="${h(item.id)}" ${page.page>=page.pages||readerBusy?'disabled':''}`)}${action("document-bookmark",t("Marcar página", "Bookmark page"),"add","quiet",`data-id="${h(item.id)}"`)}`:""}</div>${active&&readerBusy?`<p role="status">${t("Cargando página…", "Loading page…")}</p>`:""}${active&&readerError?`<p role="alert">${h(readerError)}</p>`:""}${page?`<figure><img class="document-page-image" src="${readerImage}" alt="${t("Página", "Page")} ${page.page}"></figure><details><summary>${t("Texto de esta página", "Text on this page")}</summary>${page.textAvailable?`<pre class="document-text">${h(page.text)}</pre>`:`<p class="field-note">${t("No hay texto extraíble o el documento no permite copiarlo. La lectura no aplica OCR.", "There is no extractable text, or copying is not permitted. The reader does not perform OCR.")}</p>`}</details><form id="document-search-form" data-id="${h(item.id)}"><label>${t("Buscar en el documento", "Search the document")}<input id="document-search" type="search" required minlength="2" maxlength="160"></label><button type="submit" class="button secondary" ${readerBusy?'disabled':''}>${t("Buscar", "Search")}</button></form>${searchResults===null?"":searchResults.length?`<ul class="document-search-results">${searchResults.map(hit=>`<li><button type="button" class="button quiet" data-action="document-go-page" data-id="${h(item.id)}" data-page="${hit.page}"><span>${t("Página", "Page")} ${hit.page}</span><span>${h(hit.excerpt)}</span></button></li>`).join("")}</ul>`:`<p>${t("No hay coincidencias en el texto disponible.", "No matches in the available text.")}</p>`}`:""}${bookmarks.length?`<div class="button-group">${bookmarks.map(bookmark=>action("document-go-page",`${bookmark.name} · ${Math.floor(bookmark.time)}`,undefined,"quiet",`data-id="${h(item.id)}" data-page="${Math.floor(bookmark.time)}"`)).join("")}</div>`:""}<p class="field-note">${t("El lector muestra una imagen y texto local. No ejecuta scripts ni abre enlaces del documento.", "The reader displays a local image and text. It does not execute scripts or open document links.")}</p></section>`;
+  return `<section class="document-reader" aria-label="${t("Lector local", "Local reader")}"><div class="button-group">${action("document-open",t("Abrir lector", "Open reader"),"library","secondary",`data-id="${h(item.id)}" ${readerBusy&&active?'disabled':''}`)}${page?action("document-previous",t("Anterior", "Previous"),undefined,"quiet",`data-id="${h(item.id)}" ${page.page<=1||readerBusy?'disabled':''}`):""}${page?`<span aria-live="polite">${t("Página", "Page")} ${page.page} / ${page.pages}</span>${action("document-next",t("Siguiente", "Next"),undefined,"quiet",`data-id="${h(item.id)}" ${page.page>=page.pages||readerBusy?'disabled':''}`)}${action("document-bookmark",t("Marcar página", "Bookmark page"),"add","quiet",`data-id="${h(item.id)}"`)}`:""}</div>${active&&readerBusy?`<p role="status">${t("Cargando página…", "Loading page…")}</p>`:""}${active&&readerError?`<p role="alert">${h(readerError)}</p>`:""}${page?`${pageText(item,page,t)}<figure><img class="document-page-image" src="${readerImage}" alt="${t("Página", "Page")} ${page.page}"></figure><form id="document-search-form" data-id="${h(item.id)}"><label>${t("Buscar en el documento", "Search the document")}<input id="document-search" type="search" required minlength="2" maxlength="160"></label><button type="submit" class="button secondary" ${readerBusy?'disabled':''}>${t("Buscar", "Search")}</button></form>${searchResults===null?"":searchResults.length?`<ul class="document-search-results">${searchResults.map(hit=>`<li><button type="button" class="button quiet" data-action="document-go-page" data-id="${h(item.id)}" data-page="${hit.page}"><span>${t("Página", "Page")} ${hit.page}</span><span>${h(hit.excerpt)}</span></button></li>`).join("")}</ul>`:`<p>${t("No hay coincidencias en el texto disponible.", "No matches in the available text.")}</p>`}`:""}${bookmarks.length?`<div class="button-group">${bookmarks.map(bookmark=>action("document-go-page",`${bookmark.name} · ${Math.floor(bookmark.time)}`,undefined,"quiet",`data-id="${h(item.id)}" data-page="${Math.floor(bookmark.time)}"`)).join("")}</div>`:""}<p class="field-note">${t("El lector muestra una imagen y texto local. No ejecuta scripts ni abre enlaces del documento.", "The reader displays a local image and text. It does not execute scripts or open document links.")}</p></section>`;
 }
 
 export function createDocuments(hooks:Hooks){
+  document.addEventListener("selectionchange", ({ target }) => {
+    if (!(target instanceof HTMLTextAreaElement)) return;
+    const button = target.closest(".document-page-text")?.querySelector<HTMLButtonElement>("[data-action='document-share-selection']");
+    if (button) button.disabled = readerBusy || !selectedPassage(target);
+  });
   async function page(id:string,number:number):Promise<void>{
     const generation=++readerGeneration;readerId=id;readerBusy=true;readerError="";hooks.render();
     try{const result=await hooks.command<Page>("document_page",{id,page:number});if(generation!==readerGeneration)return;readerPage=result;readerImage=pngUrl(result.png);await hooks.command("library_playback",{id,position:result.page});await hooks.refresh();}
@@ -66,6 +89,12 @@ export function createDocuments(hooks:Hooks){
     else if(name==="document-previous"&&readerPage)await page(id,readerPage.page-1);
     else if(name==="document-next"&&readerPage)await page(id,readerPage.page+1);
     else if(name==="document-go-page")await page(id,Number(button.dataset.page));
+    else if(name==="document-share-selection"&&id===readerId&&!readerBusy&&readerPage?.textAvailable&&readerPage.page===Number(button.dataset.page)){
+      const field=button.closest(".document-page-text")?.querySelector("textarea");
+      const item=hooks.snapshot().library.find(item=>item.id===id);
+      const text=field ? selectedPassage(field) : "";
+      if(text&&item)hooks.share({ids:[id],text,label:`${item.name} · ${hooks.t("Página", "Page")} ${readerPage.page}`});
+    }
     else if(name==="document-bookmark"&&readerPage){await hooks.command("library_bookmark",{id,bookmark:{id:crypto.randomUUID(),name:hooks.t("Página ","Page ")+readerPage.page,time:readerPage.page},remove:false});await hooks.refresh();}
     return true;
   }

@@ -144,7 +144,7 @@ const screenCapture=createScreenCapture({command,snapshot:()=>snapshot,refresh,r
 const automation=createAutomation({command,render:renderCurrent,notify,t,desktop,copy:copyText,review:()=>{preferences.section="automation";navigate("settings");}});
 const voice=createVoice({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t,settings:()=>{preferences.section='engines';navigate('settings');void loadSettingsSection().catch(showError);},chooseFolder:()=>{void chooseFolder().then(renderCurrent).catch(showError);}});
 const documentEdits=createDocumentEdits({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t});
-const documents=createDocuments({command,snapshot:()=>snapshot,refresh,render:renderLibraryModules,t});
+const documents=createDocuments({command,snapshot:()=>snapshot,refresh,render:renderLibraryModules,t,share:input=>deviceShare.open(input)});
 const galleryExports=createGalleryExports({command,selected:()=>[...library.selected],refresh,notify,t});
 const platforms=createPlatformsController({command,snapshot:()=>snapshot,refresh,notify,showError,render:renderCurrent,t,openLink:url=>{navigate('home');updateSourceInput(url);clearTimeout(debounce);void inspect(true).catch(showError);}});
 const sources=createSourcesController({command,openPublicSource:url=>{platformModule="fileSources";navigate("platforms");void fileSources.open(url).catch(showError);},getSnapshot:()=>snapshot,refresh,notify,showError,t,render:renderCurrent});

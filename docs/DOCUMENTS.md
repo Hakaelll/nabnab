@@ -20,6 +20,8 @@ El lector recibe una imagen PNG renderizada y texto plano. No introduce PDF, EPU
 
 Permite avanzar y retroceder, conservar la página actual, marcar páginas y buscar en el texto disponible. La posición y los marcadores usan la persistencia de biblioteca existente. EPUB utiliza un tamaño de página y fuente fijos para mantener la correspondencia entre la página guardada y la lectura posterior. La búsqueda devuelve hasta 100 páginas con coincidencias; si el motor no conserva límites de página, informa de esa limitación en vez de asignar resultados a páginas inventadas.
 
+Abre **Texto de esta página** y marca un fragmento con el puntero o con **Mayús + flechas**. Pulsa **Enviar texto seleccionado** para revisar el fragmento y el dispositivo en KDE Connect. Puedes editar el texto en el diálogo o elegir la copia local desde **Archivos**. El lector muestra un aviso cuando no puede ofrecer texto para copiar. [Envío a un dispositivo](DEVICE-SHARE.md)
+
 La vista limita la imagen a 1400 × 2000 píxeles y 8 MiB. El texto de cada página se limita a un millón de caracteres. El lector no ofrece OCR ni desbloqueo de libros protegidos.
 
 ## Procedencia y comprobación
@@ -28,4 +30,4 @@ La implementación sigue la documentación oficial de [mutool merge](https://mup
 
 El componente Windows procede de [ArtifexSoftware/mupdf-downloads 1.28.5](https://github.com/ArtifexSoftware/mupdf-downloads/releases/tag/1.28.5), con licencia AGPL-3.0. La descarga y activación son voluntarias. Las herramientas usan únicamente el ejecutable gestionado por Componentes.
 
-Las pruebas unitarias cubren selección y orden de páginas, entradas inválidas, separación de argumentos y búsqueda por página. No se ha instalado MuPDF ni ejecutado una transformación PDF o lectura EPUB real durante este bloque; ese recorrido sigue pendiente de la comprobación con el componente instalado voluntariamente.
+Las pruebas unitarias cubren selección y orden de páginas, entradas inválidas, separación de argumentos y búsqueda por página. Con MuPDF verificado en un perfil aislado, WebView2 abrió un PDF y un EPUB sintéticos y preparó solo el texto marcado. Un PDF con la copia deshabilitada mostró la página y mantuvo la acción de envío fuera del lector. [Revisión de un fragmento del EPUB](device-share-document-excerpt.png)

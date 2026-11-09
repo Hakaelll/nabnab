@@ -16,6 +16,10 @@ Al abrir **Enviar a dispositivo** desde un archivo de arXiv, Zenodo o LibriVox, 
 
 Puedes enviar hasta 50 archivos por solicitud, un enlace público o hasta 8 KiB de texto. El contador mide bytes UTF-8 y **Revisar envío** se habilita cuando el texto cabe. Los enlaces con credenciales, fragmentos, destinos locales o parámetros de acceso se rechazan también cuando aparecen en el texto. Se admite el parámetro público `v` de los enlaces de vídeo de YouTube. Para enlaces privados puedes elegir la copia local.
 
+En el lector de PDF y EPUB, abre **Texto de esta página**, selecciona un fragmento y pulsa **Enviar texto seleccionado**. La revisión muestra el nombre del documento, la página y el texto que se va a enviar. El lector comprueba los permisos de copia antes de ofrecer la acción. [Lector de documentos](DOCUMENTS.md#lector-pdf-y-epub)
+
+![Revisión del fragmento seleccionado de un EPUB sintético en Windows](device-share-document-excerpt.png)
+
 **Entregado a KDE Connect** indica que la CLI respondió sin errores al pasarle la solicitud. Para archivos, nabnab espera una línea de respuesta por archivo. Consulta KDE Connect para ver el progreso o confirmar la recepción. Si la CLI devuelve una respuesta parcial, emite un diagnóstico o tarda demasiado, nabnab muestra **Entrega a KDE Connect sin confirmar**. El resultado conserva el destino y los archivos revisados. Comprueba ambos dispositivos antes de iniciar otra revisión. [Comandos de la CLI de KDE Connect 26.08.2](https://github.com/KDE/kdeconnect-kde/blob/v26.08.2/cli/kdeconnect-cli.cpp)
 
 ![Resultado de un envío de dos archivos con una respuesta parcial de la CLI de prueba](device-share-unconfirmed.png)
