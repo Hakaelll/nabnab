@@ -8,8 +8,9 @@ export interface DubSelection { draftId: string; revision: number; settings: Voi
 export interface DubVideoOptions {
   voiceJobId: string;
   videoId: string;
-  mode: "alternate" | "replace" | "mix";
+  mode: "alternate" | "replace" | "mix" | "instrumental";
   originalAudioId?: string;
+  instrumentalId?: string;
 }
 interface OriginalAudio { id: string; title: string | null; language: string | null; codec: string | null }
 interface DraftContext { id: string; revision: number; pair: "es-en" | "en-es"; sourceId: string; count: number }
@@ -35,6 +36,7 @@ export function createDubbing(hooks: Hooks) {
   let mode: DubVideoOptions["mode"] = "alternate";
   let audioReview: { videoId: string; tracks: OriginalAudio[] } | null = null;
   let originalAudioId = "";
+  let instrumentalId = "";
   let player: HTMLAudioElement | null = null, sampleUrl = "", sampleText = "", requestId = 0;
   let observed = "";
 
@@ -43,6 +45,21 @@ export function createDubbing(hooks: Hooks) {
   const videoChoice = () => videos().find(item => item.id === (videoId || hooks.draft()?.sourceId))?.id ?? "";
   const reviewedTracks = () => audioReview?.videoId === videoChoice() ? audioReview.tracks : undefined;
   const mixAudio = () => reviewedTracks()?.find(track => track.id === originalAudioId);
+
+  function instrumentals() {
+    const video = videoChoice();
+    if (!video) return [];
+    const { jobs, library } = hooks.snapshot();
+    const sets = new Map(jobs.filter(job => job.source.kind === "stems"
+      && job.source.selection.libraryId === video && job.state === "completed").map(job => [job.id, job.outputs]));
+    return library.filter(item => {
+      const stem = item.details?.stems;
+      return !item.missing && item.kind === "audio" && item.parentId === video
+        && stem?.role === "Instrumental" && sets.get(stem.setId)?.includes(item.path);
+    });
+  }
+
+  const instrumentalChoice = () => instrumentals().find(item => item.id === instrumentalId);
 
   function selection(): DubSelection | null {
     const draft = hooks.draft();
@@ -68,11 +85,13 @@ export function createDubbing(hooks: Hooks) {
   function videoJob() {
     const wav = completedVoice();
     const track = mode === "mix" ? mixAudio() : undefined;
+    const instrumental = mode === "instrumental" ? instrumentalChoice() : undefined;
     const first = reviewedTracks()?.[0];
     return hooks.snapshot().jobs.filter(job => {
       if (job.source.kind !== "dubVideo") return false;
       const options = job.source.options;
       return options.voiceJobId === wav?.id && options.videoId === videoChoice() && options.mode === mode
+        && options.instrumentalId === instrumental?.id
         && (options.originalAudioId === track?.id || !options.originalAudioId && track?.id === first?.id
           && (job.state === "completed" || pending(job) && job.state !== "paused"));
     }).sort((left, right) => right.createdAt - left.createdAt)[0];
@@ -114,6 +133,7 @@ export function createDubbing(hooks: Hooks) {
     videoId = "";
     audioReview = null;
     originalAudioId = "";
+    instrumentalId = "";
     sampleCue = 0;
     error = "";
   }
@@ -136,6 +156,22 @@ export function createDubbing(hooks: Hooks) {
           ${tracks.length > 1 ? option("", t("Elige una pista de audio", "Choose an audio track"), originalAudioId) : ""}
           ${tracks.map((track, index) => option(track.id, labels[index], originalAudioId)).join("")}
         </select></div>${refresh}
+    </div>`;
+  }
+
+  function instrumentalControls() {
+    const tracks = instrumentals();
+    const selected = tracks.find(item => item.id === instrumentalId);
+    return `<div class="dub-mix-tracks">
+      ${tracks.length ? `<div class="dub-track-field"><label for="dub-instrumental">${t("Instrumental de Biblioteca", "Library instrumental")}</label>
+        <select id="dub-instrumental">
+          ${option("", t("Elige una exportación instrumental", "Choose an instrumental export"), selected?.id ?? "")}
+          ${tracks.map(item => option(item.id, item.name, selected?.id ?? "")).join("")}
+        </select></div>
+        ${selected ? action("play-media", t("Escuchar instrumental", "Play instrumental"), "play", "quiet", `data-id="${h(selected.id)}"`) : ""}
+        <p class="field-note dub-instrumental-note">${t("Fondo al 20 % desde Separar pistas. La separación puede dejar restos de voz o artefactos.", "Background at 20% from Separate stems. Separation may leave vocal bleed or artifacts.")}</p>`
+      : `<p class="field-note">${t("Exporta el instrumental de este vídeo desde Separar pistas.", "Export the instrumental for this video in Separate stems.")}</p>
+        ${action("tool-module", t("Abrir Separar pistas", "Open Separate stems"), "arrow", "quiet", 'data-id="stems"')}`}
     </div>`;
   }
 
@@ -170,18 +206,21 @@ export function createDubbing(hooks: Hooks) {
       ${audio ? translationOutput(audio, t("Voz sincronizada · WAV", "Synchronized voice · WAV"), t, t("Escuchar WAV", "Play WAV")) : ""}
       ${wav ? `<fieldset id="dub-video-controls" class="translation-fields" ${disabled ? "disabled" : ""}><legend>${t("2. Copia de vídeo", "2. Video copy")}</legend>
         <label for="dub-video">${t("Vídeo de Biblioteca", "Library video")}<select id="dub-video">${option("", t("Selecciona el vídeo correspondiente", "Select the matching video"), videoChoice())}${videos().map(item => option(item.id, item.name, videoChoice())).join("")}</select></label>
-        <label for="dub-mode">${t("Audio en la copia MKV", "Audio in the MKV copy")}<select id="dub-mode">${option("alternate", t("Pista alternativa", "Alternate track"), mode)}${option("replace", t("Solo voz traducida", "Translated voice only"), mode)}${option("mix", t("Voz + original al 20 %", "Voice + original at 20%"), mode)}</select></label>
+        <label for="dub-mode">${t("Audio en la copia MKV", "Audio in the MKV copy")}<select id="dub-mode">${option("alternate", t("Pista alternativa", "Alternate track"), mode)}${option("replace", t("Solo voz traducida", "Translated voice only"), mode)}${option("mix", t("Voz + original al 20 %", "Voice + original at 20%"), mode)}${option("instrumental", t("Voz + instrumental", "Voice + instrumental"), mode)}</select></label>
         ${mode === "mix" && videoChoice() ? originalAudioControls() : ""}
-        ${action("dub-queue-video", mux?.state === "error" || mux?.state === "cancelled" || mux?.state === "paused" ? t("Reintentar copia", "Retry copy") : t("Crear copia de vídeo", "Create video copy"), "video", "secondary", !videoChoice() || mode === "mix" && !mixAudio() || pending(mux) && mux?.state !== "paused" ? "disabled" : "")}
-      </fieldset>${video ? translationOutput(video, t("Copia de vídeo · MKV", "Video copy · MKV"), t, t("Reproducir copia", "Play copy")) : mux ? `<p class="field-note" role="status">${stateLabel(mux.state, t)} · MKV ${mux.error ? `· ${h(mux.error.code === "dubbing_no_original"
+        ${mode === "instrumental" && videoChoice() ? instrumentalControls() : ""}
+        ${action("dub-queue-video", mux?.state === "error" || mux?.state === "cancelled" || mux?.state === "paused" ? t("Reintentar copia", "Retry copy") : t("Crear copia de vídeo", "Create video copy"), "video", "secondary", !videoChoice() || mode === "mix" && !mixAudio() || mode === "instrumental" && !instrumentalChoice() || pending(mux) && mux?.state !== "paused" ? "disabled" : "")}
+      </fieldset>${video ? translationOutput(video, mode === "instrumental" ? t("Copia con instrumental · MKV", "Copy with instrumental · MKV") : t("Copia de vídeo · MKV", "Video copy · MKV"), t, t("Reproducir copia", "Play copy")) : mux ? `<p class="field-note" role="status">${stateLabel(mux.state, t)} · MKV ${mux.error ? `· ${h(mux.error.code === "dubbing_no_original"
         ? t("Este vídeo carece de audio original. El WAV sigue disponible.", "This video has no original audio. The WAV remains available.")
         : mux.error.code === "dubbing_audio_changed"
           ? t("La pista elegida cambió. Vuelve a revisar las pistas del vídeo. El WAV sigue disponible.", "The selected track changed. Review the video's tracks again. The WAV remains available.")
-          : mux.error.message)}` : ""}</p>` : ""}` : ""}`}
+          : mux.error.code === "dubbing_instrumental_changed"
+            ? t("El vídeo o el instrumental cambiaron. Exporta un nuevo instrumental para ese vídeo. El WAV sigue disponible.", "The video or instrumental changed. Export a fresh instrumental for this video. The WAV remains available.")
+            : mux.error.message)}` : ""}</p>` : ""}` : ""}`}
       ${busy ? `<div class="button-group"><p class="field-note" role="status">${t("Preparando operación local…", "Preparing local operation…")}</p>
         ${requestId ? action("dub-cancel", t("Cancelar", "Cancel"), "close", "quiet") : ""}</div>` : ""}
       ${error ? `<p class="asset-error" role="alert">${h(error)}</p>` : ""}
-      <p class="field-note">${t("El WAV respeta las pausas y avisa si una frase no cabe. La copia con mezcla conserva el diálogo que ya tenga el vídeo.", "The WAV preserves pauses and flags speech that does not fit. Mixing keeps any dialogue present in the video.")}</p>
+      <p class="field-note">${t("El WAV respeta las pausas y avisa si una frase no cabe.", "The WAV preserves pauses and flags speech that does not fit.")}${mode === "mix" ? " " + t("La mezcla conserva el diálogo presente en la pista original.", "The mix keeps any dialogue in the original track.") : ""}</p>
     </section>`;
   }
 
@@ -255,11 +294,13 @@ export function createDubbing(hooks: Hooks) {
         const voiceJobId = completedVoice()?.id;
         const videoId = videoChoice(), previous = videoJob();
         const track = mode === "mix" ? mixAudio() : undefined;
-        if (!voiceJobId || !videoId || mode === "mix" && !track) return;
+        const instrumental = mode === "instrumental" ? instrumentalChoice() : undefined;
+        if (!voiceJobId || !videoId || mode === "mix" && !track || mode === "instrumental" && !instrumental) return;
         if (previous && ["error", "cancelled", "paused"].includes(previous.state)) {
           await hooks.command("job_action", { ids: [previous.id], action: "retry" });
         } else {
-          const options: DubVideoOptions = { voiceJobId, videoId, mode, ...(track ? { originalAudioId: track.id } : {}) };
+          const options: DubVideoOptions = { voiceJobId, videoId, mode, ...(track ? { originalAudioId: track.id } : {}),
+            ...(instrumental ? { instrumentalId: instrumental.id } : {}) };
           await hooks.command("queue_dub_video", { options, clientRequest: crypto.randomUUID() });
         }
         await hooks.refresh();
@@ -279,9 +320,11 @@ export function createDubbing(hooks: Hooks) {
         videoId = target.value;
         audioReview = null;
         originalAudioId = "";
+        instrumentalId = "";
         break;
-      case "dub-mode": if (target.value === "replace" || target.value === "mix" || target.value === "alternate") mode = target.value; break;
+      case "dub-mode": if (target.value === "replace" || target.value === "mix" || target.value === "alternate" || target.value === "instrumental") mode = target.value; break;
       case "dub-original-audio": originalAudioId = target.value; break;
+      case "dub-instrumental": instrumentalId = target.value; break;
       default: return false;
     }
     stopSample(); hooks.render();

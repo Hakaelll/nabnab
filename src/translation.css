@@ -51,6 +51,7 @@
 .dub-track-field { display: grid; flex: 1 1 240px; gap: 6px; min-width: 0; }
 .dub-track-field select { width: 100%; min-width: 0; }
 .dub-mix-tracks > p { flex: 1 1 170px; align-self: center; }
+.dub-mix-tracks > .dub-instrumental-note { flex-basis: 100%; }
 .dub-sample { display: grid; grid-template-columns: minmax(0, 1fr) minmax(180px, 300px); gap: 10px; align-items: center; overflow-wrap: anywhere; }
 .dub-sample audio { display: block; width: 100%; height: 36px; }
 .dub-result { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }

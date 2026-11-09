@@ -22,15 +22,14 @@ pub(super) async fn run_dubbing(
             (file, info, draft.selection.input.library_id, format!("Translated voice - {}.wav", job.id))
         }
         Source::DubVideo { options, pair } => {
-            let (video, wav) = {
+            let input = {
                 let guard = state.repository.lock().unwrap();
                 let repo = guard.as_ref().ok_or("Open nabnab first.")?;
-                let (video, wav, _) = crate::dubbing::video_input(repo, options)?;
-                (video, wav)
+                crate::dubbing::video_input(repo, options)?.0
             };
             let language = if pair.languages().1 == "es" { "spa" } else { "eng" };
-            let (file, info) = crate::dubbing::mux(&engines, &video.path, &wav, staging, options, language, cancel.clone()).await?;
-            (file, info, video.id, format!("Dubbed video - {}.mkv", job.id))
+            let (file, info) = crate::dubbing::mux(&engines, &input, staging, options, language, cancel.clone()).await?;
+            (file, info, input.video.id, format!("Dubbed video - {}.mkv", job.id))
         }
         _ => return Err("Dubbing execution was not dispatched.".into()),
     };

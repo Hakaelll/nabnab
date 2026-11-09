@@ -38,6 +38,12 @@ La copia de vídeo tiene su propio trabajo en Descargas. Si falla, **Reintentar 
 
 ![Selección de la segunda pista del vídeo en una ventana de 900 píxeles](dubbing-mix-track.png)
 
+Para usar una separación ya exportada, elige **Voz + instrumental**. Selecciona el FLAC de **Separar pistas** asociado al mismo vídeo. Puedes escucharlo antes de crear la copia. La mezcla conserva el retraso inicial indicado por la pista de origen y usa el instrumental al 20 %. La separación es estimada y puede dejar restos de voz o artefactos. [Separar pistas](STEMS.md) · [Mezcla de audio con FFmpeg](https://ffmpeg.org/ffmpeg-filters.html#amix)
+
+Si el vídeo cambió desde la separación, exporta un instrumental de la versión actual. nabnab verifica el origen antes de publicar el MKV y conserva el WAV y el instrumental para que puedas revisar el trabajo.
+
+![Selección del instrumental de Biblioteca en una ventana de 900 píxeles](dubbing-instrumental.png)
+
 ## Verificación
 
 El recorrido nativo de Windows instaló las dos direcciones desde Ajustes, con un único runtime y vocabulario. Tradujo un VTT local, conservó cuatro identificadores y sus tiempos, y mantuvo la cursiva. Se guardó una corrección, se reabrió el borrador y se verificaron el VTT bilingüe y el SRT traducido. El original quedó idéntico y los directorios temporales quedaron vacíos. La comparación se comprobó a 1180 y 900 px. [Comparación y aviso de longitud](translation-preview.png)
@@ -45,3 +51,5 @@ El recorrido nativo de Windows instaló las dos direcciones desde Ajustes, con u
 `tests/native-dubbing.browser.mjs` parte de un borrador sintético y utiliza SAPI y FFmpeg reales. Abre la herramienta desde el catálogo y Ctrl + K, comprueba el foco del selector y conserva las ediciones sin guardar al cambiar de herramienta. También verifica la decodificación de la muestra, el acceso directo a dos avisos de síntesis, la reutilización de una frase al editar las otras dos y los silencios del WAV. Verifica las tres copias MKV con FFprobe, la diferencia entre mezclar y sustituir el audio, el reintento de un trabajo fallido y la integridad del WAV y del vídeo original. El panel se revisó a 1180 y 900 px. Un ejecutable de prueba de KDE Connect registra la ruta de cada VTT, WAV y MKV después de la confirmación explícita desde el panel.
 
 El vídeo de prueba lleva tonos distintos en cada pista. El MKV mezclado contiene el tono de la segunda pista durante una pausa del doblaje. La prueba también solicita una pista que ya no coincide con el vídeo y comprueba que se conserva el WAV publicado.
+
+La prueba usa un FLAC instrumental sintético con un tono de 540 Hz. Comprueba el silencio inicial, la aparición del tono en el MKV y el rechazo de la mezcla si cambia el vídeo. Verifica que el WAV y el FLAC se conservan. El selector se revisó a 900 y 1180 px.

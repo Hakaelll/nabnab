@@ -19,18 +19,23 @@ const ffmpeg = path.join(root, "src-tauri/engines/ffmpeg.exe");
 const ffprobe = path.join(root, "src-tauri/engines/ffprobe.exe");
 const video = path.join(data, "Vídeo original ñ.mp4");
 const silent = path.join(data, "Vídeo sin audio.mp4");
+const instrumental = path.join(output, "Instrumental de prueba.flac");
+const vocals = path.join(output, "Voz separada de prueba.flac");
 const subtitle = path.join(data, "Subtítulos originales.vtt");
 const draftId = "19999-1";
 const port = Number(process.env.NABNAB_DUBBING_DEBUG_PORT || 9256);
 const hash = bytes => createHash("sha256").update(bytes).digest("hex");
 
 await writeFile(subtitle, "WEBVTT\n\nprimero\n00:00:00.500 --> 00:00:02.000\nHola.\n\nsegundo\n00:00:03.000 --> 00:00:05.500\nNos vemos pronto.\n\ntercero\n00:00:06.000 --> 00:00:08.500\nHasta luego.\n");
-execFileSync(ffmpeg, ["-v", "error", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=12:d=9", "-f", "lavfi", "-i", "sine=frequency=290:d=9",
+execFileSync(ffmpeg, ["-v", "error", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=12:d=9", "-itsoffset", "0.25", "-f", "lavfi", "-i", "sine=frequency=290:d=8.75",
   "-f", "lavfi", "-i", "sine=frequency=710:d=9", "-i", subtitle, "-map", "0:v", "-map", "1:a", "-map", "2:a", "-map", "3:s",
   "-metadata:s:a:0", "language=spa", "-metadata:s:a:0", "handler_name=Primera mezcla",
   "-metadata:s:a:1", "language=eng", "-metadata:s:a:1", "handler_name=Segunda mezcla",
   "-c:v", "libopenh264", "-c:a", "aac", "-c:s", "mov_text", video], { windowsHide: true });
 execFileSync(ffmpeg, ["-v", "error", "-i", video, "-map", "0:v:0", "-c:v", "copy", silent], { windowsHide: true });
+for (const [file, frequency] of [[instrumental, 540], [vocals, 610]]) {
+  execFileSync(ffmpeg, ["-v", "error", "-f", "lavfi", "-i", `sine=frequency=${frequency}:duration=8.75`, "-c:a", "flac", file], { windowsHide: true });
+}
 
 let child, browser, page, launches = 0, log = "";
 async function wait(check, timeout = 40_000) {
@@ -98,6 +103,7 @@ async function openDubbingFromPalette() {
 }
 
 const probe = file => JSON.parse(execFileSync(ffprobe, ["-v", "error", "-show_streams", "-show_format", "-of", "json", file], { windowsHide: true })).streams;
+const gapSamples = (file, start = "2.4", length = "0.25") => execFileSync(ffmpeg, ["-v", "error", "-ss", start, "-i", file, "-t", length, "-vn", "-ac", "1", "-ar", "22050", "-f", "s16le", "pipe:1"], { windowsHide: true });
 function frequencyStrength(samples, hz) {
   let real = 0, imaginary = 0;
   for (let offset = 0; offset + 1 < samples.length; offset += 2) {
@@ -159,7 +165,7 @@ try {
   await page.locator('.dubbing-empty [data-action="translation-edit-draft"]').click();
   await page.locator("#translation-setup").waitFor();
   await rpc("enable_component", { id: "voice", enabled: true });
-  const imported = await rpc("import_paths", { paths: [video, silent, subtitle] });
+  const imported = await rpc("import_paths", { paths: [video, silent, subtitle, instrumental, vocals] });
   const item = file => imported.library.find(candidate => candidate.name === path.basename(file));
   const input = { libraryId: item(subtitle).id, trackId: item(subtitle).details.tracks[0].id };
   const { sourceHash, cues } = await rpc("translation_source", { input });
@@ -168,6 +174,19 @@ try {
   // Seed a completed translation in the isolated repository so this test needs no model download.
   const repository = path.join(data, "state-v1.json");
   const fixture = JSON.parse(await readFile(repository, "utf8"));
+  const sourceBytes = await readFile(video);
+  const instrumentalBytes = await readFile(instrumental);
+  const stemsId = "19998-1";
+  const stems = [[instrumental, "Instrumental"], [vocals, "Vocals"]].map(([file, role]) => {
+    const stem = fixture.library.find(candidate => candidate.id === item(file).id);
+    stem.parentId = item(video).id;
+    stem.details.stems = { setId: stemsId, role, model: "Spleeter" };
+    return stem.path;
+  });
+  fixture.jobs.push({ id: stemsId, runId: 1, clientRequest: "fixture-stems", title: "Separación de prueba", createdAt: 19998, updatedAt: 19998, state: "completed",
+    source: { kind: "stems", selection: { libraryId: item(video).id, inputHash: hash(sourceBytes) } },
+    folder: output, provider: "Spleeter", thumbnail: null, progress: null, outputs: stems, error: null, attempt: 1,
+    groupId: null, runNext: false, associations: [] });
   const selection = { input, sourceHash, pair: "es-en" };
   fixture.jobs.push({ id: draftId, runId: 1, clientRequest: "fixture-translation", title: "Traducción de prueba", createdAt: Date.now(), updatedAt: Date.now(), state: "completed",
     source: { kind: "captionTranslation", selection }, folder: output, provider: "Bergamot", thumbnail: null, progress: null, outputs: [], error: null, attempt: 1,
@@ -180,7 +199,6 @@ try {
       "The final sentence is deliberately long as well, so the test can check how a second timing warning opens its own line in the editor."],
     contextualBlocks: 1, edited: [] }));
 
-  const sourceBytes = await readFile(video);
   await launch();
   const errors = [];
   page.on("pageerror", error => errors.push(error.message));
@@ -284,13 +302,13 @@ try {
   assert.equal(probe(mixed.outputs[0]).filter(stream => stream.codec_type === "audio").length, 1);
   assert.equal(mixed.source.options.voiceJobId, wav.id);
   assert.equal(mixed.source.options.originalAudioId, originalAudioId);
-  const tone = execFileSync(ffmpeg, ["-v", "error", "-ss", "2.4", "-i", mixed.outputs[0], "-t", "0.25", "-vn", "-ac", "1", "-ar", "22050", "-f", "s16le", "pipe:1"], { windowsHide: true });
+  const tone = gapSamples(mixed.outputs[0]);
   assert.ok(frequencyStrength(tone, 710) > 10 * frequencyStrength(tone, 290));
   await page.locator("#dub-mode").selectOption("replace");
   await page.locator('[data-action="dub-queue-video"]').click();
   const replaced = await jobOf("dubVideo", 3, "completed");
   assert.equal(probe(replaced.outputs[0]).filter(stream => stream.codec_type === "audio").length, 1);
-  const speechGap = execFileSync(ffmpeg, ["-v", "error", "-ss", "2.4", "-i", replaced.outputs[0], "-t", "0.25", "-vn", "-ac", "1", "-ar", "22050", "-f", "s16le", "pipe:1"], { windowsHide: true });
+  const speechGap = gapSamples(replaced.outputs[0]);
   assert.ok(speechGap.every(value => value === 0));
   await rpc("queue_dub_video", { options: { voiceJobId: wav.id, videoId: item(video).id, mode: "mix", originalAudioId: "e".repeat(64) },
     clientRequest: "changed-dubbing-track" });
@@ -298,7 +316,53 @@ try {
   assert.equal(changedTrack.error.code, "dubbing_audio_changed");
   assert.deepEqual(changedTrack.outputs, []);
   assert.equal(hash(await readFile(wav.outputs[0])), hash(pcm));
+  await page.locator("#dub-mode").selectOption("instrumental", { timeout: 5000 });
+  const background = page.getByLabel("Instrumental de Biblioteca", { exact: true });
+  await background.waitFor();
+  assert.equal(await background.getByRole("option", { name: /Voz separada/ }).count(), 0);
+  const options = { voiceJobId: wav.id, videoId: item(video).id, mode: "instrumental", instrumentalId: item(instrumental).id };
+  for (const invalid of [{ ...options, instrumentalId: item(vocals).id }, { ...options, videoId: item(silent).id }]) {
+    await assert.rejects(rpc("queue_dub_video", { options: invalid, clientRequest: "foreign-stems" }), /instrumental/i);
+  }
+  await page.locator("#dub-video").selectOption(item(silent).id);
+  await page.getByRole("button", { name: "Abrir Separar pistas", exact: true }).waitFor();
+  assert.equal(await page.locator('[data-action="dub-queue-video"]').isDisabled(), true);
+  await page.locator("#dub-video").selectOption(item(video).id);
+  await background.selectOption(item(instrumental).id);
+  await page.getByRole("button", { name: "Escuchar instrumental", exact: true }).click();
+  await wait(() => page.locator("#audio-engine").evaluate((media, id) => media.dataset.localPlayer === id && media.currentTime > 0, item(instrumental).id));
+  await page.locator("#audio-close").click();
+  assert.equal(await background.inputValue(), item(instrumental).id);
+  for (const [width, height] of [[1180, 780], [900, 620]]) {
+    await page.setViewportSize({ width, height });
+    const panel = page.locator("#dub-video-controls");
+    await panel.evaluate(element => element.scrollIntoView({ block: "center" }));
+    assert.ok(await panel.evaluate(node => node.scrollWidth <= node.clientWidth + 1));
+    await page.screenshot({ path: path.join(data, `dubbing-instrumental-${width}.png`), animations: "disabled" });
+  }
+  await page.locator('[data-action="dub-queue-video"]').click();
+  const stemMix = await jobOf("dubVideo", 5, "completed");
+  assert.deepEqual(stemMix.source.options, options);
+  assert.match(probe(stemMix.outputs[0]).find(stream => stream.codec_type === "audio").tags.title, /separated instrumental/);
+  assert.ok(gapSamples(stemMix.outputs[0], "0.04", "0.10").every(byte => byte === 0));
+  assert.ok(frequencyStrength(gapSamples(stemMix.outputs[0], "0.32", "0.10"), 540) > 100000);
+  const instrumentalTone = gapSamples(stemMix.outputs[0]);
+  for (const frequency of [290, 610, 710]) {
+    assert.ok(frequencyStrength(instrumentalTone, 540) > 10 * frequencyStrength(instrumentalTone, frequency));
+  }
+  await writeFile(video, Buffer.concat([sourceBytes, Buffer.from("changed video fixture")]));
+  try {
+    await rpc("queue_dub_video", { options, clientRequest: "stale-stems" });
+    const staleStem = await jobOf("dubVideo", 6, "error");
+    assert.equal(staleStem.error.code, "dubbing_instrumental_changed");
+    assert.deepEqual(staleStem.outputs, []);
+  } finally {
+    await writeFile(video, sourceBytes);
+  }
+  assert.equal(hash(await readFile(wav.outputs[0])), hash(pcm));
+  assert.deepEqual(await readFile(instrumental), instrumentalBytes);
   assert.equal(hash(await readFile(video)), hash(sourceBytes));
+  await page.locator("#dub-mode").selectOption("replace");
   await shareOutput(wav);
   await shareOutput(replaced);
   await page.getByRole("button", { name: "Editar traducción", exact: true }).click();
@@ -319,7 +383,8 @@ try {
     if (width === 1180) await section.screenshot({ path: path.join(data, "dubbing-results.png"), animations: "disabled" });
   }
   console.log(JSON.stringify({ draftFixture: true, catalogAndPalette: true, editsPreservedBetweenTools: true, sapiSample: true, timingIssue: tooLong.error.technical, reusedCues: 1, synchronizedSeconds: 8.5,
-    alternateTracks: 3, failedMixKeptWav: true, selectedMixHz: 710, mixedTracks: 1, unchangedOriginal: true, shares: 3, viewports: [1180, 900] }));
+    alternateTracks: 3, failedMixKeptWav: true, selectedMixHz: 710, separatedInstrumentalHz: 540, staleInstrumentalRejected: true,
+    mixedTracks: 1, unchangedOriginal: true, shares: 3, viewports: [1180, 900] }));
 } catch (error) {
   console.error(log);
   await page?.screenshot({ path: path.join(data, "failure.png"), animations: "disabled" }).catch(() => {});

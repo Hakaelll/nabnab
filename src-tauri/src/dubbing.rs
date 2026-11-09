@@ -41,6 +41,7 @@ pub enum VideoMode {
     Alternate,
     Replace,
     Mix,
+    Instrumental,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -51,6 +52,8 @@ pub struct VideoOptions {
     pub mode: VideoMode,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub original_audio_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instrumental_id: Option<String>,
 }
 
 impl VideoOptions {
@@ -67,6 +70,13 @@ impl VideoOptions {
                 || !id.bytes().all(|byte| byte.is_ascii_hexdigit())
         }) {
             return Err("Choose an inspected original audio track for the mix.".into());
+        }
+        if (self.mode == VideoMode::Instrumental) != self.instrumental_id.is_some()
+            || self.instrumental_id.as_ref().is_some_and(|id| {
+                id.len() != 64 || !id.bytes().all(|byte| byte.is_ascii_hexdigit())
+            })
+        {
+            return Err("Choose an instrumental export from the selected video.".into());
         }
         Ok(())
     }
@@ -137,10 +147,41 @@ pub fn queue_dub_voice(
     Ok(jobs)
 }
 
+pub struct VideoInput {
+    pub video: library::LibraryItem,
+    voice: PathBuf,
+    instrumental: Option<InstrumentalInput>,
+}
+
+struct InstrumentalInput {
+    path: PathBuf,
+    size: u64,
+    source_hash: String,
+}
+
+fn instrumental_input(repo: &Repository, video_id: &str, id: &str) -> Result<InstrumentalInput, String> {
+    let error = "Choose a completed instrumental export from the selected video.";
+    let item = repo.data.library.iter().find(|item| {
+        item.id == id && item.kind == "audio" && item.parent_id.as_deref() == Some(video_id)
+    }).ok_or(error)?;
+    let reference = item.details.stems.as_ref().filter(|stem| stem.role == "Instrumental").ok_or(error)?;
+    let selection = repo.data.jobs.iter().find_map(|job| {
+        let queue::Source::Stems { selection } = &job.source else { return None; };
+        (job.id == reference.set_id && job.state == queue::JobState::Completed
+            && selection.library_id == video_id && job.outputs.contains(&item.path)).then_some(selection)
+    }).ok_or(error)?;
+    selection.validate()?;
+    Ok(InstrumentalInput {
+        path: library::authorized_path(&item.path)?,
+        size: item.size,
+        source_hash: selection.input_hash.clone(),
+    })
+}
+
 pub fn video_input<'a>(
     repo: &'a Repository,
     options: &VideoOptions,
-) -> Result<(library::LibraryItem, PathBuf, &'a Selection), String> {
+) -> Result<(VideoInput, &'a Selection), String> {
     options.validate()?;
     let voice = repo
         .data
@@ -163,7 +204,10 @@ pub fn video_input<'a>(
         return Err("The synchronized WAV is missing from Library.".into());
     }
     let video = video_item(repo, &options.video_id)?.clone();
-    Ok((video, library::authorized_path(output)?, selection))
+    let instrumental = options.instrumental_id.as_deref()
+        .map(|id| instrumental_input(repo, &video.id, id))
+        .transpose()?;
+    Ok((VideoInput { video, voice: library::authorized_path(output)?, instrumental }, selection))
 }
 
 fn video_item<'a>(repo: &'a Repository, id: &str) -> Result<&'a library::LibraryItem, String> {
@@ -241,7 +285,8 @@ pub fn queue_dub_video(
     crate::dependencies::engine_root(&app)?;
     let mut guard = state.repository.lock().unwrap();
     let repo = guard.as_mut().ok_or("Open nabnab first.")?;
-    let (video, _, selection) = video_input(repo, &options)?;
+    let (input, selection) = video_input(repo, &options)?;
+    let video = input.video;
     let root = translation::commands::completed_root(repo, &selection.draft_id)?;
     let draft = selection.draft(&root)?;
     library::authorized_path(&video.path)?;
@@ -273,6 +318,10 @@ fn duration(info: &serde_json::Value) -> Result<f64, String> {
         .ok_or_else(|| "The input has no verified duration.".into())
 }
 
+fn start_time(info: &Value) -> Option<f64> {
+    info["start_time"].as_str()?.parse::<f64>().ok().filter(|value| value.is_finite())
+}
+
 fn stream_count(info: &serde_json::Value, kind: &str) -> usize {
     info["streams"]
         .as_array()
@@ -284,14 +333,24 @@ fn stream_count(info: &serde_json::Value, kind: &str) -> usize {
 
 pub async fn mux(
     engines: &Path,
-    video: &Path,
-    voice: &Path,
+    input: &VideoInput,
     staging: &Path,
     options: &VideoOptions,
     language: &str,
     cancel: watch::Receiver<bool>,
 ) -> Result<(PathBuf, serde_json::Value), String> {
-    let video = library::authorized_path(video)?;
+    let video = library::authorized_path(&input.video.path)?;
+    let voice = &input.voice;
+    let instrumental_hash = if let Some(instrumental) = &input.instrumental {
+        if queue::digest(video.clone(), cancel.clone()).await? != instrumental.source_hash
+            || std::fs::metadata(&instrumental.path).map(|meta| meta.len()).ok() != Some(instrumental.size)
+        {
+            return Err("DUB_INSTRUMENTAL_CHANGED".into());
+        }
+        Some(queue::digest(instrumental.path.clone(), cancel.clone()).await?)
+    } else {
+        None
+    };
     let original = crate::media::probe(engines, &video, cancel.clone()).await?;
     let mode = options.mode;
     let voice_info = crate::media::probe(engines, voice, cancel.clone()).await?;
@@ -320,6 +379,33 @@ pub async fn mux(
         "file".into(),
         "-i".into(),
         voice.to_string_lossy().into_owned(),
+    ];
+    let mut instrumental_stream = "2:a:0";
+    let mut instrumental_lead = String::new();
+    if let Some(instrumental) = &input.instrumental {
+        let (_, source_audio) = audio_streams(&original).next().ok_or("DUB_INSTRUMENTAL_CHANGED")?;
+        let origin = start_time(&original["format"]).unwrap_or(0.0);
+        let offset = (start_time(source_audio).unwrap_or(origin) - origin).clamp(0.0, seconds);
+        let info = crate::media::probe(engines, &instrumental.path, cancel.clone()).await?;
+        let (_, stream) = audio_streams(&info).next().ok_or("DUB_INSTRUMENTAL_CHANGED")?;
+        if stream_count(&info, "audio") != 1 || stream_count(&info, "video") != 0
+            || stream["codec_name"] != "flac" || stream["sample_rate"] != "44100"
+            || duration(&info)? + offset > seconds + 0.25
+        {
+            return Err("DUB_INSTRUMENTAL_CHANGED".into());
+        }
+        if offset > 0.000_001 {
+            let layout = match stream["channels"].as_u64() {
+                Some(1) => "mono",
+                Some(2) => "stereo",
+                _ => return Err("DUB_INSTRUMENTAL_CHANGED".into()),
+            };
+            instrumental_stream = "bed";
+            instrumental_lead = format!("anullsrc=r=44100:cl={layout}:d={offset:.6}[lead];[lead][2:a:0]concat=n=2:v=0:a=1[bed];");
+        }
+        args.extend(["-protocol_whitelist".into(), "file".into(), "-i".into(), instrumental.path.to_string_lossy().into_owned()]);
+    }
+    args.extend([
         "-map".into(),
         "0:V:0".into(),
         "-map".into(),
@@ -328,7 +414,7 @@ pub async fn mux(
         "copy".into(),
         "-c:s".into(),
         "copy".into(),
-    ];
+    ]);
     let index = if mode == VideoMode::Alternate {
         originals
     } else {
@@ -348,16 +434,20 @@ pub async fn mux(
     if mode == VideoMode::Alternate {
         args.extend(["-map", "0:a?", "-c:a", "copy"].map(str::to_owned));
     }
-    let filter = if mode == VideoMode::Mix {
-        let original_stream = if let Some(id) = &options.original_audio_id {
+    let background = match mode {
+        VideoMode::Mix => Some(if let Some(id) = &options.original_audio_id {
             let (index, _) = audio_streams(&original)
                 .find(|(_, stream)| audio_identity(stream) == *id)
                 .ok_or("DUB_AUDIO_CHANGED")?;
             format!("0:{index}")
         } else {
             "0:a:0".into()
-        };
-        format!("[1:a]apad[dub];[dub][{original_stream}]amix=inputs=2:duration=first:weights='0.8 0.2':normalize=0[speech]")
+        }),
+        VideoMode::Instrumental => Some(instrumental_stream.into()),
+        VideoMode::Alternate | VideoMode::Replace => None,
+    };
+    let filter = if let Some(stream) = background {
+        format!("{instrumental_lead}[1:a]apad[dub];[dub][{stream}]amix=inputs=2:duration=first:weights='0.8 0.2':normalize=0[speech]")
     } else {
         "[1:a]apad[speech]".into()
     };
@@ -368,7 +458,11 @@ pub async fn mux(
         format!("-metadata:s:a:{index}"),
         format!("language={language}"),
         format!("-metadata:s:a:{index}"),
-        "title=Local translated voice".into(),
+        if mode == VideoMode::Instrumental {
+            "title=Local translated voice + separated instrumental".into()
+        } else {
+            "title=Local translated voice".into()
+        },
         format!("-disposition:a:{index}"),
         if index == 0 {
             "default".into()
@@ -380,6 +474,13 @@ pub async fn mux(
         output.to_string_lossy().into_owned(),
     ]);
     engine::tool(engines, "ffmpeg.exe", args, cancel.clone()).await?;
+    if let (Some(instrumental), Some(hash)) = (&input.instrumental, instrumental_hash) {
+        if queue::digest(video, cancel.clone()).await? != instrumental.source_hash
+            || queue::digest(instrumental.path.clone(), cancel.clone()).await? != hash
+        {
+            return Err("DUB_INSTRUMENTAL_CHANGED".into());
+        }
+    }
     let info = crate::media::probe(engines, &output, cancel).await?;
     if stream_count(&info, "audio") != index + 1
         || stream_count(&info, "video") != 1
