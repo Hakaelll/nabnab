@@ -2,6 +2,7 @@ import "./stems.css";
 import { escapeHtml as h, type Copy, type Snapshot } from "./contracts";
 import { bytesLabel, durationLabel, isCancelled } from "./presentation";
 import { action, icon, option } from "./views-common";
+import { isPlayable } from "./playback-preferences";
 
 interface Component { id: string; installed: boolean; enabled: boolean; available: boolean; size: number; installedSize?: number }
 interface Preview { previewId: number; seconds: number; channels: number; originalChannels: number }
@@ -22,6 +23,8 @@ interface Hooks {
 }
 
 const waveColumns = 88;
+const sampleSeconds = 8;
+const maximumStart = 30 * 60;
 
 function sampleWaveforms(samples: AudioBuffer[]): string[] {
   const envelopes = samples.map(buffer => {
@@ -56,10 +59,42 @@ export function createStemsTool(hooks: Hooks) {
   let waveforms: string[] = [];
   let chosen = 0, position = 0, began = 0, frame = 0;
   const labels = () => [t("Original", "Original"), t("Voz", "Vocals"), t("Instrumental", "Instrumental")];
-  const sources = () => hooks.snapshot().library.filter(item => !item.missing && (item.kind === "audio" || item.kind === "video"));
-  const selected = () => sources().find(item => item.id === libraryId);
+  const sources = () => hooks.snapshot().library.filter(isPlayable);
+  const selected = () => hooks.snapshot().library.find(item => item.id === libraryId && isPlayable(item));
   const ready = () => component?.installed && component.enabled && component.available;
   const disabled = () => busy ? "disabled" : "";
+
+  function sourceDuration() {
+    const duration = selected()?.duration;
+    return typeof duration === "number" && Number.isFinite(duration) && duration > 0 ? duration : null;
+  }
+
+  function sampleWindow(duration: number, seconds: number) {
+    const span = Math.min(duration, maximumStart + sampleSeconds);
+    const max = Math.max(0, Math.min(maximumStart, (Math.ceil(duration * 10) - 1) / 10));
+    const value = Math.max(0, Math.min(max, Number.isFinite(seconds) ? seconds : 0));
+    const end = Math.min(span, value + sampleSeconds);
+    const time = (value: number) => {
+      const tenths = Math.round(value * 10);
+      return durationLabel(Math.floor(tenths / 10)) + (tenths % 10 ? t(",", ".") + tenths % 10 : "");
+    };
+    return { span: time(span), max, value, from: `${100 * value / span}%`, to: `${100 * end / span}%`,
+      label: t(`De ${time(value)} a ${time(end)}`, `From ${time(value)} to ${time(end)}`),
+      summary: value === seconds ? `${time(value)}–${time(end)}` : t("Inicio fuera de rango", "Start out of range") };
+  }
+
+  function syncSampleWindow(seconds: number) {
+    const duration = sourceDuration();
+    const slider = document.getElementById("stems-window");
+    const summary = document.getElementById("stems-window-summary");
+    if (!duration || !(slider instanceof HTMLInputElement) || !summary) return;
+    const window = sampleWindow(duration, seconds);
+    slider.value = String(window.value);
+    slider.style.setProperty("--stems-window-from", window.from);
+    slider.style.setProperty("--stems-window-to", window.to);
+    slider.setAttribute("aria-valuetext", window.label);
+    summary.textContent = window.summary;
+  }
 
   function publishedSet() {
     if (!libraryId) return;
@@ -206,6 +241,8 @@ export function createStemsTool(hooks: Hooks) {
 
   function render() {
     const matches = sources().filter(item => item.id === libraryId || item.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
+    const duration = sourceDuration();
+    const window = duration ? sampleWindow(duration, start) : null;
     const mib = (bytes: number) => `${new Intl.NumberFormat(t("es", "en"), { maximumFractionDigits: 1 }).format(bytes / 1048576)} MiB`;
     const status = ready() ? "" : `<div class="upscale-component"><div><strong>Spleeter · sherpa-onnx</strong>
       <p class="field-note">${t("Instala y activa el componente en Ajustes. El audio se procesa en CPU en este equipo.", "Install and enable the component in Settings. Audio is processed on this device’s CPU.")}</p>
@@ -225,8 +262,13 @@ export function createStemsTool(hooks: Hooks) {
         </fieldset>
         <section class="asset-review" aria-labelledby="stems-review-title">
           <div class="section-heading"><h3 id="stems-review-title">${t("Muestra sincronizada", "Synchronized sample")}</h3></div>
+          ${window ? `<div class="stems-window">
+            <div class="stems-window-heading"><label for="stems-window">${t("Inicio en la línea de tiempo", "Start on timeline")}</label><output id="stems-window-summary" aria-live="off">${h(window.summary)}</output></div>
+            <input id="stems-window" type="range" min="0" max="${window.max}" step="0.1" value="${window.value}" aria-valuetext="${h(window.label)}" ${busy || !window.max ? "disabled" : ""} style="--stems-window-from:${window.from};--stems-window-to:${window.to}">
+            <div class="stems-window-heading" aria-hidden="true"><span>0:00</span><span>${h(window.span)}</span></div>
+          </div>` : selected() ? `<p class="field-note">${t("Duración desconocida. Indica el segundo de inicio.", "Duration unknown. Enter the start time in seconds.")}</p>` : ""}
           <div class="stems-sample-controls">
-            <label for="stems-start">${t("Inicio (segundos)", "Start (seconds)")}<input id="stems-start" type="number" min="0" max="1800" step="0.1" required value="${Number.isFinite(start) ? start : ""}" ${disabled()}></label>
+            <label for="stems-start">${t("Inicio (segundos)", "Start (seconds)")}<input id="stems-start" type="number" min="0" max="${window?.max ?? maximumStart}" step="0.1" required value="${Number.isFinite(start) ? start : ""}" ${disabled()}></label>
             ${action("stems-preview", t("Generar muestra", "Generate sample"), "audio", "secondary", !ready() || !selected() || busy ? "disabled" : "")}
             ${requestId ? action("stems-cancel", t("Cancelar muestra", "Cancel sample"), "close", "quiet") : ""}
           </div>
@@ -338,15 +380,27 @@ export function createStemsTool(hooks: Hooks) {
       else drawTime();
       return true;
     }
+    if (target.id === "stems-window" && target instanceof HTMLInputElement) {
+      const number = document.getElementById("stems-start");
+      if (number instanceof HTMLInputElement) number.value = target.value;
+      syncSampleWindow(target.valueAsNumber);
+      return true;
+    }
     if (target.id === "stems-start" && target instanceof HTMLInputElement) {
       start = target.valueAsNumber;
-      if (!preview && !error) return true;
+      if (!preview && !error) { syncSampleWindow(start); return true; }
     } else if (target.id === "stems-source" && target instanceof HTMLSelectElement) {
       libraryId = target.value; start = 0;
       hooks.restoreComparison();
     } else return false;
     discard(); error = ""; hooks.render();
     return true;
+  }
+
+  function change(target: HTMLElement) {
+    if (target.id !== "stems-window") return target.id === "stems-source" && input(target);
+    const number = document.getElementById("stems-start");
+    return number instanceof HTMLInputElement && input(number);
   }
 
   async function submit(form: HTMLFormElement) {
@@ -362,5 +416,5 @@ export function createStemsTool(hooks: Hooks) {
     return true;
   }
 
-  return { render, load, leave, click, input, submit };
+  return { render, load, leave, click, input, change, submit };
 }

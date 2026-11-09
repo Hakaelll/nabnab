@@ -1,6 +1,10 @@
 # Separar pistas
 
-En **Herramientas → Audio y voz → Separar pistas**, elige un audio o vídeo de Biblioteca, indica el segundo de inicio y genera una muestra de hasta ocho segundos. Puedes reproducirla, buscar una posición y cambiar entre Original, Voz e Instrumental sobre el mismo reloj de reproducción.
+En **Herramientas → Audio y voz → Separar pistas**, elige un audio o vídeo de Biblioteca. Si la duración está disponible, arrastra el control de la línea de tiempo o muévelo con las flechas para elegir el inicio. La banda clara y sus tiempos indican el tramo que se va a analizar, de hasta ocho segundos. **Inicio (segundos)** permite ajustarlo con precisión y también funciona si falta la duración. Si cambias el inicio, vuelve a generar la muestra.
+
+![Selección de un tramo de ocho segundos en un audio de prueba](stems-sample-window.png)
+
+Puedes reproducir la muestra, buscar una posición y cambiar entre Original, Voz e Instrumental sobre el mismo reloj de reproducción.
 
 Las tres formas de onda usan la misma escala y comparten un cursor. Puedes ver dónde aparece señal en cada pista y pulsar su fila para escucharla desde el mismo punto. La barra inferior permite buscar con el ratón o las flechas del teclado.
 
@@ -25,6 +29,8 @@ El paquete usa Spleeter de Deezer en FP16, convertido para sherpa-onnx 2.0.1. La
 La cola comparte el límite de procesamiento con ampliación y transcripción. Cancelar la muestra o la tarea detiene su proceso. Los fragmentos de inferencia solapados acotan la memoria y los archivos intermedios se eliminan al terminar. El límite de 30 minutos por archivo acota el espacio temporal.
 
 ## Verificación
+
+En Edge se comprobó el arrastre, el ajuste por teclado y la entrada numérica a 900 y 1180 px con audio sintético. Cambiar el tramo retiró la comparación anterior y deshabilitó la exportación hasta generar otra muestra. En WebView2 se verificó la línea de tiempo con un vídeo local y la comparación de dos FLAC ya exportados.
 
 El recorrido nativo de Windows verificó la instalación desde Ajustes, el cambio de pista durante la reproducción y la vista a 1180 y 900 px. Una mezcla mono sintética de 927 423 muestras conservó el canal y la duración en los dos FLAC. Sus picos quedaron por debajo del máximo PCM y el hash del original se mantuvo. Una muestra estéreo conservó dos canales. Cancelar una segunda tarea en curso eliminó sus archivos temporales.
 

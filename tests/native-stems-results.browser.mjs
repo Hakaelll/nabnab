@@ -9,7 +9,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(import.meta.dirname, "..");
-const base = path.join(root, "artifacts/stems");
+const base = path.resolve(process.env.NABNAB_STEMS_RESULTS_ARTIFACTS ?? path.join(root, "artifacts/stems"));
 await mkdir(base, { recursive: true });
 const data = await mkdtemp(path.join(base, "results-run-"));
 const output = path.join(data, "output");
@@ -115,6 +115,14 @@ try {
   await page.locator("#stems-source").selectOption(source.id);
   const panel = page.locator(".stems-output");
   const baseline = process.argv.includes("--baseline");
+  if (!baseline) {
+    const window = page.getByRole("slider", { name: "Inicio en la línea de tiempo", exact: true });
+    await window.press("ArrowRight");
+    assert.equal(await page.locator("#stems-start").inputValue(), "0.1");
+    await page.locator("#stems-start").fill("4.7");
+    assert.equal(await window.inputValue(), "4.7");
+    assert.equal(await window.getAttribute("aria-valuetext"), "De 0:04,7 a 0:12,7");
+  }
   for (const [width, height] of [[1180, 780], [900, 620]]) {
     await page.setViewportSize({ width, height });
     await page.locator("#stems-form .asset-submit").evaluate(node => node.scrollIntoView({ block: "start" }));

@@ -11,6 +11,18 @@
 .stems-fields legend, .stems-tool h3 { margin: 0 0 8px; font-size: 14px; font-weight: 600; }
 .stems-sample-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; }
 .stems-sample-controls input { width: 112px; }
+.stems-window { margin: 12px 0; padding: 10px 12px; border: 1px solid var(--edge-quiet); border-radius: 10px; background: var(--surface); }
+.stems-window-heading { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 12px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.stems-window-heading output { color: var(--text); }
+#stems-window { appearance: none; width: 100%; min-height: 30px; margin: 0; padding: 0; border: 0; border-radius: 6px; background: transparent; cursor: pointer; }
+#stems-window:disabled { cursor: default; }
+#stems-window:focus-visible { outline: 2px solid var(--action); outline-offset: 2px; }
+#stems-window::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 6px;
+  background: linear-gradient(to right, var(--border) var(--stems-window-from), var(--action) var(--stems-window-from) var(--stems-window-to), var(--border) var(--stems-window-to));
+}
+#stems-window::-webkit-slider-thumb { appearance: none; width: 12px; height: 12px; margin-top: -3px; border-radius: 50%; background: var(--text); box-shadow: 0 0 0 2px var(--surface); }
 .stems-review { --stems-label-width: 116px; display: grid; gap: 10px; margin: 12px 0 0; }
 .stems-tracks { flex-wrap: wrap; justify-content: flex-start; }
 .stems-lanes { display: grid; gap: 4px; }

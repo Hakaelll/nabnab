@@ -17,7 +17,10 @@ const setup = `
   globalThis.isTauri = true;
   mockWindows("main");
   const settings = { folder: "C:/Fixture", language: "es", reducedMotion: true, reducedTransparency: true, sidebarExpanded: true, trayEnabled: false };
-  const snapshot = { settings, jobs: [], library: [{ id: "mix", name: "Mezcla de prueba.wav", kind: "audio", path: "C:/Fixture/Mezcla de prueba.wav" }], collections: [], drafts: [], sources: [], rules: [], smartCollections: [], presets: [], audioPlaylists: [] };
+  const snapshot = { settings, jobs: [], library: [
+    { id: "mix", name: "Mezcla de prueba.wav", kind: "audio", path: "C:/Fixture/Mezcla de prueba.wav", duration: 30 },
+    { id: "unknown", name: "Mezcla sin duración.wav", kind: "audio", path: "C:/Fixture/Mezcla sin duración.wav", duration: null },
+  ], collections: [], drafts: [], sources: [], rules: [], smartCollections: [], presets: [], audioPlaylists: [] };
   const calls = window.stemsCalls = [];
   function wav(track) {
     const rate = 16000, length = rate * 4 * 4;
@@ -58,7 +61,36 @@ try {
   await page.locator('[data-page="tools"]').click();
   await openTool(page, "stems");
   const tool = page.locator(".stems-tool");
+  const start = tool.getByRole("spinbutton", { name: "Inicio (segundos)", exact: true });
+  const timeline = tool.getByRole("slider", { name: "Inicio en la línea de tiempo", exact: true });
+  await tool.locator("#stems-source").selectOption("unknown");
+  assert.equal(await timeline.count(), 0);
+  assert.equal(await start.isEnabled(), true);
   await tool.locator("#stems-source").selectOption("mix");
+  await timeline.waitFor({ timeout: 2500 });
+  await timeline.press("End");
+  assert.equal(await start.inputValue(), "29.9");
+  assert.equal(await timeline.getAttribute("aria-valuetext"), "De 0:29,9 a 0:30");
+  await start.fill("12.3");
+  assert.equal(await timeline.inputValue(), "12.3");
+  await timeline.press("ArrowRight");
+  assert.equal(await start.inputValue(), "12.4");
+  assert.equal(await timeline.getAttribute("aria-valuetext"), "De 0:12,4 a 0:20,4");
+  await timeline.scrollIntoViewIfNeeded();
+  const { x, y, width, height } = await timeline.boundingBox();
+  await page.mouse.move(x + width * 0.42, y + height / 2);
+  await page.mouse.down();
+  await page.mouse.move(x + width * 0.75, y + height / 2, { steps: 8 });
+  await page.mouse.up();
+  assert.ok(Number(await start.inputValue()) > 20);
+  await start.fill("12.4");
+  for (const [width, height] of [[900, 620], [1180, 780]]) {
+    await page.setViewportSize({ width, height });
+    await tool.locator(".asset-review").evaluate(section => section.scrollIntoView({ block: "start" }));
+    assert.ok(await tool.evaluate(element => element.scrollWidth <= element.clientWidth + 1));
+    await page.screenshot({ path: `${directory}/stems-window-${width}.png` });
+  }
+  await page.setViewportSize({ width: 900, height: 620 });
   await tool.getByRole("button", { name: "Generar muestra" }).click();
   const review = tool.locator(".stems-review");
   const position = review.getByRole("slider", { name: "Posición en la muestra" });
@@ -96,9 +128,16 @@ try {
     await review.scrollIntoViewIfNeeded();
     await page.screenshot({ path: `${directory}/review-${width}.png` });
   }
+  await timeline.press("ArrowLeft");
+  await review.waitFor({ state: "detached" });
+  assert.equal(await tool.getByRole("button", { name: "Exportar pistas" }).isDisabled(), true);
+  assert.equal(await start.inputValue(), "12.3");
+  await tool.getByRole("button", { name: "Generar muestra" }).click();
+  await review.waitFor();
   await tool.getByRole("button", { name: "Exportar pistas" }).click();
   const calls = await page.evaluate(() => window.stemsCalls);
-  assert.equal(calls.filter(call => call.command === "stems_preview").length, 1);
+  assert.deepEqual(calls.filter(call => call.command === "stems_preview").map(call => call.args.start), [12.4, 12.3]);
+  assert.ok(calls.some(call => call.command === "stems_release" && call.args.previewId === 22));
   assert.equal(calls.find(call => call.command === "queue_stems").args.previewId, 22);
   assert.deepEqual(errors, []);
   console.log("Three aligned waveforms reflect both channels and share the sample position through seeking and track switches.");

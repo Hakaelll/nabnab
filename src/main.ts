@@ -966,7 +966,7 @@ document.addEventListener('input',event=>{
   if(event.target instanceof HTMLElement&&event.target.id==='sticker-query'&&stickerTool.input(event.target))return;
   if(event.target instanceof HTMLElement&&['upscale-query','upscale-split'].includes(event.target.id)&&upscaleTool.input(event.target))return;
   if(event.target instanceof HTMLElement&&event.target.id==='background-query'&&backgroundTool.input(event.target))return;
-  if(event.target instanceof HTMLElement&&['stems-query','stems-start','stems-position'].includes(event.target.id)&&stemsTool.input(event.target))return;
+  if(event.target instanceof HTMLElement&&['stems-query','stems-start','stems-position','stems-window'].includes(event.target.id)&&stemsTool.input(event.target))return;
   if(event.target instanceof HTMLElement&&translationTool.input(event.target))return;
   if(event.target instanceof HTMLElement&&personalArchives.input(event.target))return;
   if(event.target instanceof HTMLElement&&(automation.change(event.target)||screenCapture.change(event.target)||voice.change(event.target)||imageAssets.input(event.target)||fileOrganization.input(event.target)||(event.target.id==='portable-query'&&portable.change(event.target))||audioPlayer.input(event.target)||audioLibrary.input(event.target)||personalServers.handleInput(event.target)||fileSources.handleInput(event.target)||advancedFiles.handleInput(event.target)||sourceExports.handleInput(event.target)||live.input(event.target)||telegram.handleInput(event.target)||courses.handleInput(event.target)||torrents.handleInput(event.target)||platforms.handleInput(event.target)||batches.handleInput(event.target)||sources.handleInput(event.target)||libraryFeatures.handleInput(event.target)))return;
@@ -982,7 +982,7 @@ document.addEventListener('change',event=>{
   if(target instanceof HTMLElement&&target.id!=='sticker-query'&&stickerTool.input(target))return;
   if(target instanceof HTMLElement&&!['upscale-query','upscale-split'].includes(target.id)&&upscaleTool.input(target))return;
   if(target instanceof HTMLElement&&target.id!=='background-query'&&backgroundTool.input(target))return;
-  if(target instanceof HTMLElement&&target.id==='stems-source'&&stemsTool.input(target))return;
+  if(target instanceof HTMLElement&&stemsTool.change(target))return;
   if(target instanceof HTMLElement&&(target.id.startsWith('dub-')||['translation-source','translation-pair','translation-format','translation-bilingual','translation-draft'].includes(target.id))){void translationTool.change(target).catch(showError);return;}
   if(target instanceof HTMLElement&&target.closest('.personal-archives')){void personalArchives.change(target).catch(showError);return;}
   if((target instanceof HTMLInputElement||target instanceof HTMLSelectElement||target instanceof HTMLTextAreaElement)&&(articles.change(target)||ocr.change(target)))return;
