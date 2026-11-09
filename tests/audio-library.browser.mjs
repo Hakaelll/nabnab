@@ -68,16 +68,16 @@ const setup = `
     if(cmd==="audio_playlist_rematch"){
       const list=state.audioPlaylists.find(item=>item.id===args.listId);
       return {kind:"list",listId:list.id,name:list.name,rows:list.entries.map(entry=>({
-        entry,artist:entry.kind==="missing"?"Sonia":null,duration:entry.kind==="missing"?12:null,version:null,
+        entry,artist:entry.hints?.artist??null,duration:entry.hints?.duration??null,version:entry.hints?.version??null,
         candidates:entry.kind==="missing"?[{id:"first",title:"Primera pista",artist:"Sonia",album:"Álbum de prueba",duration:12,versionMatches:false}]:[],
       }))};
     }
     if(cmd==="audio_playlist_choose")return {kind:"csv",id:"fixture-csv",name:"Lista exportada",columns:["Track name","Artist","Duration (ms)","Version"],sample:[["Versión buscada","Sonia","10000","En directo"]],count:3};
     if(cmd==="audio_playlist_map")return {kind:"list",name:"Lista exportada",rows:[
-      {entry:{kind:"remote",url:"https://example.org/audio",title:"Versión buscada"},artist:"Sonia",duration:10,version:"En directo",candidates:[
+      {entry:{kind:"remote",url:"https://example.org/audio",title:"Versión buscada",hints:{id:"exported-live",artist:"Sonia",duration:10,version:"En directo"}},artist:"Sonia",duration:10,version:"En directo",candidates:[
         {id:"first",title:"Versión buscada",artist:"Sonia",album:"Sesiones",duration:10,versionMatches:false},
         {id:"last",title:"Versión buscada",artist:"Sonia",album:"Sesiones",duration:10,versionMatches:true}]},
-      {entry:{kind:"missing",locator:"missing.mp3",title:"Ausente"},artist:null,duration:null,version:null,candidates:[]},
+      {entry:{kind:"missing",locator:"missing.mp3",title:"Ausente",hints:{artist:"Sonia",duration:12}},artist:"Sonia",duration:12,version:null,candidates:[]},
       {entry:{kind:"remote",url:"https://example.org/remote",title:"Referencia remota"},artist:null,duration:null,version:null,candidates:[]},
     ]};
     if(cmd==="audio_lyrics")return state.library.find(item=>item.id===args.id)?.details.lyrics ??
@@ -373,7 +373,11 @@ try {
   await page.getByRole("button", {name:"Guardar lista",exact:true}).click();
   await page.getByRole("heading", {name:"Lista exportada",exact:true}).waitFor();
   const imported = await page.evaluate(() => window.audioFixture.state.audioPlaylists.find(list=>list.name==="Lista exportada"));
-  assert.deepEqual(imported.entries,[{kind:"local",id:"last",title:"Versión buscada"},{kind:"missing",locator:"missing.mp3",title:"Ausente"},{kind:"remote",url:"https://example.org/remote",title:"Referencia remota"}]);
+  assert.deepEqual(imported.entries,[
+    {kind:"local",id:"last",title:"Versión buscada",hints:{id:"exported-live",artist:"Sonia",duration:10,version:"En directo"}},
+    {kind:"missing",locator:"missing.mp3",title:"Ausente",hints:{artist:"Sonia",duration:12}},
+    {kind:"remote",url:"https://example.org/remote",title:"Referencia remota"},
+  ]);
   const mapping = await page.evaluate(() => window.audioFixture.calls.find(call=>call.cmd==="audio_playlist_map").args.mapping);
   assert.equal(mapping.duration,2);
   assert.equal(mapping.milliseconds,true);
@@ -417,7 +421,23 @@ try {
   await page.waitForFunction(id => window.audioFixture.state.audioPlaylists.find(list=>list.id===id).entries[1].id==="first", imported.id);
   const rematched = await readSavedPlaylist();
   assert.equal(rematched.id, imported.id);
-  assert.deepEqual(rematched.entries, [imported.entries[0], {kind:"local",id:"first",title:"Primera pista"}, imported.entries[2]]);
+  assert.deepEqual(rematched.entries, [imported.entries[0], {kind:"local",id:"first",title:"Ausente",hints:{artist:"Sonia",duration:12}}, imported.entries[2]]);
+
+  const originalRecordingMissing = missing => page.evaluate(async missing => {
+    window.audioFixture.state.library.find(item => item.id === "last").missing = missing;
+    const { emit } = await import("/node_modules/@tauri-apps/api/event.js");
+    await emit("library-update");
+  }, missing);
+  await originalRecordingMissing(true);
+  await page.getByText("Archivo ausente", { exact: true }).waitFor();
+  await reviewReferences.press("Enter");
+  const originalRecording = page.locator('.audio-import-rows li[value="1"]');
+  await originalRecording.getByText("Sonia · En directo · 0:10 · Archivo ausente", { exact: true }).waitFor();
+  assert.equal(await prepareChanges.isDisabled(), true);
+  assert.deepEqual(await readSavedPlaylist(), rematched);
+  await closeReview.press("Enter");
+  await originalRecordingMissing(false);
+  await page.locator(".audio-list-entries").getByText("Tercera pista", { exact: true }).waitFor();
 
   await page.evaluate(async () => {
     window.audioFixture.state.audioPlaylists.push({

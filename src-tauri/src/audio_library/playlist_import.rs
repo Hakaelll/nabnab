@@ -38,26 +38,19 @@ struct Row {
 
 impl Row {
     fn from_saved(entry: &PlaylistEntry) -> Self {
-        let (title, locator, hints) = match entry {
-            PlaylistEntry::Local { id, title } => {
-                return Self {
-                    title: Some(title.clone()),
-                    id: Some(id.clone()),
-                    original: Some(entry.clone()),
-                    ..Self::default()
-                }
-            }
-            PlaylistEntry::Remote { title, url, hints } => (title, url, hints),
+        let (title, locator, fallback_id, hints) = match entry {
+            PlaylistEntry::Local { id, title, hints } => (title, None, id, hints),
+            PlaylistEntry::Remote { title, url, hints } => (title, Some(url), url, hints),
             PlaylistEntry::Missing {
                 title,
                 locator,
                 hints,
-            } => (title, locator, hints),
+            } => (title, Some(locator), locator, hints),
         };
         let hints = hints.clone().unwrap_or_default();
         Self {
-            locator: hints.path.or_else(|| Some(locator.clone())),
-            id: hints.id.or_else(|| Some(locator.clone())),
+            locator: hints.path.or_else(|| locator.cloned()),
+            id: hints.id.or_else(|| Some(fallback_id.clone())),
             title: Some(title.clone()),
             artist: hints.artist,
             duration: hints.duration,
@@ -303,13 +296,6 @@ fn local_path(value: &str, directory: &Path) -> Option<PathBuf> {
     })
 }
 
-fn local(item: &LibraryItem) -> PlaylistEntry {
-    PlaylistEntry::Local {
-        id: item.id.clone(),
-        title: item_title(item),
-    }
-}
-
 fn match_rows<'a>(
     rows: Vec<Row>,
     directory: &Path,
@@ -358,11 +344,16 @@ fn match_rows<'a>(
                 .map(|items| items[0])
                 .or(exact_path);
             let reviewing_saved = row.original.is_some();
-            let available_local = matches!(&row.original, Some(PlaylistEntry::Local { id, .. }) if id_matches.is_some_and(|items| items.iter().any(|item| item.id == *id)));
+            let available_local = matches!(&row.original, Some(PlaylistEntry::Local { id, .. })
+                if by_id.get(id.as_str()).is_some_and(|items| items.iter().any(|item| item.id == *id)));
             let entry = if let Some(entry) = row.original {
                 entry
             } else if let Some(item) = exact {
-                local(item)
+                PlaylistEntry::Local {
+                    id: item.id.clone(),
+                    title: row.title.clone().unwrap_or_else(|| item_title(item)),
+                    hints: row.match_hints(source_path.as_deref()),
+                }
             } else if let Some(url) = row
                 .locator
                 .as_ref()
@@ -786,5 +777,56 @@ mod tests {
         assert!(reviewed[0].candidates[0].version_matches);
         assert!(matches!(reviewed[1].entry, PlaylistEntry::Missing { .. }));
         assert_eq!(reviewed[1].candidates.len(), 2);
+    }
+
+    #[test]
+    fn a_saved_local_match_retains_import_metadata_if_the_file_disappears() {
+        let mut first = track("original", "Live recording");
+        first.details.content_id = Some("external-track".into());
+        first.details.audio.as_mut().unwrap().title = Some("Nombre en disco".into());
+        let imported = match_rows(
+            vec![Row {
+                title: Some("La canción".into()),
+                id: Some("external-track".into()),
+                artist: Some("Una artista".into()),
+                duration: Some(200.0),
+                version: Some("Live".into()),
+                ..Row::default()
+            }],
+            Path::new(""),
+            [&first],
+        );
+        let saved = serde_json::to_vec(&imported[0].entry).unwrap();
+        let entry: PlaylistEntry = serde_json::from_slice(&saved).unwrap();
+        entry.validate().unwrap();
+        let alternatives = [
+            track("a-studio", "Studio recording"),
+            track("z-live", "Live recording"),
+        ];
+        let review = |library: &[LibraryItem]| {
+            match_rows(vec![Row::from_saved(&entry)], Path::new(""), library)
+        };
+        assert!(review(&[first])[0].candidates.is_empty());
+        let pending = review(&alternatives);
+        assert_eq!(pending[0].artist.as_deref(), Some("Una artista"));
+        assert_eq!(pending[0].duration, Some(200.0));
+        assert_eq!(pending[0].version.as_deref(), Some("Live"));
+        assert_eq!(pending[0].candidates[0].id, "z-live");
+        assert!(pending[0].candidates[0].version_matches);
+        assert!(matches!(&pending[0].entry, PlaylistEntry::Local { id, .. } if id == "original"));
+
+        let mut imported_again = track("relocated", "Live recording");
+        imported_again.details.content_id = Some("external-track".into());
+        let pending = review(&[imported_again, alternatives[0].clone()]);
+        assert_eq!(pending[0].candidates.len(), 1);
+        assert_eq!(pending[0].candidates[0].id, "relocated");
+
+        let legacy: PlaylistEntry = serde_json::from_value(serde_json::json!({
+            "kind": "local", "id": "legacy", "title": "La canción"
+        }))
+        .unwrap();
+        legacy.validate().unwrap();
+        let pending = match_rows(vec![Row::from_saved(&legacy)], Path::new(""), &alternatives);
+        assert_eq!(pending[0].candidates.len(), 2);
     }
 }

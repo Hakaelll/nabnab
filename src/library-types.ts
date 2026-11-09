@@ -13,10 +13,18 @@ export interface AudioTags {
   title: string | null; artist: string | null; albumArtist: string | null; album: string | null;
   genre: string | null; disc: number | null; track: number | null; embeddedCover: boolean;
 }
-export type AudioPlaylistEntry =
-  | { kind: "local"; id: string; title: string }
-  | { kind: "remote"; url: string; title: string }
-  | { kind: "missing"; locator: string; title: string };
+interface PlaylistMatchHints {
+  id?: string | null;
+  artist?: string | null;
+  duration?: number | null;
+  version?: string | null;
+  path?: string | null;
+}
+export type AudioPlaylistEntry = { title: string; hints?: PlaylistMatchHints } & (
+  | { kind: "local"; id: string }
+  | { kind: "remote"; url: string }
+  | { kind: "missing"; locator: string }
+);
 export interface AudioPlaylist { id: string; name: string; entries: AudioPlaylistEntry[] }
 export interface Lyric { time: number; text: string }
 export interface LibraryDetails {

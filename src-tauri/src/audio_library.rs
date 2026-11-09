@@ -311,7 +311,12 @@ pub struct PlaylistMatchHints {
     rename_all_fields = "camelCase"
 )]
 pub enum PlaylistEntry {
-    Local { id: String, title: String },
+    Local {
+        id: String,
+        title: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        hints: Option<PlaylistMatchHints>,
+    },
     Remote {
         url: String,
         title: String,
@@ -329,7 +334,7 @@ pub enum PlaylistEntry {
 impl PlaylistEntry {
     fn validate(&self) -> Result<(), String> {
         let (title, valid) = match self {
-            Self::Local { id, title } => (
+            Self::Local { id, title, .. } => (
                 title,
                 !id.is_empty()
                     && id.len() <= 128
@@ -348,7 +353,9 @@ impl PlaylistEntry {
         if !valid || title.trim().is_empty() || !valid_label(title, 256) {
             return Err("The playlist contains an invalid entry.".into());
         }
-        if let Self::Remote { hints: Some(hints), .. } | Self::Missing { hints: Some(hints), .. } = self {
+        if let Self::Local { hints: Some(hints), .. }
+        | Self::Remote { hints: Some(hints), .. }
+        | Self::Missing { hints: Some(hints), .. } = self {
             if [&hints.id, &hints.artist, &hints.version].into_iter().flatten().any(|value| !valid_label(value, 256))
                 || hints.duration.is_some_and(|value| !value.is_finite() || !(0.0..=604800.0).contains(&value))
                 || hints.path.as_deref().is_some_and(|value| !valid_label(value, 2048) || !Path::new(value).is_absolute())

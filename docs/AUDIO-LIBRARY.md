@@ -36,7 +36,9 @@ La cabecera de una lista guardada muestra las pistas disponibles, su duración s
 
 ![Lista con archivos locales, referencias pendientes y la cola de reproducción](audio-playlist-playback.png)
 
-Cuando incorpores más música, abre la lista guardada y pulsa **Revisar referencias**. Verás las entradas remotas o ausentes en su posición original, con las grabaciones disponibles en Biblioteca. Las nuevas importaciones conservan los datos de identificación, artista, duración y versión cuando el archivo los incluye. Las listas antiguas pueden buscar por título o por el identificador o la ruta que ya tengan guardados. Elige una grabación, pulsa **Preparar cambios** y después **Guardar lista**. Puedes cerrar la revisión para conservar las referencias originales.
+Cuando incorpores más música, abre la lista guardada y pulsa **Revisar referencias**. Verás las entradas remotas o ausentes en su posición original, con las grabaciones disponibles en Biblioteca. Elige una grabación, pulsa **Preparar cambios** y después **Guardar lista**. La lista conserva el título de origen y, si la exportación los incluía, el identificador, el artista, la duración y la versión. Si la copia local deja de estar disponible, nabnab usa esos datos en la siguiente revisión y te deja confirmar la grabación. Las entradas antiguas usan el título, el identificador o la ruta que ya tengan guardados.
+
+En Windows se comprobó con tres WAV sintéticos. Tras retirar la copia original y reiniciar, la revisión sugirió primero la grabación en directo y conservó los metadatos al confirmar la sustitución con el teclado.
 
 La prueba de interfaz reproduce un WAV silencioso en Edge con almacenamiento de escritorio simulado. Comprueba el orden por disco y pista, la estantería con teclado, la continuidad del reproductor, el descanso de audiolibros, las letras y la edición de listas y etiquetas. La prueba nativa usa audio sintético y verifica que, después de reiniciar nabnab, **Continuar** abre el capítulo siguiente de un libro cuyo capítulo anterior terminó. La integración con Windows se comprueba mediante solicitudes del sistema a la sesión multimedia de prueba.
 

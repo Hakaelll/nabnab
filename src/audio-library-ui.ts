@@ -835,9 +835,11 @@ export function createAudioLibrary(hooks: Hooks) {
           hooks.notify(t("Una grabación elegida ya no está disponible.", "A chosen recording is no longer available."), "error");
           break;
         }
-        const entries = preview.rows.map((row, index) => {
+        const entries = preview.rows.map<AudioPlaylistEntry>((row, index) => {
           const chosen = row.candidates.find(candidate => candidate.id === resolutions.get(index));
-          return chosen ? { kind: "local" as const, id: chosen.id, title: chosen.title } : row.entry;
+          if (!chosen) return row.entry;
+          const { title, hints } = row.entry;
+          return { kind: "local", id: chosen.id, title, ...(hints ? { hints } : {}) };
         });
         editing = { id: preview.listId ?? null, name: preview.name, entries };
         imported = null; resolutions.clear();
