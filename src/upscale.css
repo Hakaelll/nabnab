@@ -4,6 +4,13 @@
 .upscale-tool .field-note { margin: 0; }
 .upscale-options { margin-top: 18px; }
 .upscale-options legend { padding: 0 0 10px; }
+.upscale-batch { display: grid; gap: 8px; margin: 16px 0; padding: 12px; border: 1px solid var(--edge-quiet); border-radius: 10px; background: var(--secondary); }
+.upscale-batch .section-heading { flex-wrap: wrap; gap: 6px 12px; }
+.upscale-batch ul { margin: 0; padding: 0; list-style: none; }
+.upscale-batch li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; padding-block: 8px; border-block-start: 1px solid var(--edge-quiet); }
+.upscale-batch li > strong { flex: 1 1 130px; min-width: 0; overflow-wrap: anywhere; }
+.upscale-batch li > span, .upscale-batch li > small { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.upscale-batch li b { color: var(--text); }
 .upscale-fields { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
 .upscale-fields > label { flex: 1 1 125px; min-width: 0; }
 .upscale-fields > label:first-child { flex-grow: 1.6; }

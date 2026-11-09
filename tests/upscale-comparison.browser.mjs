@@ -18,7 +18,12 @@ const setup = `
   mockWindows("main");
   const settings = { folder: "C:/Fixture", language: "es", reducedMotion: true, reducedTransparency: true, sidebarExpanded: true, trayEnabled: false };
   const image = { id: "crop", path: "C:/Fixture/Paisaje.png", name: "Paisaje.png", kind: "image", width: null, height: null, size: 9000, addedAt: 1, missing: false, collections: [], tags: [] };
-  const snapshot = { settings, jobs: [], library: [image], collections: [], drafts: [], sources: [], rules: [], smartCollections: [], presets: [], audioPlaylists: [] };
+  const portrait = { ...image, id: "portrait", name: "Retrato.png", path: "C:/Fixture/Retrato.png" };
+  const batch = [
+    { id: image.id, width: 240, height: 180, outputWidth: 960, outputHeight: 720, rgbaBytes: 2937600 },
+    { id: portrait.id, width: 360, height: 540, outputWidth: 1440, outputHeight: 2160, rgbaBytes: 13219200 },
+  ];
+  const snapshot = { settings, jobs: [], library: [image, portrait], collections: [], drafts: [], sources: [], rules: [], smartCollections: [], presets: [], audioPlaylists: [] };
   const calls = window.upscaleCalls = [];
   function sample(soft) {
     const canvas = document.createElement("canvas");
@@ -43,7 +48,8 @@ const setup = `
     if (command === "optional_components") return [{ id: "upscale", installed: true, enabled: true, available: true }];
     if (command === "image_assets_inspect") return { images: [{ id: image.id, name: image.name, width: 240, height: 180 }] };
     if (command === "thumbnail" && args.stored) return "data:image/png;base64," + btoa(String.fromCharCode(...sample(false)));
-    if (command === "upscale_preview") return { previewId: 17, before: sample(true), after: sample(false), cropWidth: 120, cropHeight: 90, cropX: 30, cropY: 20, dimensions: { width: 240, height: 180, outputWidth: 960, outputHeight: 720 }, peakRgbaBytes: 2937600 };
+    if (command === "upscale_inspect") return batch;
+    if (command === "upscale_preview") return { previewId: 17, before: sample(true), after: sample(false), cropWidth: 120, cropHeight: 90, cropX: 30, cropY: 20, batch };
     if (command === "queue_upscale") return [];
   }, { shouldMockEvents: true });
   await import("/src/main.ts");
@@ -61,11 +67,24 @@ try {
   const tool = page.locator(".upscale-tool");
   await tool.getByRole("button", { name: "Elegir imágenes" }).click();
   await tool.getByRole("checkbox", { name: "Paisaje.png" }).check();
+  await tool.getByRole("checkbox", { name: "Retrato.png" }).check();
   await tool.getByRole("button", { name: "Cerrar lista" }).click();
   await page.setViewportSize({ width: 900, height: 620 });
   const review = tool.locator(".upscale-review");
   await review.evaluate(node => node.scrollIntoView({ block: "start" }));
   await page.screenshot({ path: path.join(directory, "crop-overview-before.png") });
+  const batchReview = tool.getByRole("region", { name: "Dimensiones del lote" });
+  await batchReview.getByRole("button", { name: "Revisar dimensiones" }).press("Enter", { timeout: 3500 });
+  await batchReview.getByText("1440 × 2160 px", { exact: false }).waitFor();
+  assert.equal(await batchReview.getByRole("heading").evaluate(heading => heading === document.activeElement), true);
+  assert.deepEqual(await batchReview.locator("li strong").allTextContents(), ["Paisaje.png", "Retrato.png"]);
+  assert.match(await batchReview.innerText(), /12,6 MiB/);
+  assert.equal(await tool.getByRole("button", { name: "Ampliar en la cola" }).isDisabled(), true);
+  for (const [width, height] of [[1180, 780], [900, 620]]) {
+    await page.setViewportSize({ width, height });
+    assert.ok(await batchReview.evaluate(node => node.scrollWidth <= node.clientWidth + 1));
+    await batchReview.screenshot({ path: path.join(directory, `batch-dimensions-${width}.png`) });
+  }
   const map = tool.getByRole("button", { name: "Colocar recorte en la imagen" });
   await map.waitFor({ timeout: 4500 });
   await map.locator("img").evaluate(img => img.decode());
@@ -76,6 +95,7 @@ try {
   assert.equal(await vertical.inputValue(), "0");
   await horizontal.press("ArrowRight");
   assert.equal(await horizontal.inputValue(), "1");
+  assert.equal(await batchReview.locator("li").count(), 2);
   assert.equal(await horizontal.evaluate(control => control === document.activeElement), true);
   await map.press("Enter");
   assert.equal(await horizontal.inputValue(), "50");
@@ -148,6 +168,7 @@ try {
   await tool.getByRole("button", { name: "Ampliar en la cola" }).click();
   const requests = await page.evaluate(() => window.upscaleCalls);
   assert.equal(requests.filter(call => call.command === "upscale_preview").length, 1);
+  assert.deepEqual(requests.find(call => call.command === "upscale_inspect").args.ids, ["crop", "portrait"]);
   assert.deepEqual(requests.find(call => call.command === "upscale_preview").args.anchor, {x:100,y:100});
   assert.equal(requests.find(call => call.command === "queue_upscale").args.previewId, 17);
   assert.deepEqual(errors, []);

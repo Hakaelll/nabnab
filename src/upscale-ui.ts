@@ -1,5 +1,5 @@
 import "./upscale.css";
-import { escapeHtml as h, type Copy, type Snapshot } from "./contracts";
+import { escapeHtml as h, type Copy, type LibraryItem, type Snapshot } from "./contracts";
 import { imageExports } from "./image-exports";
 import { isCancelled } from "./presentation";
 import { action, icon, option } from "./views-common";
@@ -7,6 +7,9 @@ import { action, icon, option } from "./views-common";
 type Model = "photo" | "illustration";
 interface Options { model: Model; scale: number; tile: number }
 interface Component { id: string; installed: boolean; enabled: boolean; available: boolean; size: number; installedSize?: number }
+interface ImageSize { width: number; height: number }
+interface BatchImage extends ImageSize { id: string; outputWidth: number; outputHeight: number; rgbaBytes: number }
+type Operation = "inspect" | "preview" | "queue";
 interface Preview {
   previewId: number;
   before: number[];
@@ -15,10 +18,8 @@ interface Preview {
   cropHeight: number;
   cropX: number;
   cropY: number;
-  dimensions: { width: number; height: number; outputWidth: number; outputHeight: number };
-  peakRgbaBytes: number;
+  batch: BatchImage[];
 }
-interface ImageSize { width: number; height: number }
 type Overview = { id: string; kind: "loading" | "unavailable" } | ({ id: string; kind: "ready"; url: string } & ImageSize);
 interface Hooks {
   snapshot(): Snapshot;
@@ -46,10 +47,13 @@ export function createUpscaleTool(hooks: Hooks) {
   let settings: Options = { model: "photo", scale: 4, tile: 64 };
   let anchor = { x: 50, y: 50 };
   let overview: Overview | null = null;
-  let preview: (Omit<Preview, "before" | "after"> & { before: string; after: string }) | null = null;
+  let batch: BatchImage[] = [];
+  let preview: (Omit<Preview, "before" | "after" | "batch"> & { before: string; after: string }) | null = null;
   let comparisonMode: "pair" | "wipe" = "pair";
   let split = 50;
-  let busy = false, requestId = 0, error = "";
+  let busy: Operation | null = null;
+  let error: { operation: Operation; message: string } | null = null;
+  let requestId = 0;
   const ready = () => component?.installed && component.enabled && component.available;
   const disabled = () => busy ? "disabled" : "";
   const images = () => hooks.snapshot().library.filter(item => item.kind === "image" && !item.missing && /\.(png|jpe?g|webp)$/i.test(item.name));
@@ -63,11 +67,11 @@ export function createUpscaleTool(hooks: Hooks) {
   async function load() {
     loadOverview(true);
     try { component = (await hooks.command<Component[]>("optional_components")).find(entry => entry.id === "upscale") ?? null; }
-    catch (cause) { error = cause instanceof Error ? cause.message : String(cause); }
+    catch (cause) { error = { operation: "preview", message: cause instanceof Error ? cause.message : String(cause) }; }
     hooks.render();
   }
 
-  function invalidate() { preview = null; split = 50; error = ""; }
+  function invalidate() { preview = null; split = 50; error = null; }
 
   function loadOverview(refresh = false) {
     if (!sampleId) { overview = null; return; }
@@ -123,14 +127,16 @@ export function createUpscaleTool(hooks: Hooks) {
     </div>`;
   }
 
-  async function run(task: () => Promise<void>) {
+  async function run(operation: Operation, task: () => Promise<void>) {
     if (busy) return;
-    busy = true;
-    error = "";
+    busy = operation;
+    error = null;
     hooks.render();
     try { await task(); }
-    catch (cause) { if (!isCancelled(cause)) error = (cause instanceof Error ? cause.message : String(cause)).slice(0, 500); }
-    finally { busy = false; requestId = 0; hooks.render(); }
+    catch (cause) {
+      if (!isCancelled(cause)) error = { operation, message: (cause instanceof Error ? cause.message : String(cause)).slice(0, 500) };
+    }
+    finally { busy = null; requestId = 0; hooks.render(); }
   }
 
   function sources() {
@@ -165,16 +171,33 @@ export function createUpscaleTool(hooks: Hooks) {
         ${option("64", t("64 px · menor uso de VRAM", "64 px · lower VRAM use"), String(settings.tile))}
         ${option("128", "128 px", String(settings.tile))}
       </select></label></div>
-      <p class="field-note">${preview
-        ? t(`Hasta ${mib(preview.peakRgbaBytes)} en píxeles RGBA de entrada y salida por imagen del lote. La memoria adicional del modelo depende de la GPU.`,
-          `Up to ${mib(preview.peakRgbaBytes)} of input and output RGBA pixels per image in this batch. Additional model memory depends on the GPU.`)
-        : t("La muestra calcula la memoria de los píxeles del lote. La GPU procesa una imagen por turno y usa bloques para limitar la memoria.", "The preview calculates pixel memory for the batch. The GPU processes one image at a time and uses tiles to limit memory.")}</p>
+      <p class="field-note">${t("La GPU procesa una imagen por turno. Usa bloques de 64 px para reducir el uso de memoria.", "The GPU processes one image at a time. Use 64 px tiles to reduce memory use.")}</p>
     </fieldset>`;
   }
 
+  function batchReview(current: readonly LibraryItem[]) {
+    const peak = Math.max(0, ...batch.map(image => image.rgbaBytes));
+    return `<section class="upscale-batch" aria-labelledby="upscale-batch-title">
+      <div class="section-heading"><h3 id="upscale-batch-title" tabindex="-1">${t("Dimensiones del lote", "Batch dimensions")}</h3>
+        <div class="button-group">
+          ${action("upscale-inspect", t("Revisar dimensiones", "Review dimensions"), "list", "secondary", !valid() || busy ? "disabled" : "")}
+          ${busy === "inspect" && requestId ? action("upscale-cancel", t("Cancelar revisión", "Cancel review"), "close", "quiet") : ""}
+        </div></div>
+      ${batch.length ? `<ul aria-label="${t("Imágenes del lote", "Batch images")}">${batch.map(image => `<li>
+        <strong>${h(current.find(item => item.id === image.id)?.name ?? "")}</strong>
+        <span>${image.width} × ${image.height} → <b>${image.outputWidth} × ${image.outputHeight} px</b></span>
+        <small>${mib(image.rgbaBytes)}</small></li>`).join("")}</ul>
+        <p class="field-note">${t(`Pico de memoria de píxeles · ${mib(peak)} por imagen`, `Peak pixel memory · ${mib(peak)} per image`)}</p>
+        <p class="field-note">${t("Estimación de píxeles RGBA de entrada y salida. El modelo y el controlador usan memoria adicional.", "Estimate for input and output RGBA pixels. The model and driver use extra memory.")}</p>`
+        : busy !== "inspect" && error?.operation !== "inspect" ? `<p class="field-note">${t("Comprueba el tamaño de salida y la memoria de píxeles antes de generar la muestra.", "Check output dimensions and pixel memory before generating the preview.")}</p>` : ""}
+      ${busy === "inspect" ? `<p role="status" class="field-note">${t("Revisando las imágenes…", "Reviewing images…")}</p>` : ""}
+      ${error?.operation === "inspect" ? `<p role="alert" class="asset-error" id="upscale-batch-error" tabindex="-1">${h(error.message)}</p>` : ""}
+    </section>`;
+  }
+
   function comparison() {
-    if (!preview) return `<div class="upscale-empty">${t("Genera una muestra para comparar los detalles del mismo recorte.", "Generate a preview to compare details in the same crop.")}</div>`;
-    const d = preview.dimensions;
+    const d = batch.find(image => image.id === sampleId);
+    if (!preview || !d) return `<div class="upscale-empty">${t("Genera una muestra para comparar los detalles del mismo recorte.", "Generate a preview to compare details in the same crop.")}</div>`;
     const original = t("Original · bicúbico", "Original · bicubic");
     const processed = `Real-ESRGAN ×${settings.scale}`;
     const before = `<img alt="${t("Recorte original ampliado para comparar", "Original crop enlarged for comparison")}" src="${preview.before}">`;
@@ -197,6 +220,7 @@ export function createUpscaleTool(hooks: Hooks) {
     const current = selected();
     if (current.length !== ids.length && !busy) {
       ids = current.map(item => item.id);
+      batch = [];
       if (!ids.includes(sampleId)) sampleId = ids[0] ?? "";
       loadOverview();
       invalidate();
@@ -208,14 +232,14 @@ export function createUpscaleTool(hooks: Hooks) {
     return `<section class="tool-section image-assets-panel upscale-tool">
       <header class="asset-panel-heading"><span>${icon("image")}</span><div><h2>${t("Ampliar imagen", "Upscale image")}</h2>
         <p>${t("Real-ESRGAN estima detalles y guarda una copia PNG ampliada.", "Real-ESRGAN estimates detail and saves an enlarged PNG copy.")}</p></div></header>
-      ${status}<form id="upscale-form">${sources()}${options()}
+      ${status}<form id="upscale-form">${sources()}${options()}${ids.length ? batchReview(current) : ""}
         <section class="asset-review upscale-review" aria-labelledby="upscale-preview-title">
           <div class="section-heading"><h3 id="upscale-preview-title">${t("Muestra del recorte", "Crop preview")}</h3>
             <div class="button-group">${action("upscale-preview", t("Generar muestra", "Generate preview"), "image", "secondary", !ready() || !valid() || busy ? "disabled" : "")}
-            ${requestId ? action("upscale-cancel", t("Cancelar muestra", "Cancel preview"), "close", "quiet") : ""}</div></div>
+            ${busy === "preview" && requestId ? action("upscale-cancel", t("Cancelar muestra", "Cancel preview"), "close", "quiet") : ""}</div></div>
           ${ids.length ? cropSelector() : ""}${comparison()}
-          ${busy ? `<p role="status" class="field-note">${requestId ? t("Procesando la muestra en este equipo…", "Processing the preview on this device…") : t("Añadiendo a la cola…", "Adding to the queue…")}</p>` : ""}
-          ${error ? `<p role="alert" class="asset-error">${h(error)}</p>` : ""}
+          ${busy && busy !== "inspect" ? `<p role="status" class="field-note">${busy === "preview" ? t("Procesando la muestra en este equipo…", "Processing the preview on this device…") : t("Añadiendo a la cola…", "Adding to the queue…")}</p>` : ""}
+          ${error && error.operation !== "inspect" ? `<p role="alert" class="asset-error">${h(error.message)}</p>` : ""}
         </section>
         <div class="asset-destination"><span>${t("Destino", "Destination")}<span class="path">${h(hooks.snapshot().settings.folder)}</span></span>
           ${action("choose-folder", t("Cambiar carpeta", "Change folder"), "folder", "quiet", disabled())}</div>
@@ -251,12 +275,24 @@ export function createUpscaleTool(hooks: Hooks) {
         picking = !picking; hooks.render();
         if (picking) document.getElementById("upscale-query")?.focus();
         return true;
+      case "upscale-inspect":
+        if (!valid() || busy) return true;
+        await run("inspect", async () => {
+          invalidate();
+          batch = [];
+          requestId = Date.now() * 1000 + 705;
+          hooks.render();
+          batch = await hooks.command<BatchImage[]>("upscale_inspect", { ids, options: settings, requestId });
+        });
+        (document.getElementById("upscale-batch-error") ?? document.getElementById("upscale-batch-title"))?.focus({ preventScroll: true });
+        return true;
       case "upscale-preview":
-        if (ready() && valid()) await run(async () => {
+        if (ready() && valid()) await run("preview", async () => {
           invalidate();
           requestId = Date.now() * 1000 + 704;
           hooks.render();
-          const { before, after, ...details } = await hooks.command<Preview>("upscale_preview", { ids, sampleId, options: settings, anchor, requestId });
+          const { before, after, batch: dimensions, ...details } = await hooks.command<Preview>("upscale_preview", { ids, sampleId, options: settings, anchor, requestId });
+          batch = dimensions;
           preview = { ...details, before: pngUrl(before), after: pngUrl(after) };
         });
         return true;
@@ -283,12 +319,14 @@ export function createUpscaleTool(hooks: Hooks) {
       const id = target.dataset.upscaleId;
       if (target.checked && ids.length < MAX_BATCH) ids = [...ids, id];
       if (!target.checked) ids = ids.filter(value => value !== id);
+      batch = [];
       if (!ids.includes(sampleId)) sampleId = ids[0] ?? "";
     } else switch (target.id) {
       case "upscale-model":
         settings = { ...settings, model: target.value as Model, scale: target.value === "photo" ? 4 : settings.scale };
+        batch = [];
         break;
-      case "upscale-scale": settings = { ...settings, scale: Number(target.value) }; break;
+      case "upscale-scale": settings = { ...settings, scale: Number(target.value) }; batch = []; break;
       case "upscale-tile": settings = { ...settings, tile: Number(target.value) }; break;
       case "upscale-sample": sampleId = target.value; break;
       case "upscale-x": anchor = { ...anchor, x: Number(target.value) }; break;
@@ -303,7 +341,7 @@ export function createUpscaleTool(hooks: Hooks) {
     if (form.id !== "upscale-form") return false;
     if (preview && ready() && valid() && !picking) {
       const previewId = preview.previewId;
-      await run(async () => {
+      await run("queue", async () => {
         await hooks.command("queue_upscale", { ids, options: settings, previewId, clientRequest: crypto.randomUUID() });
         invalidate();
         await hooks.refresh();

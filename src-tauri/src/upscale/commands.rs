@@ -1,7 +1,12 @@
 use super::{Anchor, Dimensions, Options, Sample, Selection, MAX_BATCH};
-use crate::{file_operations, file_sources, queue, workspaces::Workspace, AppState};
+use crate::{
+    file_operations, file_sources, library::LibraryItem, queue, workspaces::Workspace, AppState,
+};
 use serde::Serialize;
-use std::sync::{Arc, Mutex};
+use std::{
+    path::Path,
+    sync::{Arc, Mutex},
+};
 use tauri::{AppHandle, State};
 use tokio::sync::{watch, Semaphore, SemaphorePermit};
 
@@ -53,8 +58,67 @@ pub struct Preview {
     #[serde(flatten)]
     sample: Sample,
     preview_id: u64,
+    batch: Vec<BatchImage>,
+}
+
+#[derive(Serialize)]
+pub struct BatchImage {
+    id: String,
+    #[serde(flatten)]
     dimensions: Dimensions,
-    peak_rgba_bytes: u64,
+}
+
+async fn inspect_image(
+    engines: &Path,
+    input: &LibraryItem,
+    options: Options,
+    cancel: watch::Receiver<bool>,
+) -> Result<BatchImage, String> {
+    if input.kind != "image" {
+        return Err(format!(
+            "{}: Choose a still image from Library.",
+            input.name
+        ));
+    }
+    let dimensions = super::inspect(engines, &input.path, options, cancel)
+        .await
+        .map_err(|error| {
+            if error == crate::engine::CANCELLED {
+                error
+            } else {
+                format!("{}: {error}", input.name)
+            }
+        })?;
+    Ok(BatchImage {
+        id: input.id.clone(),
+        dimensions,
+    })
+}
+
+#[tauri::command]
+pub async fn upscale_inspect(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    ids: Vec<String>,
+    options: Options,
+    request_id: u64,
+) -> Result<Vec<BatchImage>, String> {
+    options.validate()?;
+    let (_, library) = file_operations::context(&state)?;
+    let inputs = file_operations::selected(&library, &ids, MAX_BATCH)?;
+    let engines = crate::dependencies::engine_root(&app)?;
+    let cancel = file_sources::begin(&state, request_id)?;
+    let result = async {
+        let _processing = queue::processing_permit(&state, cancel.clone()).await?;
+        let mut batch = Vec::with_capacity(inputs.len());
+        for input in &inputs {
+            batch.push(inspect_image(&engines, input, options, cancel.clone()).await?);
+        }
+        Ok(batch)
+    }
+    .await;
+    file_sources::finish(&state, request_id);
+    result
 }
 
 #[tauri::command]
@@ -82,13 +146,10 @@ pub async fn upscale_preview(
         let _processing = queue::processing_permit(&state, cancel.clone()).await?;
         let runtime =
             super::component::ready(&crate::components::root(&app)?, &options.model_files())?;
-        let mut dimensions = Vec::with_capacity(inputs.len());
+        let mut batch = Vec::with_capacity(inputs.len());
         let mut selections = Vec::with_capacity(inputs.len());
         for input in &inputs {
-            if input.kind != "image" {
-                return Err("Choose still images from Library.".into());
-            }
-            dimensions.push(super::inspect(&engines, &input.path, options, cancel.clone()).await?);
+            batch.push(inspect_image(&engines, input, options, cancel.clone()).await?);
             let input_hash = queue::digest(input.path.clone(), cancel.clone()).await?;
             selections.push(Selection {
                 library_id: input.id.clone(),
@@ -102,7 +163,7 @@ pub async fn upscale_preview(
             &runtime,
             &workspace.path,
             input,
-            &dimensions[position],
+            &batch[position].dimensions,
             options,
             anchor,
             cancel.clone(),
@@ -115,12 +176,6 @@ pub async fn upscale_preview(
         if *cancel.borrow() {
             return Err(crate::engine::CANCELLED.into());
         }
-        let peak_rgba_bytes = dimensions
-            .iter()
-            .map(|dimension| dimension.rgba_bytes)
-            .max()
-            .unwrap_or_default();
-        let dimension = dimensions.swap_remove(position);
         *state.upscale.preview.lock().unwrap() = Some(Approval {
             id: request_id,
             expires: queue::now() + 600_000,
@@ -129,8 +184,7 @@ pub async fn upscale_preview(
         Ok(Preview {
             sample,
             preview_id: request_id,
-            dimensions: dimension,
-            peak_rgba_bytes,
+            batch,
         })
     }
     .await;

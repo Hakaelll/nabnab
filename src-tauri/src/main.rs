@@ -1236,7 +1236,7 @@ fn main() {
             voice_operations::voice_status,voice_operations::voice_prepare,voice_operations::voice_sample,voice_operations::voice_plan_status,voice_operations::voice_segment_audio,voice_operations::queue_voice,voice_operations::voice_pause_job,voice_operations::cancel_voice_request,
             file_operations::image_assets_inspect,file_operations::image_assets_preview,file_operations::queue_image_assets,file_operations::cancel_image_assets_preview,
             stickers::commands::sticker_preview, stickers::commands::queue_sticker,
-            upscale::commands::upscale_preview, upscale::commands::queue_upscale,
+            upscale::commands::upscale_inspect, upscale::commands::upscale_preview, upscale::commands::queue_upscale,
             background::commands::background_preview, background::commands::queue_background,
             stems::commands::stems_preview, stems::commands::stems_sample, stems::commands::stems_release, stems::commands::queue_stems,
             translation::commands::translation_source, translation::commands::queue_translation,

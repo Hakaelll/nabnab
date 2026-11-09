@@ -48,7 +48,10 @@ async function verifyCropOverview(input) {
   const jpeg = await readFile(file);
   const exif = Buffer.from("ffe1002245786966000049492a0008000000010012010300010000000600000000000000", "hex");
   await writeFile(file, Buffer.concat([jpeg.subarray(0, 2), exif, jpeg.subarray(2)]));
-  const imported = await rpc("import_paths", { paths: [file] });
+  const oversized = path.join(data, "Demasiado ancha.png");
+  execFileSync(path.join(root, "src-tauri/engines/ffmpeg.exe"),
+    ["-v", "error", "-f", "lavfi", "-i", "color=gray:size=2100x32", "-frames:v", "1", oversized], { windowsHide: true });
+  const imported = await rpc("import_paths", { paths: [file, input, oversized] });
   const item = imported.library.find(entry => entry.name === "Horizonte EXIF.jpg");
   assert.equal(item.kind, "image");
   await page.locator('[data-page="tools"]').click();
@@ -78,8 +81,34 @@ async function verifyCropOverview(input) {
   assert.match(await tool.locator(".upscale-crop-coordinates").innerText(), /160 × 150 px · x=80, y=0/);
   await page.setViewportSize({ width: 900, height: 620 });
   await map.screenshot({ path: path.join(data, "stored-crop.png"), animations: "disabled" });
+  const review = tool.getByRole("region", { name: "Dimensiones del lote" });
+  const inspect = review.getByRole("button", { name: "Revisar dimensiones" });
+  await tool.getByRole("button", { name: "Elegir imágenes" }).click();
+  await tool.getByRole("checkbox", { name: path.basename(input) }).check();
+  await tool.getByRole("button", { name: "Cerrar lista" }).click();
+  await inspect.press("Enter");
+  await review.locator("li").nth(1).waitFor();
+  assert.deepEqual(await review.locator("li b").allTextContents(), ["960 × 600 px", "960 × 600 px"]);
+  assert.match(await review.innerText(), /2,3 MiB por imagen/);
+  assert.equal(await tool.getByRole("button", { name: "Ampliar en la cola" }).isDisabled(), true);
+  await page.locator("#upscale-model").selectOption("illustration");
+  await page.locator("#upscale-scale").selectOption("2");
+  assert.equal(await review.locator("li").count(), 0);
+  await inspect.press("Enter");
+  await review.locator("li").nth(1).waitFor();
+  assert.deepEqual(await review.locator("li b").allTextContents(), ["480 × 300 px", "480 × 300 px"]);
+  await page.locator("#upscale-model").selectOption("photo");
+  await tool.getByRole("button", { name: "Elegir imágenes" }).click();
+  await tool.getByRole("checkbox", { name: path.basename(oversized) }).check();
+  await tool.getByRole("button", { name: "Cerrar lista" }).click();
+  await inspect.press("Enter");
+  const invalid = review.getByRole("alert").filter({ hasText: /Demasiado ancha\.png:.*8192 pixels/ });
+  await invalid.waitFor();
+  assert.equal(await invalid.evaluate(alert => alert === document.activeElement), true);
+  assert.equal(await review.locator("li").count(), 0);
+  assert.deepEqual((await rpc("get_snapshot")).jobs, []);
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ displayed, regular, crop: "160 × 150 at (80, 0)", cacheFiles: 2, generatedModelOutputs: 0 }));
+  console.log(JSON.stringify({ displayed, regular, crop: "160 × 150 at (80, 0)", cacheFiles: 2, batchDimensionsVerified: true, rejectedOversizeByName: true, generatedModelOutputs: 0 }));
 }
 
 async function verify() {

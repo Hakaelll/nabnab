@@ -9,6 +9,10 @@ Open **Tools → Image and composition → Upscale image**. Select up to 12 stil
 | Photo · RealESRGAN x4plus | ×4 |
 | Illustration · AnimeVideo v3 | ×2, ×3, ×4 |
 
+Select **Review dimensions** before running the model. The review shows the source and output dimensions for each image, along with the largest pixel memory estimate in the batch. It works with the bundled media tools even when the optional model is disabled. If an image exceeds the limits, the review names the file so you can remove it or choose a lower supported scale.
+
+![Output dimensions and estimated pixel memory for two test images](upscale-batch-dimensions.png)
+
 Choose one image in the batch. Click the thumbnail to place the crop, or adjust the horizontal and vertical sliders with the arrow keys. Press **Enter** on the thumbnail to center the crop. The outline and coordinates show the area of up to 160 × 160 source pixels. The thumbnail uses the same stored pixel orientation as the upscale engine and counts toward the Library thumbnail cache limit.
 
 ![Crop position and source pixel coordinates before generating a sample](upscale-crop-overview.png)
@@ -27,4 +31,4 @@ Review the destination and select **Queue upscale**. The queue checks the source
 
 The optional engine uses the pinned upstream Windows build from April 24, 2022. The runtime code is MIT, the Real-ESRGAN project that publishes the weights is BSD-3-Clause, and the Windows binary includes Microsoft's OpenMP runtime. Inference runs locally with the verified files, using Vulkan and the bundled FFmpeg for image preparation. [Pinned upstream package](https://github.com/xinntao/Real-ESRGAN/releases/tag/v0.2.5.0) · [Runtime license](https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan/blob/v0.2.0/LICENSE) · [Real-ESRGAN license](https://github.com/xinntao/Real-ESRGAN/blob/master/LICENSE)
 
-`node tests/native-upscale.browser.mjs --overview-only` tests the crop selector with a synthetic JPEG that carries EXIF rotation metadata. The test verifies the thumbnail orientation and crop coordinates in WebView2 without running the model. The Edge test checks pointer and keyboard placement at 900 and 1180 pixels using a simulated comparison.
+`node tests/native-upscale.browser.mjs --overview-only` verifies the crop selector with an EXIF-rotated JPEG, reviews output dimensions at two scales, and identifies an oversized PNG by name in WebView2. This mode uses the bundled media tools. The Edge test checks the batch review and keyboard and pointer placement at 900 and 1180 pixels using a simulated comparison.
