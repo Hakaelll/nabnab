@@ -19,8 +19,11 @@ En **Plataformas → Archivos y documentos**, pega un enlace, un identificador o
 - **Seguir comunidad** guarda su identificador estable en **Biblioteca → Fuentes**. La revisión es manual. Abre el registro concreto antes de elegir archivos para Descargas.
 - Revisa tipo, versión, tamaño y checksum de los archivos. La selección muestra el tamaño total conocido antes de enviar nada a la cola. Se verifica el checksum publicado MD5 o SHA-256 cuando esté disponible.
 - **En Biblioteca** indica que ya tienes una copia de ese archivo del registro abierto. nabnab compara la versión y el checksum con la procedencia guardada, y el tamaño con el que figura en Biblioteca. **Mostrar carpeta** abre la ubicación de la copia en el Explorador. Los archivos de otro registro de la misma familia se revisan por separado.
+- El filtro **Copia local** muestra todos los archivos, los que no tienen copia local o los que ya están en Biblioteca. **Marcar archivos sin copia** añade los archivos visibles que faltan a la selección. El lote admite hasta 199 archivos y la cola empieza al pulsar **Añadir a Descargas**.
 - Usa **Solo seleccionados** para revisar todos los archivos marcados, incluidos los que el texto de búsqueda había ocultado. Puedes quitar archivos y ver cómo cambia el total. Pulsa el botón de nuevo para recuperar la búsqueda anterior.
 - Los registros con archivos restringidos, embargados o sin acceso público declarado muestran metadatos sin permitir la descarga. La cola guarda archivos sin ejecutarlos.
+
+![Archivos sin copia local marcados, con el total conocido y el tamaño pendiente](zenodo-files-without-copy.png)
 
 [API de registros y límites](https://developers.zenodo.org/#records) · [Versiones de registros](https://help.zenodo.org/docs/deposit/manage-versions/)
 

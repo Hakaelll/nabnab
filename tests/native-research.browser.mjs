@@ -282,6 +282,13 @@ try {
     assert.equal(await showFolder.getAttribute("data-id"), item.id);
     assert.match(await page.locator(".file-source-saved-copy").innerText(), /En Biblioteca · 450 B/);
     assert.equal(await page.locator(".file-source-saved-copy").count(), 1);
+    const copyFilter = page.getByRole("combobox", { name: "Copia local" });
+    await copyFilter.selectOption("saved");
+    assert.equal(await page.locator("[data-file-source-select]").count(), 1);
+    assert.equal(await page.getByRole("button", { name: "Marcar archivos sin copia" }).isDisabled(), true);
+    await copyFilter.selectOption("missing");
+    assert.equal(await showFolder.count(), 0);
+    assert.equal(await page.locator(`[data-file-source-select="${asset.id}"]`).count(), 0);
     assert.equal((await getSnapshot()).jobs.length, jobCount);
     return { family: family.zenodo.familyId, record: source.zenodo.recordId, filename: item.name, bytes: item.size, checksum: asset.checksum, savedCopyViaConceptDoi: true };
   });

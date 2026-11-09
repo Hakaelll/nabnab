@@ -327,6 +327,41 @@ try {
     await page.waitForFunction(() => window.fileSourceFixture.calls.some(call =>
       call.cmd === "open_media" && call.args.id === "zenodo-copy-v1" && call.args.folder === true));
     assert.equal(await review.getAttribute("aria-pressed"), "false");
+    const copyFilter = page.getByRole("combobox", { name: "Copia local" });
+    const selectMissing = page.getByRole("button", { name: "Marcar archivos sin copia" });
+    await copyFilter.selectOption("saved", { timeout: 3500 });
+    assert.equal(await page.locator("[data-file-source-select]").count(), 1);
+    assert.equal(await savedDatasetFolder.isVisible(), true);
+    assert.equal(await selectMissing.isDisabled(), true);
+    await copyFilter.selectOption("missing");
+    assert.equal(await page.locator("[data-file-source-select]").count(), 2);
+    assert.equal(await savedDatasetFolder.count(), 0);
+    await fileQuery.fill("appendix");
+    const queuedBeforeReview = await page.evaluate(() => window.fileSourceFixture.calls.filter(call => call.cmd === "queue_public_files").length);
+    await selectMissing.press("Enter");
+    assert.equal(await review.evaluate(button => button === document.activeElement), true);
+    await review.press("Enter");
+    assert.equal(await copyFilter.isDisabled(), true);
+    assert.deepEqual(await page.locator("[data-file-source-select]").evaluateAll(inputs => inputs.map(input => input.dataset.fileSourceSelect)),
+      ["zenodo:1235:appendix.zip"]);
+    assert.match(await page.locator(".file-source-selection").innerText(), /1 seleccionado[\s\S]*Tamaño desconocido/i);
+    assert.equal(await page.evaluate(() => window.fileSourceFixture.calls.filter(call => call.cmd === "queue_public_files").length), queuedBeforeReview);
+    await review.press("Enter");
+    assert.equal(await copyFilter.inputValue(), "missing");
+    assert.equal(await fileQuery.inputValue(), "appendix");
+    await page.locator('[data-action="file-source-clear"]').click();
+    await fileQuery.clear();
+    await selectMissing.press("Enter");
+    assert.equal(await selectMissing.isDisabled(), true);
+    await page.setViewportSize({ width: 1180, height: 780 });
+    await page.locator(".file-source-filter").evaluate(element => element.scrollIntoView({ block: "start" }));
+    await page.screenshot({ path: `${directory}/zenodo-files-without-copy.png` });
+    await review.press("Enter");
+    assert.deepEqual(await page.locator("[data-file-source-select]").evaluateAll(inputs => inputs.map(input => input.dataset.fileSourceSelect)),
+      ["zenodo:1235:appendix.zip", "zenodo:1235:readme.txt"]);
+    assert.match(await page.locator(".file-source-selection").innerText(), /2 seleccionados[\s\S]*tamaño pendiente/);
+    await page.locator('[data-action="file-source-clear"]').click();
+    await copyFilter.selectOption("all");
     const exactFile = page.locator("[data-file-source-select='zenodo:1235:samples.csv']");
     assert.equal(await exactFile.isChecked(), false);
     await exactFile.check();
