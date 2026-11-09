@@ -70,6 +70,8 @@ impl Failure {
             ("dubbing_timing", "Some translated cues do not fit. Shorten the indicated cues and generate the voice again.", false)
         } else if raw == "DUB_NO_ORIGINAL" {
             ("dubbing_no_original", "This video has no original audio to mix. Choose translated voice only or select another video. The synchronized WAV is available.", false)
+        } else if raw == "DUB_AUDIO_CHANGED" {
+            ("dubbing_audio_changed", "The selected audio track changed. Review the video's tracks again. The synchronized WAV is available.", false)
         } else if raw == "DUB_DURATION" {
             ("dubbing_duration", "The synchronized WAV extends past the selected video. Choose the matching video. The synchronized WAV is available.", false)
         } else if text.starts_with("automation") && text.contains("budget") {

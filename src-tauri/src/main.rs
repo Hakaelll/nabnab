@@ -1239,7 +1239,7 @@ fn main() {
             translation::commands::translation_drafts, translation::commands::translation_read,
             translation::commands::translation_edit, translation::commands::translation_remove,
             translation::commands::queue_translation_export,
-            dubbing::dub_sample, dubbing::queue_dub_voice, dubbing::queue_dub_video,
+            dubbing::dub_sample, dubbing::inspect_dub_video_audio, dubbing::queue_dub_voice, dubbing::queue_dub_video,
             device_share::device_share_status, device_share::device_share_choose_cli,
             device_share::device_share_prepare, device_share::device_share_send, device_share::device_share_discard,
             file_operations::file_analysis,file_operations::queue_file_analysis,file_operations::file_rename_preview,file_operations::queue_file_rename,file_operations::file_rename_history,file_operations::queue_file_undo,file_operations::file_organize_review,file_operations::cancel_file_operation,

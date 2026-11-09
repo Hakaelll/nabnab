@@ -29,7 +29,7 @@ pub(super) async fn run_dubbing(
                 (video, wav)
             };
             let language = if pair.languages().1 == "es" { "spa" } else { "eng" };
-            let (file, info) = crate::dubbing::mux(&engines, &video.path, &wav, staging, options.mode, language, cancel.clone()).await?;
+            let (file, info) = crate::dubbing::mux(&engines, &video.path, &wav, staging, options, language, cancel.clone()).await?;
             (file, info, video.id, format!("Dubbed video - {}.mkv", job.id))
         }
         _ => return Err("Dubbing execution was not dispatched.".into()),

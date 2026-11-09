@@ -2,9 +2,16 @@ import { activeStates, escapeHtml as h, type Copy, type Job, type Snapshot } fro
 import { action, option, stateLabel } from "./views-common";
 import { publishedTranslationFile, translationOutput } from "./translation-output";
 import { audioBlob, type VoiceSample, type VoiceSettings, type VoiceStatus } from "./voice-ui";
+import { isCancelled } from "./presentation";
 
 export interface DubSelection { draftId: string; revision: number; settings: VoiceSettings }
-export interface DubVideoOptions { voiceJobId: string; videoId: string; mode: "alternate" | "replace" | "mix" }
+export interface DubVideoOptions {
+  voiceJobId: string;
+  videoId: string;
+  mode: "alternate" | "replace" | "mix";
+  originalAudioId?: string;
+}
+interface OriginalAudio { id: string; title: string | null; language: string | null; codec: string | null }
 interface DraftContext { id: string; revision: number; pair: "es-en" | "en-es"; sourceId: string; count: number }
 interface Hooks {
   draft(): DraftContext | null;
@@ -26,12 +33,16 @@ export function createDubbing(hooks: Hooks) {
   let status: VoiceStatus | null = null, busy = false, error = "";
   let voiceId = "", rate = 0, volume = 100, videoId = "", sampleCue = 0;
   let mode: DubVideoOptions["mode"] = "alternate";
+  let audioReview: { videoId: string; tracks: OriginalAudio[] } | null = null;
+  let originalAudioId = "";
   let player: HTMLAudioElement | null = null, sampleUrl = "", sampleText = "", requestId = 0;
   let observed = "";
 
   const voices = () => status?.voices.filter(voice => voice.enabled && voice.language.split("-")[0] === hooks.draft()?.pair.split("-")[1]) ?? [];
   const videos = () => hooks.snapshot().library.filter(item => item.kind === "video" && !item.missing);
   const videoChoice = () => videos().find(item => item.id === (videoId || hooks.draft()?.sourceId))?.id ?? "";
+  const reviewedTracks = () => audioReview?.videoId === videoChoice() ? audioReview.tracks : undefined;
+  const mixAudio = () => reviewedTracks()?.find(track => track.id === originalAudioId);
 
   function selection(): DubSelection | null {
     const draft = hooks.draft();
@@ -56,8 +67,15 @@ export function createDubbing(hooks: Hooks) {
 
   function videoJob() {
     const wav = completedVoice();
-    return hooks.snapshot().jobs.filter(job => job.source.kind === "dubVideo" && job.source.options.voiceJobId === wav?.id
-      && job.source.options.videoId === videoChoice() && job.source.options.mode === mode).sort((left, right) => right.createdAt - left.createdAt)[0];
+    const track = mode === "mix" ? mixAudio() : undefined;
+    const first = reviewedTracks()?.[0];
+    return hooks.snapshot().jobs.filter(job => {
+      if (job.source.kind !== "dubVideo") return false;
+      const options = job.source.options;
+      return options.voiceJobId === wav?.id && options.videoId === videoChoice() && options.mode === mode
+        && (options.originalAudioId === track?.id || !options.originalAudioId && track?.id === first?.id
+          && (job.state === "completed" || pending(job) && job.state !== "paused"));
+    }).sort((left, right) => right.createdAt - left.createdAt)[0];
   }
 
   function timingIssues(job = matchingVoices()[0]): number[] {
@@ -94,6 +112,8 @@ export function createDubbing(hooks: Hooks) {
   function resetDraft() {
     stopSample();
     videoId = "";
+    audioReview = null;
+    originalAudioId = "";
     sampleCue = 0;
     error = "";
   }
@@ -101,6 +121,22 @@ export function createDubbing(hooks: Hooks) {
   function bind() {
     const slot = document.getElementById("dub-sample-slot");
     if (slot && player && player.parentElement !== slot) slot.append(player);
+  }
+
+  function originalAudioControls() {
+    const tracks = reviewedTracks();
+    const refresh = action("dub-review-audio", tracks ? t("Volver a revisar", "Review again") : t("Revisar pistas", "Review tracks"), "list", "quiet", 'id="dub-review-audio"');
+    if (!tracks?.length) return `<div class="dub-mix-tracks">${refresh}<p class="field-note" role="status">${tracks
+      ? t("Este vídeo no tiene pistas de audio.", "This video has no audio tracks.")
+      : t("Revisa el vídeo para elegir el audio que se mezclará con la voz.", "Review the video to choose the audio to mix with the voice.")}</p></div>`;
+    const labels = tracks.map((track, index) => [t(`Pista ${index + 1}`, `Track ${index + 1}`), track.title, track.language, track.codec?.toUpperCase()].filter(Boolean).join(" · "));
+    return `<div class="dub-mix-tracks">
+      <div class="dub-track-field"><label for="dub-original-audio">${t("Pista original", "Original track")}</label>
+        <select id="dub-original-audio" title="${h(labels[tracks.findIndex(track => track.id === originalAudioId)] ?? "")}">
+          ${tracks.length > 1 ? option("", t("Elige una pista de audio", "Choose an audio track"), originalAudioId) : ""}
+          ${tracks.map((track, index) => option(track.id, labels[index], originalAudioId)).join("")}
+        </select></div>${refresh}
+    </div>`;
   }
 
   function render() {
@@ -135,11 +171,15 @@ export function createDubbing(hooks: Hooks) {
       ${wav ? `<fieldset id="dub-video-controls" class="translation-fields" ${disabled ? "disabled" : ""}><legend>${t("2. Copia de vídeo", "2. Video copy")}</legend>
         <label for="dub-video">${t("Vídeo de Biblioteca", "Library video")}<select id="dub-video">${option("", t("Selecciona el vídeo correspondiente", "Select the matching video"), videoChoice())}${videos().map(item => option(item.id, item.name, videoChoice())).join("")}</select></label>
         <label for="dub-mode">${t("Audio en la copia MKV", "Audio in the MKV copy")}<select id="dub-mode">${option("alternate", t("Pista alternativa", "Alternate track"), mode)}${option("replace", t("Solo voz traducida", "Translated voice only"), mode)}${option("mix", t("Voz + original al 20 %", "Voice + original at 20%"), mode)}</select></label>
-        ${action("dub-queue-video", mux?.state === "error" || mux?.state === "cancelled" || mux?.state === "paused" ? t("Reintentar copia", "Retry copy") : t("Crear copia de vídeo", "Create video copy"), "video", "secondary", !videoChoice() || pending(mux) && mux?.state !== "paused" ? "disabled" : "")}
+        ${mode === "mix" && videoChoice() ? originalAudioControls() : ""}
+        ${action("dub-queue-video", mux?.state === "error" || mux?.state === "cancelled" || mux?.state === "paused" ? t("Reintentar copia", "Retry copy") : t("Crear copia de vídeo", "Create video copy"), "video", "secondary", !videoChoice() || mode === "mix" && !mixAudio() || pending(mux) && mux?.state !== "paused" ? "disabled" : "")}
       </fieldset>${video ? translationOutput(video, t("Copia de vídeo · MKV", "Video copy · MKV"), t, t("Reproducir copia", "Play copy")) : mux ? `<p class="field-note" role="status">${stateLabel(mux.state, t)} · MKV ${mux.error ? `· ${h(mux.error.code === "dubbing_no_original"
         ? t("Este vídeo carece de audio original. El WAV sigue disponible.", "This video has no original audio. The WAV remains available.")
-        : mux.error.message)}` : ""}</p>` : ""}` : ""}`}
-      ${busy ? `<p class="field-note" role="status">${t("Preparando voz local…", "Preparing local voice…")}</p>` : ""}
+        : mux.error.code === "dubbing_audio_changed"
+          ? t("La pista elegida cambió. Vuelve a revisar las pistas del vídeo. El WAV sigue disponible.", "The selected track changed. Review the video's tracks again. The WAV remains available.")
+          : mux.error.message)}` : ""}</p>` : ""}` : ""}`}
+      ${busy ? `<div class="button-group"><p class="field-note" role="status">${t("Preparando operación local…", "Preparing local operation…")}</p>
+        ${requestId ? action("dub-cancel", t("Cancelar", "Cancel"), "close", "quiet") : ""}</div>` : ""}
       ${error ? `<p class="asset-error" role="alert">${h(error)}</p>` : ""}
       <p class="field-note">${t("El WAV respeta las pausas y avisa si una frase no cabe. La copia con mezcla conserva el diálogo que ya tenga el vídeo.", "The WAV preserves pauses and flags speech that does not fit. Mixing keeps any dialogue present in the video.")}</p>
     </section>`;
@@ -149,7 +189,7 @@ export function createDubbing(hooks: Hooks) {
     if (busy) return;
     busy = true; error = ""; hooks.render();
     try { await task(); }
-    catch (cause) { error = String(cause).slice(0, 600); }
+    catch (cause) { if (!isCancelled(cause)) error = String(cause).slice(0, 600); }
     finally { busy = false; hooks.render(); }
   }
 
@@ -164,9 +204,30 @@ export function createDubbing(hooks: Hooks) {
       return true;
     }
     if (actionName === "dub-settings") { hooks.components(); return true; }
+    if (actionName === "dub-cancel") { stopSample(); hooks.render(); return true; }
     if (actionName === "dub-edit-cue") {
       const index = Number(button.dataset.index);
       if (!busy && timingIssues().includes(index)) await hooks.focusCue(index);
+      return true;
+    }
+    if (actionName === "dub-review-audio") {
+      const videoId = videoChoice();
+      if (!videoId || mode !== "mix" || busy || hooks.hasEdits()) return true;
+      const previousId = originalAudioId;
+      await run(async () => {
+        audioReview = null;
+        originalAudioId = "";
+        const id = Date.now() * 1000 + 918;
+        requestId = id;
+        hooks.render();
+        try {
+          const tracks = await hooks.command<OriginalAudio[]>("inspect_dub_video_audio", { videoId, requestId: id });
+          if (requestId !== id || videoChoice() !== videoId) return;
+          audioReview = { videoId, tracks };
+          originalAudioId = tracks.some(track => track.id === previousId) ? previousId : tracks.length === 1 ? tracks[0].id : "";
+        } finally { if (requestId === id) requestId = 0; }
+      });
+      (document.getElementById("dub-original-audio") ?? document.getElementById("dub-review-audio"))?.focus();
       return true;
     }
     if (actionName !== "dub-sample" && actionName !== "dub-queue-voice" && actionName !== "dub-queue-video") return false;
@@ -177,6 +238,7 @@ export function createDubbing(hooks: Hooks) {
         stopSample();
         const id = Date.now() * 1000 + 917;
         requestId = id;
+        hooks.render();
         try {
           const sample = await hooks.command<VoiceSample>("dub_sample", { selection: choice, index: Math.min(sampleCue, draft.count - 1), requestId: id });
           if (requestId !== id) return;
@@ -192,11 +254,13 @@ export function createDubbing(hooks: Hooks) {
       } else {
         const voiceJobId = completedVoice()?.id;
         const videoId = videoChoice(), previous = videoJob();
-        if (!voiceJobId || !videoId) return;
+        const track = mode === "mix" ? mixAudio() : undefined;
+        if (!voiceJobId || !videoId || mode === "mix" && !track) return;
         if (previous && ["error", "cancelled", "paused"].includes(previous.state)) {
           await hooks.command("job_action", { ids: [previous.id], action: "retry" });
         } else {
-          await hooks.command("queue_dub_video", { options: { voiceJobId, videoId, mode }, clientRequest: crypto.randomUUID() });
+          const options: DubVideoOptions = { voiceJobId, videoId, mode, ...(track ? { originalAudioId: track.id } : {}) };
+          await hooks.command("queue_dub_video", { options, clientRequest: crypto.randomUUID() });
         }
         await hooks.refresh();
       }
@@ -211,8 +275,13 @@ export function createDubbing(hooks: Hooks) {
       case "dub-rate": rate = Number(target.value); break;
       case "dub-volume": volume = Math.round(Math.max(1, Math.min(100, Number(target.value) || 100))); break;
       case "dub-cue": sampleCue = Math.max(0, Math.min((hooks.draft()?.count ?? 1) - 1, Math.floor(Number(target.value) || 1) - 1)); break;
-      case "dub-video": videoId = target.value; break;
+      case "dub-video":
+        videoId = target.value;
+        audioReview = null;
+        originalAudioId = "";
+        break;
       case "dub-mode": if (target.value === "replace" || target.value === "mix" || target.value === "alternate") mode = target.value; break;
+      case "dub-original-audio": originalAudioId = target.value; break;
       default: return false;
     }
     stopSample(); hooks.render();

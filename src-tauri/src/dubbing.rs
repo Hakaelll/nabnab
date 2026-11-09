@@ -1,5 +1,7 @@
 use crate::{engine, library, queue, store::Repository, translation, voice, AppState};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
@@ -47,6 +49,8 @@ pub struct VideoOptions {
     pub voice_job_id: String,
     pub video_id: String,
     pub mode: VideoMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub original_audio_id: Option<String>,
 }
 
 impl VideoOptions {
@@ -56,6 +60,13 @@ impl VideoOptions {
             || !self.video_id.bytes().all(|byte| byte.is_ascii_hexdigit())
         {
             return Err("Choose a finished voice job and a local video.".into());
+        }
+        if self.original_audio_id.as_ref().is_some_and(|id| {
+            self.mode != VideoMode::Mix
+                || id.len() != 64
+                || !id.bytes().all(|byte| byte.is_ascii_hexdigit())
+        }) {
+            return Err("Choose an inspected original audio track for the mix.".into());
         }
         Ok(())
     }
@@ -151,14 +162,73 @@ pub fn video_input<'a>(
     {
         return Err("The synchronized WAV is missing from Library.".into());
     }
-    let video = repo
+    let video = video_item(repo, &options.video_id)?.clone();
+    Ok((video, library::authorized_path(output)?, selection))
+}
+
+fn video_item<'a>(repo: &'a Repository, id: &str) -> Result<&'a library::LibraryItem, String> {
+    repo
         .data
         .library
         .iter()
-        .find(|item| item.id == options.video_id && item.kind == "video")
-        .ok_or("Choose a video from Library.")?
-        .clone();
-    Ok((video, library::authorized_path(output)?, selection))
+        .find(|item| item.id == id && item.kind == "video")
+        .ok_or_else(|| "Choose a video from Library.".into())
+}
+
+#[derive(Serialize)]
+pub struct OriginalAudio {
+    id: String,
+    title: Option<String>,
+    language: Option<String>,
+    codec: Option<String>,
+}
+
+fn audio_streams(info: &Value) -> impl Iterator<Item = (u64, &Value)> {
+    info["streams"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|stream| stream["codec_type"] == "audio")
+        .filter_map(|stream| Some((stream["index"].as_u64()?, stream)))
+}
+
+fn audio_identity(stream: &Value) -> String {
+    format!("{:x}", Sha256::digest(stream.to_string().as_bytes()))
+}
+
+fn track_text(value: &Value) -> Option<String> {
+    let text = value.as_str()?.trim();
+    let text: String = text.chars().filter(|ch| !ch.is_control()).take(100).collect();
+    (!text.trim().is_empty()).then_some(text)
+}
+
+#[tauri::command]
+pub async fn inspect_dub_video_audio(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    video_id: String,
+    request_id: u64,
+) -> Result<Vec<OriginalAudio>, String> {
+    let path = {
+        let guard = state.repository.lock().unwrap();
+        let repo = guard.as_ref().ok_or("Open nabnab first.")?;
+        video_item(repo, &video_id)?.path.clone()
+    };
+    let engines = crate::dependencies::engine_root(&app)?;
+    let cancel = crate::file_sources::begin(&state, request_id)?;
+    let info = crate::media::probe(&engines, Path::new(&path), cancel).await;
+    crate::file_sources::finish(&state, request_id);
+    Ok(audio_streams(&info?)
+        .map(|(_, stream)| OriginalAudio {
+            id: audio_identity(stream),
+            title: track_text(&stream["tags"]["title"]).or_else(|| {
+                track_text(&stream["tags"]["handler_name"])
+                    .filter(|title| !title.eq_ignore_ascii_case("SoundHandler"))
+            }),
+            language: track_text(&stream["tags"]["language"]).filter(|value| value != "und"),
+            codec: track_text(&stream["codec_name"]),
+        })
+        .collect())
 }
 
 #[tauri::command]
@@ -217,12 +287,13 @@ pub async fn mux(
     video: &Path,
     voice: &Path,
     staging: &Path,
-    mode: VideoMode,
+    options: &VideoOptions,
     language: &str,
     cancel: watch::Receiver<bool>,
 ) -> Result<(PathBuf, serde_json::Value), String> {
     let video = library::authorized_path(video)?;
     let original = crate::media::probe(engines, &video, cancel.clone()).await?;
+    let mode = options.mode;
     let voice_info = crate::media::probe(engines, voice, cancel.clone()).await?;
     let seconds = duration(&original)?;
     if duration(&voice_info)? > seconds + 0.02 {
@@ -278,11 +349,19 @@ pub async fn mux(
         args.extend(["-map", "0:a?", "-c:a", "copy"].map(str::to_owned));
     }
     let filter = if mode == VideoMode::Mix {
-        "[1:a]apad[dub];[dub][0:a:0]amix=inputs=2:duration=first:weights='0.8 0.2':normalize=0[speech]"
+        let original_stream = if let Some(id) = &options.original_audio_id {
+            let (index, _) = audio_streams(&original)
+                .find(|(_, stream)| audio_identity(stream) == *id)
+                .ok_or("DUB_AUDIO_CHANGED")?;
+            format!("0:{index}")
+        } else {
+            "0:a:0".into()
+        };
+        format!("[1:a]apad[dub];[dub][{original_stream}]amix=inputs=2:duration=first:weights='0.8 0.2':normalize=0[speech]")
     } else {
-        "[1:a]apad[speech]"
+        "[1:a]apad[speech]".into()
     };
-    args.extend(["-filter_complex", filter, "-map", "[speech]"].map(str::to_owned));
+    args.extend(["-filter_complex".into(), filter, "-map".into(), "[speech]".into()]);
     args.extend([
         format!("-c:a:{index}"),
         "aac".into(),

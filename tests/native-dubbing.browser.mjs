@@ -26,7 +26,10 @@ const hash = bytes => createHash("sha256").update(bytes).digest("hex");
 
 await writeFile(subtitle, "WEBVTT\n\nprimero\n00:00:00.500 --> 00:00:02.000\nHola.\n\nsegundo\n00:00:03.000 --> 00:00:05.500\nNos vemos pronto.\n\ntercero\n00:00:06.000 --> 00:00:08.500\nHasta luego.\n");
 execFileSync(ffmpeg, ["-v", "error", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=12:d=9", "-f", "lavfi", "-i", "sine=frequency=290:d=9",
-  "-i", subtitle, "-map", "0:v", "-map", "1:a", "-map", "2:s", "-c:v", "libopenh264", "-c:a", "aac", "-c:s", "mov_text", video], { windowsHide: true });
+  "-f", "lavfi", "-i", "sine=frequency=710:d=9", "-i", subtitle, "-map", "0:v", "-map", "1:a", "-map", "2:a", "-map", "3:s",
+  "-metadata:s:a:0", "language=spa", "-metadata:s:a:0", "handler_name=Primera mezcla",
+  "-metadata:s:a:1", "language=eng", "-metadata:s:a:1", "handler_name=Segunda mezcla",
+  "-c:v", "libopenh264", "-c:a", "aac", "-c:s", "mov_text", video], { windowsHide: true });
 execFileSync(ffmpeg, ["-v", "error", "-i", video, "-map", "0:v:0", "-c:v", "copy", silent], { windowsHide: true });
 
 let child, browser, page, launches = 0, log = "";
@@ -95,6 +98,16 @@ async function openDubbingFromPalette() {
 }
 
 const probe = file => JSON.parse(execFileSync(ffprobe, ["-v", "error", "-show_streams", "-show_format", "-of", "json", file], { windowsHide: true })).streams;
+function frequencyStrength(samples, hz) {
+  let real = 0, imaginary = 0;
+  for (let offset = 0; offset + 1 < samples.length; offset += 2) {
+    const phase = Math.PI * hz * offset / 22050;
+    const sample = samples.readInt16LE(offset);
+    real += Math.cos(phase) * sample;
+    imaginary += Math.sin(phase) * sample;
+  }
+  return Math.hypot(real, imaginary);
+}
 async function shares() {
   const log = await readFile(path.join(data, "cli-arguments.jsonl"), "utf8").catch(error => {
     if (error.code === "ENOENT") return "";
@@ -227,12 +240,16 @@ try {
   await page.locator('[data-action="dub-queue-video"]').click();
   const alternate = await jobOf("dubVideo", 0, "completed");
   const audioTracks = probe(alternate.outputs[0]).filter(stream => stream.codec_type === "audio");
-  assert.equal(audioTracks.length, 2);
-  assert.equal(audioTracks[1].tags.language, "eng");
+  assert.equal(audioTracks.length, 3);
+  assert.equal(audioTracks[2].tags.language, "eng");
   assert.equal(probe(alternate.outputs[0]).find(stream => stream.codec_type === "subtitle").codec_name, "subrip");
   await page.locator("#dub-video").selectOption(item(silent).id);
   await page.locator("#dub-mode").selectOption("mix");
-  await page.locator('[data-action="dub-queue-video"]').click();
+  const reviewAudio = page.getByRole("button", { name: "Revisar pistas", exact: true });
+  await reviewAudio.click({ timeout: 5000 });
+  await page.getByText("Este vídeo no tiene pistas de audio.", { exact: true }).waitFor();
+  assert.equal(await page.locator('[data-action="dub-queue-video"]').isDisabled(), true);
+  await rpc("queue_dub_video", { options: { voiceJobId: wav.id, videoId: item(silent).id, mode: "mix" }, clientRequest: "legacy-silent-mix" });
   const failed = await jobOf("dubVideo", 1, "error");
   assert.equal(failed.error.code, "dubbing_no_original");
   assert.equal(failed.source.options.voiceJobId, wav.id);
@@ -240,24 +257,47 @@ try {
   assert.equal(await page.locator(".dub-expanded .translation-output").filter({ hasText: "Copia de vídeo" }).count(), 0);
   const bytes = await readFile(wav.outputs[0]);
   assert.equal(hash(bytes), hash(pcm));
-  await page.getByRole("button", { name: "Reintentar copia" }).click();
+  await rpc("job_action", { ids: [failed.id], action: "retry" });
   await wait(async () => {
     const jobs = (await rpc("get_snapshot")).jobs;
     return jobs.find(job => job.id === failed.id && job.runId > failed.runId && job.state === "error");
   });
   await page.locator("#dub-video").selectOption(item(video).id);
+  await reviewAudio.press("Enter");
+  const track = page.getByLabel("Pista original", { exact: true });
+  await track.waitFor();
+  assert.equal(await track.inputValue(), "");
+  assert.equal(await track.evaluate(element => document.activeElement === element), true);
+  assert.equal(await page.locator('[data-action="dub-queue-video"]').isDisabled(), true);
+  const secondTrack = track.getByRole("option", { name: /Segunda mezcla.*eng/ });
+  const originalAudioId = await secondTrack.getAttribute("value");
+  await track.selectOption(originalAudioId);
+  for (const [width, height] of [[1180, 780], [900, 620]]) {
+    await page.setViewportSize({ width, height });
+    const options = page.locator("#dub-video-controls");
+    await options.evaluate(element => element.scrollIntoView({ block: "center" }));
+    assert.ok(await options.evaluate(node => node.scrollWidth <= node.clientWidth + 1));
+    await page.screenshot({ path: path.join(data, `dubbing-mix-${width}.png`), animations: "disabled" });
+  }
   await page.locator('[data-action="dub-queue-video"]').click();
   const mixed = await jobOf("dubVideo", 2, "completed");
   assert.equal(probe(mixed.outputs[0]).filter(stream => stream.codec_type === "audio").length, 1);
   assert.equal(mixed.source.options.voiceJobId, wav.id);
+  assert.equal(mixed.source.options.originalAudioId, originalAudioId);
   const tone = execFileSync(ffmpeg, ["-v", "error", "-ss", "2.4", "-i", mixed.outputs[0], "-t", "0.25", "-vn", "-ac", "1", "-ar", "22050", "-f", "s16le", "pipe:1"], { windowsHide: true });
-  assert.ok(tone.some(value => value !== 0));
+  assert.ok(frequencyStrength(tone, 710) > 10 * frequencyStrength(tone, 290));
   await page.locator("#dub-mode").selectOption("replace");
   await page.locator('[data-action="dub-queue-video"]').click();
   const replaced = await jobOf("dubVideo", 3, "completed");
   assert.equal(probe(replaced.outputs[0]).filter(stream => stream.codec_type === "audio").length, 1);
   const speechGap = execFileSync(ffmpeg, ["-v", "error", "-ss", "2.4", "-i", replaced.outputs[0], "-t", "0.25", "-vn", "-ac", "1", "-ar", "22050", "-f", "s16le", "pipe:1"], { windowsHide: true });
   assert.ok(speechGap.every(value => value === 0));
+  await rpc("queue_dub_video", { options: { voiceJobId: wav.id, videoId: item(video).id, mode: "mix", originalAudioId: "e".repeat(64) },
+    clientRequest: "changed-dubbing-track" });
+  const changedTrack = await jobOf("dubVideo", 4, "error");
+  assert.equal(changedTrack.error.code, "dubbing_audio_changed");
+  assert.deepEqual(changedTrack.outputs, []);
+  assert.equal(hash(await readFile(wav.outputs[0])), hash(pcm));
   assert.equal(hash(await readFile(video)), hash(sourceBytes));
   await shareOutput(wav);
   await shareOutput(replaced);
@@ -279,7 +319,7 @@ try {
     if (width === 1180) await section.screenshot({ path: path.join(data, "dubbing-results.png"), animations: "disabled" });
   }
   console.log(JSON.stringify({ draftFixture: true, catalogAndPalette: true, editsPreservedBetweenTools: true, sapiSample: true, timingIssue: tooLong.error.technical, reusedCues: 1, synchronizedSeconds: 8.5,
-    alternateTracks: 2, failedMixKeptWav: true, mixedTracks: 1, unchangedOriginal: true, shares: 3, viewports: [1180, 900] }));
+    alternateTracks: 3, failedMixKeptWav: true, selectedMixHz: 710, mixedTracks: 1, unchangedOriginal: true, shares: 3, viewports: [1180, 900] }));
 } catch (error) {
   console.error(log);
   await page?.screenshot({ path: path.join(data, "failure.png"), animations: "disabled" }).catch(() => {});
