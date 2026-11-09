@@ -32,6 +32,13 @@ pub struct Course {
     pub slug: Option<String>,
     pub sections: Vec<CourseSection>,
     pub created_at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outline_status: Option<OutlineStatus>,
+}
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+pub struct OutlineStatus {
+    pub pages: u8,
+    pub partial: bool,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -103,6 +110,7 @@ impl Course {
                     | "rocketseat" | "coursera" | "domestika" | "skillshare"
             )
             || self.sections.len() > 1000
+            || self.outline_status.is_some_and(|status| self.provider != "coursera" || !(1..=coursera::MAX_OUTLINE_PAGES).contains(&status.pages))
         {
             return Err("The saved course has invalid metadata.".into());
         }
@@ -270,6 +278,7 @@ fn local_course(root: &Path, items: &[library::LibraryItem]) -> Result<Course, S
         slug: None,
         sections: course_sections,
         created_at: queue::now(),
+        outline_status: None,
     })
 }
 
@@ -858,6 +867,7 @@ fn parse_udemy_course(
             slug: None,
             sections,
             created_at: queue::now(),
+            outline_status: None,
         },
         downloads,
     ))

@@ -31,6 +31,7 @@ const setup = `
       if (args.token === "expired-fixture") throw Error("Coursera Business returned HTTP 401.");
       const course = {
         id:"business-course",provider:"coursera",title:args.title,url:args.url,slug:args.courseId,createdAt:1,
+        outlineStatus:{ pages:args.token === "complete-fixture" ? 3 : 2, partial:args.token !== "complete-fixture" },
         sections:[{id:"coursera-module-z",title:"02 Datos en práctica",lessons:[{
           id:"coursera-lesson-1",title:"Revisar los datos",learned:true,
           notes:[{id:"business-note",text:"Comprobar el origen",time:null,bookmarkId:null}],
@@ -40,7 +41,7 @@ const setup = `
         }]},{id:"coursera-module-a",title:"01 Repaso",lessons:[{id:"coursera-lesson-2",title:"Comprobar el resultado",learned:false,notes:[],assets:[]}]}],
       };
       fixture.courses = [course];
-      return {course,partial:true};
+      return course;
     }
     if (cmd === "review_skillshare_resources") {
       const names = {"Guide.pdf":"Guía del proyecto.pdf","Templates.zip":"Plantillas.zip","Unused.pdf":"Sin marcar.pdf","Referencias.pdf":"Referencias.pdf"};
@@ -490,16 +491,31 @@ try {
   await page.getByText("Comprobar el origen", {exact:true}).waitFor();
   assert.equal(await page.locator("[data-action='course-queue']").count(), 0);
   assert.equal(await page.locator("[data-course-asset]").count(), 0);
-  await page.getByText("El origen indica que el temario guardado es parcial.", {exact:true}).waitFor();
+  const outlineStatus = business.locator(".course-outline-status");
+  assert.equal(await outlineStatus.innerText(), "Temario parcial · 2 páginas consultadas");
+  await page.getByText("Temario guardado.", {exact:true}).waitFor();
+  assert.equal(await page.getByText("Error: Coursera Business returned HTTP 401.", {exact:true}).count(), 0);
+  await page.locator("[data-action='dismiss-message']").click();
   const courseCall = await page.evaluate(() => window.courseFixture.calls.filter(call => call.cmd === "inspect_coursera_course").at(-1).args);
   assert.deepEqual(courseCall, {url:"https://www.coursera.org/learn/analisis",title:"Análisis de datos",organization:"org-fixture",program:"program-fixture",courseId:"course-fixture",token:"authorized-fixture"});
   for (const [width,height] of [[1180,780],[900,620]]) {
     await page.setViewportSize({width,height});
+    assert.ok(await business.evaluate(node => node.scrollWidth <= node.clientWidth + 1));
+    await business.screenshot({path:`${directory}/coursera-outline-status-${width}.png`,animations:"disabled"});
     const study = page.locator(".course-layout");
     await page.getByRole("heading", { name: "Revisar los datos" }).scrollIntoViewIfNeeded();
     assert.ok(await study.evaluate(node => node.scrollWidth <= node.clientWidth + 1));
     await page.screenshot({path:`${directory}/coursera-business-study-${width}.png`,animations:"disabled"});
   }
+  await page.getByRole("button", { name: "Todos los cursos" }).click();
+  await page.locator('[data-action="course-open"][data-id="business-course"]').click();
+  assert.equal(await outlineStatus.innerText(), "Temario parcial · 2 páginas consultadas");
+  await business.locator("summary").press("Enter");
+  await token.fill("complete-fixture");
+  await business.getByRole("button", { name: "Actualizar temario" }).press("Enter");
+  await page.waitForFunction(() => document.querySelector(".course-outline-status")?.textContent === "3 páginas consultadas");
+  await page.getByText("Comprobar el origen", {exact:true}).waitFor();
+  assert.equal(await business.evaluate(details => details.open), false);
   assert.deepEqual(errors, []);
   console.log("Browser-assisted import, Skillshare attachment queueing and Coursera Business outline review passed at two widths.");
 } finally {

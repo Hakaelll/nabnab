@@ -194,6 +194,7 @@ fn register(
             slug: None,
             sections: Vec::new(),
             created_at: queue::now(),
+            outline_status: None,
         });
     let target = lesson_id
         .map(|id| {

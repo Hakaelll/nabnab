@@ -316,6 +316,7 @@ pub async fn inspect_member_course(
         slug: (provider == "hotmart").then(|| slug.clone()),
         sections: navigation(&provider, &navigation_value, limit)?,
         created_at: queue::now(),
+        outline_status: None,
     };
     for lesson in course
         .sections

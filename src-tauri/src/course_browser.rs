@@ -183,7 +183,7 @@ pub fn course_manual_outline(
     let title = label(&title, 240);
     if title.is_empty() { return Err("Enter the course name.".into()); }
     let mut course = Course { id: link.id, title, provider, url: Some(link.page.to_string()),
-        slug: None, sections: outline_sections(&text)?, created_at: queue::now() };
+        slug: None, sections: outline_sections(&text)?, created_at: queue::now(), outline_status: None };
     if !save { return Ok(course); }
     let mut guard = state.repository.lock().unwrap();
     let repo = guard.as_mut().ok_or("Open the app first.")?;
@@ -579,6 +579,7 @@ fn import_selected(
             slug: None,
             sections: Vec::new(),
             created_at: queue::now(),
+            outline_status: None,
         });
     course.url = Some(link.page.to_string());
     let attached: HashMap<_, _> = course
@@ -905,7 +906,7 @@ mod tests {
         let mut repo = crate::store::Repository::open(&root, &root).unwrap();
         save_course(&mut repo, Course {
             id: link.id.clone(), title: "Fixture".into(), provider: "coursera".into(),
-            url: Some(link.page.to_string()), slug: Some("remote-id".into()), created_at: 1,
+            url: Some(link.page.to_string()), slug: Some("remote-id".into()), created_at: 1, outline_status: None,
             sections: vec![CourseSection {
                 id: "coursera-module-fixture".into(), title: "First module".into(),
                 lessons: vec![CourseLesson {

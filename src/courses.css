@@ -97,6 +97,7 @@
 }
 .course-resource-entry { min-width: 0; margin-block: 12px; padding: 12px 0; border-block-start: 1px solid var(--edge-quiet); }
 .course-resource-entry summary { cursor: pointer; font-weight: 600; }
+.course-outline-status { display: inline-block; margin-inline-start: 12px; color: var(--muted); font-weight: 400; }
 #course-coursera-form { margin-top: 16px; }
 #course-outline-form { margin-top: 14px; gap: 12px; max-width: 42rem; }
 #course-coursera-form .field-note { margin: 0; }

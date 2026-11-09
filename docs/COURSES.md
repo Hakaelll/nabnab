@@ -77,10 +77,14 @@ Las pruebas usan materiales sintéticos. Rust verifica la asociación tras reabr
 
 1. En **Plataformas → Cursos**, selecciona **Coursera**, pega el enlace del curso e indica su nombre.
 2. Abre **Temario de Coursera Business**. Introduce los identificadores de organización, programa y curso. Usa un token de acceso emitido para una aplicación autorizada de Business, Campus o Government. [Cómo obtener un token en Coursera](https://dev.coursera.com/get-started)
-3. Pulsa **Consultar temario**. nabnab guarda los módulos y sus lecciones en el orden que devuelve la API. El token se envía a `api.coursera.com` durante la solicitud y se borra del formulario. La consulta guarda la página devuelta y avisa si la respuesta indica que hay más páginas. [API de materiales del curso](https://dev.coursera.com/docs/coursera-for-business-api-product/1/routes/api%2Fbusinesses.v1%2F%7BorgId%7D%2Fprograms%2F%7BprogramId%7D%2FcourseMaterials%2F%7BcourseId%7D/get)
+3. Pulsa **Consultar temario**. nabnab guarda módulos, lecciones y materiales en el orden de la API. Si la respuesta incluye un enlace de continuación con un desplazamiento numérico hacia delante, la consulta sigue ese enlace dentro del mismo curso. El token se envía a `api.coursera.com` durante la consulta y se borra del formulario. [API de materiales del curso](https://dev.coursera.com/docs/coursera-for-business-api-product/1/routes/api%2Fbusinesses.v1%2F%7BorgId%7D%2Fprograms%2F%7BprogramId%7D%2FcourseMaterials%2F%7BcourseId%7D/get)
 4. Usa **Abrir curso en el navegador** para consultar las lecturas, vídeos y actividades con tu sesión de alumno. Guarda los archivos que el sitio permita descargar y vincúlalos a su lección con **Añadir adjuntos**. Actualizar el temario conserva las notas, el estado aprendido y los adjuntos locales de las lecciones que ya están guardadas.
 
-La respuesta documentada contiene enlaces de acceso que pueden inscribir al alumno. nabnab guarda el tipo y el nombre de cada material y usa el enlace general del curso para abrir Coursera. Las pruebas de Rust usan respuestas sintéticas basadas en el esquema oficial. La prueba de Edge comprueba los controles a 900 y 1180 px y el reintento tras un token caducado simulado. La consulta con un token real de organización queda pendiente.
+Cada consulta admite hasta ocho páginas y 60 segundos. Si Coursera anuncia más páginas y se alcanza el límite o no hay un enlace de continuación válido, el panel muestra **Temario parcial** junto al número de páginas consultadas. Una página que repite los resultados también deja el temario como parcial. Un error de red o de autorización deja el temario guardado en su estado anterior. Los enlaces de acceso a lecciones pueden inscribir al alumno. nabnab guarda el tipo y el nombre de cada material y abre el enlace general del curso.
+
+Las pruebas de Rust usan respuestas sintéticas y cubren la unión de páginas con elementos repetidos, el orden y la persistencia. La prueba de Edge revisa el estado a 900 y 1180 px, el regreso desde la lista de cursos y el reintento tras un token caducado simulado. La consulta con un token real de organización queda pendiente.
+
+![Temario parcial y número de páginas consultadas con datos de prueba](course-coursera-pagination.png)
 
 ![Lección con los tipos de material del temario de Coursera Business, con datos de prueba](course-coursera-business.png)
 

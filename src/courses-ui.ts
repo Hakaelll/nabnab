@@ -41,7 +41,7 @@ export interface CourseAsset { id: string; title: string; kind: string; status: 
 export interface CourseNote { id: string; text: string; time: number | null; bookmarkId: string | null }
 export interface CourseLesson { id: string; title: string; learned: boolean; assets: CourseAsset[]; notes: CourseNote[] }
 export interface CourseSection { id: string; title: string; lessons: CourseLesson[] }
-export interface Course { id: string; title: string; provider: string; url: string | null; slug?: string | null; sections: CourseSection[]; createdAt: number }
+export interface Course { id: string; title: string; provider: string; url: string | null; slug?: string | null; sections: CourseSection[]; createdAt: number; outlineStatus?: { pages: number; partial: boolean } }
 interface ReviewFile { id: number; name: string; kind: string; size: number }
 interface MaterialReview { id: number; title: string; provider: BrowserCourseProvider; groups: { title: string; files: ReviewFile[] }[] }
 interface MaterialTarget { kind: "lesson" | "unit"; id: string; title: string }
@@ -341,10 +341,14 @@ export function createCoursesController(hooks: CourseHooks) {
   function courseraForm(course?: Course): string {
     const idField = (name: string, caption: string, value = "") =>
       `<label>${caption}<input name="${name}" required maxlength="128" value="${h(value)}" autocomplete="off" spellcheck="false"></label>`;
+    const status = course?.outlineStatus;
+    const pages = status?.pages === 1 ? t("1 página consultada", "1 page fetched")
+      : status ? t(`${status.pages} páginas consultadas`, `${status.pages} pages fetched`) : "";
     return `<details id="course-coursera-business" class="course-resource-entry">
-      <summary>${t("Temario de Coursera Business", "Coursera Business outline")}</summary>
+      <summary>${t("Temario de Coursera Business", "Coursera Business outline")}${status ? `<small class="course-outline-status">${status.partial ? `${t("Temario parcial", "Partial outline")} · ` : ""}${pages}</small>` : ""}</summary>
       <form id="course-coursera-form" class="settings-form" aria-busy="${busy}">
         <p class="field-note">${t("Usa un token autorizado de Business, Campus o Government. La consulta guarda el temario y usa el token solo durante la solicitud.", "Use an authorized Business, Campus or Government token. This request saves the outline and uses the token only for the request.")}</p>
+        ${status?.partial ? `<p class="field-note">${t("El temario guardado contiene las páginas que se pudieron consultar. Abre el curso en Coursera para ver el contenido restante.", "The saved outline contains the pages that could be fetched. Open the course in Coursera to see the remaining content.")}</p>` : ""}
         <fieldset ${busy ? "disabled" : ""}>
           <div class="form-grid">
             ${idField("organization", t("ID de organización", "Organization ID"), courseraIds.organization)}
@@ -552,13 +556,13 @@ export function createCoursesController(hooks: CourseHooks) {
       };
       let saved = false;
       await perform(async () => {
-        const result = await hooks.command<{ course: Course; partial: boolean }>("inspect_coursera_course", {
+        const result = await hooks.command<Course>("inspect_coursera_course", {
           url: course?.url ?? input, title: course?.title ?? browserTitle, ...courseraIds, token: accessToken,
         });
-        courseId = result.course.id;
-        lessonId = course?.id === courseId ? lessonId : result.course.sections[0]?.lessons[0]?.id ?? null;
+        courseId = result.id;
+        lessonId = course?.id === courseId ? lessonId : result.sections[0]?.lessons[0]?.id ?? null;
         saved = true;
-        if (result.partial) hooks.notify(t("El origen indica que el temario guardado es parcial.", "The source reports that the saved outline is partial."), "info");
+        hooks.notify(t("Temario guardado.", "Outline saved."), "success");
       });
       const entry = document.querySelector<HTMLDetailsElement>("#course-coursera-business");
       if (entry) entry.open = !saved;
