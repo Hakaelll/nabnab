@@ -8,7 +8,8 @@ type Payload = { kind: "files"; ids: string[] } | { kind: "link"; url: string } 
 interface Device { id: string; name: string }
 interface Status { state: "ready" | "missing" | "offline" | "incompatible" | "unsupported"; devices: Device[]; share: boolean; shareText: boolean }
 interface Preview { token: string; device: Device; entries: { name: string; bytes: number }[]; total: number }
-type Receipt = "handedOff" | "unconfirmed";
+type UnconfirmedReason = { kind: "cliError" } | { kind: "noReply" } | { kind: "fileCount"; replies: number };
+type Receipt = { state: "handedOff" } | { state: "unconfirmed"; reason: UnconfirmedReason };
 type Review = Omit<Preview, "token">;
 interface Hooks {
   command<T>(name: string, args?: Record<string, unknown>): Promise<T>;
@@ -71,6 +72,23 @@ export function createDeviceShare(hooks: Hooks) {
     if (count) count.textContent = textCount(size);
   }
 
+  function receiptEvidence(receipt: Receipt, files: number): string {
+    if (receipt.state === "handedOff") return "";
+    switch (receipt.reason.kind) {
+      case "cliError":
+        return t("KDE Connect devolvió un error o un diagnóstico durante la entrega.", "KDE Connect returned an error or diagnostic during handoff.");
+      case "noReply":
+        return t("La respuesta de KDE Connect quedó vacía o no se pudo leer.", "The KDE Connect response was empty or unreadable.");
+      case "fileCount": {
+        const { replies } = receipt.reason;
+        return t(
+          `KDE Connect devolvió ${replies} ${replies === 1 ? "respuesta" : "respuestas"} para ${files} ${files === 1 ? "archivo" : "archivos"}.`,
+          `KDE Connect returned ${replies} ${replies === 1 ? "response" : "responses"} for ${files} ${files === 1 ? "file" : "files"}.`,
+        );
+      }
+    }
+  }
+
   function draw() {
     if (!dialog) return;
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement.id : "";
@@ -92,10 +110,12 @@ export function createDeviceShare(hooks: Hooks) {
       : status?.state === "unsupported" ? t("La integración de nabnab está disponible en Windows.", "Nabnab’s integration is available on Windows.")
       : !devices.length && status ? t("Empareja un dispositivo desde KDE Connect y comprueba que esté accesible.", "Pair a device in KDE Connect and make sure it is reachable.") : "";
     const button = (id: string, caption: string, style = "quiet", disabled = false) => `<button type="button" id="share-${id}" class="button ${style}" data-share-action="${id}" ${disabled ? "disabled" : ""}>${h(caption)}</button>`;
+    const evidence = result ? receiptEvidence(result.receipt, result.review.entries.length) : "";
     dialog.innerHTML = `<header class="device-share-head"><div><p class="eyebrow">KDE Connect</p><h2 id="device-share-title">${t("Enviar a dispositivo", "Send to device")}</h2>${label ? `<p class="field-note">${h(label)}</p>` : ""}</div>
       <button type="button" id="share-close" class="icon-button" data-share-action="close" aria-label="${t("Cerrar", "Close")}" ${busy === "send" ? "disabled" : ""}>${icon("close")}</button></header>
-      ${result ? `<section class="device-share-result" aria-labelledby="share-result-status"><h3 id="share-result-status" tabindex="-1" aria-describedby="share-result-note">${result.receipt === "handedOff" ? t("Entregado a KDE Connect", "Handed off to KDE Connect") : t("Entrega a KDE Connect sin confirmar", "KDE Connect handoff unconfirmed")}</h3>
-        <p id="share-result-note">${result.receipt === "handedOff" ? t("Consulta KDE Connect para seguir la transferencia y confirmar la recepción.", "Check KDE Connect for transfer progress and receipt.") : t("Comprueba KDE Connect y el dispositivo antes de volver a enviar.", "Check KDE Connect and the device before sending again.")}</p>
+      ${result ? `<section class="device-share-result" aria-labelledby="share-result-status"><h3 id="share-result-status" tabindex="-1" aria-describedby="${evidence ? "share-result-evidence " : ""}share-result-note">${result.receipt.state === "handedOff" ? t("Entregado a KDE Connect", "Handed off to KDE Connect") : t("Entrega a KDE Connect sin confirmar", "KDE Connect handoff unconfirmed")}</h3>
+        ${evidence ? `<p id="share-result-evidence">${h(evidence)}</p>` : ""}
+        <p id="share-result-note">${result.receipt.state === "handedOff" ? t("Consulta KDE Connect para seguir la transferencia y confirmar la recepción.", "Check KDE Connect for transfer progress and receipt.") : t("Comprueba KDE Connect y el dispositivo antes de volver a enviar.", "Check KDE Connect and the device before sending again.")}</p>
         <div class="device-share-review">${reviewContent(result.review, mode === "files")}</div></section>` : preview ? `<section class="device-share-review">
         ${reviewContent(preview, true)}
         <div class="device-share-footer">${button("back", t("Editar envío", "Edit share"), "quiet", Boolean(busy))}${button("send", busy ? t("Entregando a KDE Connect…", "Handing off to KDE Connect…") : t("Confirmar envío", "Confirm share"), "primary", Boolean(busy))}</div></section>` : `<section class="device-share-fields">

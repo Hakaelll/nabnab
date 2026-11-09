@@ -20,7 +20,7 @@ En el lector de PDF y EPUB, abre **Texto de esta página**, selecciona un fragme
 
 ![Revisión del fragmento seleccionado de un EPUB sintético en Windows](device-share-document-excerpt.png)
 
-**Entregado a KDE Connect** indica que la CLI respondió sin errores al pasarle la solicitud. Para archivos, nabnab espera una línea de respuesta por archivo. Consulta KDE Connect para ver el progreso o confirmar la recepción. Si la CLI devuelve una respuesta parcial, emite un diagnóstico o tarda demasiado, nabnab muestra **Entrega a KDE Connect sin confirmar**. El resultado conserva el destino y los archivos revisados. Comprueba ambos dispositivos antes de iniciar otra revisión. [Comandos de la CLI de KDE Connect 26.08.2](https://github.com/KDE/kdeconnect-kde/blob/v26.08.2/cli/kdeconnect-cli.cpp)
+**Entregado a KDE Connect** indica que la CLI respondió sin errores al pasarle la solicitud. Consulta KDE Connect para ver el progreso o confirmar la recepción. **Entrega a KDE Connect sin confirmar** distingue un error de la CLI, una respuesta vacía o ilegible y un número de respuestas distinto del número de archivos revisados. El recuento corresponde a la solicitud entera. El resultado conserva el destino y los archivos revisados para que puedas comprobarlos en KDE Connect antes de iniciar otro envío. [Comandos de la CLI de KDE Connect 26.08.2](https://github.com/KDE/kdeconnect-kde/blob/v26.08.2/cli/kdeconnect-cli.cpp)
 
 ![Resultado de un envío de dos archivos con una respuesta parcial de la CLI de prueba](device-share-unconfirmed.png)
 

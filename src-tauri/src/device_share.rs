@@ -541,10 +541,18 @@ pub async fn device_share_prepare(
 }
 
 #[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum UnconfirmedReason {
+    CliError,
+    NoReply,
+    FileCount { replies: usize },
+}
+
+#[derive(Serialize)]
+#[serde(tag = "state", rename_all = "camelCase")]
 pub enum Receipt {
     HandedOff,
-    Unconfirmed,
+    Unconfirmed { reason: UnconfirmedReason },
 }
 
 #[tauri::command]
@@ -586,23 +594,21 @@ pub async fn device_share_send(
         }
     }
     let file_count = plan.files.len();
-    match run(&plan.cli.path, plan.args).await {
-        Ok(reply)
-            if reply.success
-                && reply.stderr.trim().is_empty()
-                && !reply.stdout.trim().is_empty()
-                && (file_count == 0
-                    || reply
-                        .stdout
-                        .lines()
-                        .filter(|line| !line.trim().is_empty())
-                        .count()
-                        == file_count) =>
-        {
-            Ok(Receipt::HandedOff)
+    let reason = match run(&plan.cli.path, plan.args).await {
+        Err(_) => UnconfirmedReason::NoReply,
+        Ok(reply) if !reply.success || !reply.stderr.trim().is_empty() => UnconfirmedReason::CliError,
+        Ok(reply) => {
+            let replies = reply.stdout.lines().filter(|line| !line.trim().is_empty()).count();
+            if replies == 0 {
+                UnconfirmedReason::NoReply
+            } else if file_count != 0 && replies != file_count {
+                UnconfirmedReason::FileCount { replies }
+            } else {
+                return Ok(Receipt::HandedOff);
+            }
         }
-        _ => Ok(Receipt::Unconfirmed),
-    }
+    };
+    Ok(Receipt::Unconfirmed { reason })
 }
 
 #[tauri::command]

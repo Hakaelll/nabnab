@@ -185,14 +185,14 @@ try {
   const preview = await rpc("device_share_prepare", { deviceId: device, selection: { kind: "text", text } });
   assert.equal(preview.total, Buffer.byteLength(text));
   await writeFile(path.join(data, "cli-warning"), "1");
-  assert.equal(await rpc("device_share_send", { token: preview.token }), "unconfirmed");
+  assert.deepEqual(await rpc("device_share_send", { token: preview.token }), { state: "unconfirmed", reason: { kind: "cliError" } });
   await assert.rejects(rpc("device_share_send", { token: preview.token }), /Review the selection/);
   const afterText = await calls();
   assert.equal(afterText.length, 3);
   assert.deepEqual(afterText.at(-1), [`--device=${device}`, `--share-text=${text}`]);
   await unlink(path.join(data, "cli-warning"));
   const textAgain = await rpc("device_share_prepare", { deviceId: device, selection: { kind: "text", text } });
-  assert.equal(await rpc("device_share_send", { token: textAgain.token }), "handedOff");
+  assert.deepEqual(await rpc("device_share_send", { token: textAgain.token }), { state: "handedOff" });
   assert.deepEqual(await calls(), [...afterText, afterText.at(-1)]);
 
   const stale = await rpc("device_share_prepare", { deviceId: device, selection: { kind: "files", ids } });
@@ -241,6 +241,8 @@ try {
     assert.ok(await modal().evaluate(element => element.scrollWidth <= element.clientWidth + 1));
     await modal().screenshot({ path: path.join(base, `unconfirmed-${width}.png`), animations: "disabled" });
   }
+  await modal().getByText("KDE Connect devolvió 1 respuesta para 2 archivos.", { exact: true }).waitFor({ timeout: 3500 });
+  assert.equal(await partial.getAttribute("aria-describedby"), "share-result-evidence share-result-note");
   await unlink(partialFlag);
   await closeShare();
   await page.locator('[data-action="share-collection"][data-collection="Lecturas"]').click();
@@ -370,6 +372,16 @@ try {
     }
     await closeShare();
     await page.locator('[data-action="close-inspector"]').click();
+  }
+  const beforeEmpty = await calls();
+  const empty = await rpc("device_share_prepare", { deviceId: device, selection: { kind: "link", url: "https://example.org/review" } });
+  const emptyFlag = path.join(data, "cli-empty-reply");
+  await writeFile(emptyFlag, "1");
+  try {
+    assert.deepEqual(await rpc("device_share_send", { token: empty.token }), { state: "unconfirmed", reason: { kind: "noReply" } });
+    assert.deepEqual(await calls(), [...beforeEmpty, [`--device=${device}`, "--share=https://example.org/review"]]);
+  } finally {
+    await unlink(emptyFlag);
   }
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ nativeCliFixture: true, unicodeFile: true, staleFileRejected: true, signedLinkRejected: true, partialHandoffUnconfirmed: true,

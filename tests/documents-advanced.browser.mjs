@@ -50,7 +50,7 @@ const setup=String.raw`
     if(cmd==="document_page")return {page:args.page,pages:2,png,text:args.page===1?ocr.pages[0]?.text??"":"",textAvailable:args.page===1};
     if(cmd==="device_share_status")return {state:"ready",devices:[{id:"paired-reader",name:"Teléfono de prueba"}],share:true,shareText:true};
     if(cmd==="device_share_prepare")return {token:"document-review",device:{id:args.deviceId,name:"Teléfono de prueba"},entries:[{name:args.selection.text,bytes:14}],total:14};
-    if(cmd==="device_share_send")return "handedOff";
+    if(cmd==="device_share_send")return {state:"handedOff"};
     if(cmd==="library_playback"){const file=state.library.find(file=>file.id===args.id);file.details.playbackPosition=args.position;return;}
     if(cmd==="thumbnail")return dataUrl;
     if(cmd==="document_edit_info")return {pages:2,width:612,height:792,forms:true,signatures:true,edit:true,bookmarks:[{title:"Sección de prueba",page:1,level:1}],bookmarksTruncated:false};

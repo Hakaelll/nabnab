@@ -26,6 +26,9 @@ fn main() {
             .open(root.join("cli-arguments.jsonl"))
             .unwrap();
         writeln!(log, "{args:?}").unwrap();
+        if root.join("cli-empty-reply").is_file() {
+            return;
+        }
         if root.join("cli-warning").is_file() {
             eprintln!("D-Bus share interface unavailable");
         }
