@@ -81,6 +81,7 @@ const setup = `
       const all=[...selected.categories,...selected.sensitive];
       const archive={id:String(++imports),provider,source:provider+"-export.zip",fingerprint,mediaBytes:0,account:selected.account,destination:selected.destination,
         categories:Object.fromEntries(all.map(key=>[key,key==="media"&&provider==="x"?2:rows[key].length])),formats:Object.fromEntries(all.map(key=>[key,["json"]])),pendingRemoval:false};
+      if(provider==="x")archive.coverage={posts:"available",likes:"absent",bookmarks:"unsupported",media:imports===1?"empty":"available",messages:"requiresSelection"};
       summaries.push(archive);
       return {archive,skippedFiles:0};
     }
@@ -206,6 +207,20 @@ try {
   assert.deepEqual(selection.categories, ["posts"]);
   assert.deepEqual(selection.sensitive, ["messages"]);
   assert.equal(selection.from, "2025-01-01");
+  await page.screenshot({ path: `${directory}/package-overview.png` });
+  const packageCoverage = page.locator(".archive-coverage");
+  const listCalls = (await calls()).filter(call => call.cmd === "personal_archive_records").length;
+  await packageCoverage.locator("summary").press("Enter", { timeout: 3500 });
+  assert.deepEqual(await packageCoverage.locator("dl > div").allTextContents().then(rows => rows.map(row => row.replace(/\s+/g, " ").trim())),
+    ["Publicaciones 53 registros guardados", "Multimedia Vacío", "Me gusta No incluido", "Marcadores Formato no compatible"]);
+  assert.equal((await calls()).filter(call => call.cmd === "personal_archive_records").length, listCalls);
+  for (const [width, height] of [[1180, 780], [900, 620]]) {
+    await page.setViewportSize({ width, height });
+    assert.ok(await packageCoverage.evaluate(node => node.scrollWidth <= node.clientWidth + 1));
+    await packageCoverage.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `${directory}/package-coverage-${width}.png` });
+  }
+  await packageCoverage.locator("summary").press("Enter");
   const archiveSearch = page.getByRole("button", { name: "Buscar", exact: true });
   const fromDate = page.getByLabel("Desde (UTC)", { exact: true });
   const toDate = page.getByLabel("Hasta (UTC)", { exact: true });

@@ -41,6 +41,7 @@ struct Plan {
     fingerprint: String,
     zipped: bool,
     entries: Vec<Entry>,
+    coverage: BTreeMap<Category, Availability>,
 }
 
 #[derive(Default)]
@@ -62,6 +63,8 @@ pub struct Summary {
     fingerprint: String,
     categories: BTreeMap<Category, usize>,
     formats: BTreeMap<Category, Vec<Format>>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    coverage: BTreeMap<Category, Availability>,
     media_bytes: u64,
     pending_removal: bool,
 }
@@ -73,7 +76,7 @@ pub struct ImportResult {
     skipped_files: usize,
 }
 
-#[derive(Clone, Copy, Serialize)]
+#[derive(Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 enum Availability {
     Absent,
@@ -247,12 +250,13 @@ async fn inspect(
         })
         .collect()
     };
-    let plan = Plan {
+    let mut plan = Plan {
         provider,
         path,
         fingerprint: fingerprint.clone(),
         zipped,
         entries,
+        coverage: BTreeMap::new(),
     };
     let scratch = Scratch::new(root)?;
     let mut budget = MAX_TEXT_TOTAL;
@@ -358,6 +362,11 @@ async fn inspect(
     if queue::digest(plan.path.clone(), cancel).await? != plan.fingerprint {
         return Err("The export changed while it was being inspected. Choose it again.".into());
     }
+    plan.coverage = categories
+        .iter()
+        .filter(|item| !item.sensitive)
+        .map(|item| (item.category, item.availability))
+        .collect();
     Ok((
         plan,
         Preview {
@@ -921,6 +930,7 @@ async fn import(
             .map(|(category, rows)| (*category, rows.len()))
             .collect(),
         formats,
+        coverage: plan.coverage.clone(),
         media_bytes: previous.as_ref().map_or(0, |item| item.media_bytes) + bytes,
         pending_removal: false,
     };
@@ -1921,6 +1931,9 @@ mod tests {
         let imported = imported.archive;
         assert_eq!(imported.categories, BTreeMap::from([(Category::Posts, 1)]));
         assert_eq!(imported.media_bytes, 0);
+        let coverage = serde_json::json!({"posts": "available", "saved": "empty", "media": "available"});
+        let saved = load_index(&root).unwrap();
+        assert_eq!(serde_json::to_value(&saved[0]).unwrap()["coverage"], coverage);
         let first = read_records(&root, &imported).unwrap();
         let post_id = first[&Category::Posts][0].id.clone();
         assert_eq!(
@@ -1940,6 +1953,8 @@ mod tests {
         .unwrap()
         .archive;
         assert_eq!(private.id, imported.id);
+        let saved = load_index(&root).unwrap();
+        assert_eq!(serde_json::to_value(&saved[0]).unwrap()["coverage"], coverage);
         let repeated = import(
             &root,
             &archive,

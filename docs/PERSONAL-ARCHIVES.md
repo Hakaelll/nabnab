@@ -17,6 +17,10 @@ The import footer totals the selected categories and flags any private categorie
 
 The account index groups exports by provider and account and lists each package with its archive group. Open a package and select a category in the workspace. Search applies to that category. Use the row checkboxes to export a selection to CSV or open its public links in the batch preparer. Selecting **Prepare links** starts metadata preparation. Downloading from that batch requires a separate action.
 
+Open **Export contents** to compare what you saved with the public categories found in the original package. The summary distinguishes categories that are available to import, empty, missing from the package, or in an unsupported format. It reflects the package as inspected before any date filter. For an older index, preview the original file again to see those details.
+
+![An imported package with saved posts and three different states for other public categories](personal-archive-coverage.png)
+
 Open **Dates (UTC)** in the category search to browse an imported period. Either date can be blank. The filter includes both days and omits undated records. Changing the period clears the row selection. Spotify history and its grouped totals use the same period.
 
 ![Browsing one day of an imported archive with synthetic data](personal-archive-search-dates.png)

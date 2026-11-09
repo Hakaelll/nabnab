@@ -45,6 +45,7 @@ interface Archive {
   fingerprint: string;
   categories: Partial<Record<Category, number>>;
   formats: Partial<Record<Category, Format[]>>;
+  coverage?: Partial<Record<Category, Availability>>;
   mediaBytes: number;
   pendingRemoval: boolean;
 }
@@ -681,6 +682,25 @@ export function createPersonalArchives(hooks: Hooks) {
     </nav>`;
   }
 
+  function archiveCoverage(archive: Archive) {
+    const rows = categoryKeys.flatMap(key => {
+      const state = archive.coverage?.[key];
+      if (privateCategory(key) || !state) return [];
+      const count = archive.categories[key] ?? 0;
+      const label = count
+        ? count === 1 ? t("1 registro guardado", "1 saved record")
+          : t(`${number(count)} registros guardados`, `${number(count)} saved records`)
+        : state === "available" ? t("Disponible para importar", "Available to import") : availability(state);
+      return [`<div><dt>${h(name(key))}</dt>
+        <dd>${h(label)}</dd></div>`];
+    });
+    return `<details class="archive-details archive-coverage" id="archive-coverage-${h(archive.id)}">
+      <summary id="archive-coverage-heading-${h(archive.id)}">${t("Contenido de la exportación", "Export contents")}</summary>
+      ${rows.length ? `<p class="field-note">${t("Categorías públicas del paquete original.", "Public categories in the original package.")}</p><dl>${rows.join("")}</dl>`
+        : `<p class="field-note">${t("Revisa el archivo original para conocer todas sus categorías.", "Review the original file to see all its categories.")}</p>`}
+    </details>`;
+  }
+
   function browse(archive: Archive) {
     const categories = categoryKeys.filter(key => (archive.categories[key] ?? 0) > 0);
     return `<section class="archive-browser" aria-labelledby="archive-current">
@@ -697,7 +717,7 @@ export function createPersonalArchives(hooks: Hooks) {
       ${confirming ? `<div class="archive-confirm"><p>${t("Se borrarán el índice privado y las copias administradas de esta importación. Se conserva el archivo original.", "This removes the private index and managed copies for this import. The original export is preserved.")}</p>
         ${action("archive-remove-confirm", t("Retirar", "Remove"), undefined, "primary", disabled())}
         ${action("archive-cancel-confirm", t("Cancelar", "Cancel"), undefined, "secondary", disabled())}</div>` : ""}
-      ${archive.pendingRemoval ? "" : `<nav class="archive-tabs" aria-label="${t("Categorías del archivo", "Archive categories")}">
+      ${archive.pendingRemoval ? "" : `${archiveCoverage(archive)}<nav class="archive-tabs" aria-label="${t("Categorías del archivo", "Archive categories")}">
         ${categories.map(key => `<button type="button" data-action="archive-category" data-id="${key}" aria-pressed="${category === key}" aria-disabled="${busy}">
           ${icon(categoryIcons[key])}<span>${name(key)}</span><small>${number(archive.categories[key] ?? 0)}</small></button>`).join("")}
       </nav>${mediaPreview ? mediaView(mediaPreview) : postAttachments ? attachmentView(postAttachments.post, postAttachments.page) :

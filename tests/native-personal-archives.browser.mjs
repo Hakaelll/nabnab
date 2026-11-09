@@ -65,6 +65,7 @@ await protect(secrets, "personal-archive-index", "nabnab-module-secret-v1", "nab
 }, {
   id:instagram, generation:1, provider:"instagram", account:"Archivo de montaña", destination:"Viajes", source:"instagram-export.zip",
   fingerprint:"d".repeat(64), categories:{posts:1,media:2}, formats:{posts:["json"],media:["media"]},
+  coverage:{posts:"available",saved:"unsupported",media:"available"},
   mediaBytes:bytes[0]+bytes[1], pendingRemoval:false,
 }, {
   id:spotify, generation:1, provider:"spotify", account:"Escuchas de prueba", destination:"Historial", source:"spotify-export.zip",
@@ -115,6 +116,7 @@ try {
   await wait(() => rpc("get_snapshot").catch(() => null));
   const packages = await rpc("personal_archive_list");
   assert.ok(packages.some(item => item.id === id));
+  assert.deepEqual(packages.find(item => item.id === instagram).coverage, {posts:"available",saved:"unsupported",media:"available"});
   const recordsArgs = { id, category: "posts", consent: false, query: "", offset: 0 };
   const oneDay = await rpc("personal_archive_records", { ...recordsArgs, dates: { from: "2025-01-01", to: "2025-01-01" } });
   assert.equal(oneDay.total, 1);
@@ -133,6 +135,10 @@ try {
   await page.locator("[data-page='library']").click();
   await page.locator("[data-section='archives']").click();
   await page.getByRole("button", { name: /x-export.zip/ }).click();
+  const packageCoverage = page.locator(".archive-coverage");
+  await packageCoverage.locator("summary").press("Enter");
+  await packageCoverage.getByText("Revisa el archivo original para conocer todas sus categorías.").waitFor();
+  await packageCoverage.locator("summary").press("Enter");
   await page.locator("#archive-browse-dates > summary").click();
   await page.locator("#archive-search-from").fill("2025-01-01");
   await page.locator("#archive-search-to").fill("2025-01-01");
@@ -189,6 +195,10 @@ try {
   assert.equal((await readdir(managed)).length, 4);
   await page.getByRole("button", { name: /instagram-export.zip/ }).click();
   const instagramAttachments = page.getByRole("button", {name:"2 adjuntos",exact:true});
+  await instagramAttachments.waitFor();
+  await packageCoverage.locator("summary").press("Enter");
+  assert.deepEqual(await packageCoverage.locator("dd").allTextContents(), ["1 registro guardado", "Formato no compatible", "2 registros guardados"]);
+  await packageCoverage.locator("summary").press("Enter");
   await instagramAttachments.press("Enter");
   await attachmentTitle.waitFor();
   assert.deepEqual(await page.locator(".archive-attachment-name strong").allTextContents(), ["123-Lago.png", "Paseo.mp4"]);

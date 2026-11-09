@@ -63,6 +63,18 @@
   flex-basis: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px;
   background: var(--secondary);
 }
+.archive-coverage {
+  min-width: 0; padding: 8px 12px; border: 1px solid var(--edge-quiet); border-radius: 10px;
+  background: var(--secondary);
+}
+.archive-coverage summary { font-size: 13px; font-weight: 600; }
+.archive-coverage dl {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 16px; margin: 0;
+}
+.archive-coverage dl > div { padding-block: 7px; border-block-start: 1px solid var(--edge-quiet); }
+.archive-coverage dt { font-weight: 550; }
+.archive-coverage dd { margin: 2px 0 0; color: var(--muted); font-size: 12px; }
 .archive-empty {
   display: grid; align-content: center; justify-items: start; gap: 8px; min-height: 160px; min-width: 0;
   padding: 22px;
