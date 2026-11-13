@@ -45,6 +45,7 @@ export function createPersonalServers(hooks: Hooks) {
   let selectionChanges: SelectionChange[] = [];
   let referenceId = "";
   let reviewing: Review | null = null;
+  let copyQueued = false;
   let error: { operation: Operation; message: string } | null = null;
   let busy: Operation | null = null;
   let sequence = 0;
@@ -121,17 +122,22 @@ export function createPersonalServers(hooks: Hooks) {
         else selectionChanges.push({ path: key, state: match ? "changed" : "missing" });
       }
       const index = reviewedIndex();
-      if (index >= 0) selected.add(index);
+      if (index >= 0 && review?.kind === "reference") selected.add(index);
     });
     if (folderError()) document.getElementById("personal-reload")?.focus();
   }
 
   async function openReview(review: Review) {
     if (busy) return;
+    copyQueued = false;
     hooks.openBrowser();
     const { serverId, path } = review.selection;
     await browse(serverId, path.slice(0, -1), review);
-    if (!folderError()) document.getElementById("personal-reference-review-title")?.focus();
+    if (!folderError()) {
+      const heading = document.getElementById("personal-reference-review-title");
+      heading?.focus({ preventScroll: true });
+      heading?.closest("section")?.scrollIntoView({ block: "nearest" });
+    }
   }
 
   function input(id: string, text: string, value: string, attributes = "") {
@@ -193,11 +199,10 @@ export function createPersonalServers(hooks: Hooks) {
     const total = sizes.reduce<number>((sum, size) => sum + (size ?? 0), 0);
     const reviewed = selected.size === 1 && selected.has(reviewedIndex());
     const updating = reviewing?.kind === "reference" && reviewed;
-    const copyingVersion = reviewing?.kind === "copy" && reviewed;
     return `<div class="file-source-selection personal-review"><div class="file-source-selection-title"><strong>${selected.size} ${selected.size === 1 ? t("archivo seleccionado", "file selected") : t("archivos seleccionados", "files selected")}</strong>
       <span>${bytesLabel(total)}${sizes.includes(null) ? ` + ${t("tamaño desconocido", "unknown size")}` : ""}</span></div>
-      ${destination()}<div class="button-group">${copyingVersion ? "" : action("personal-index", updating ? t("Actualizar referencia", "Update reference") : t("Indexar referencia", "Index reference"), "link", "secondary", disabled())}${action("personal-copy", copyingVersion ? t("Copiar versión actual", "Copy current version") : t("Copiar a mi biblioteca", "Copy to my library"), "downloads", "primary", disabled())}</div>
-      <p class="field-note">${copyingVersion ? t("La versión actual se añadirá a Descargas como una copia nueva.", "The current version will be added to Downloads as a new copy.") : updating
+      ${destination()}<div class="button-group">${action("personal-index", updating ? t("Actualizar referencia", "Update reference") : t("Indexar referencia", "Index reference"), "link", "secondary", disabled())}${action("personal-copy", t("Copiar a mi biblioteca", "Copy to my library"), "downloads", "primary", disabled())}</div>
+      <p class="field-note">${updating
         ? t("Copiar guarda el archivo actual. Actualizar guarda sus metadatos en la referencia.", "Copy saves the current file. Update saves its metadata to the reference.")
         : t("Las referencias ocupan solo espacio de índice y requieren conexión al servidor.", "References only occupy index space and require a server connection.")}</p></div>`;
   }
@@ -209,7 +214,8 @@ export function createPersonalServers(hooks: Hooks) {
     const current = entries?.[reviewedIndex()]?.stamp;
     const different = current && !sameStamp(stored, current);
     const changedVersion = current?.etag && stored.etag && current.etag !== stored.etag;
-    const message = busy === "read" ? t("Consultando la carpeta…", "Reading the folder…")
+    const message = fromCopy && copyQueued ? t("Copia añadida a Descargas.", "Copy added to Downloads.")
+      : busy === "read" ? t("Consultando la carpeta…", "Reading the folder…")
       : !server && !error ? t("La conexión ya no está configurada.", "The connection is no longer configured.")
       : folderError() ? t("La comparación sigue pendiente.", "The comparison is still pending.")
       : !entries ? t("Actualiza la carpeta para volver a consultar este archivo.", "Refresh the folder to check this file again.")
@@ -229,9 +235,13 @@ export function createPersonalServers(hooks: Hooks) {
         <h3 id="personal-reference-review-title" tabindex="-1">${h(reviewing.selection.path.at(-1) ?? "")}</h3></div>
         ${fromCopy ? action("personal-back-download", t("Volver a Descargas", "Back to Downloads"), undefined, "quiet", disabled())
           : action("personal-references", t("Volver a referencias", "Back to references"), "link", "quiet", disabled())}</header>
-      <p role="status">${message}</p>
+      <p role="status" id="personal-review-status" tabindex="-1">${message}</p>
       ${current ? `<dl><div><dt>${fromCopy ? t("Versión solicitada", "Requested version") : t("Referencia guardada", "Saved reference")}</dt><dd>${describe(stored)}</dd></div>
         <div><dt>${t("Archivo en el servidor", "File on server")}</dt><dd>${describe(current)}</dd></div></dl>` : ""}
+      ${fromCopy && current && !copyQueued ? `<div class="personal-copy-actions">
+        ${destination()}
+        ${action("personal-copy-version", t("Copiar versión actual", "Copy current version"), "downloads", "primary", disabled())}
+      </div>` : ""}
     </section>`;
   }
 
@@ -300,10 +310,10 @@ export function createPersonalServers(hooks: Hooks) {
       ${action("personal-references", t("Referencias guardadas", "Saved references"), "link", "quiet", disabled())}</div>
       ${setup()}${serverList(false)}`}${feedback(Boolean(failure))}
       ${server ? `<div class="file-source-results"><div class="file-source-result-heading"><div><span class="file-source-eyebrow">${t("Origen remoto", "Remote source")}</span><h2>${h(server.name)}</h2><p class="path">${h(server.location)}</p>${path.length ? `<p class="field-note">${t("Carpeta", "Folder")} · ${h(label(path))}</p>` : ""}</div>
-        <div class="button-group">${path.length ? action("personal-parent", t("Subir carpeta", "Parent folder"), undefined, "quiet", disabled()) : ""}${failure ? "" : action("personal-reload", t("Actualizar", "Refresh"), "retry", "quiet", `id="personal-reload" ${disabled()}`)}</div></div>
+        <div class="button-group">${path.length && reviewing?.kind !== "copy" ? action("personal-parent", t("Subir carpeta", "Parent folder"), undefined, "quiet", disabled()) : ""}${failure || copyQueued && reviewing?.kind === "copy" ? "" : action("personal-reload", t("Actualizar", "Refresh"), "retry", "quiet", `id="personal-reload" ${disabled()}`)}</div></div>
         ${referenceReview(server)}${selectionReview()}
-        ${failure ? unavailableFolder(failure) : folderContents()}
-        ${review()}</div>` : referenceReview()}</section>`;
+        ${failure ? unavailableFolder(failure) : reviewing?.kind === "copy" ? "" : folderContents()}
+        ${reviewing?.kind === "copy" ? "" : review()}</div>` : referenceReview()}</section>`;
   }
 
   function renderConnections() {
@@ -479,19 +489,25 @@ export function createPersonalServers(hooks: Hooks) {
         hooks.notify(t("Referencias guardadas en Biblioteca.", "References saved in Library."), "success");
       }); break;
       case "personal-copy":
+      case "personal-copy-version":
       case "personal-copy-reference": {
         const reference = activeReference();
         const useReference = name === "personal-copy-reference";
-        const files = useReference ? reference ? [reference.selection] : [] : selections;
+        const recovering = name === "personal-copy-version";
+        const reviewed = recovering && reviewing?.kind === "copy" && !copyQueued ? entries?.[reviewedIndex()] : undefined;
+        const files = recovering ? reviewed ? [{ serverId, path: reviewed.path, stamp: reviewed.stamp }] : []
+          : useReference ? reference ? [reference.selection] : [] : selections;
         if (files.length) await run("copy", async () => {
           await hooks.command("personal_server_copy", { selections: files, referenceId: useReference ? reference?.id : null,
             clientRequest: crypto.randomUUID() });
+          if (recovering) copyQueued = true;
           selected.clear();
           onlySelected = false;
           referenceId = "";
           await hooks.refresh();
-          hooks.notify(t("Copia añadida a Descargas.", "Copy added to Downloads."), "success");
+          if (!recovering) hooks.notify(t("Copia añadida a Descargas.", "Copy added to Downloads."), "success");
         });
+        if (recovering && copyQueued) document.getElementById("personal-review-status")?.focus();
       } break;
       default: return false;
     }

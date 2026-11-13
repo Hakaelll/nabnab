@@ -20,7 +20,7 @@ Si pulsas **Actualizar** en la carpeta, se conservan las marcas cuyos metadatos 
 
 Desde una referencia, **Revisar en servidor** abre su carpeta y compara los metadatos guardados con los actuales. Si cambia el identificador de versión, el panel lo señala aunque tamaño y fecha coincidan. **Actualizar referencia** guarda los metadatos revisados. **Copiar a mi biblioteca** solicita una copia de la versión seleccionada. Si el archivo desaparece o la carpeta está inaccesible, la referencia sigue disponible para revisarla más tarde.
 
-Cuando una copia falla porque cambió el archivo, pulsa **Revisar versión** en Descargas. Se abre su carpeta y se comparan los datos de la versión solicitada con los del archivo actual. **Copiar versión actual** crea un trabajo nuevo. Las copias publicadas y la referencia guardada se conservan. **Volver a Descargas** devuelve el foco al trabajo anterior. Si la conexión se ha retirado, el panel lo indica.
+Cuando una copia falla porque cambió el archivo, pulsa **Revisar versión** en Descargas. El panel compara la versión solicitada con la actual y muestra el destino local. **Copiar versión actual** crea un trabajo nuevo para ese archivo y muestra la confirmación en el mismo panel. **Volver a Descargas** devuelve el foco al trabajo anterior. Si la conexión se ha retirado, el panel lo indica.
 
 Las copias verifican los metadatos seleccionados y comprueban el recurso al finalizar. En WebDAV, si se interrumpe una copia con ETag fuerte y tamaño conocido, **Reanudar** solicita los bytes pendientes de esa versión. Si el servidor devuelve el mismo archivo completo, la copia vuelve a empezar. [Rangos HTTP y combinación de fragmentos](https://www.rfc-editor.org/rfc/rfc9110.html#name-combining-parts)
 
@@ -56,4 +56,4 @@ Edge también comprueba que escribir y cambiar de vista mantiene el foco y usa e
 
 ![Revisión de una versión distinta en la aplicación nativa de Windows](personal-server-review.png)
 
-![Revisión desde Descargas de una copia de prueba cuya versión cambió](personal-server-copy-review.png)
+![Comparación de una versión y confirmación de la copia, con la ruta local oculta en la captura](personal-server-copy-review.png)

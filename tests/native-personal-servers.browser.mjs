@@ -500,13 +500,21 @@ try {
   await comparison().getByRole("status").filter({ hasText: "El identificador de versión es distinto." }).waitFor();
   await page.waitForFunction(() => document.activeElement?.id === "personal-reference-review-title");
   assert.equal((await rpc("get_snapshot")).jobs.length, 2, "Reviewing must not enqueue another copy");
-  assert.equal(await page.getByRole("checkbox", { name: /Cuaderno ñ\.txt/ }).isChecked(), true);
   assert.equal(await page.getByRole("button", { name: "Actualizar referencia", exact: true }).count(), 0);
-  await page.setViewportSize({ width: 900, height: 620 });
-  assert.ok(await comparison().evaluate(panel => panel.scrollWidth <= panel.clientWidth + 1));
-  await comparison().screenshot({ path: path.join(data, "changed-copy-review.png") });
-  await page.setViewportSize({ width: 1180, height: 780 });
-  await button("Copiar versión actual").click();
+  for (const [width, height] of [[900, 620], [1180, 780]]) {
+    await page.setViewportSize({ width, height });
+    assert.ok(await comparison().evaluate(panel => panel.scrollWidth <= panel.clientWidth + 1));
+    await comparison().evaluate(panel => panel.scrollIntoView({ block: "center" }));
+    await page.screenshot({ path: path.join(data, `changed-copy-review-${width}.png`) });
+  }
+  const copyVersion = comparison().getByRole("button", { name: "Copiar versión actual", exact: true });
+  await copyVersion.waitFor({ timeout: 3000 });
+  assert.match(await comparison().innerText(), /Destino local/);
+  assert.equal(await page.getByRole("checkbox", { name: /Inventario\.txt/ }).count(), 0);
+  assert.ok(await comparison().evaluate(panel => panel.getBoundingClientRect().bottom <= innerHeight));
+  await comparison().screenshot({ path: path.join(data, "changed-copy-review.png"),
+    mask: [comparison().locator(".file-source-destination strong")], maskColor: "#2b2e34" });
+  await copyVersion.press("Enter");
   const updated = await job(2);
   assert.equal(updated.state, "completed", JSON.stringify(updated.error));
   assert.equal(updated.source.selection.stamp.size, first.source.selection.stamp.size);
@@ -516,6 +524,8 @@ try {
   assert.equal(await readFile(updated.outputs[0], "utf8"), replacement);
   assert.equal(await readFile(first.outputs[0], "utf8"), original);
   assert.equal(await readFile(remote, "utf8"), replacement);
+  await comparison().getByRole("status").filter({ hasText: "Copia añadida a Descargas." }).waitFor();
+  assert.equal(await copyVersion.count(), 0);
   const saved = await rpc("personal_servers_status");
   assert.equal(saved.references[0].selection.stamp.etag, first.source.selection.stamp.etag);
   await button("Volver a Descargas").click();

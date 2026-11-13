@@ -298,6 +298,16 @@ label.file-source-row { cursor: pointer; }
   margin: 4px 0 0;
   overflow-wrap: anywhere;
 }
+.personal-copy-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px 16px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--edge-quiet);
+}
+.personal-copy-actions .file-source-destination { flex: 1 1 250px; min-width: 0; }
 .personal-selection-review ul { max-height: 9rem; overflow: auto; margin: 10px 0 0; padding: 0; list-style: none; }
 .personal-selection-review li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; padding: 6px 0; border-block-start: 1px solid var(--edge-quiet); overflow-wrap: anywhere; }
 .personal-selection-review small { color: var(--muted); }
