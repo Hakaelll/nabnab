@@ -159,6 +159,8 @@ try{
       await page.screenshot({ path: `${directory}/sidebar-compact-${width}.png` });
       await downloadNav.hover();
       await sidebarWidth(200);
+      assert.match(await sidebar.evaluate(node => getComputedStyle(node).backgroundColor), /^rgba\(9, 10, 12, 0\.66/);
+      assert.equal(await sidebar.evaluate(node => getComputedStyle(node).backdropFilter), "blur(4px)");
       assert.equal(await downloadNav.locator(".nav-label").evaluate(label => getComputedStyle(label).opacity), "1");
       assert.deepEqual(await page.locator("#main").boundingBox(), mainBounds);
       assert.deepEqual(await downloadNav.locator("svg").first().boundingBox(), icon);
@@ -282,6 +284,11 @@ try{
     await page.locator("#reduced-transparency").check();
     await page.locator("#appearance-settings button[type=submit]").click();
     assert.equal(await page.evaluate(()=>window.sectionFixture.state.settings.reducedTransparency),true);
+    await sidebar.getByRole("button", { name: "Ajustes" }).hover();
+    await sidebarWidth(200);
+    assert.equal(await sidebar.evaluate(node => getComputedStyle(node).backgroundColor), "rgb(14, 16, 19)");
+    assert.equal(await sidebar.evaluate(node => getComputedStyle(node).backdropFilter), "none");
+    await page.mouse.move(420, 140);
     await page.keyboard.press("Control+k");
     assert.equal(await palette.evaluate(element=>getComputedStyle(element).backdropFilter),"none");
     await page.keyboard.press("Escape");

@@ -7,7 +7,7 @@
   --edge: #ffffff21; --edge-quiet: #ffffff10; --control-smoke: #0d0e10ed;
   --inset: inset 0 1px 0 #ffffff08, inset 0 -1px 2px #0005;
   --contact: 0 1px 2px #0004, 0 4px 12px #0002;
-  --glass-smoke: #111318; --glass-raised: #17191d; --nav-smoke: #090a0c18;
+  --glass-smoke: #111318; --glass-raised: #17191d; --nav-smoke: #090a0c18; --nav-expanded-smoke: #090a0caa; --nav-expanded-blur: none;
   --glass-reflection: linear-gradient(155deg, #ffffff09 0%, #ffffff02 38%, transparent 64%);
   --nav-reflection: linear-gradient(160deg, #ffffff05, transparent 60%);
   --glass-blur: none; --ease-out: cubic-bezier(.23, 1, .32, 1);
@@ -446,7 +446,7 @@ html[data-input="pointer"] #field { transition: opacity var(--surface-entry) var
 .drop-indicator { position: fixed; inset: 12px; z-index: 100; border: 1px solid var(--muted); border-radius: 12px; background: #101114f5; display: flex; flex-direction: column; gap: 20px; align-items: center; justify-content: center; pointer-events: none; font-size: 20px; }
 .drop-indicator svg { width: 40px; height: 40px; stroke-width: 1; }
 @supports (backdrop-filter: blur(1px)) {
-  :root { --glass-smoke: #11131899; --glass-raised: #17191dcf; --glass-blur: blur(8px); }
+  :root { --glass-smoke: #11131899; --glass-raised: #17191dcf; --glass-blur: blur(8px); --nav-expanded-blur: blur(4px); }
 }
 .url-control, .destination-row, .search-control, .segmented {
   background-color: var(--glass-smoke); background-image: var(--glass-reflection);
@@ -492,15 +492,15 @@ html:not([data-input="keyboard"]) .nav-item:not(:disabled):active { transform: s
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition-duration: 0s !important; scroll-behavior: auto !important; } .is-loading .url-control::after { width: 100%; opacity: .5; } }
 .reduced-motion *, .reduced-motion *::before, .reduced-motion *::after { animation: none !important; transition-duration: 0s !important; scroll-behavior: auto !important; }
 .reduced-motion .is-loading .url-control::after { width: 100%; opacity: .5; }
-.reduced-transparency { --glass-smoke: #101114; --glass-raised: #17191d; --nav-smoke: #0e1013; --glass-reflection: none; --nav-reflection: none; --glass-blur: none; }
+.reduced-transparency { --glass-smoke: #101114; --glass-raised: #17191d; --nav-smoke: #0e1013; --nav-expanded-smoke: var(--nav-smoke); --glass-reflection: none; --nav-reflection: none; --glass-blur: none; --nav-expanded-blur: none; }
 .reduced-transparency body:not([data-page="home"]) #field { opacity: 0; }
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
-  :root { --glass-smoke: #101114; --glass-raised: #17191d; --nav-smoke: #0e1013; --glass-reflection: none; --nav-reflection: none; --glass-blur: none; }
+  :root { --glass-smoke: #101114; --glass-raised: #17191d; --nav-smoke: #0e1013; --nav-expanded-smoke: var(--nav-smoke); --glass-reflection: none; --nav-reflection: none; --glass-blur: none; --nav-expanded-blur: none; }
   body:not([data-page="home"]) #field { opacity: 0; }
   .url-control, input, select, .destination-row, .nav-item[aria-current="page"] { border-color: #777c86; }
 }
 @media (forced-colors: active) {
-  :root { --glass-smoke: Canvas; --glass-raised: Canvas; --nav-smoke: Canvas; --glass-reflection: none; --nav-reflection: none; --glass-blur: none; --edge: ButtonBorder; }
+  :root { --glass-smoke: Canvas; --glass-raised: Canvas; --nav-smoke: Canvas; --nav-expanded-smoke: Canvas; --glass-reflection: none; --nav-reflection: none; --glass-blur: none; --nav-expanded-blur: none; --edge: ButtonBorder; }
   #field { display: none; }
   .sidebar, .url-control, .destination-row, .notification, .activity, .inspector, .detail-dialog, .button, .nav-item { box-shadow: none; }
   .nav-item[aria-current="page"] { outline: 1px solid Highlight; outline-offset: -1px; }

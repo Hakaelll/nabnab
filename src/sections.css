@@ -18,7 +18,6 @@
 }
 .sidebar {
   --sidebar-extent: var(--sidebar-width);
-  --sidebar-expanded-fill: color-mix(in srgb, var(--background) 78%, var(--glass-smoke));
   position: relative;
   z-index: 5;
   justify-self: start;
@@ -32,16 +31,16 @@
 }
 .sidebar:has(.nav-item:focus-visible) {
   --sidebar-extent: 200px;
-  --sidebar-fill: var(--sidebar-expanded-fill);
-  --sidebar-filter: var(--glass-blur);
+  --sidebar-fill: var(--nav-expanded-smoke);
+  --sidebar-filter: var(--nav-expanded-blur);
   --sidebar-label-opacity: 1;
   border-color: var(--edge-quiet);
 }
 @media (hover: hover) {
   .sidebar:hover:not([data-dismissed]) {
     --sidebar-extent: 200px;
-    --sidebar-fill: var(--sidebar-expanded-fill);
-    --sidebar-filter: var(--glass-blur);
+    --sidebar-fill: var(--nav-expanded-smoke);
+    --sidebar-filter: var(--nav-expanded-blur);
     --sidebar-label-opacity: 1;
     border-color: var(--edge-quiet);
   }
