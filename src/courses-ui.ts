@@ -24,6 +24,8 @@ const courseProviderName = (id: string) => courseProviders.find(([value]) => val
 const skillshareResourceSection = "skillshare-resources";
 const unitResourceId = (unitId: string) => `unit-resources-${unitId}`;
 const isUnitResource = (lesson: CourseLesson) => lesson.id.startsWith("unit-resources-");
+const isManualUnit = (section: CourseSection) => section.id.startsWith("outline-section-");
+const isManualLesson = (lesson: CourseLesson) => lesson.id.startsWith("outline-lesson-");
 const studyLessonCount = (course: Course) => course.sections
   .filter(section => section.id !== skillshareResourceSection)
   .flatMap(section => section.lessons).filter(lesson => !isUnitResource(lesson)).length;
@@ -89,6 +91,7 @@ export function createCoursesController(hooks: CourseHooks) {
   let resourceReview: ResourceReview | null = null;
   let outlineReview: OutlineReview | null = null;
   let outlineText: string | null = null;
+  let titleDraft: { courseId: string; lessonId: string; unit: string; lesson: string; error: string } | null = null;
   const selected = new Set<string>();
   const current = () => courses.find(course => course.id === courseId);
   const currentLesson = () => current()?.sections.flatMap(section => section.lessons).find(lesson => lesson.id === lessonId);
@@ -172,6 +175,7 @@ export function createCoursesController(hooks: CourseHooks) {
   async function open(url = "", initialProvider?: string): Promise<void> {
     resourceReview = null;
     outlineReview = null;
+    titleDraft = null;
     if (review) {
       const reviewId = review.plan.id;
       review = null;
@@ -347,8 +351,8 @@ export function createCoursesController(hooks: CourseHooks) {
   }
 
   function outlineForm(course?: Course): string {
-    const saved = course?.sections.filter(section => section.id.startsWith("outline-section-"))
-      .map(section => [`# ${section.title}`, ...section.lessons.filter(lesson => !isUnitResource(lesson)).map(lesson => lesson.title)].join("\n")).join("\n\n") ?? "";
+    const saved = course?.sections.filter(isManualUnit)
+      .map(section => [`# ${section.title}`, ...section.lessons.filter(isManualLesson).map(lesson => lesson.title)].join("\n")).join("\n\n") ?? "";
     return `<details id="course-manual-outline" class="course-resource-entry">
       <summary>${t("Temario manual", "Manual outline")}</summary>
       <form id="course-outline-form" class="settings-form" aria-busy="${busy}">
@@ -374,6 +378,22 @@ export function createCoursesController(hooks: CourseHooks) {
     const entry = document.querySelector<HTMLDetailsElement>("#course-manual-outline");
     if (entry) entry.open = true;
     document.getElementById("course-outline-text")?.focus();
+  }
+
+  function editableUnit(course: Course, lesson: CourseLesson) {
+    if (!hasManualOutline(course.provider) || !isManualLesson(lesson)) return;
+    return course.sections.find(section => isManualUnit(section) && section.lessons.some(item => item.id === lesson.id));
+  }
+
+  function lessonTitles(course: Course, lesson: CourseLesson, unit: CourseSection): string {
+    const draft = titleDraft?.courseId === course.id && titleDraft.lessonId === lesson.id ? titleDraft : null;
+    if (!draft) return `<div class="course-study-context"><span>${h(unit.title)}</span>${action("course-edit-titles", t("Editar títulos", "Edit titles"), undefined, "quiet", `id="course-edit-titles" ${busy ? "disabled" : ""}`)}</div>`;
+    return `<form id="course-titles-form" class="settings-form" aria-label="${t("Editar títulos", "Edit titles")}" aria-busy="${busy}">
+      <label>${t("Título de la unidad", "Unit title")}<input id="course-unit-title" required maxlength="240" value="${h(draft.unit)}" ${busy ? "disabled" : ""}></label>
+      <label>${t("Título de la lección", "Lesson title")}<input id="course-lesson-title" required maxlength="240" value="${h(draft.lesson)}" ${busy ? "disabled" : ""}></label>
+      ${draft.error ? `<p class="field-note" id="course-title-error" role="alert" tabindex="-1">${h(draft.error)}</p>` : ""}
+      <div class="button-group">${action("course-cancel-titles", t("Cancelar", "Cancel"), undefined, "quiet", busy ? "disabled" : "")}
+        <button type="submit" class="button secondary" ${busy ? "disabled" : ""}>${t("Guardar títulos", "Save titles")}</button></div></form>`;
   }
 
   function courseraForm(course?: Course): string {
@@ -556,6 +576,7 @@ export function createCoursesController(hooks: CourseHooks) {
     const resourceLesson = unitResource || resources?.lessons.some(candidate => candidate.id === lessonId);
     const showQueue = !localStudy || lessons.some(lesson => lesson.assets.some(asset => asset.status === "downloadable"));
     const item = lessonMedia(lesson);
+    const manualUnit = lesson ? editableUnit(course, lesson) : undefined;
     const canLinkRecording = browserAssisted && !resourceLesson && !item && lesson && !lesson.assets.some(asset =>
       asset.status === "local" && (asset.kind === "audio" || asset.kind === "video"));
     const queueable = course.sections.flatMap(section => section.lessons).flatMap(lesson => lesson.assets).filter(asset => selected.has(asset.id) && available(asset));
@@ -565,6 +586,7 @@ export function createCoursesController(hooks: CourseHooks) {
       ${hasManualOutline(course.provider) ? outlineForm(course) : ""}
       ${!showQueue ? "" : `<div class="selection-toolbar"><span>${queueable.length === 1 ? t("1 material seleccionado", "1 material selected") : `${queueable.length} ${t("materiales seleccionados", "materials selected")}`}</span>${action("course-queue", t("Añadir a la cola", "Add to queue"), "add", "primary", busy || !queueable.length ? "disabled" : "")}${action("course-clear", t("Quitar selección", "Clear selection"), undefined, "quiet")}</div>`}
       <div class="course-layout${browserAssisted ? " course-layout--browser" : ""}">${renderCourseTree(course, localStudy, Boolean(resourceCount))}<section class="course-study">${lesson ? `<div class="page-heading"><h2 id="course-study-title" tabindex="-1">${h(lessonTitle(lesson))}</h2>${action("course-learned", resourceLesson ? (lesson.learned ? t("Marcar pendiente", "Mark as pending") : t("Marcar revisado", "Mark as reviewed")) : (lesson.learned ? t("Marcar pendiente de aprender", "Mark as not learned") : t("Marcar aprendida", "Mark as learned")), "check", "quiet", `aria-pressed="${lesson.learned}" ${busy ? "disabled" : ""}`)}</div>
+      ${lesson && manualUnit ? lessonTitles(course, lesson, manualUnit) : ""}
       ${item ? lessonPlayback(item) : ""}
       <div class="course-materials-heading"><h3 id="course-materials-heading" tabindex="-1">${t("Materiales", "Materials")}</h3>${browserAssisted && !resourceLesson ? `<div class="button-group">
         ${action("course-add-attachments", t("Añadir adjuntos", "Add attachments"), "add", "quiet", `id="course-add-attachments" ${busy ? "disabled" : ""}`)}
@@ -600,6 +622,14 @@ export function createCoursesController(hooks: CourseHooks) {
       }
       case "course-browser-title": browserTitle = element.value; return true;
       case "course-outline-text": outlineText = element.value; return true;
+      case "course-unit-title":
+      case "course-lesson-title":
+        if (titleDraft) {
+          titleDraft[element.id === "course-unit-title" ? "unit" : "lesson"] = element.value;
+          titleDraft.error = "";
+          document.getElementById("course-title-error")?.remove();
+        }
+        return true;
       case "course-resource-links": resourceLinks = element.value; return true;
       case "course-resource-lesson": resourceLessonId = element.value; return true;
       case "course-product-id": productId = element.value; return true;
@@ -623,6 +653,30 @@ export function createCoursesController(hooks: CourseHooks) {
     }
   }
   async function handleSubmit(form: HTMLFormElement): Promise<boolean> {
+    if (form.id === "course-titles-form") {
+      const draft = titleDraft;
+      if (!draft || busy || !form.reportValidity()) return true;
+      await perform(async () => {
+        try {
+          await hooks.command("rename_course_outline_titles", { courseId: draft.courseId, lessonId: draft.lessonId,
+            unitTitle: draft.unit, lessonTitle: draft.lesson });
+        } catch (error) {
+          switch (error) {
+            case "duplicate-course-unit-title": draft.error = t("Ya existe una unidad con ese título.", "A unit with that title already exists."); break;
+            case "duplicate-course-lesson-title": draft.error = t("Ya existe una lección con ese título en la unidad.", "A lesson with that title already exists in this unit."); break;
+            case "invalid-course-titles": draft.error = t("Escribe títulos de hasta 240 caracteres sin enlaces ni # inicial.", "Enter titles of up to 240 characters without links or a leading #."); break;
+            default: hooks.showError(error); break;
+          }
+          return false;
+        }
+        titleDraft = null;
+        outlineText = null;
+      });
+      const focus = titleDraft ? document.getElementById("course-title-error") ?? document.getElementById("course-lesson-title")
+        : document.getElementById("course-study-title");
+      focus?.focus();
+      return true;
+    }
     if (form.id === "course-outline-form") {
       const course = current();
       const source = course?.provider ?? provider;
@@ -683,6 +737,20 @@ export function createCoursesController(hooks: CourseHooks) {
     if (!name.startsWith("course-")) return false;
     const course = current(), lesson = currentLesson();
     switch (name) {
+      case "course-edit-titles": {
+        const unit = course && lesson && editableUnit(course, lesson);
+        if (!course || !lesson || !unit || busy) return true;
+        titleDraft = { courseId: course.id, lessonId: lesson.id, unit: unit.title, lesson: lesson.title, error: "" };
+        hooks.render();
+        document.getElementById("course-lesson-title")?.focus();
+        return true;
+      }
+      case "course-cancel-titles":
+        if (busy) return true;
+        titleDraft = null;
+        hooks.render();
+        document.getElementById("course-edit-titles")?.focus();
+        return true;
       case "course-outline-back":
         if (busy) return true;
         outlineReview = null;
@@ -804,11 +872,11 @@ export function createCoursesController(hooks: CourseHooks) {
         return true;
       case "course-token-remove": await perform(async () => { await hooks.command("save_course_token", { provider, token: "", remove: true }); hooks.notify(t("Conexión eliminada. Los archivos se conservan.", "Connection removed. Local files are kept."), "success"); }); break;
       case "course-import": await perform(async () => { const course = await hooks.command<Course>("import_local_course"); courseId = course.id; lessonId = course.sections[0]?.lessons[0]?.id ?? null; hooks.notify(t("Curso local importado.", "Local course imported."), "success"); }); break;
-      case "course-open": courseId = element.dataset.id ?? null; lessonId = current()?.sections[0]?.lessons[0]?.id ?? null; clearSearch(); resourceLinks = ""; resourceLessonId = ""; outlineText = null; break;
-      case "course-back": courseId = null; lessonId = null; clearSearch(); resourceLinks = ""; resourceLessonId = ""; outlineText = null; selected.clear(); break;
+      case "course-open": courseId = element.dataset.id ?? null; lessonId = current()?.sections[0]?.lessons[0]?.id ?? null; clearSearch(); resourceLinks = ""; resourceLessonId = ""; outlineText = null; titleDraft = null; break;
+      case "course-back": courseId = null; lessonId = null; clearSearch(); resourceLinks = ""; resourceLessonId = ""; outlineText = null; titleDraft = null; selected.clear(); break;
       case "course-lesson": {
         const next = element.dataset.id ?? null;
-        if (next !== lessonId) { lessonId = next; noteText = ""; noteTime = ""; }
+        if (next !== lessonId) { lessonId = next; noteText = ""; noteTime = ""; titleDraft = null; }
         if (!expansionBeforeSearch) break;
         const section = course?.sections.find(section => section.lessons.some(lesson => lesson.id === lessonId));
         if (section) expansionBeforeSearch.set(`course-section-${section.id}`, true);

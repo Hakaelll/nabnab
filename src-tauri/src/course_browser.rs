@@ -133,13 +133,36 @@ pub fn open_course_site(provider: String, url: String) -> Result<(), String> {
 }
 
 const OUTLINE_SECTION: &str = "outline-section-";
+const OUTLINE_LESSON: &str = "outline-lesson-";
 
-fn outline_sections(text: &str) -> Result<Vec<CourseSection>, String> {
+fn valid_outline_title(title: &str) -> bool {
+    !title.is_empty() && !title.starts_with('#') && !title.contains("://")
+        && title.chars().count() <= 240 && !title.chars().any(char::is_control)
+}
+
+fn new_outline_id(prefix: &str, key: &str, occupied: &mut HashSet<String>) -> String {
+    let mut id = format!("{prefix}{}", digest(key));
+    while !occupied.insert(id.clone()) {
+        id = format!("{prefix}{}", digest(&id));
+    }
+    id
+}
+
+fn outline_sections(text: &str, previous: Option<&Course>) -> Result<Vec<CourseSection>, String> {
     if text.len() > 64 * 1024 {
         return Err("The outline is too long. Use up to 64 KiB of titles.".into());
     }
     let mut sections: Vec<CourseSection> = Vec::new();
-    let mut ids = HashSet::new();
+    let mut used = HashSet::new();
+    let saved_sections = previous.map_or(&[][..], |course| course.sections.as_slice());
+    let saved_units: HashMap<_, _> = saved_sections.iter().filter(|unit| unit.id.starts_with(OUTLINE_SECTION))
+        .map(|unit| (unit.title.to_lowercase(), unit)).collect();
+    let saved_lessons: HashMap<_, _> = saved_sections.iter().flat_map(|unit| unit.lessons.iter()
+        .filter(|lesson| lesson.id.starts_with(OUTLINE_LESSON))
+        .map(|lesson| ((unit.id.as_str(), lesson.title.to_lowercase()), lesson))).collect();
+    let mut occupied: HashSet<_> = saved_sections.iter().flat_map(|unit| {
+        std::iter::once(unit.id.clone()).chain(unit.lessons.iter().map(|lesson| lesson.id.clone()))
+    }).collect();
     let mut lessons = 0;
     for (index, line) in text.lines().enumerate() {
         let line = line.trim();
@@ -147,20 +170,18 @@ fn outline_sections(text: &str) -> Result<Vec<CourseSection>, String> {
         let heading = line.strip_prefix("# ");
         let title = heading.unwrap_or(line).trim();
         let invalid = || format!("Check outline line {}. Use # followed by a unit title, then one lesson title per line.", index + 1);
-        if title.is_empty() || title.starts_with('#') || title.contains("://")
-            || title.chars().count() > 240 || title.chars().any(char::is_control)
-        {
-            return Err(invalid());
-        }
+        if !valid_outline_title(title) { return Err(invalid()); }
         let key = title.to_lowercase();
         if heading.is_some() {
-            let id = format!("{OUTLINE_SECTION}{}", digest(&key));
-            if !ids.insert(id.clone()) { return Err(format!("Duplicate unit on line {}.", index + 1)); }
+            if !used.insert((None, key.clone())) { return Err(format!("Duplicate unit on line {}.", index + 1)); }
+            let id = saved_units.get(&key).map(|unit| unit.id.clone())
+                .unwrap_or_else(|| new_outline_id(OUTLINE_SECTION, &key, &mut occupied));
             sections.push(CourseSection { id, title: title.into(), lessons: Vec::new() });
         } else {
             let section = sections.last_mut().ok_or_else(invalid)?;
-            let id = format!("outline-lesson-{}", digest(&format!("{}:{key}", section.id)));
-            if !ids.insert(id.clone()) { return Err(format!("Duplicate lesson on line {}.", index + 1)); }
+            if !used.insert((Some(section.id.clone()), key.clone())) { return Err(format!("Duplicate lesson on line {}.", index + 1)); }
+            let id = saved_lessons.get(&(section.id.as_str(), key.clone())).map(|lesson| lesson.id.clone())
+                .unwrap_or_else(|| new_outline_id(OUTLINE_LESSON, &format!("{}:{key}", section.id), &mut occupied));
             section.lessons.push(CourseLesson { id, title: title.into(), learned: false, assets: Vec::new(), notes: Vec::new() });
             lessons += 1;
         }
@@ -182,12 +203,13 @@ pub fn course_manual_outline(
     let link = CourseLink::selected(&provider, &url)?;
     let title = label(&title, 240);
     if title.is_empty() { return Err("Enter the course name.".into()); }
-    let mut course = Course { id: link.id, title, provider, url: Some(link.page.to_string()),
-        slug: None, sections: outline_sections(&text)?, created_at: queue::now(), outline_status: None };
-    if !save { return Ok(course); }
     let mut guard = state.repository.lock().unwrap();
     let repo = guard.as_mut().ok_or("Open the app first.")?;
-    if let Some(previous) = repo.data.courses.iter().find(|previous| previous.id == course.id) {
+    let previous = repo.data.courses.iter().find(|previous| previous.id == link.id);
+    let mut course = Course { id: link.id, title, provider, url: Some(link.page.to_string()),
+        slug: None, sections: outline_sections(&text, previous)?, created_at: queue::now(), outline_status: None };
+    if !save { return Ok(course); }
+    if let Some(previous) = previous {
         course.created_at = previous.created_at;
         let prior_lessons: HashMap<_, _> = previous.sections.iter().flat_map(|section| &section.lessons)
             .map(|lesson| (lesson.id.as_str(), lesson)).collect();
@@ -196,6 +218,44 @@ pub fn course_manual_outline(
         }
     }
     save_course(repo, course)
+}
+
+#[tauri::command]
+pub fn rename_course_outline_titles(
+    state: State<'_, Arc<AppState>>, course_id: String, lesson_id: String, unit_title: String, lesson_title: String,
+) -> Result<(), String> {
+    let unit_title = unit_title.trim();
+    let lesson_title = lesson_title.trim();
+    if !valid_outline_title(unit_title) || !valid_outline_title(lesson_title) {
+        return Err("invalid-course-titles".into());
+    }
+    let mut guard = state.repository.lock().unwrap();
+    let repo = guard.as_mut().ok_or("Open the app first.")?;
+    let mut course = repo.data.courses.iter().find(|course| course.id == course_id
+        && matches!(course.provider.as_str(), "rocketseat" | "domestika" | "skillshare"))
+        .cloned().ok_or("Open a manual course outline first.")?;
+    let (unit_index, lesson_index) = course.sections.iter().enumerate().find_map(|(index, unit)| {
+        if !unit.id.starts_with(OUTLINE_SECTION) { return None; }
+        unit.lessons.iter().position(|lesson| lesson.id == lesson_id && lesson.id.starts_with(OUTLINE_LESSON))
+            .map(|lesson| (index, lesson))
+    }).ok_or("Choose a lesson from the manual outline.")?;
+    let unit_key = unit_title.to_lowercase();
+    if course.sections.iter().enumerate().any(|(index, unit)| {
+        index != unit_index && unit.id.starts_with(OUTLINE_SECTION) && unit.title.to_lowercase() == unit_key
+    }) {
+        return Err("duplicate-course-unit-title".into());
+    }
+    let unit = &mut course.sections[unit_index];
+    let lesson_key = lesson_title.to_lowercase();
+    if unit.lessons.iter().enumerate().any(|(index, lesson)| {
+        index != lesson_index && lesson.id.starts_with(OUTLINE_LESSON) && lesson.title.to_lowercase() == lesson_key
+    }) {
+        return Err("duplicate-course-lesson-title".into());
+    }
+    unit.title = unit_title.into();
+    unit.lessons[lesson_index].title = lesson_title.into();
+    save_course(repo, course)?;
+    Ok(())
 }
 
 fn is_course_attachment(path: &Path) -> bool {

@@ -121,12 +121,64 @@ try {
   assert.equal(updated.sections[0].lessons[1].learned, true);
   assert.equal(updated.sections[0].lessons[1].notes[0].text, "Nota de estudio");
 
+  await search.fill("preparar el material");
+  await page.getByRole("button", { name: "Preparar el material", exact: true }).press("Enter");
+  await search.fill("");
+  if (process.env.NABNAB_NATIVE_COURSE_ARTIFACTS) {
+    for (const [width, height] of [[900, 620], [1180, 780]]) {
+      await page.setViewportSize({ width, height });
+      await page.locator("#course-study-title").scrollIntoViewIfNeeded();
+      await page.screenshot({ path: path.join(artifacts, `course-study-${width}.png`), animations: "disabled" });
+    }
+  }
+  await assert.rejects(rpc("rename_course_outline_titles", { courseId: course.id, lessonId, unitTitle: "Unidad práctica", lessonTitle: "Crear una muestra" }), /duplicate-course-lesson-title/);
+  await page.getByRole("button", { name: "Editar títulos", exact: true }).press("Enter");
+  const unitTitle = page.getByLabel("Título de la unidad", { exact: true });
+  const lessonTitle = page.getByLabel("Título de la lección", { exact: true });
+  assert.ok(await lessonTitle.evaluate(element => document.activeElement === element));
+  await lessonTitle.fill("Borrador de título");
+  await page.locator("#course-titles-form").getByRole("button", { name: "Cancelar", exact: true }).press("Enter");
+  const edit = page.getByRole("button", { name: "Editar títulos", exact: true });
+  assert.ok(await edit.evaluate(element => document.activeElement === element));
+  await edit.press("Enter");
+  assert.equal(await lessonTitle.inputValue(), "Preparar el material");
+  await unitTitle.fill("Cierre");
+  await lessonTitle.fill("Preparación del material");
+  await page.getByRole("button", { name: "Guardar títulos", exact: true }).press("Enter");
+  await page.getByRole("alert").filter({ hasText: "Ya existe una unidad con ese título." }).waitFor();
+  assert.equal(await unitTitle.inputValue(), "Cierre");
+  assert.equal((await rpc("list_courses"))[0].sections[0].title, "Unidad práctica");
+  await unitTitle.fill("Taller de preparación");
+  assert.equal(await page.locator("#course-title-error").count(), 0);
+  for (const [width, height] of [[900, 620], [1180, 780]]) {
+    await page.setViewportSize({ width, height });
+    const editor = page.locator("#course-titles-form");
+    await editor.scrollIntoViewIfNeeded();
+    assert.ok(await editor.evaluate(element => element.scrollWidth <= element.clientWidth + 1));
+    if (process.env.NABNAB_NATIVE_COURSE_ARTIFACTS) await page.screenshot({ path: path.join(artifacts, `course-titles-${width}.png`), animations: "disabled" });
+  }
+  await page.getByRole("button", { name: "Guardar títulos", exact: true }).press("Enter");
+  const renamedHeading = page.getByRole("heading", { name: "Preparación del material", exact: true });
+  await renamedHeading.waitFor();
+  assert.ok(await renamedHeading.evaluate(element => element === document.activeElement));
+  assert.equal(await page.getByText("Nota de estudio", { exact: true }).count(), 1);
+  const reordered = await rpc("course_manual_outline", { ...request, save: true, text: "# Taller de preparación\nPreparación del material\nCrear una muestra\nPreparar el material\n\n# Unidad práctica\nPresentación" });
+  assert.equal(reordered.sections[0].id, course.sections[0].id);
+  assert.equal(reordered.sections[0].lessons[0].id, lessonId);
+  assert.equal(reordered.sections[0].lessons[0].notes[0].text, "Nota de estudio");
+  assert.equal(reordered.sections[0].lessons[0].learned, true);
+  assert.notEqual(reordered.sections[0].lessons[2].id, lessonId);
+  assert.notEqual(reordered.sections[1].id, course.sections[0].id);
+
   const skillshare = { provider: "skillshare", url: "https://www.skillshare.com/en/classes/Fixture/123", title: "Clase de prueba", text: "# Práctica\nPreparar" };
   const skillCourse = await rpc("course_manual_outline", { ...skillshare, save: true });
   const skillLesson = skillCourse.sections[0].lessons[0].id;
   await rpc("add_skillshare_resources", { url: skillshare.url, title: skillshare.title, links: ["https://static.skillshare.com/uploads/attachment/1234/abcdef12/Guide.pdf"], lessonId: skillLesson });
   const skillUpdated = await rpc("course_manual_outline", { ...skillshare, text: "# Práctica\nRevisar\nPreparar", save: true });
   assert.equal(skillUpdated.sections[0].lessons[1].assets[0].title, "Guide.pdf");
+  await rpc("rename_course_outline_titles", { courseId: skillCourse.id, lessonId: skillLesson, unitTitle: "Taller", lessonTitle: "Preparación" });
+  const skillRenamed = await rpc("course_manual_outline", { ...skillshare, text: "# Taller\nPreparación\nRevisar", save: true });
+  assert.equal(skillRenamed.sections[0].lessons[0].assets[0].id, skillUpdated.sections[0].lessons[1].assets[0].id);
   const rocket = await rpc("course_manual_outline", { ...request, provider: "rocketseat", url: "https://app.rocketseat.com.br/classroom/git?token=fixture", save: true });
   assert.equal(rocket.url, "https://app.rocketseat.com.br/classroom/git");
   const snapshot = await rpc("get_snapshot");
@@ -136,7 +188,8 @@ try {
   assert.ok(!savedData.includes("token=fixture"));
   const persisted = JSON.parse(savedData);
   assert.equal(persisted.courses.length, 3);
-  console.log("Native course outlines passed for Domestika, Skillshare and Rocketseat. Search, keyboard focus, review, order, notes, progress and safe file selection were verified.");
+  assert.equal(persisted.courses.find(item => item.id === course.id).sections[0].lessons[0].id, lessonId);
+  console.log("Native course outlines passed for Domestika, Skillshare and Rocketseat. Verified keyboard title editing, duplicate rejection, stable IDs, notes, learned status, attachment links and safe file selection.");
 } finally {
   try {
     await page?.evaluate(async () => {

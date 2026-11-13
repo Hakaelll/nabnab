@@ -61,11 +61,13 @@ En Rocketseat, Domestika y Skillshare puedes organizar el curso antes de añadir
 
 Puedes añadir adjuntos a cada lección desde la vista de estudio. En Domestika también puedes añadir recursos a la unidad. En Skillshare puedes revisar enlaces directos y asociarlos a una lección del temario. Guardar el temario no crea trabajos en Descargas.
 
-Al editar el temario, conserva el título de cada unidad y lección para mantener su identidad. Cambiar el orden conserva los adjuntos, las notas y el progreso. Los elementos que omitas se conservan al final. Cambiar un título crea una entrada distinta, conservando la anterior.
+Abre una lección y pulsa **Editar títulos** para corregir el nombre de la lección o de su unidad. Se conservan las notas, el estado de aprendizaje, los archivos vinculados y su posición de reproducción. El formulario **Temario manual** se actualiza con los títulos guardados y permite reordenar las entradas. Cada título nuevo que añadas desde ese formulario crea una entrada y los elementos que omitas se conservan al final.
+
+![Edición de los títulos de una unidad y una lección en Windows con datos de prueba](course-outline-titles.png)
 
 ![Revisión de un temario manual de Domestika con datos de prueba](course-manual-outline.png)
 
-La prueba nativa de Windows guarda temarios sintéticos de los tres proveedores y comprueba que la revisión no escribe en el índice. Verifica el orden, el foco a 900 y 1180 px, y que al reordenar se conservan las notas, el progreso y un adjunto de Skillshare. No usa sesiones ni descarga los materiales de prueba.
+La prueba nativa de Windows guarda temarios sintéticos de los tres proveedores y comprueba que la revisión no escribe en el índice. Verifica el editor con teclado a 900 y 1180 px, el rechazo de títulos duplicados y la conservación de las notas, el estado de aprendizaje y un adjunto de Skillshare al cambiar los títulos y reordenar el temario. Usa datos locales de prueba.
 
 ![Enlace de aula de Rocketseat pegado desde Inicio, a 900 × 620 con IPC simulado](course-rocketseat-classroom.png)
 
