@@ -50,7 +50,7 @@ Udemy, Hotmart, and Kiwify use separate authorized connections. With a Coursera 
 - **Playback.** Switch between the compact bar, full player, and mini player with the same queue and position. The music view includes thirteen scenes that respond to the sound, including Phosphor and Cassette. Mark favorites, enable automatic rotation, or use a still image. [Playback guide](docs/playback.md) · [Phosphor scene](docs/playback/phosphor-full.png)
 - **Personal archives.** Browse official Instagram, Facebook, X, Spotify, and LinkedIn exports by account, category, and date. Before importing a date range, review record counts and attachment sizes. In an imported archive, **Export contents** shows which public categories the source package contained, including empty, missing, or unsupported categories. Contacts and messages require explicit selection. [Personal archives](docs/PERSONAL-ARCHIVES.md) · [Export contents](docs/personal-archive-coverage.png)
 
-The animated character field on Home cycles through eleven patterns. The sidebar uses the same translucent material across sections. In **Settings → Appearance**, you can reduce motion or transparency. [Home and the compact sidebar](docs/nabnab-sidebar.png) · [Library](docs/nabnab-library.png) · [Design reference](docs/design-reference.md)
+The animated character field on Home cycles through eleven patterns. The translucent sidebar expands to show labels on hover or keyboard focus, while the workspace stays in place. In **Settings → Appearance**, you can reduce motion or transparency. [Home and the compact sidebar](docs/nabnab-sidebar.png) · [Design reference](docs/design-reference.md)
 
 ## Local tools and device sharing
 

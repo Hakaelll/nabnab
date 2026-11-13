@@ -244,7 +244,7 @@ required("#app").innerHTML = `<canvas id="field" aria-hidden="true"></canvas><he
   <button id="minimize" aria-label="Minimizar" title="Minimizar"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10"/></svg></button>
   <button id="maximize" aria-label="Maximizar" title="Maximizar"><svg class="maximize-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="3.5" width="9" height="9" rx=".5"/></svg><svg class="restore-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 5.5v-2h7v7h-2"/><rect x="3.5" y="5.5" width="7" height="7" rx=".5"/></svg></button>
   <button id="close" aria-label="Cerrar" title="Cerrar"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg></button>
-  </div></header><div class="app-shell"><nav class="sidebar" aria-label="Navegación principal"><div class="sidebar-header"><span class="sidebar-mark" aria-hidden="true"></span><button id="toggle-sidebar" class="sidebar-toggle icon-button" data-action="toggle-sidebar" title="Contraer navegación" aria-label="Contraer navegación">${icon("menu")}</button></div><div class="nav-primary"></div><div class="nav-secondary"></div></nav>
+  </div></header><div class="app-shell"><nav class="sidebar" aria-label="Navegación principal"><div class="nav-primary"></div><div class="nav-secondary"></div></nav>
   <div class="work-area"><main id="main"><div id="notification" class="notification" hidden><span id="notification-icon"></span><div><span id="notification-text"></span><details id="notification-details" hidden><summary>Detalles técnicos</summary><pre></pre></details></div><button class="icon-button" data-action="dismiss-message" aria-label="Cerrar aviso">${icon("close")}</button></div><section id="home-page" class="home-page"><div id="home-content"></div></section><div class="content-layout"><section id="page-content" class="page-content" hidden></section><aside id="inspector" class="inspector" aria-label="Detalles" hidden></aside></div><button id="activity" class="activity" data-action="show-activity" hidden><span class="activity-dot"></span><span id="activity-text"></span>${icon("arrow")}</button></main><section class="audio-player" id="audio-player" hidden><div id="audio-transport"></div></section></div></div><section class="playback-stage" id="playback-stage" aria-label="Reproductor de vídeo" tabindex="-1" hidden><video id="audio-engine" crossorigin="anonymous" preload="metadata" playsinline></video><div class="stage-captions" hidden></div><div class="stage-feedback" aria-hidden="true" hidden></div><div class="stage-hud"></div></section><aside id="capture-indicator" class="capture-indicator" hidden aria-label="Controles de captura"><span class="capture-status-dot" aria-hidden="true"></span><div class="capture-status-copy"><strong id="capture-status-label" aria-live="polite"></strong><small id="capture-status-source"></small></div><time id="capture-status-time"></time><span id="capture-shortcut-label"></span><button class="button quiet" data-action="screen-capture-open">Captura</button><button class="button secondary" data-action="screen-capture-save-replay" hidden>Guardar</button><button class="button primary" data-action="screen-capture-stop">Detener</button></aside><dialog id="detail-dialog" class="detail-dialog" aria-label="Detalles"></dialog><div id="drop-indicator" class="drop-indicator" hidden>${icon("add")}<span></span></div>`;
 const inspectorBody = document.createElement("div");
 inspectorBody.className = "inspector-body";
@@ -349,14 +349,11 @@ function updateNavigation(): void {
   document.documentElement.lang = snapshot.settings.language;
   document.documentElement.classList.toggle("reduced-motion", snapshot.settings.reducedMotion);
   document.documentElement.classList.toggle("reduced-transparency", snapshot.settings.reducedTransparency);
-  document.documentElement.classList.toggle("sidebar-collapsed", !snapshot.settings.sidebarExpanded);
   required(".sidebar").setAttribute("aria-label", t("Navegación principal", "Main navigation"));
   required(".titlebar-search span").textContent=t("Buscar en nabnab", "Search nabnab");
   required(".nav-primary").innerHTML = navigationLinks().map(([key,label,symbol])=>`<button class="nav-item" data-page="${key}" aria-current="${page===key?'page':'false'}" aria-label="${label}" title="${label}">${icon(symbol)}<span class="nav-label">${label}</span>${key==='downloads'&&snapshot.jobs.some(job=>activeStates.includes(job.state))?'<span class="nav-work-dot" aria-hidden="true"></span>':''}</button>`).join("");
   const settingsLabel=t("Ajustes", "Settings");
   required(".nav-secondary").innerHTML=`<button class="nav-item" data-page="settings" aria-current="${page==='settings'?'page':'false'}" aria-label="${settingsLabel}" title="${settingsLabel}">${icon("settings")}<span class="nav-label">${settingsLabel}</span></button>`;
-  const toggleLabel=snapshot.settings.sidebarExpanded?t("Contraer navegación", "Collapse navigation"):t("Expandir navegación", "Expand navigation");
-  required("#toggle-sidebar").setAttribute("aria-label",toggleLabel);required("#toggle-sidebar").title=toggleLabel;
   for (const [id,label] of [["minimize",t("Minimizar", "Minimize")],["close",t("Cerrar", "Close")]]) { required(`#${id}`).setAttribute("aria-label",label); required(`#${id}`).title=label; }
   const maximize=required('#maximize');const maximizeLabel=maximize.dataset.maximized==='true'?t("Restaurar", "Restore"):t("Maximizar", "Maximize");maximize.setAttribute('aria-label',maximizeLabel);maximize.title=maximizeLabel;
   required("#notification [data-action='dismiss-message']").setAttribute("aria-label",t("Cerrar aviso", "Dismiss notice"));
@@ -775,10 +772,17 @@ document.addEventListener("contextmenu", event => {
   event.preventDefault();
 });
 matchMedia("(prefers-reduced-motion: reduce)").addEventListener("change",()=>cancelSurfaceMotion());
+const sidebar = required(".sidebar");
+sidebar.addEventListener("pointerleave", () => sidebar.removeAttribute("data-dismissed"));
 document.addEventListener("click",event=>{
   const target=event.target instanceof Element?event.target.closest<HTMLButtonElement>('button'):null;
   if(!target||target.disabled)return;const destination=target.dataset.page;
-  if(isPage(destination)){openPage(destination);return;}const action=target.dataset.action;
+  if(isPage(destination)){
+    if (event.detail > 0) target.closest<HTMLElement>(".sidebar")?.setAttribute("data-dismissed", "");
+    openPage(destination);
+    return;
+  }
+  const action=target.dataset.action;
   if(event.detail > 0 && target.hasAttribute("data-open-on-double-click")) return;
   if(action)void handleAction(action,target,event).catch(showError);
 });
@@ -860,7 +864,6 @@ async function handleAction(action: string, button: HTMLButtonElement, event?: M
     case 'library-section':{const section=button.dataset.section;if(section==='files'||section==='collections'||section==='sources'||section==='later'||section==='references'||section==='audio'||section==='archives'){if(section!=='archives')personalArchives.leave();librarySection=section;renderCurrent();if(section==='references')await personalServers.load();if(section==='archives')await personalArchives.load();}break;}
     case 'prepare-single':await batches.prepare(home.input,quickPreset||null);break;
     case 'save-single-later':await batches.prepare(home.input,quickPreset||null,true);break;
-    case 'toggle-sidebar':{const settings={...snapshot.settings,sidebarExpanded:!snapshot.settings.sidebarExpanded};if(desktop)await saveSettings(settings);else{snapshot.settings=settings;renderCurrent();}break;}
     case 'dismiss-message':notify("");break;
     case 'go-home':navigate('home');required<HTMLTextAreaElement>('#url').focus();break;
     case 'show-activity':downloads.filter='all';navigate('downloads');break;
@@ -1067,7 +1070,7 @@ async function submitForm(form: HTMLFormElement): Promise<void> {
     case 'tool-form':{const button=form.querySelector<HTMLButtonElement>('button[type=submit]');if(button?.disabled)return;if(button)button.disabled=true;try{await queueTool();}finally{if(button)button.disabled=false;}break;}
     case 'general-settings':{const language=inputValue('language');if(language==='es'||language==='en')await saveSettings({...snapshot.settings,language,trayEnabled:checked('tray-enabled'),closeToTray:checked('tray-enabled')&&checked('close-to-tray'),startWithWindows:checked('start-with-windows')});notify(t("Ajustes guardados.", "Settings saved."),'success');break;}
     case 'download-settings':await saveSettings({...snapshot.settings,networkLimit:Number(inputValue('network-limit')),processingLimit:Number(inputValue('processing-limit'))});notify(t("Ajustes guardados.", "Settings saved."),'success');break;
-    case 'appearance-settings':cancelSurfaceMotion();await saveSettings({...snapshot.settings,reducedMotion:checked('reduced-motion'),reducedTransparency:checked('reduced-transparency'),sidebarExpanded:checked('expanded-sidebar')});notify(t("Ajustes guardados.", "Settings saved."),'success');break;
+    case 'appearance-settings':cancelSurfaceMotion();await saveSettings({...snapshot.settings,reducedMotion:checked('reduced-motion'),reducedTransparency:checked('reduced-transparency')});notify(t("Ajustes guardados.", "Settings saved."),'success');break;
     case 'organize-media':{const split=(value:string)=>[...new Set(value.split(',').map(value=>value.trim()).filter(Boolean))].slice(0,50);applySnapshot(await command<Snapshot>('update_library',{id:form.dataset.id??"",collections:split(inputValue('media-collections')),tags:split(inputValue('media-tags'))}));notify(t("Organización guardada.", "Organization saved."),'success');break;}
     case 'session-form':{const site=inputValue('session-site');await command('import_session',{site});await loadSettingsSection();const saved=preferences.sessions?.some(session=>session.site===site);notify(saved?t("Sesión disponible con protección de Windows.", "Session available with Windows protection."):t("No se ha añadido ninguna sesión.", "No session was added."),saved?'success':'info');break;}
     case 'bridge-form':preferences.pairing=await command<{token:string;port:number}>('bridge_pair',{extensionId:inputValue('extension-id')});await loadSettingsSection();break;

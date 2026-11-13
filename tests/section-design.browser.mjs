@@ -146,6 +146,44 @@ try{
   }
   if(!before){
     await page.locator('[data-page="downloads"]').click();
+    const sidebar = page.getByRole("navigation", { name: "Navegación principal" });
+    const downloadNav = sidebar.getByRole("button", { name: "Descargas" });
+    const sidebarWidth = width => page.waitForFunction(width => Math.abs(document.querySelector(".sidebar").getBoundingClientRect().width - width) < 1, width);
+    assert.equal(await sidebar.locator(".sidebar-header, #toggle-sidebar, .sidebar-mark").count(), 0);
+    for (const [width, height] of [[1180, 780], [900, 620]]) {
+      await page.setViewportSize({ width, height });
+      await page.mouse.move(width - 40, height - 40);
+      await sidebarWidth(64);
+      const mainBounds = await page.locator("#main").boundingBox();
+      const icon = await downloadNav.locator("svg").first().boundingBox();
+      await page.screenshot({ path: `${directory}/sidebar-compact-${width}.png` });
+      await downloadNav.hover();
+      await sidebarWidth(200);
+      assert.equal(await downloadNav.locator(".nav-label").evaluate(label => getComputedStyle(label).opacity), "1");
+      assert.deepEqual(await page.locator("#main").boundingBox(), mainBounds);
+      assert.deepEqual(await downloadNav.locator("svg").first().boundingBox(), icon);
+      await page.mouse.move(150, icon.y + 9);
+      assert.equal((await sidebar.boundingBox()).width, 200);
+      await page.screenshot({ path: `${directory}/sidebar-expanded-${width}.png` });
+      await page.mouse.move(width - 40, height - 40);
+      await sidebarWidth(64);
+    }
+    await page.getByRole("button", { name: "Cerrar", exact: true }).focus();
+    await page.keyboard.press("Tab");
+    assert.equal(await sidebar.getByRole("button", { name: "Inicio" }).evaluate(button => button === document.activeElement), true);
+    await sidebarWidth(200);
+    await page.keyboard.press("Tab");
+    assert.equal(await downloadNav.evaluate(button => button === document.activeElement), true);
+    await page.locator("#job-search").focus();
+    await sidebarWidth(64);
+    await downloadNav.click();
+    await sidebarWidth(64);
+    await page.mouse.move(400, 180);
+    await downloadNav.hover();
+    await sidebarWidth(200);
+    await page.mouse.move(400, 180);
+    await sidebarWidth(64);
+    checks.push("Sidebar expands by pointer or keyboard and keeps the workspace and icons fixed.");
     assert.equal(await page.locator(".job-row").count(),5);
     assert.deepEqual(await page.locator(".job-section-heading h2").allTextContents(),["En curso","En espera","Finalizadas"]);
     assert.equal(await page.getByRole("progressbar", {name:"Un recorrido por la ciudad"}).getAttribute("aria-valuenow"),"43.2");
@@ -154,7 +192,6 @@ try{
     const preview=page.locator(".job-list .row-thumbnail[data-thumbnail-id='clip']");
     await preview.scrollIntoViewIfNeeded();
     await preview.locator("img").waitFor();
-    await page.locator("#toggle-sidebar").click();
     await page.getByRole("button",{name:"Buscar en nabnab"}).click();
     const palette=page.locator(".action-palette");
     const query=palette.getByRole("combobox");
@@ -170,7 +207,6 @@ try{
     assert.equal(await searchButton.evaluate(button=>button===document.activeElement),true);
     assert.equal(await page.locator(".sidebar .nav-item[aria-current='page']").getAttribute("data-page"),"downloads");
     assert.ok(await page.locator(".sidebar").evaluate(sidebar => sidebar.scrollWidth <= sidebar.clientWidth + 1));
-    await page.locator("#toggle-sidebar").click();
     await page.locator("[data-action='job-filter'][data-filter='error']").click();
     assert.equal(await page.locator(".job-row").count(),1);
     await page.locator("[data-action='job-filter'][data-filter='all']").click();

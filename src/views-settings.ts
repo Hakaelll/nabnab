@@ -27,8 +27,6 @@ export function settingsView(snapshot: Snapshot, view: SettingsView, t: Copy, de
           <input id="reduced-motion" type="checkbox" ${settings.reducedMotion ? "checked" : ""}></label>
         <label class="setting-control-row"><span><strong>${t("Reducir transparencias", "Reduce transparency")}</strong><small>${t("Usa superficies opacas, también en la búsqueda.", "Uses opaque surfaces, including in search.")}</small></span>
           <input id="reduced-transparency" type="checkbox" ${settings.reducedTransparency ? "checked" : ""}></label>
-        <label class="setting-control-row"><span><strong>${t("Mostrar etiquetas en la navegación", "Show navigation labels")}</strong></span>
-          <input id="expanded-sidebar" type="checkbox" ${settings.sidebarExpanded ? "checked" : ""}></label>
       </div>
       <div class="settings-save"><button class="button primary" type="submit">${t("Guardar ajustes", "Save settings")}</button></div>
     </form>`; break;

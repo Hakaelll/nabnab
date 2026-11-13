@@ -107,14 +107,14 @@ async function captureWalkthrough() {
   await page.evaluate(()=>{const request=window.fixture.metadata[0];request.resolve({requestId:request.id,title:'Big Buck Bunny · Blender Open Movie',duration:65,thumbnail:'https://example.org/thumbnail-fixture',uploader:'Blender Studio',heights:[1080,720],hasAudio:true,hasVideo:true,entries:[],subtitleLanguages:['en','es'],capabilities:{video:true,audio:true,images:false,batches:false,subtitles:true,verified:false}});});
   await page.locator('#download').waitFor();await page.waitForTimeout(650);await page.locator('#toggle-sidebar').click();await page.waitForTimeout(450);await page.locator('#toggle-sidebar').click();await page.waitForTimeout(450);
   await page.screenshot({path:'artifacts/nabnab/glass-preview-1280-1x.png'});
-  await page.locator('#download').click();await page.locator('[data-page=downloads]').click();
+  await page.locator('#download').click();await page.locator('.nav-item[data-page=downloads]').click();
   assert(await page.locator('#page-content').evaluate(element=>element.getAnimations().length>0),'Pointer navigation has a bounded surface transition');
   await page.keyboard.press('Control+1');assert.equal(await page.locator('#home-page').isVisible(),true);
   assert.equal(await page.locator('#home-content').evaluate(element=>element.getAnimations().length),0,'Keyboard navigation interrupts motion and arrives immediately');
-  await page.locator('[data-page=downloads]').click();await page.waitForTimeout(500);
-  await page.locator('[data-page=library]').click();await page.locator('[data-action=import-files]').first().click();await page.locator('.media-open').nth(2).click();await page.waitForTimeout(700);
-  await page.locator('#inspector [data-action=tool-media]').click();await page.waitForTimeout(550);await page.locator('[data-page=settings]').click();await page.waitForTimeout(550);
-  await page.locator('[data-page=home]').click();await page.waitForTimeout(900);await page.screenshot({path:'artifacts/nabnab/glass-home-1280-1x.png'});
+  await page.locator('.nav-item[data-page=downloads]').click();await page.waitForTimeout(500);
+  await page.locator('.nav-item[data-page=library]').click();await page.locator('[data-action=import-files]').first().click();await page.locator('.media-open').nth(2).click();await page.waitForTimeout(700);
+  await page.locator('#inspector [data-action=tool-media]').click();await page.waitForTimeout(550);await page.locator('.nav-item[data-page=settings]').click();await page.waitForTimeout(550);
+  await page.locator('.nav-item[data-page=home]').click();await page.waitForTimeout(900);await page.screenshot({path:'artifacts/nabnab/glass-home-1280-1x.png'});
   await cdp.send('Page.stopScreencast');await Promise.all(writes);await cdp.detach();assert(frames.length>20,'The video contains actual browser screencast frames');
   const concat=frames.map((frame,index)=>`file '${frame.file}'\nduration ${Math.max(.01,(frames[index+1]?.time??frame.time+.1)-frame.time)}`).join('\n');
   await writeFile(`${frameDir}/frames.ffconcat`,`ffconcat version 1.0\n${concat}\nfile '${frames.at(-1).file}'\n`);
@@ -127,7 +127,7 @@ async function checkPlatformNavigation(){
   const page=await browser.newPage({viewport:{width:1180,height:780}});
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
   await mockPage(page);await page.goto(base);await page.locator('#url').waitFor();
-  await page.locator('[data-page="platforms"]').click();
+  await page.locator('.nav-item[data-page="platforms"]').click();
   for(const id of ['http','telegram','udemy','torrent','youtube','pinterest']){
     await page.locator(`.platform-row[data-id="${id}"]`).click();
     assert.equal(await page.locator('[data-action="platform-back"]').count(),1,`${id} needs one route back to the catalog`);
@@ -143,13 +143,13 @@ async function checkPlatformNavigation(){
   }
   await page.locator('#platform-search').fill('YouTube');
   await page.locator('.platform-row[data-id="youtube"]').click();
-  await page.locator('[data-page="platforms"]').click();
+  await page.locator('.nav-item[data-page="platforms"]').click();
   assert.equal(await page.locator('#platform-search').inputValue(),'YouTube');
-  await page.locator('[data-page="home"]').click();
+  await page.locator('.nav-item[data-page="home"]').click();
   assert.equal(await page.locator('[data-action="paste"]').count(),0);
   assert.equal(await page.locator('.source-actions').innerText(),'Importar');
   assert.equal(await page.locator('.source-actions button').count(),1);
-  await page.screenshot({path:'artifacts/nabnab/home-actions-refined.png'});
+  await page.screenshot({path:process.env.NABNAB_NAV_SCREENSHOT || 'artifacts/nabnab/home-actions-refined.png'});
   await page.locator('[data-action="url-file"]').click();
   assert.ok(await page.evaluate(()=>window.fixture.calls.some(call=>call.cmd==='import_url_file')));
   assert.deepEqual(errors,[]);
@@ -176,10 +176,13 @@ try {
     assert.equal(await page.locator('#field').evaluate(element=>getComputedStyle(element).opacity),'1');
     const inputHeight=(await page.locator('.url-control').boundingBox()).height;assert(inputHeight>=52&&inputHeight<=56);
     await page.screenshot({path:`artifacts/nabnab/home-${width}-${scale}x.png`});
-    await page.locator('#toggle-sidebar').click();assert.equal((await page.locator('.sidebar').boundingBox()).width,64);
+    assert.equal((await page.locator('.sidebar').boundingBox()).width,64);
     await assertNoOverflow(page);assert.deepEqual(await page.locator('#field').boundingBox(),field);
     await page.screenshot({path:`artifacts/nabnab/home-collapsed-${width}-${scale}x.png`});
-    await page.locator('#toggle-sidebar').click();assert.equal((await page.locator('.sidebar').boundingBox()).width,200);
+    await page.locator('.sidebar .nav-item').first().hover();
+    await page.waitForFunction(() => document.querySelector('.sidebar').getBoundingClientRect().width === 200);
+    await page.mouse.move(width-40,height-40);
+    await page.waitForFunction(() => document.querySelector('.sidebar').getBoundingClientRect().width === 64);
     const source=page.locator('#url');
     await page.locator('#source-status').evaluate(element=>window.fixture.statusNode=element);
     const idleBox=await page.locator('.url-control').boundingBox();
@@ -232,7 +235,7 @@ try {
     await page.waitForFunction(()=>window.fixture.calls.some(call=>call.cmd==='queue_download'));
     assert.equal(await page.evaluate(()=>window.fixture.calls.find(call=>call.cmd==='queue_download').args.subtitleLanguage),'es');
     assert.equal(await source.inputValue(),'');
-    await page.locator('[data-page=downloads]').click();await page.locator('.job-row').waitFor();
+    await page.locator('.nav-item[data-page=downloads]').click();await page.locator('.job-row').waitFor();
     assert.equal(await page.locator('#field').evaluate(element=>element.hidden),true);
     await page.waitForTimeout(150);const stoppedFrames=await page.evaluate(()=>window.visualFrames);await page.waitForTimeout(150);assert.equal(await page.evaluate(()=>window.visualFrames),stoppedFrames,'Background animation stops outside Home');
     const focusedJobId=await page.locator('[data-select-job]').first().getAttribute('data-select-job');
@@ -242,7 +245,7 @@ try {
     assert.equal(await page.evaluate(()=>document.activeElement?.getAttribute('data-select-job')),focusedJobId,'Progress rerenders preserve the focused queue checkbox');
     assert.doesNotMatch(await page.locator('.job-row').innerText(),/100(?:\.0)?%/);
     await page.screenshot({path:`artifacts/nabnab/active-downloads-${width}-${scale}x.png`});
-    if(width===1280){await page.locator('#toggle-sidebar').click();await page.screenshot({path:'artifacts/nabnab/active-downloads-collapsed-1280-1x.png'});await page.locator('#toggle-sidebar').click();}
+    if(width===1280){await page.mouse.move(width-40,height-40);await page.screenshot({path:'artifacts/nabnab/active-downloads-collapsed-1280-1x.png'});}
     await page.locator('.row-actions [data-action=cancel-job]').focus();
     await page.locator('.row-actions [data-action=cancel-job]').evaluate(element=>window.fixture.focusedAction=element);
     await page.evaluate(async()=>{const {emit}=await import('/node_modules/@tauri-apps/api/event.js');const item=window.fixture.state.jobs[0];item.updatedAt=Date.now()+20;await emit('job-update',structuredClone(item));});
@@ -271,7 +274,7 @@ try {
       const malformed=await page.evaluate(async()=>{const {errorLabel,errorDetails}=await import('/src/presentation.ts');return [errorLabel({code:1,message:7,technical:false}),errorDetails({code:'x',message:'x',technical:'x',phase:'x',retryable:'yes',retryAfter:-1})];});
       assert.deepEqual(malformed,['[object Object]','[object Object]']);
     }
-    await page.locator('[data-page=library]').click();await page.locator('[data-action=import-files]').first().click();
+    await page.locator('.nav-item[data-page=library]').click();await page.locator('[data-action=import-files]').first().click();
     await page.waitForFunction(()=>document.querySelectorAll('.media-item').length===60);
     assert.equal(await page.locator('.media-item').count(),60);
     assert.match(await page.locator('.media-item').first().innerText(),/No encontrado/);
@@ -300,13 +303,13 @@ try {
     await page.locator('.media-open').nth(2).click();await inspector.locator('[data-action=tool-media]').click();
     await page.locator('[data-action=tool-kind][data-kind=trim]').click();
     await page.locator('#tool-start').fill('2');await page.locator('#tool-end').fill('8');await page.locator('#tool-precise').check();
-    await page.locator('[data-page=downloads]').click();await page.locator('[data-page=tools]').click();assert.equal(await page.locator('#tool-start').inputValue(),'2');
+    await page.locator('.nav-item[data-page=downloads]').click();await page.locator('.nav-item[data-page=tools]').click();assert.equal(await page.locator('#tool-start').inputValue(),'2');
     await assertNoOverflow(page);await page.locator('#main').evaluate(element=>element.scrollTop=0);await page.screenshot({path:`artifacts/nabnab/tools-${width}-${scale}x.png`});
     await page.locator('#tool-form button[type=submit]').click();await page.waitForFunction(()=>window.fixture.calls.some(call=>call.cmd==='queue_tool'));
     const queued=await page.evaluate(()=>window.fixture.calls.find(call=>call.cmd==='queue_tool').args);assert.deepEqual(queued.options,{kind:'trim',start:2,end:8,precise:true});
     if(width===1180&&scale===1){
       for(const [kind,options]of [['convert',{kind:'convert',container:'mkv',videoCodec:'copy',audioCodec:'copy'}],['extractAudio',{kind:'extractAudio',format:'m4a'}],['compress',{kind:'compress',quality:'small',targetMb:12}]]){
-        await page.locator('[data-page=tools]').click();await page.locator(`[data-action=tool-kind][data-kind=${kind}]`).click();
+        await page.locator('.nav-item[data-page=tools]').click();await page.locator(`[data-action=tool-kind][data-kind=${kind}]`).click();
         if(kind==='convert'){await page.locator('#tool-container').selectOption('mkv');await page.locator('#tool-video-codec').selectOption('copy');await page.locator('#tool-audio-codec').selectOption('copy');}
         if(kind==='extractAudio')await page.locator('#tool-audio-format').selectOption('m4a');
         if(kind==='compress'){await page.locator('#tool-compression').selectOption('small');await page.locator('#tool-target').fill('12');}
@@ -315,21 +318,21 @@ try {
         assert.deepEqual(await page.evaluate(()=>window.fixture.calls.filter(call=>call.cmd==='queue_tool').at(-1).args.options),options);
       }
     }
-    await page.locator('[data-page=settings]').click();await page.locator('#language').selectOption('en');await page.locator('#general-settings button[type=submit]').click();
+    await page.locator('.nav-item[data-page=settings]').click();await page.locator('#language').selectOption('en');await page.locator('#general-settings button[type=submit]').click();
     assert.equal(await page.locator('html').getAttribute('lang'),'en');
-    assert.match(await page.locator('[data-page=downloads]').innerText(),/Downloads/);
+    assert.match(await page.locator('.nav-item[data-page=downloads]').innerText(),/Downloads/);
     await page.locator('[data-action=settings-section][data-section=engines]').click();await page.locator('.engine-list li').first().waitFor();
     await assertNoOverflow(page);await page.screenshot({path:`artifacts/nabnab/settings-${width}-${scale}x.png`});
     await page.locator('[data-action=settings-section][data-section=appearance]').click();
     await page.locator('#reduced-transparency').check();await page.locator('#reduced-motion').check();await page.locator('#appearance-settings button[type=submit]').click();
     assert.equal(await page.locator('html').evaluate(element=>element.classList.contains('reduced-transparency')),true);
     assert.equal(await page.evaluate(()=>window.fixture.state.settings.reducedTransparency),true,'Reduced transparency persists through save_settings');
-    await page.locator('[data-page=home]').click();
+    await page.locator('.nav-item[data-page=home]').click();
     assert.equal(await page.locator('.url-control').evaluate(element=>getComputedStyle(element).backdropFilter),'none');
     assert.equal(await page.locator('.url-control').evaluate(element=>getComputedStyle(element).backgroundColor),'rgb(16, 17, 20)');
     await page.waitForTimeout(100);const reducedFrames=await page.evaluate(()=>window.visualFrames);await page.waitForTimeout(120);assert.equal(await page.evaluate(()=>window.visualFrames),reducedFrames);
     if(width===1280)await page.screenshot({path:'artifacts/nabnab/reduced-transparency-1280-1x.png'});
-    await page.locator('[data-page=settings]').click();await page.locator('[data-action=settings-section][data-section=appearance]').click();
+    await page.locator('.nav-item[data-page=settings]').click();await page.locator('[data-action=settings-section][data-section=appearance]').click();
     await page.locator('#reduced-transparency').uncheck();await page.locator('#reduced-motion').uncheck();await page.locator('#appearance-settings button[type=submit]').click();
     await page.locator('[data-action=settings-section][data-section=sessions]').click();
     assert.equal(await page.locator('#session-site').inputValue(),'youtube');
@@ -340,11 +343,11 @@ try {
     assert.equal(await page.locator('#session-site option[value=pinterest]').count(),1);
     await page.locator('[data-action=export-diagnostics]').click();
     assert(await page.evaluate(()=>window.fixture.calls.some(call=>call.cmd==='export_diagnostics')));
-    await page.locator('[data-page=library]').click();
+    await page.locator('.nav-item[data-page=library]').click();
     if(width>=1120||!(await page.locator('#detail-dialog').evaluate(dialog=>dialog.open)))await page.locator('.media-open').nth(2).click();
     await inspector.locator('[data-action=remove-media]').click();
     assert.equal(await page.evaluate(()=>window.fixture.calls.some(call=>/delete_file|trash_file/.test(call.cmd))),false);
-    await page.locator('[data-page=home]').click();
+    await page.locator('.nav-item[data-page=home]').click();
     const metadataCount=await page.evaluate(()=>window.fixture.metadata.length);
     await source.fill('https://example.org/after-enqueue');await source.press('Enter');
     await page.waitForFunction(count=>window.fixture.metadata.length===count+1,metadataCount);
@@ -369,7 +372,7 @@ try {
     await page.waitForFunction(()=>document.querySelector('.preview-media')?.dataset.orientation==='portrait');
     const portraitFrame=await page.locator('.preview-media').boundingBox();assert(Math.abs(portraitFrame.width/portraitFrame.height-900/1600)<.01);assert(portraitFrame.height<=height*.42+1);
     await page.locator('#main').evaluate(element=>element.scrollTop=0);await page.screenshot({path:`artifacts/nabnab/portrait-${width}-${scale}x.png`});await assertNoOverflow(page);
-    if(width===1280){await page.locator('#toggle-sidebar').click();await page.screenshot({path:'artifacts/nabnab/portrait-collapsed-1280-1x.png'});await page.locator('#toggle-sidebar').click();}
+    if(width===1280){await page.mouse.move(width-40,height-40);await page.screenshot({path:'artifacts/nabnab/portrait-collapsed-1280-1x.png'});}
     assert.deepEqual(errors,[]);
     results.push({width,height,scale,checks:'IPC UI fixtures: full-window field, natural thumbnail ratios, complete CTA, metadata/subtitle reset races, explicit subtitle enqueue, audio/batch exclusions, stable polite status, keyboard focus, last-page focus, phases, stale run, cancel, bounded 1000-item pagination, library organization, tool options, language, sessions, reduced motion/transparency persistence, diagnostics, safe removal'});
     await page.close();
