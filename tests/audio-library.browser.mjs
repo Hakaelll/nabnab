@@ -359,6 +359,7 @@ try {
   assert.equal(await originalReference.isChecked(), true);
   await localRecording.press("Space");
   assert.ok(await comparison.evaluate(panel => panel.scrollWidth <= panel.clientWidth + 1));
+  await comparison.locator(".audio-match-candidates").evaluate(rows => rows.scrollIntoView({ block: "center" }));
   const [first, second, transport] = await comparison.evaluate(panel => {
     const options = [...panel.querySelectorAll(".audio-match-candidates label")].map(option => option.getBoundingClientRect().toJSON());
     return [...options, document.querySelector("#audio-player").getBoundingClientRect().toJSON()];
@@ -369,6 +370,12 @@ try {
   await page.setViewportSize({width:1180,height:780});
   await page.locator("#main").evaluate(main => { main.scrollTop = 0; });
   await page.screenshot({path:`${directory}/playlist-matching.png`});
+  const unmatchedImport = page.locator('.audio-import-rows li[value="2"]');
+  await unmatchedImport.getByText("Buscar en Biblioteca", { exact: true }).press("Enter");
+  const importSearch = unmatchedImport.getByRole("searchbox");
+  await importSearch.fill("Second.mp3");
+  await unmatchedImport.getByRole("radio", { name: /Segunda pista.*Rafael/ }).press("Space");
+  await unmatchedImport.getByRole("radio", { name: "Conservar referencia original" }).press("Space");
   await page.getByRole("button", {name:"Preparar lista",exact:true}).click();
   await page.getByRole("button", {name:"Guardar lista",exact:true}).click();
   await page.getByRole("heading", {name:"Lista exportada",exact:true}).waitFor();
@@ -435,9 +442,39 @@ try {
   await originalRecording.getByText("Sonia · En directo · 0:10 · Archivo ausente", { exact: true }).waitFor();
   assert.equal(await prepareChanges.isDisabled(), true);
   assert.deepEqual(await readSavedPlaylist(), rematched);
+  for (const [width, height] of [[900, 620], [1180, 780]]) {
+    await page.setViewportSize({ width, height });
+    await originalRecording.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `${directory}/playlist-manual-before-${width}.png` });
+  }
+  await originalRecording.getByText("Buscar en Biblioteca", { exact: true }).press("Enter", { timeout: 3000 });
+  const localSearch = originalRecording.getByRole("searchbox", { name: "Buscar por título, artista, álbum o archivo" });
+  await localSearch.fill("ninguna grabación de prueba");
+  await originalRecording.getByText("No hay grabaciones disponibles con esa búsqueda.", { exact: true }).waitFor();
+  await localSearch.fill("zeta improvisacion");
+  const manualRecording = originalRecording.getByRole("radio", { name: /Improvisación.*Zeta/ });
+  await manualRecording.press("Space");
+  assert.ok(await manualRecording.isChecked());
+  assert.ok(await manualRecording.evaluate(input => input === document.activeElement));
+  await localSearch.fill("rafael");
+  assert.ok(await manualRecording.isChecked(), "The chosen recording stays visible when the query changes");
+  assert.ok(await originalRecording.getByRole("radio", { name: /Segunda pista.*Rafael/ }).isVisible());
+  assert.deepEqual(await readSavedPlaylist(), rematched);
+  for (const [width, height] of [[900, 620], [1180, 780]]) {
+    await page.setViewportSize({ width, height });
+    assert.ok(await originalRecording.evaluate(row => row.scrollWidth <= row.clientWidth + 1));
+    await originalRecording.locator(".audio-match-candidates").evaluate(rows => rows.scrollIntoView({ block: "center" }));
+    assert.ok(await originalRecording.locator(".audio-match-candidates").evaluate(rows => rows.getBoundingClientRect().bottom <= document.querySelector("#audio-player").getBoundingClientRect().top));
+    await page.screenshot({ path: `${directory}/playlist-manual-${width}.png` });
+  }
+  await prepareChanges.press("Enter");
+  await page.getByRole("button", { name:"Guardar lista", exact:true }).press("Enter");
+  await page.waitForFunction(id => window.audioFixture.state.audioPlaylists.find(list => list.id === id).entries[0].id === "notebook", imported.id);
+  assert.deepEqual((await readSavedPlaylist()).entries, [{ ...rematched.entries[0], id: "notebook" }, ...rematched.entries.slice(1)]);
+  await reviewReferences.press("Enter");
   await closeReview.press("Enter");
   await originalRecordingMissing(false);
-  await page.locator(".audio-list-entries").getByText("Tercera pista", { exact: true }).waitFor();
+  await page.locator(".audio-list-entries").getByText("Improvisación", { exact: true }).waitFor();
 
   await page.evaluate(async () => {
     window.audioFixture.state.audioPlaylists.push({

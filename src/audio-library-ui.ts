@@ -4,7 +4,7 @@ import { escapeHtml as h, type Copy, type LibraryItem, type Snapshot } from "./c
 import { detailsFor } from "./library-features";
 import type { AudioPlaylist, AudioPlaylistEntry, AudioTags, Chapter, LibraryDetails, Lyric } from "./library-types";
 import { audiobookChapterComplete, audiobookResumePosition, chapterAt, isPlayable } from "./playback-preferences";
-import { durationLabel, errorLabel } from "./presentation";
+import { durationLabel, errorLabel, searchKey } from "./presentation";
 import { action, icon, option, type Icon } from "./views-common";
 
 type Category = "music" | "podcasts" | "books" | "playlists";
@@ -136,6 +136,13 @@ export function createAudioLibrary(hooks: Hooks) {
   let milliseconds = false;
   let importPage = 0;
   const resolutions = new Map<number, string>();
+  const matchQueries = new Map<number, string>();
+
+  function resetMatchReview() {
+    resolutions.clear();
+    matchQueries.clear();
+    importPage = 0;
+  }
 
   const items = () => hooks.snapshot().library.filter(item => item.kind === "audio");
   const itemFor = (id: string) => hooks.snapshot().library.find(item => item.id === id && item.kind === "audio");
@@ -488,10 +495,10 @@ export function createAudioLibrary(hooks: Hooks) {
         <button class="button primary" type="submit" ${busy || mapping.id === undefined && mapping.title === undefined && mapping.locator === undefined ? "disabled" : ""}>${t("Buscar coincidencias locales", "Find local matches")}</button></form></section>`;
     }
     const start = importPage * 40;
-    const filePaths = new Map(hooks.snapshot().library.filter(item => item.kind === "audio" && !item.missing).map(item => [item.id, item.path]));
-    const reviewRows = preview.rows.map((row, index) => ({row, index, local: row.entry.kind === "local" && filePaths.has(row.entry.id)}))
+    const localFiles = new Map(items().filter(item => !item.missing).map(item => [item.id, item]));
+    const reviewRows = preview.rows.map((row, index) => ({row, index, local: row.entry.kind === "local" && localFiles.has(row.entry.id)}))
       .filter(({local}) => !rematching || !local);
-    const unresolved = reviewRows.filter(({index, local}) => !local && !resolutions.has(index)).length;
+    const unresolved = reviewRows.filter(({index, local}) => !local && !localFiles.has(resolutions.get(index) ?? "")).length;
     const count = preview.rows.length === 1 ? t("1 entrada", "1 entry") : t(`${preview.rows.length} entradas`, `${preview.rows.length} entries`);
     const pending = unresolved === 1 ? t("1 referencia remota o ausente", "1 remote or missing reference")
       : t(`${unresolved} referencias remotas o ausentes`, `${unresolved} remote or missing references`);
@@ -499,21 +506,51 @@ export function createAudioLibrary(hooks: Hooks) {
       ${reviewRows.length ? "" : `<p class="field-note">${t("Todas las grabaciones de esta lista están disponibles.", "All recordings in this playlist are available.")}</p>`}
       <ol class="audio-rows audio-import-rows" start="${start + 1}">${reviewRows.slice(start, start + 40).map(({row, index, local}) => {
         const selected = resolutions.get(index);
-        const original = selected ? t("Copia local elegida", "Local copy chosen")
+        const chosenFile = selected ? localFiles.get(selected) : undefined;
+        const original = chosenFile ? t("Copia local elegida", "Local copy chosen")
+          : selected ? t("La copia elegida ya no está disponible", "Chosen copy is no longer available")
           : local ? t("Archivo local", "Local file") : row.entry.kind === "remote" ? t("URL remota", "Remote URL") : t("Archivo ausente", "Missing file");
         const metadata = [row.artist, row.version, row.duration === null ? "" : durationLabel(row.duration), original].filter(Boolean).join(" · ");
-        const count = row.candidates.length;
-        const radio = (optionIndex: number, id: string) => `<input type="radio" id="audio-match-${index}-${optionIndex}" name="audio-match-${index}" data-audio-match="${index}" value="${h(id)}" ${id === (selected ?? "") ? "checked" : ""} ${disabled()}>`;
+        const suggestions = row.candidates.filter(candidate => localFiles.has(candidate.id));
+        const query = matchQueries.get(index) ?? "";
+        const terms = searchKey(query).trim().split(/\s+/).filter(Boolean);
+        const fromLibrary = (item: LibraryItem): Candidate => ({
+          id: item.id, title: audioTitle(item), artist: item.details?.audio?.artist ?? item.details?.creator ?? null,
+          album: item.details?.audio?.album ?? null, duration: item.duration, versionMatches: false,
+        });
+        const matches: Candidate[] = [];
+        if (terms.length) {
+          for (const item of localFiles.values()) {
+            const candidate = fromLibrary(item);
+            const text = searchKey([candidate.title, candidate.artist, candidate.album, item.name].join(" "));
+            if (terms.every(term => text.includes(term))) matches.push(candidate);
+            if (matches.length === 9) break;
+          }
+        }
+        const candidates = terms.length ? matches.slice(0, 8) : suggestions;
+        if (chosenFile && !candidates.some(candidate => candidate.id === chosenFile.id)) {
+          candidates.unshift(suggestions.find(candidate => candidate.id === chosenFile.id) ?? fromLibrary(chosenFile));
+        }
+        const summary = suggestions.length === 1 ? t("Revisar grabación local", "Review local recording")
+          : suggestions.length ? `${suggestions.length} ${t("grabaciones locales para comparar", "local recordings to compare")}`
+          : t("Buscar en Biblioteca", "Search Library");
+        const radio = (id: string) => `<input type="radio" id="audio-match-${index}-${id ? `file-${h(id)}` : "original"}" name="audio-match-${index}" data-audio-match="${index}" value="${h(id)}" ${id === (selected ?? "") ? "checked" : ""} ${disabled()}>`;
+        const searchLabel = t("Buscar por título, artista, álbum o archivo", "Search by title, artist, album, or filename");
         return `<li class="audio-playlist-entry" value="${index + 1}"><span>${index + 1}</span><div><strong id="audio-import-title-${index}">${h(row.entry.title)}</strong><small>${h(metadata)}</small></div>
-          ${count ? `<details class="audio-match" id="audio-import-match-${index}"><summary id="audio-match-summary-${index}" aria-describedby="audio-import-title-${index}">${count === 1 ? t("Revisar grabación local", "Review local recording") : `${count} ${t("grabaciones locales para comparar", "local recordings to compare")}`}</summary>
+          ${!local ? `<details class="audio-match" id="audio-import-match-${index}"><summary id="audio-match-summary-${index}" aria-describedby="audio-import-title-${index}">${summary}</summary>
             <fieldset><legend class="sr-only">${h(t("Grabaciones locales para ", "Local recordings for ") + row.entry.title)}</legend>
-              <label class="audio-match-option">${radio(0, "")}<span>${t("Conservar referencia original", "Keep original reference")}</span></label>
-              <div class="audio-match-candidates">${row.candidates.map((candidate, candidateIndex) => {
+              <label class="audio-match-option">${radio("")}<span>${t("Conservar referencia original", "Keep original reference")}</span></label>
+              <label class="search-control audio-match-search">${icon("search")}<input type="search" id="audio-match-search-${index}" data-match-query="${index}"
+                value="${h(query)}" placeholder="${searchLabel}" aria-label="${searchLabel}" maxlength="180" ${disabled()}></label>
+              <div class="audio-match-candidates">${candidates.map(candidate => {
                 const details = [candidate.artist, candidate.album, candidate.duration === null ? "" : durationLabel(candidate.duration), candidate.versionMatches ? t("Coincide el texto de la versión", "Version text matches") : ""].filter(Boolean).join(" · ");
-                const filePath = filePaths.get(candidate.id);
-                return `<label class="audio-match-option">${radio(candidateIndex + 1, candidate.id)}<span><strong>${h(candidate.title)}</strong>${details ? `<small>${h(details)}</small>` : ""}${filePath ? `<small class="audio-match-path" dir="auto">${h(filePath)}</small>` : ""}</span></label>`;
+                const filePath = localFiles.get(candidate.id)?.path;
+                return `<label class="audio-match-option">${radio(candidate.id)}<span><strong>${h(candidate.title)}</strong>${details ? `<small>${h(details)}</small>` : ""}${filePath ? `<small class="audio-match-path" dir="auto">${h(filePath)}</small>` : ""}</span></label>`;
               }).join("")}</div>
-            </fieldset></details>` : rematching ? `<small class="field-note">${t("Sin coincidencias locales", "No local matches")}</small>` : ""}</li>`;
+              ${terms.length && !matches.length ? `<p class="field-note" role="status">${t("No hay grabaciones disponibles con esa búsqueda.", "No available recordings match this search.")}</p>` : ""}
+              ${matches.length > 8 ? `<p class="field-note" role="status">${t("Acota la búsqueda para ver otras grabaciones.", "Narrow the search to see other recordings.")}</p>` : ""}
+            </fieldset></details>` : ""}
+          ${!local && !suggestions.length && !selected ? `<small class="field-note">${t("Sin coincidencias locales", "No local matches")}</small>` : ""}</li>`;
       }).join("")}</ol>
       ${reviewRows.length > 40 ? `<div class="library-pagination"><span>${start + 1}–${Math.min(reviewRows.length, start + 40)} / ${reviewRows.length}</span>
         ${action("audio-import-back", t("Anterior", "Previous"), undefined, "quiet", importPage ? disabled() : "disabled")}
@@ -798,8 +835,7 @@ export function createAudioLibrary(hooks: Hooks) {
         if (!preview) return;
         imported = preview;
         mapping = {};
-        resolutions.clear();
-        importPage = 0;
+        resetMatchReview();
         if (preview.kind === "csv") {
           const labels = preview.columns.map(name => name.trim().toLocaleLowerCase().replace(/[ _-]/g, ""));
           for (const field of columns) {
@@ -814,14 +850,13 @@ export function createAudioLibrary(hooks: Hooks) {
           const preview = await hooks.command<ImportPreview>("audio_playlist_rematch", { listId: list.id });
           await hooks.refresh();
           imported = preview;
-          resolutions.clear();
-          importPage = 0;
+          resetMatchReview();
         });
         document.getElementById("audio-import-heading")?.focus();
       } break;
       case "audio-cancel-import": {
         const saved = imported?.kind === "list" && imported.listId !== undefined;
-        imported = null; resolutions.clear(); hooks.render();
+        imported = null; resetMatchReview(); hooks.render();
         if (saved) document.querySelector<HTMLElement>('[data-action="audio-rematch-list"]')?.focus();
       } break;
       case "audio-import-back": importPage = Math.max(0, importPage - 1); hooks.render(); break;
@@ -830,19 +865,19 @@ export function createAudioLibrary(hooks: Hooks) {
         const preview = imported;
         if ([...resolutions.values()].some(id => {
           const item = itemFor(id);
-          return !item || item.missing;
+          return !isPlayable(item);
         })) {
           hooks.notify(t("Una grabación elegida ya no está disponible.", "A chosen recording is no longer available."), "error");
           break;
         }
         const entries = preview.rows.map<AudioPlaylistEntry>((row, index) => {
-          const chosen = row.candidates.find(candidate => candidate.id === resolutions.get(index));
+          const chosen = resolutions.get(index);
           if (!chosen) return row.entry;
           const { title, hints } = row.entry;
-          return { kind: "local", id: chosen.id, title, ...(hints ? { hints } : {}) };
+          return { kind: "local", id: chosen, title, ...(hints ? { hints } : {}) };
         });
         editing = { id: preview.listId ?? null, name: preview.name, entries };
-        imported = null; resolutions.clear();
+        imported = null; resetMatchReview();
         hooks.render(); document.getElementById("audio-playlist-name")?.focus();
       } break;
       case "audio-edit-list": if (list) { editing = { id: list.id, name: list.name, entries: [...list.entries] }; hooks.render(); } break;
@@ -923,6 +958,11 @@ export function createAudioLibrary(hooks: Hooks) {
     const view = views[category];
     const { selected, tags } = view;
     if (element instanceof HTMLInputElement) {
+      if (element.dataset.matchQuery !== undefined) {
+        matchQueries.set(Number(element.dataset.matchQuery), element.value);
+        hooks.render();
+        return true;
+      }
       if (element.dataset.audioMatch !== undefined) {
         if (element.checked) {
           const index = Number(element.dataset.audioMatch);
@@ -1006,8 +1046,7 @@ export function createAudioLibrary(hooks: Hooks) {
     category = "playlists";
     imported = preview;
     editing = null;
-    resolutions.clear();
-    importPage = 0;
+    resetMatchReview();
     hooks.render();
   }
 
