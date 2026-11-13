@@ -1285,7 +1285,7 @@ fn main() {
             personal_servers::personal_server_copy,
             transcription::remove_transcription_model, transcription::transcription_models, transcription::install_transcription_model,
             courses::members::save_course_token, courses::members::inspect_member_course, courses::inspect_course, courses::queue_course_assets, courses::list_courses, courses::import_local_course, courses::course_learned, courses::save_course_note,
-            courses::browser::open_course_site, courses::browser::course_manual_outline, courses::browser::rename_course_outline_titles, courses::browser::preview_course_materials,
+            courses::browser::open_course_site, courses::browser::open_course_lesson, courses::browser::course_manual_outline, courses::browser::rename_course_outline_titles, courses::browser::preview_course_materials,
             courses::browser::discard_course_materials, courses::browser::import_course_materials,
             courses::coursera::inspect_coursera_course,
             courses::resources::review_skillshare_resources,

@@ -34,7 +34,7 @@ const setup = `
       }
       return structuredClone(state);
     }
-    if (cmd === "open_course_site") return;
+    if (cmd === "open_course_site" || cmd === "open_course_lesson") return;
     if (cmd === "inspect_coursera_course") {
       if (args.token === "expired-fixture") throw Error("Coursera Business returned HTTP 401.");
       const course = {
@@ -633,6 +633,27 @@ try {
   await page.locator(".course-study .course-playback").getByText(/Guardado en 0:18/).waitFor();
   await page.getByText("Nota guardada antes de mover el audio.").waitFor();
   assert.deepEqual(await page.evaluate(() => window.courseFixture.calls.filter(call => call.cmd === "locate_media").map(call => call.args.id)), ["lesson-audio", "lesson-audio"]);
+  await page.evaluate(() => {
+    window.courseFixture.courses.push({
+      id: "linked-fixture", provider: "rocketseat", title: "Aula de prueba",
+      url: "https://app.rocketseat.com.br/classroom/git", createdAt: 1,
+      sections: [{ id: "outline-section-fixture", title: "Git", lessons: [
+        { id: "outline-lesson-linked", title: "Primer paso", learned: false, notes: [], assets: [],
+          sourceUrl: "https://app.rocketseat.com.br/classroom/git/group/intro/lesson/primero" },
+        { id: "outline-lesson-next", title: "Ejercicio local", learned: false, notes: [], assets: [] },
+      ] }],
+    });
+  });
+  await page.getByRole("button", { name: "Todos los cursos" }).click();
+  await page.locator('[data-page="home"]').click();
+  await page.locator('[data-page="platforms"]').click();
+  await page.locator('[data-action="open-courses"]').first().click();
+  await page.locator('[data-action="course-open"][data-id="linked-fixture"]').click();
+  await page.getByRole("button", { name: "Abrir lección en Rocketseat", exact: true }).press("Enter");
+  assert.deepEqual(await page.evaluate(() => window.courseFixture.calls.filter(call => call.cmd === "open_course_lesson").map(call => call.args)),
+    [{ courseId: "linked-fixture", lessonId: "outline-lesson-linked" }]);
+  await page.getByRole("button", { name: "Ejercicio local", exact: true }).click();
+  assert.equal(await page.getByRole("button", { name: "Abrir lección en Rocketseat", exact: true }).count(), 0);
   assert.deepEqual(errors, []);
   console.log("Browser-assisted import, Skillshare attachment queueing and Coursera Business outline review passed at two widths.");
 } finally {

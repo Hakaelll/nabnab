@@ -63,6 +63,10 @@ Puedes añadir adjuntos a cada lección desde la vista de estudio. En Domestika 
 
 Abre una lección y pulsa **Editar títulos** para corregir el nombre de la lección o de su unidad. Se conservan las notas, el estado de aprendizaje, los archivos vinculados y su posición de reproducción. El formulario **Temario manual** se actualiza con los títulos guardados y permite reordenar las entradas. Cada título nuevo que añadas desde ese formulario crea una entrada y los elementos que omitas se conservan al final.
 
+En Domestika y en un aula de Rocketseat puedes usar **Añadir enlace de lección**. Pega el enlace oficial de la lección del mismo curso y guarda. **Abrir lección en Domestika** o **Abrir lección en Rocketseat** te lleva a esa página en el navegador del sistema. nabnab guarda la ruta de la lección y descarta los parámetros y el fragmento del enlace. Puedes corregirlo o retirarlo desde **Editar títulos**. Si la plataforma pide iniciar sesión, hazlo en el navegador. [Temario de ejemplo en Domestika](https://www.domestika.org/en/courses/262-creative-drawing-techniques-for-beginners/course) · [Página de lección de Rocketseat](https://app.rocketseat.com.br/classroom/jornada-primeira-vaga-01/group/jornada-primeira-vaga-01/lesson/land-aula-01-como-comecar-na-programacao)
+
+![Enlace oficial integrado en la vista de estudio con datos de prueba](course-official-lesson-link.png)
+
 ![Edición de los títulos de una unidad y una lección en Windows con datos de prueba](course-outline-titles.png)
 
 ![Revisión de un temario manual de Domestika con datos de prueba](course-manual-outline.png)

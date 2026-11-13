@@ -132,6 +132,50 @@ pub fn open_course_site(provider: String, url: String) -> Result<(), String> {
     crate::cloud_storage::browser(link.page.as_str())
 }
 
+pub(super) fn lesson_page(provider: &str, course: &str, input: &str) -> Option<Url> {
+    let course = CourseLink::selected(provider, course).ok()?;
+    let input = input.trim();
+    let source = CourseLink::selected(provider, input).ok()?;
+    if source.id != course.id {
+        return None;
+    }
+    let original = Url::parse(input).ok()?;
+    let tail = original.path().trim_end_matches('/').strip_prefix(source.page.path())?;
+    let markers: Vec<_> = tail.strip_prefix('/')?.split('/').collect();
+    let valid = match (provider, markers.as_slice()) {
+        ("domestika", ["units", unit, "lessons", lesson]) => {
+            slug(unit) && slug(lesson)
+                && unit.split_once('-').and_then(|(id, _)| number(id)).is_some()
+                && lesson.split_once('-').and_then(|(id, _)| number(id)).is_some()
+        }
+        ("rocketseat", ["group", unit, "lesson", lesson]) =>
+            source.page.path().starts_with("/classroom/") && slug(unit) && slug(lesson),
+        _ => false,
+    };
+    if !valid {
+        return None;
+    }
+    let mut page = source.page;
+    page.set_path(&format!("{}{tail}", page.path()));
+    Some(page)
+}
+
+#[tauri::command]
+pub fn open_course_lesson(state: State<'_, Arc<AppState>>, course_id: String, lesson_id: String) -> Result<(), String> {
+    let page = {
+        let guard = state.repository.lock().unwrap();
+        let repo = guard.as_ref().ok_or("Open the app first.")?;
+        let course = repo.data.courses.iter().find(|course| course.id == course_id)
+            .ok_or("Open the saved course first.")?;
+        let lesson = course.sections.iter().flat_map(|unit| &unit.lessons).find(|lesson| lesson.id == lesson_id)
+            .ok_or("Choose a saved lesson.")?;
+        course.url.as_deref().zip(lesson.source_url.as_deref())
+            .and_then(|(course_url, source)| lesson_page(&course.provider, course_url, source))
+            .ok_or("Add an official lesson link first.")?
+    };
+    crate::cloud_storage::browser(page.as_str())
+}
+
 const OUTLINE_SECTION: &str = "outline-section-";
 const OUTLINE_LESSON: &str = "outline-lesson-";
 
@@ -180,9 +224,11 @@ fn outline_sections(text: &str, previous: Option<&Course>) -> Result<Vec<CourseS
         } else {
             let section = sections.last_mut().ok_or_else(invalid)?;
             if !used.insert((Some(section.id.clone()), key.clone())) { return Err(format!("Duplicate lesson on line {}.", index + 1)); }
-            let id = saved_lessons.get(&(section.id.as_str(), key.clone())).map(|lesson| lesson.id.clone())
+            let previous = saved_lessons.get(&(section.id.as_str(), key.clone()));
+            let id = previous.map(|lesson| lesson.id.clone())
                 .unwrap_or_else(|| new_outline_id(OUTLINE_LESSON, &format!("{}:{key}", section.id), &mut occupied));
-            section.lessons.push(CourseLesson { id, title: title.into(), learned: false, assets: Vec::new(), notes: Vec::new() });
+            section.lessons.push(CourseLesson { id, title: title.into(), learned: false, assets: Vec::new(), notes: Vec::new(),
+                source_url: previous.and_then(|lesson| lesson.source_url.clone()) });
             lessons += 1;
         }
         if sections.len() > 50 || lessons > 400 { return Err("Use up to 50 units and 400 lessons.".into()); }
@@ -223,6 +269,7 @@ pub fn course_manual_outline(
 #[tauri::command]
 pub fn rename_course_outline_titles(
     state: State<'_, Arc<AppState>>, course_id: String, lesson_id: String, unit_title: String, lesson_title: String,
+    source_url: Option<String>,
 ) -> Result<(), String> {
     let unit_title = unit_title.trim();
     let lesson_title = lesson_title.trim();
@@ -245,6 +292,13 @@ pub fn rename_course_outline_titles(
     }) {
         return Err("duplicate-course-unit-title".into());
     }
+    let link = match source_url.as_deref().map(str::trim) {
+        None => course.sections[unit_index].lessons[lesson_index].source_url.clone(),
+        Some("") => None,
+        Some(input) => Some(course.url.as_deref()
+            .and_then(|course_url| lesson_page(&course.provider, course_url, input))
+            .ok_or("invalid-course-lesson-url")?.to_string()),
+    };
     let unit = &mut course.sections[unit_index];
     let lesson_key = lesson_title.to_lowercase();
     if unit.lessons.iter().enumerate().any(|(index, lesson)| {
@@ -254,6 +308,7 @@ pub fn rename_course_outline_titles(
     }
     unit.title = unit_title.into();
     unit.lessons[lesson_index].title = lesson_title.into();
+    unit.lessons[lesson_index].source_url = link;
     save_course(repo, course)?;
     Ok(())
 }
@@ -565,6 +620,7 @@ fn material_sections(items: Vec<&library::LibraryItem>) -> Vec<CourseSection> {
             lesson.assets.push(local_asset(item));
         } else {
             section.lessons.push(CourseLesson {
+                source_url: None,
                 id: lesson_id,
                 title: label(title, 240),
                 learned: false,
@@ -713,6 +769,7 @@ fn import_selected(
                 entry.assets.extend(additions.into_iter().map(local_asset));
             } else {
                 section.lessons.push(CourseLesson {
+                    source_url: None,
                     id,
                     title: "Unit resources".into(),
                     learned: false,
@@ -994,6 +1051,7 @@ mod tests {
             sections: vec![CourseSection {
                 id: "coursera-module-fixture".into(), title: "First module".into(),
                 lessons: vec![CourseLesson {
+                    source_url: None,
                     id: "coursera-lesson-fixture".into(), title: "First lesson".into(),
                     learned: true, notes: Vec::new(), assets: Vec::new(),
                 }],

@@ -261,6 +261,7 @@ fn register(
                 Some(index) => index,
                 None => {
                     section.lessons.push(CourseLesson {
+                        source_url: None,
                         id,
                         title: resource.filename.clone(),
                         learned: false,
@@ -514,6 +515,7 @@ mod tests {
                 id: "unit-2".into(),
                 title: "Unit 2".into(),
                 lessons: vec![CourseLesson {
+                    source_url: None,
                     id: "lesson-2".into(),
                     title: "Build the design".into(),
                     learned: true,

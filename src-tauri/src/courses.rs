@@ -56,6 +56,8 @@ pub struct CourseLesson {
     pub assets: Vec<CourseAsset>,
     #[serde(default)]
     pub notes: Vec<CourseNote>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_url: Option<String>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -131,6 +133,10 @@ impl Course {
                     || lesson.title.len() > 4096
                     || lesson.assets.len() > 100
                     || lesson.notes.len() > 100
+                    || lesson.source_url.as_deref().is_some_and(|url| {
+                        self.url.as_deref().and_then(|course| browser::lesson_page(&self.provider, course, url))
+                            .is_none_or(|canonical| canonical.as_str() != url)
+                    })
                 {
                     return Err("The saved course has an invalid lesson.".into());
                 }
@@ -241,6 +247,7 @@ fn local_course(root: &Path, items: &[library::LibraryItem]) -> Result<Course, S
                 });
             }
             lessons.push(CourseLesson {
+                source_url: None,
                 id: format!("lesson-{}", item.id),
                 title: item
                     .path
@@ -851,6 +858,7 @@ fn parse_udemy_course(
             .ok_or("Missing course section.")?
             .lessons
             .push(CourseLesson {
+                source_url: None,
                 id: format!("lesson-{id}"),
                 title,
                 learned: false,

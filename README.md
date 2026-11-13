@@ -37,7 +37,7 @@ The two desktop shortcuts are listed in **Settings → General → Desktop playb
 
 ### Study offline
 
-Open **Platforms → Courses** to organize lessons and keep notes, progress, and playback position together. Create an outline for Rocketseat, Domestika, or Skillshare. In a lesson, use **Edit titles** to rename the lesson or its unit while keeping its study history, or choose **Link audio or video** to attach a saved recording. Domestika resources can sit alongside the lessons in their unit. Skillshare can also review supported direct attachment links. [Edit titles](docs/course-outline-titles.png) · [Link a recording](docs/course-lesson-recording.png)
+Open **Platforms → Courses** to organize lessons and keep notes, progress, and playback position together. Create an outline for Rocketseat, Domestika, or Skillshare. Save an official Domestika or Rocketseat classroom lesson link to open that lesson in your browser session. Use **Link audio or video** to attach a saved recording. Skillshare can also review supported direct attachment links. [Courses guide](docs/COURSES.md) · [Link a recording](docs/course-lesson-recording.png)
 
 Search the course by unit, lesson, or attachment name, including units you have collapsed. When you open a different lesson, the course can offer to resume your most recent unfinished audio or video lesson from its saved position, even after a restart. If a file you moved is still indexed in Library, use **Locate file** from the lesson to recover it and keep your notes and saved position. [Course search](docs/course-search.png) · [Lesson resume](docs/course-resume.png) · [Moved material](docs/course-moved-material.png)
 

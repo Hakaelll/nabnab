@@ -140,8 +140,16 @@ try {
   await page.locator("#course-titles-form").getByRole("button", { name: "Cancelar", exact: true }).press("Enter");
   const edit = page.getByRole("button", { name: "Editar títulos", exact: true });
   assert.ok(await edit.evaluate(element => document.activeElement === element));
-  await edit.press("Enter");
+  const addSource = page.getByRole("button", { name: "Añadir enlace de lección", exact: true });
+  await addSource.press("Enter");
   assert.equal(await lessonTitle.inputValue(), "Preparar el material");
+  const lessonLink = page.getByLabel("Enlace oficial de la lección", { exact: true });
+  assert.ok(await lessonLink.evaluate(element => document.activeElement === element));
+  const official = `${url}/units/32-taller/lessons/44-preparar`;
+  await lessonLink.fill("https://www.domestika.org/es/courses/25-otro/units/32-taller/lessons/44-preparar");
+  await page.getByRole("button", { name: "Guardar títulos", exact: true }).press("Enter");
+  await page.getByRole("alert").filter({ hasText: "Usa un enlace de lección de este mismo curso." }).waitFor();
+  await lessonLink.fill(official + "?token=fixture#anchor");
   await unitTitle.fill("Cierre");
   await lessonTitle.fill("Preparación del material");
   await page.getByRole("button", { name: "Guardar títulos", exact: true }).press("Enter");
@@ -162,11 +170,20 @@ try {
   await renamedHeading.waitFor();
   assert.ok(await renamedHeading.evaluate(element => element === document.activeElement));
   assert.equal(await page.getByText("Nota de estudio", { exact: true }).count(), 1);
+  const source = page.getByRole("button", { name: "Abrir lección en Domestika", exact: true });
+  await source.waitFor();
+  for (const [width, height] of [[900, 620], [1180, 780]]) {
+    await page.setViewportSize({ width, height });
+    await source.scrollIntoViewIfNeeded();
+    assert.ok(await page.locator(".course-study").evaluate(node => node.scrollWidth <= node.clientWidth + 1));
+    if (process.env.NABNAB_NATIVE_COURSE_ARTIFACTS) await page.screenshot({ path: path.join(artifacts, `course-lesson-link-${width}.png`), animations: "disabled" });
+  }
   const reordered = await rpc("course_manual_outline", { ...request, save: true, text: "# Taller de preparación\nPreparación del material\nCrear una muestra\nPreparar el material\n\n# Unidad práctica\nPresentación" });
   assert.equal(reordered.sections[0].id, course.sections[0].id);
   assert.equal(reordered.sections[0].lessons[0].id, lessonId);
   assert.equal(reordered.sections[0].lessons[0].notes[0].text, "Nota de estudio");
   assert.equal(reordered.sections[0].lessons[0].learned, true);
+  assert.equal(reordered.sections[0].lessons[0].sourceUrl, official);
   assert.notEqual(reordered.sections[0].lessons[2].id, lessonId);
   assert.notEqual(reordered.sections[1].id, course.sections[0].id);
 
@@ -181,6 +198,17 @@ try {
   assert.equal(skillRenamed.sections[0].lessons[0].assets[0].id, skillUpdated.sections[0].lessons[1].assets[0].id);
   const rocket = await rpc("course_manual_outline", { ...request, provider: "rocketseat", url: "https://app.rocketseat.com.br/classroom/git?token=fixture", save: true });
   assert.equal(rocket.url, "https://app.rocketseat.com.br/classroom/git");
+  const rocketLesson = rocket.sections[0].lessons[0];
+  const rocketEdit = { courseId: rocket.id, lessonId: rocketLesson.id, unitTitle: rocket.sections[0].title, lessonTitle: rocketLesson.title };
+  const rocketPage = `${rocket.url}/group/introducao/lesson/primeiro-passo`;
+  await assert.rejects(rpc("rename_course_outline_titles", { ...rocketEdit, sourceUrl: rocketPage.replace("app.rocketseat.com.br", "app.rocketseat.com.br.invalid") }), /invalid-course-lesson-url/);
+  await assert.rejects(rpc("rename_course_outline_titles", { ...rocketEdit, sourceUrl: `${rocket.url}/group/introducao` }), /invalid-course-lesson-url/);
+  await rpc("rename_course_outline_titles", { ...rocketEdit, sourceUrl: rocketPage + "?token=fixture" });
+  await rpc("rename_course_outline_titles", rocketEdit);
+  const readRocket = async () => (await rpc("list_courses")).find(item => item.id === rocket.id).sections[0].lessons[0];
+  assert.equal((await readRocket()).sourceUrl, rocketPage);
+  await rpc("rename_course_outline_titles", { ...rocketEdit, sourceUrl: "" });
+  assert.equal((await readRocket()).sourceUrl, undefined);
   const snapshot = await rpc("get_snapshot");
   assert.deepEqual(snapshot.library, []);
   assert.deepEqual(snapshot.jobs, []);

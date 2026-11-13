@@ -96,6 +96,7 @@ fn parse(data: Value, course_id: &str) -> Result<(Vec<CourseSection>, Value), St
                     })
                     .collect();
                 lessons.push(CourseLesson {
+                    source_url: None,
                     id: format!(
                         "coursera-lesson-{}",
                         digest(&format!("{}:{}", module.id, lesson.id))

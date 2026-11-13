@@ -209,6 +209,7 @@ fn navigation(provider: &str, value: &Value, limit: usize) -> Result<Vec<CourseS
                 )
             );
             lessons.push(CourseLesson {
+                source_url: None,
                 id: format!("lesson-{lesson_id}"),
                 title,
                 learned: false,

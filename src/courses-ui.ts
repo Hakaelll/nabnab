@@ -20,6 +20,8 @@ const courseProviders: [CourseProvider, string][] = [
 ];
 const isBrowserProvider = (value: string): value is BrowserCourseProvider => Object.hasOwn(browserCoursePlatforms, value);
 const hasManualOutline = (provider: string): boolean => provider === "rocketseat" || provider === "domestika" || provider === "skillshare";
+const hasLessonLinks = (provider: string, url: string | null): boolean =>
+  provider === "domestika" || provider === "rocketseat" && Boolean(url?.startsWith("https://app.rocketseat.com.br/classroom/"));
 const courseProviderName = (id: string) => courseProviders.find(([value]) => value === id)?.[1] ?? id;
 const skillshareResourceSection = "skillshare-resources";
 const unitResourceId = (unitId: string) => `unit-resources-${unitId}`;
@@ -41,7 +43,7 @@ export function browserCourseProvider(url: URL): BrowserCourseProvider | undefin
 
 export interface CourseAsset { id: string; title: string; kind: string; status: "local" | "downloadable" | "drm" | "unavailable"; restriction?: string | null; libraryId: string | null; urlRef: string | null; jobIds: string[] }
 export interface CourseNote { id: string; text: string; time: number | null; bookmarkId: string | null }
-export interface CourseLesson { id: string; title: string; learned: boolean; assets: CourseAsset[]; notes: CourseNote[] }
+export interface CourseLesson { id: string; title: string; learned: boolean; assets: CourseAsset[]; notes: CourseNote[]; sourceUrl?: string }
 export interface CourseSection { id: string; title: string; lessons: CourseLesson[] }
 export interface Course { id: string; title: string; provider: string; url: string | null; slug?: string | null; sections: CourseSection[]; createdAt: number; outlineStatus?: { pages: number; partial: boolean } }
 interface ReviewFile { id: number; name: string; kind: string; size: number }
@@ -91,7 +93,7 @@ export function createCoursesController(hooks: CourseHooks) {
   let resourceReview: ResourceReview | null = null;
   let outlineReview: OutlineReview | null = null;
   let outlineText: string | null = null;
-  let titleDraft: { courseId: string; lessonId: string; unit: string; lesson: string; error: string } | null = null;
+  let titleDraft: { courseId: string; lessonId: string; unit: string; lesson: string; sourceUrl: string; error: string; returnFocus: string } | null = null;
   const selected = new Set<string>();
   const current = () => courses.find(course => course.id === courseId);
   const currentLesson = () => current()?.sections.flatMap(section => section.lessons).find(lesson => lesson.id === lessonId);
@@ -387,10 +389,22 @@ export function createCoursesController(hooks: CourseHooks) {
 
   function lessonTitles(course: Course, lesson: CourseLesson, unit: CourseSection): string {
     const draft = titleDraft?.courseId === course.id && titleDraft.lessonId === lesson.id ? titleDraft : null;
-    if (!draft) return `<div class="course-study-context"><span>${h(unit.title)}</span>${action("course-edit-titles", t("Editar títulos", "Edit titles"), undefined, "quiet", `id="course-edit-titles" ${busy ? "disabled" : ""}`)}</div>`;
+    if (!draft) {
+      const provider = courseProviderName(course.provider);
+      return `<div class="course-study-context"><span>${h(unit.title)}</span><div class="button-group">
+        ${lesson.sourceUrl ? action("course-open-lesson", t(`Abrir lección en ${provider}`, `Open lesson on ${provider}`), "arrow", "secondary", busy ? "disabled" : "")
+          : hasLessonLinks(course.provider, course.url) ? action("course-edit-titles", t("Añadir enlace de lección", "Add lesson link"), "link", "secondary",
+            `id="course-add-lesson-link" data-field="url" ${busy ? "disabled" : ""}`) : ""}
+        ${action("course-edit-titles", t("Editar títulos", "Edit titles"), undefined, "quiet", `id="course-edit-titles" ${busy ? "disabled" : ""}`)}
+      </div></div>`;
+    }
     return `<form id="course-titles-form" class="settings-form" aria-label="${t("Editar títulos", "Edit titles")}" aria-busy="${busy}">
       <label>${t("Título de la unidad", "Unit title")}<input id="course-unit-title" required maxlength="240" value="${h(draft.unit)}" ${busy ? "disabled" : ""}></label>
       <label>${t("Título de la lección", "Lesson title")}<input id="course-lesson-title" required maxlength="240" value="${h(draft.lesson)}" ${busy ? "disabled" : ""}></label>
+      ${hasLessonLinks(course.provider, course.url) ? `<div class="course-lesson-link-field">
+        <label for="course-lesson-url">${t("Enlace oficial de la lección", "Official lesson URL")}</label>
+        <input id="course-lesson-url" type="url" maxlength="4096" placeholder="https://…" value="${h(draft.sourceUrl)}" autocomplete="off" spellcheck="false" aria-describedby="course-lesson-link-help" ${busy ? "disabled" : ""}>
+        <p class="field-note" id="course-lesson-link-help">${t("Opcional. Abre la lección en el navegador con tu sesión.", "Optional. Opens the lesson in your browser session.")}</p></div>` : ""}
       ${draft.error ? `<p class="field-note" id="course-title-error" role="alert" tabindex="-1">${h(draft.error)}</p>` : ""}
       <div class="button-group">${action("course-cancel-titles", t("Cancelar", "Cancel"), undefined, "quiet", busy ? "disabled" : "")}
         <button type="submit" class="button secondary" ${busy ? "disabled" : ""}>${t("Guardar títulos", "Save titles")}</button></div></form>`;
@@ -624,8 +638,10 @@ export function createCoursesController(hooks: CourseHooks) {
       case "course-outline-text": outlineText = element.value; return true;
       case "course-unit-title":
       case "course-lesson-title":
+      case "course-lesson-url":
         if (titleDraft) {
-          titleDraft[element.id === "course-unit-title" ? "unit" : "lesson"] = element.value;
+          const key = element.id === "course-unit-title" ? "unit" : element.id === "course-lesson-title" ? "lesson" : "sourceUrl";
+          titleDraft[key] = element.value;
           titleDraft.error = "";
           document.getElementById("course-title-error")?.remove();
         }
@@ -659,12 +675,13 @@ export function createCoursesController(hooks: CourseHooks) {
       await perform(async () => {
         try {
           await hooks.command("rename_course_outline_titles", { courseId: draft.courseId, lessonId: draft.lessonId,
-            unitTitle: draft.unit, lessonTitle: draft.lesson });
+            unitTitle: draft.unit, lessonTitle: draft.lesson, sourceUrl: draft.sourceUrl });
         } catch (error) {
           switch (error) {
             case "duplicate-course-unit-title": draft.error = t("Ya existe una unidad con ese título.", "A unit with that title already exists."); break;
             case "duplicate-course-lesson-title": draft.error = t("Ya existe una lección con ese título en la unidad.", "A lesson with that title already exists in this unit."); break;
             case "invalid-course-titles": draft.error = t("Escribe títulos de hasta 240 caracteres sin enlaces ni # inicial.", "Enter titles of up to 240 characters without links or a leading #."); break;
+            case "invalid-course-lesson-url": draft.error = t("Usa un enlace de lección de este mismo curso.", "Use a lesson URL from this course."); break;
             default: hooks.showError(error); break;
           }
           return false;
@@ -740,17 +757,20 @@ export function createCoursesController(hooks: CourseHooks) {
       case "course-edit-titles": {
         const unit = course && lesson && editableUnit(course, lesson);
         if (!course || !lesson || !unit || busy) return true;
-        titleDraft = { courseId: course.id, lessonId: lesson.id, unit: unit.title, lesson: lesson.title, error: "" };
+        titleDraft = { courseId: course.id, lessonId: lesson.id, unit: unit.title, lesson: lesson.title,
+          sourceUrl: lesson.sourceUrl ?? "", error: "", returnFocus: element.id };
         hooks.render();
-        document.getElementById("course-lesson-title")?.focus();
+        document.getElementById(element.dataset.field === "url" ? "course-lesson-url" : "course-lesson-title")?.focus();
         return true;
       }
-      case "course-cancel-titles":
+      case "course-cancel-titles": {
         if (busy) return true;
+        const focus = titleDraft?.returnFocus;
         titleDraft = null;
         hooks.render();
-        document.getElementById("course-edit-titles")?.focus();
+        document.getElementById(focus ?? "course-edit-titles")?.focus();
         return true;
+      }
       case "course-outline-back":
         if (busy) return true;
         outlineReview = null;
@@ -829,6 +849,12 @@ export function createCoursesController(hooks: CourseHooks) {
         }
         return true;
       }
+      case "course-open-lesson":
+        if (course && lesson?.sourceUrl) {
+          try { await hooks.command("open_course_lesson", { courseId: course.id, lessonId: lesson.id }); }
+          catch (error) { hooks.showError(error); }
+        }
+        return true;
       case "course-add-materials":
         if (course?.url && isBrowserProvider(course.provider)) await reviewMaterials(course.provider, course.url, course.title);
         return true;
