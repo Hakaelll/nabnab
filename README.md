@@ -26,7 +26,7 @@ After a restart, interrupted jobs are paused for review. Choose **Retry** to run
 
 ### Study offline
 
-Open **Platforms → Courses** to organize lessons and keep notes, progress, and playback position together. Create an outline for Rocketseat, Domestika, or Skillshare and attach files you have already saved. Domestika resources can sit alongside the lessons in their unit. Skillshare can also review supported direct attachment links. [Manual outlines](docs/course-manual-outline.png) · [Domestika unit resources](docs/course-domestika-unit.png)
+Open **Platforms → Courses** to organize lessons and keep notes, progress, and playback position together. Create an outline for Rocketseat, Domestika, or Skillshare. In a lesson, choose **Link audio or video** to review a saved recording and attach it to that lesson. Domestika resources can sit alongside the lessons in their unit. Skillshare can also review supported direct attachment links. [Manual outlines](docs/course-manual-outline.png) · [Link a recording](docs/course-lesson-recording.png)
 
 Search the course by unit, lesson, or attachment name, including units you have collapsed. When you open a different lesson, the course can offer to resume your most recent unfinished audio or video lesson from its saved position, even after a restart. If a file you moved is still indexed in Library, use **Locate file** from the lesson to recover it and keep your notes and saved position. [Course search](docs/course-search.png) · [Lesson resume](docs/course-resume.png) · [Moved material](docs/course-moved-material.png)
 

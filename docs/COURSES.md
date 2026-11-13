@@ -34,7 +34,13 @@ Abre **Plataformas → Cursos**, elige el proveedor y pega el enlace del curso. 
 
 Para conservar el orden del curso, guarda cada unidad en una carpeta numerada y numera los nombres de las lecciones. Los archivos con el mismo nombre base en la misma carpeta aparecen juntos, por ejemplo, un vídeo y su subtítulo. Los ZIP, RAR, 7z y archivos de diseño admitidos quedan como adjuntos para consultar en su carpeta. **Añadir carpeta** y **Añadir archivos guardados** amplían el curso existente y conservan las notas, el estado aprendido y la posición asociada a los archivos ya indexados.
 
-Si un documento, subtítulo, imagen o archivo comprimido pertenece a una lección ya importada, ábrela y usa **Materiales → Añadir adjuntos**. La revisión muestra la lección de destino y permite marcar archivos aunque tengan otro nombre o estén en otra carpeta. Al confirmar con **Añadir a la lección**, se vinculan a la lección existente. Repetir la importación conserva la asociación. Los vídeos y audios se incorporan desde **Añadir archivos guardados** o **Añadir carpeta**.
+Si un documento, subtítulo, imagen o archivo comprimido pertenece a una lección ya importada, ábrela y usa **Materiales → Añadir adjuntos**. La revisión muestra la lección de destino y permite marcar archivos aunque tengan otro nombre o estén en otra carpeta. Al confirmar con **Añadir a la lección**, se vinculan a la lección existente. Repetir la importación conserva la asociación.
+
+Si la lección aún no tiene una grabación, usa **Materiales → Vincular audio o vídeo** y elige un archivo que hayas guardado con autorización. La revisión muestra el destino, el nombre, el tipo y el tamaño. Confirma con **Vincular a la lección** para reproducirlo desde el mismo temario. La grabación se queda en su carpeta y la lección conserva sus notas y el estado aprendido. Si el archivo ya está en Biblioteca, nabnab conserva su posición guardada y sus marcadores.
+
+![Revisión de una grabación local antes de vincularla a una lección, con datos de prueba](course-lesson-recording.png)
+
+La revisión se comprobó en Edge con datos de prueba a 900 y 1180 píxeles. La prueba de Rust vincula una grabación ya indexada con otro nombre, repite la importación y comprueba que se conservan la lección y la posición de reproducción.
 
 Si cambias de carpeta un archivo que sigue en Biblioteca, abre la lección o los recursos de la unidad y elige **Localizar archivo** junto a **Archivo ausente**. Selecciona el mismo archivo en su nueva ubicación. El vínculo, las notas y el punto de reproducción se conservan. Si recuperas un adjunto descargado, nabnab lo sigue reconociendo en el curso al volver a abrirlo.
 

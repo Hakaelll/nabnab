@@ -87,7 +87,7 @@ pub fn authorized_path(path: &Path) -> Result<PathBuf, String> {
     fs::canonicalize(path).map_err(|e| format!("The selected path is unavailable: {e}"))
 }
 
-fn path_key(path: &Path) -> String {
+pub(crate) fn path_key(path: &Path) -> String {
     let value = path.to_string_lossy().into_owned();
     #[cfg(windows)]
     return value.to_lowercase();

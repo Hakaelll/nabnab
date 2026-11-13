@@ -93,7 +93,9 @@ const setup = `
     if (cmd === "preview_course_materials") {
       if (fixture.cancel) return null;
       const id = fixture.calls.length;
-      fixture.plan = {id, provider:args.provider, title:args.title, url:args.url, folder:args.folder, lessonId:args.lessonId, unitId:args.unitId};
+      fixture.plan = {id, provider:args.provider, title:args.title, url:args.url, folder:args.folder, lessonId:args.lessonId, unitId:args.unitId, playback:args.playback};
+      if (args.playback) return {id, provider:args.provider, title:args.title, groups:[{title:"Grabaciones",
+        files:[{id:7,name:"Grabación del proyecto.wav",kind:"audio",size:16384}]}]};
       if (args.unitId) return {id, provider:args.provider, title:args.title, groups:[{title:"Descargas",
         files:[{id:5,name:"Plantillas de la unidad.zip",kind:"file",size:16384},{id:6,name:"Guía de color.pdf",kind:"document",size:2048}]}]};
       if (args.lessonId) return {id, provider:args.provider, title:args.title, groups:[{title:"Descargas",
@@ -128,6 +130,11 @@ const setup = `
           const item = {...state.library[0],id:"material-reference",name:"Material de referencia.pdf",path:"C:/Downloads/Material de referencia.pdf"};
           state.library.push(item);
           lesson.assets.push({...lesson.assets[0],id:"asset-reference",title:item.name,libraryId:item.id});
+        }
+        if (args.ids.includes(7) && plan.playback) {
+          const item = {...state.library[0],id:"lesson-recording",name:"Grabación del proyecto.wav",kind:"audio",path:"C:/Fixture/Grabaciones/Grabación del proyecto.wav"};
+          state.library.push(item);
+          lesson.assets.push({id:"lesson-recording-asset",title:item.name,kind:"audio",status:"local",libraryId:item.id,urlRef:null,jobIds:[]});
         }
         return structuredClone(course);
       }
@@ -305,6 +312,28 @@ try {
     await page.locator("#main").evaluate(node => { node.scrollTop = 0; });
     await page.screenshot({path:`${directory}/attachment-study-${width}x${height}.png`,animations:"disabled"});
   }
+  await page.setViewportSize({width:900,height:620});
+  const recording = page.getByRole("button", {name:"Vincular audio o vídeo",exact:true});
+  await recording.waitFor({timeout:3000});
+  await recording.press("Enter");
+  await heading.waitFor();
+  assert.match(await page.locator(".course-review").innerText(), /Grabación para 02 Preparar/);
+  await page.getByRole("button", {name:"Volver",exact:true}).press("Enter");
+  assert.ok(await recording.evaluate(node => node === document.activeElement));
+  await recording.press("Enter");
+  await page.getByRole("checkbox", {name:/^Grabación del proyecto.wav/}).check();
+  for (const [width,height] of [[900,620],[1180,780]]) {
+    await page.setViewportSize({width,height});
+    assert.ok(await page.locator(".course-review").evaluate(node => node.scrollWidth <= node.clientWidth + 1));
+    await page.screenshot({path:`${directory}/lesson-recording-${width}.png`,animations:"disabled"});
+  }
+  await page.getByRole("button", {name:"Vincular a la lección",exact:true}).press("Enter");
+  await page.waitForFunction(() => document.activeElement.id === "course-materials-heading");
+  assert.equal(await page.getByText("Revisar la plantilla", {exact:true}).count(), 1);
+  await page.locator(".course-playback").getByText("Grabación del proyecto.wav", {exact:true}).waitFor();
+  assert.equal(await page.getByRole("button", {name:"Reproducir lección",exact:true}).count(), 1);
+  const linked = await page.evaluate(() => window.courseFixture.courses[0].sections.flatMap(section => section.lessons).map(lesson => [lesson.id, lesson.learned, lesson.assets.map(asset => asset.id)]));
+  assert.deepEqual(linked, [["lesson-1",true,["asset-pdf","asset-reference","lesson-recording-asset"]],["lesson-2",false,["asset-extras"]]]);
   await page.setViewportSize({width:900,height:620});
   const unit = page.locator(".course-tree details").filter({ hasText: "01 Fundamentos" });
   const addResources = unit.getByRole("button", { name: "Añadir recursos a la unidad" });

@@ -44,7 +44,7 @@ export interface CourseSection { id: string; title: string; lessons: CourseLesso
 export interface Course { id: string; title: string; provider: string; url: string | null; slug?: string | null; sections: CourseSection[]; createdAt: number; outlineStatus?: { pages: number; partial: boolean } }
 interface ReviewFile { id: number; name: string; kind: string; size: number }
 interface MaterialReview { id: number; title: string; provider: BrowserCourseProvider; groups: { title: string; files: ReviewFile[] }[] }
-interface MaterialTarget { kind: "lesson" | "unit"; id: string; title: string }
+interface MaterialTarget { kind: "lesson" | "unit" | "recording"; id: string; title: string }
 type ResourceCheck = { kind: "supported" | "duplicate"; filename: string } | { kind: "unsupported" };
 interface ResourceReview {
   url: string; title: string; lesson: Pick<CourseLesson, "id" | "title"> | null;
@@ -216,11 +216,12 @@ export function createCoursesController(hooks: CourseHooks) {
   }
 
   async function reviewMaterials(source: BrowserCourseProvider, url: string, title: string, folder = false, target?: MaterialTarget, droppedPaths?: string[]) {
-    const trigger = target?.kind === "unit" ? `course-add-unit-${target.id}` : target ? "course-add-attachments"
+    const trigger = target?.kind === "unit" ? `course-add-unit-${target.id}` : target?.kind === "recording" ? "course-link-recording" : target ? "course-add-attachments"
       : folder ? "course-add-folder" : courseId ? "course-add-materials" : "course-browser-import";
     await perform(async () => {
       const plan = await hooks.command<MaterialReview | null>("preview_course_materials", { provider: source, url, title, folder,
-        lessonId: target?.kind === "lesson" ? target.id : null, unitId: target?.kind === "unit" ? target.id : null, droppedPaths });
+        lessonId: target && target.kind !== "unit" ? target.id : null, unitId: target?.kind === "unit" ? target.id : null,
+        playback: target?.kind === "recording", droppedPaths });
       if (plan) review = { plan, files: new Set(), trigger, target };
       return false;
     });
@@ -267,6 +268,7 @@ export function createCoursesController(hooks: CourseHooks) {
       courseId = course.id;
       imported = true;
       hooks.notify(target?.kind === "unit" ? t("Recursos añadidos a la unidad.", "Resources added to the unit.")
+        : target?.kind === "recording" ? t("Grabación vinculada a la lección.", "Recording linked to the lesson.")
         : target
         ? t("Adjuntos añadidos a la lección.", "Attachments added to the lesson.")
         : t("Materiales añadidos al curso.", "Materials added to the course."), "success");
@@ -293,6 +295,7 @@ export function createCoursesController(hooks: CourseHooks) {
       <div class="page-heading"><div><h1 id="course-heading" tabindex="-1">${t("Revisar materiales", "Review materials")}</h1>
         <p>${h(plan.title)} · ${h(courseProviderName(plan.provider))}</p></div></div>
       ${target ? `<p class="course-review-note">${target.kind === "unit" ? t("Recursos para la unidad", "Resources for the unit")
+        : target.kind === "recording" ? t("Grabación para", "Recording for")
         : t("Adjuntos para", "Attachments for")} <strong>${h(target.title)}</strong></p>` : ""}
       <p class="course-review-note">${t("Marca los archivos que quieras añadir. Se conservarán en su ubicación actual.", "Select the files to add. They will stay in their current locations.")}</p>
       <div class="course-review-groups">${plan.groups.map((group, index) => {
@@ -313,6 +316,7 @@ export function createCoursesController(hooks: CourseHooks) {
         <output>${files.size ? `${fileCount(files.size)} · ${bytesLabel(total)}` : t("Elige al menos un archivo", "Select at least one file")}</output>
         <div class="button-group">${action("course-review-cancel", t("Volver", "Back"), undefined, "quiet", disabled)}
           ${action("course-review-confirm", target?.kind === "unit" ? t("Añadir a la unidad", "Add to unit")
+            : target?.kind === "recording" ? t("Vincular a la lección", "Link to lesson")
             : target ? t("Añadir a la lección", "Add to lesson") : t("Añadir al curso", "Add to course"), "add", "primary", busy || !files.size ? "disabled" : "")}</div>
       </footer>
     </section>`;
@@ -552,6 +556,8 @@ export function createCoursesController(hooks: CourseHooks) {
     const resourceLesson = unitResource || resources?.lessons.some(candidate => candidate.id === lessonId);
     const showQueue = !localStudy || lessons.some(lesson => lesson.assets.some(asset => asset.status === "downloadable"));
     const item = lessonMedia(lesson);
+    const canLinkRecording = browserAssisted && !resourceLesson && !item && lesson && !lesson.assets.some(asset =>
+      asset.status === "local" && (asset.kind === "audio" || asset.kind === "video"));
     const queueable = course.sections.flatMap(section => section.lessons).flatMap(lesson => lesson.assets).filter(asset => selected.has(asset.id) && available(asset));
     return `<div class="page-heading"><div>${action("course-back", t("Todos los cursos", "All courses"), undefined, "quiet")}<h1 id="course-heading" tabindex="-1">${h(course.title)}</h1><p>${h(course.provider === "local" ? t("Archivos locales", "Local files") : courseProviderName(course.provider))} · ${courseCounts}</p></div>${browserAssisted ? `<div class="button-group">${action("course-browser-open", t("Abrir curso en el navegador", "Open course in browser"), "arrow", "quiet", busy ? "disabled" : "")}${action("course-add-folder", t("Añadir carpeta", "Add folder"), "folder", "secondary", `id="course-add-folder" ${busy ? "disabled" : ""}`)}${action("course-add-materials", t("Añadir archivos guardados", "Add saved files"), "add", "primary", `id="course-add-materials" ${busy ? "disabled" : ""}`)}</div>` : course.url ? action("course-refresh", t("Actualizar materiales", "Refresh materials"), "retry", "quiet", busy ? "disabled" : "") : ""}</div>
       ${courseResume(course)}
@@ -560,7 +566,9 @@ export function createCoursesController(hooks: CourseHooks) {
       ${!showQueue ? "" : `<div class="selection-toolbar"><span>${queueable.length === 1 ? t("1 material seleccionado", "1 material selected") : `${queueable.length} ${t("materiales seleccionados", "materials selected")}`}</span>${action("course-queue", t("Añadir a la cola", "Add to queue"), "add", "primary", busy || !queueable.length ? "disabled" : "")}${action("course-clear", t("Quitar selección", "Clear selection"), undefined, "quiet")}</div>`}
       <div class="course-layout${browserAssisted ? " course-layout--browser" : ""}">${renderCourseTree(course, localStudy, Boolean(resourceCount))}<section class="course-study">${lesson ? `<div class="page-heading"><h2 id="course-study-title" tabindex="-1">${h(lessonTitle(lesson))}</h2>${action("course-learned", resourceLesson ? (lesson.learned ? t("Marcar pendiente", "Mark as pending") : t("Marcar revisado", "Mark as reviewed")) : (lesson.learned ? t("Marcar pendiente de aprender", "Mark as not learned") : t("Marcar aprendida", "Mark as learned")), "check", "quiet", `aria-pressed="${lesson.learned}" ${busy ? "disabled" : ""}`)}</div>
       ${item ? lessonPlayback(item) : ""}
-      <div class="course-materials-heading"><h3 id="course-materials-heading" tabindex="-1">${t("Materiales", "Materials")}</h3>${browserAssisted && !resourceLesson ? action("course-add-attachments", t("Añadir adjuntos", "Add attachments"), "add", "quiet", `id="course-add-attachments" ${busy ? "disabled" : ""}`) : ""}</div><div class="source-items">${lesson.assets.map(asset => materialRow(asset, localStudy)).join("")}</div>
+      <div class="course-materials-heading"><h3 id="course-materials-heading" tabindex="-1">${t("Materiales", "Materials")}</h3>${browserAssisted && !resourceLesson ? `<div class="button-group">
+        ${action("course-add-attachments", t("Añadir adjuntos", "Add attachments"), "add", "quiet", `id="course-add-attachments" ${busy ? "disabled" : ""}`)}
+        ${canLinkRecording ? action("course-link-recording", t("Vincular audio o vídeo", "Link audio or video"), "video", "secondary", `id="course-link-recording" ${busy ? "disabled" : ""}`) : ""}</div>` : ""}</div><div class="source-items">${lesson.assets.map(asset => materialRow(asset, localStudy)).join("")}</div>
       <h3>${unitResource ? t("Notas de la unidad", "Unit notes") : resourceLesson ? t("Notas de este adjunto", "Attachment notes") : t("Notas de esta lección", "Lesson notes")}</h3><form id="course-note" class="settings-form"><label>${t("Nota", "Note")}<textarea id="course-note-text" rows="3" maxlength="4000" required>${h(noteText)}</textarea></label><div class="form-grid"><label>${t("Tiempo en segundos, opcional", "Time in seconds, optional")}<input id="course-note-time" type="number" min="0" step="0.1" value="${h(noteTime)}"></label><div class="button-group">${item ? action("course-note-now", t("Usar tiempo actual", "Use current time"), undefined, "quiet", player.current()?.id === item.id ? "" : "disabled") : ""}<button class="button secondary" type="submit" ${busy ? "disabled" : ""}>${t("Guardar nota", "Save note")}</button></div></div></form>
       ${lesson.notes.map(note => `<article class="course-note"><p>${h(note.text)}</p><div class="button-group">${note.time === null ? "" : item ? action("course-note-seek", `${note.time.toFixed(1)} s`, "play", "quiet", `data-time="${note.time}"`) : `<span class="field-note">${note.time.toFixed(1)} s</span>`}${action("course-note-remove", t("Eliminar nota", "Remove note"), "close", "quiet", `data-id="${h(note.id)}" ${busy ? "disabled" : ""}`)}</div></article>`).join("")}` : `<div class="empty-state"><h2>${t("Elige una lección", "Choose a lesson")}</h2><p>${t("Guardado y aprendido son estados independientes.", "Saved and learned are separate states.")}</p></div>`}</section></div>`;
   }
@@ -759,6 +767,11 @@ export function createCoursesController(hooks: CourseHooks) {
       case "course-add-attachments":
         if (lesson && course?.url && isBrowserProvider(course.provider)) {
           await reviewMaterials(course.provider, course.url, course.title, false, { ...lesson, kind: "lesson" });
+        }
+        return true;
+      case "course-link-recording":
+        if (lesson && course?.url && isBrowserProvider(course.provider)) {
+          await reviewMaterials(course.provider, course.url, course.title, false, { ...lesson, kind: "recording" });
         }
         return true;
       case "course-add-unit-resources": {

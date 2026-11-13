@@ -220,18 +220,23 @@ fn index_material(path: &Path, link: &CourseLink) -> Result<library::LibraryItem
     }
 }
 
-fn material_paths(paths: &[PathBuf], attachments_only: bool) -> Result<Vec<PathBuf>, String> {
+fn material_paths(paths: &[PathBuf], target: Option<&MaterialTarget>) -> Result<Vec<PathBuf>, String> {
+    let recording = matches!(target, Some(MaterialTarget::Recording(_)));
     let mut paths = library::files_for_import(paths, |path| {
         let kind = library::extension_kind(path);
-        if attachments_only && matches!(kind, Some("audio" | "video")) {
-            return false;
+        match target {
+            Some(MaterialTarget::Recording(_)) => matches!(kind, Some("audio" | "video")),
+            Some(_) => kind.is_some_and(|kind| !matches!(kind, "audio" | "video")) || is_course_attachment(path),
+            None => kind.is_some() || is_course_attachment(path),
         }
-        kind.is_some() || is_course_attachment(path)
     })?;
     paths.sort_unstable();
     paths.dedup();
+    if recording && paths.len() != 1 {
+        return Err("Choose one audio or video file saved on this computer.".into());
+    }
     if paths.is_empty() || paths.len() > 200 {
-        return Err(if attachments_only {
+        return Err(if target.is_some() {
             "Choose between 1 and 200 documents, captions, images or archives."
         } else {
             "Choose between 1 and 200 supported course files."
@@ -270,9 +275,10 @@ struct ReviewedFile {
     modified: SystemTime,
 }
 
-enum AttachmentTarget {
+enum MaterialTarget {
     Lesson(String),
     Unit(String),
+    Recording(String),
 }
 
 const UNIT_RESOURCES: &str = "unit-resources-";
@@ -285,7 +291,7 @@ struct Plan {
     id: u32,
     link: CourseLink,
     title: String,
-    target: Option<AttachmentTarget>,
+    target: Option<MaterialTarget>,
     files: Vec<ReviewedFile>,
     created: Instant,
 }
@@ -326,7 +332,7 @@ fn prepare_review(
     title: String,
     paths: &[PathBuf],
     folder: bool,
-    target: Option<AttachmentTarget>,
+    target: Option<MaterialTarget>,
 ) -> Result<(Review, Plan), String> {
     let root = if folder {
         paths
@@ -338,7 +344,7 @@ fn prepare_review(
     };
     let mut groups = BTreeMap::<PathBuf, ReviewGroup>::new();
     let mut files = Vec::new();
-    for path in material_paths(paths, target.is_some())? {
+    for path in material_paths(paths, target.as_ref())? {
         let metadata = fs::metadata(&path).map_err(|error| error.to_string())?;
         if !metadata.is_file() || metadata.len() == 0 {
             continue;
@@ -562,9 +568,17 @@ fn import_selected(
     repo: &mut crate::store::Repository,
     link: CourseLink,
     title: String,
-    selected: Vec<library::LibraryItem>,
-    target: Option<&AttachmentTarget>,
+    mut selected: Vec<library::LibraryItem>,
+    target: Option<&MaterialTarget>,
 ) -> Result<Course, String> {
+    let existing: HashMap<_, _> = repo.data.library.iter()
+        .map(|item| (library::path_key(&item.path), item))
+        .collect();
+    for item in &mut selected {
+        if let Some(saved) = existing.get(&library::path_key(&item.path)) {
+            item.id.clone_from(&saved.id);
+        }
+    }
     let mut course = repo
         .data
         .courses
@@ -594,8 +608,8 @@ fn import_selected(
         })
         .collect();
     let target_id = target.map(|target| match target {
-        AttachmentTarget::Lesson(id) => id.clone(),
-        AttachmentTarget::Unit(section) => unit_resources_id(section),
+        MaterialTarget::Lesson(id) | MaterialTarget::Recording(id) => id.clone(),
+        MaterialTarget::Unit(section) => unit_resources_id(section),
     });
     if let Some(target_id) = &target_id {
         if selected.iter().any(|item| {
@@ -614,17 +628,22 @@ fn import_selected(
         })
         .collect();
     match target {
-        Some(AttachmentTarget::Lesson(id)) => {
+        Some(MaterialTarget::Lesson(id) | MaterialTarget::Recording(id)) => {
             let lesson = course.sections.iter_mut().filter(|section| {
                 section.id.starts_with("section-") || section.id.starts_with(OUTLINE_SECTION)
                     || link.provider == "coursera" && section.id.starts_with("coursera-module-")
             })
                 .flat_map(|section| &mut section.lessons)
                 .find(|lesson| lesson.id == *id && !lesson.id.starts_with(UNIT_RESOURCES))
-                .ok_or("This lesson is no longer available. Open the course and choose the attachments again.")?;
+                .ok_or("This lesson is no longer available. Open the course and choose the files again.")?;
+            if matches!(target, Some(MaterialTarget::Recording(_))) && !additions.is_empty()
+                && lesson.assets.iter().any(|asset| asset.status == "local" && matches!(asset.kind.as_str(), "audio" | "video"))
+            {
+                return Err("This lesson already has a saved recording.".into());
+            }
             lesson.assets.extend(additions.into_iter().map(local_asset));
         }
-        Some(AttachmentTarget::Unit(section_id)) => {
+        Some(MaterialTarget::Unit(section_id)) => {
             let section = course.sections.iter_mut().find(|section| {
                 link.provider == "domestika" && section.id == *section_id
                     && (section.id.starts_with("section-") || section.id.starts_with(OUTLINE_SECTION))
@@ -674,12 +693,14 @@ pub async fn preview_course_materials(
     lesson_id: Option<String>,
     unit_id: Option<String>,
     dropped_paths: Option<Vec<PathBuf>>,
+    playback: Option<bool>,
 ) -> Result<Option<Review>, String> {
     let link = CourseLink::selected(&provider, &url)?;
-    let target = match (lesson_id, unit_id) {
-        (Some(id), None) => Some(AttachmentTarget::Lesson(id)),
-        (None, Some(id)) if link.provider == "domestika" => Some(AttachmentTarget::Unit(id)),
-        (None, None) => None,
+    let target = match (lesson_id, unit_id, playback.unwrap_or(false)) {
+        (Some(id), None, true) if !folder && dropped_paths.is_none() => Some(MaterialTarget::Recording(id)),
+        (Some(id), None, false) => Some(MaterialTarget::Lesson(id)),
+        (None, Some(id), false) if link.provider == "domestika" => Some(MaterialTarget::Unit(id)),
+        (None, None, false) => None,
         _ => return Err("Choose one valid destination for the course resources.".into()),
     };
     let title = label(&title, 240);
@@ -701,12 +722,15 @@ pub async fn preview_course_materials(
                         .set_title("Choose an authorized course folder")
                         .blocking_pick_folder()
                         .map(|folder| vec![folder])
+                } else if matches!(target, Some(MaterialTarget::Recording(_))) {
+                    dialog.set_title("Choose an audio or video file for this lesson")
+                        .blocking_pick_file().map(|file| vec![file])
                 } else {
                     dialog
                         .set_title(match &target {
-                            Some(AttachmentTarget::Lesson(_)) => "Choose attachments for this lesson",
-                            Some(AttachmentTarget::Unit(_)) => "Choose resources for this unit",
-                            None => "Choose authorized course files",
+                            Some(MaterialTarget::Lesson(_)) => "Choose attachments for this lesson",
+                            Some(MaterialTarget::Unit(_)) => "Choose resources for this unit",
+                            _ => "Choose authorized course files",
                         })
                         .blocking_pick_files()
                 };
@@ -915,7 +939,7 @@ mod tests {
                 }],
             }],
         }).unwrap();
-        let target = AttachmentTarget::Lesson("coursera-lesson-fixture".into());
+        let target = MaterialTarget::Lesson("coursera-lesson-fixture".into());
         let (_, plan) = prepare_review(1, link, "Fixture".into(), &[path], false, Some(target)).unwrap();
         let selected = selected_files(&plan, &[0]).unwrap();
         let saved = import_selected(&mut repo, plan.link, plan.title, selected, plan.target.as_ref()).unwrap();
@@ -923,6 +947,36 @@ mod tests {
         assert!(lesson.learned);
         assert_eq!(lesson.assets[0].title, "Saved handout.txt");
         assert_eq!(lesson.assets[0].library_id.as_deref(), Some(repo.data.library[0].id.as_str()));
+        let recording = root.join("Recording with a different name.wav");
+        let alternate = root.join("Alternate recording.mp4");
+        for path in [&recording, &alternate] {
+            fs::write(path, b"Fixture for library indexing").unwrap();
+        }
+        let target = MaterialTarget::Recording(lesson.id.clone());
+        let link = || CourseLink::selected("coursera", "https://www.coursera.org/learn/fixture").unwrap();
+        assert!(prepare_review(2, link(), "Fixture".into(), &[recording.clone(), alternate.clone()], false,
+            Some(MaterialTarget::Recording(lesson.id.clone()))).is_err());
+        let indexed = library::index(&recording, None, None, None).unwrap();
+        repo.data.library.push(indexed);
+        let previously_moved = repo.data.library.last_mut().unwrap();
+        previously_moved.id = "previously-moved-recording".into();
+        previously_moved.details.playback_position = 8.0;
+        let (_, plan) = prepare_review(2, link(), "Fixture".into(), &[recording], false, Some(target)).unwrap();
+        let selected = selected_files(&plan, &[0]).unwrap();
+        for _ in 0..2 {
+            let saved = import_selected(&mut repo, link(), "Fixture".into(), selected.clone(), plan.target.as_ref()).unwrap();
+            assert_eq!(saved.sections[0].lessons.len(), 1);
+            let saved_lesson = &saved.sections[0].lessons[0];
+            assert!(saved_lesson.learned);
+            assert_eq!(saved_lesson.id, lesson.id);
+            assert_eq!(saved_lesson.assets.len(), 2);
+            assert_eq!(saved_lesson.assets[1].kind, "audio");
+            assert_eq!(saved_lesson.assets[1].library_id.as_deref(), Some(repo.data.library[1].id.as_str()));
+        }
+        let another = library::index(&alternate, None, None, None).unwrap();
+        assert!(import_selected(&mut repo, link(), "Fixture".into(), vec![another], plan.target.as_ref()).is_err());
+        assert_eq!(repo.data.library.len(), 2);
+        assert_eq!(repo.data.library[1].details.playback_position, 8.0);
         assert!(repo.data.jobs.is_empty());
         drop(repo);
         fs::remove_dir_all(root).unwrap();
@@ -1039,7 +1093,7 @@ mod tests {
             "Drawing".into(),
             &[video],
             false,
-            Some(AttachmentTarget::Lesson(lesson_id.clone()))
+            Some(MaterialTarget::Lesson(lesson_id.clone()))
         )
         .is_err());
         let (review, plan) = prepare_review(
@@ -1048,7 +1102,7 @@ mod tests {
             "Drawing".into(),
             &[handout],
             false,
-            Some(AttachmentTarget::Lesson(lesson_id.clone())),
+            Some(MaterialTarget::Lesson(lesson_id.clone())),
         )
         .unwrap();
         assert_eq!(review.groups[0].files.len(), 1);
@@ -1058,7 +1112,7 @@ mod tests {
             link(),
             "Drawing".into(),
             attachments.clone(),
-            Some(&AttachmentTarget::Lesson("missing-lesson".into()))
+            Some(&MaterialTarget::Lesson("missing-lesson".into()))
         )
         .is_err());
         assert_eq!(repo.data.library.len(), 4);
@@ -1082,7 +1136,7 @@ mod tests {
             link(),
             "Drawing".into(),
             attachments.clone(),
-            Some(&AttachmentTarget::Lesson(other.clone()))
+            Some(&MaterialTarget::Lesson(other.clone()))
         )
         .is_err());
         let repeated =
@@ -1096,16 +1150,16 @@ mod tests {
         fs::write(&unit_resource, b"Authorized material from another folder").unwrap();
         assert!(prepare_review(
             4, link(), "Drawing".into(), &[nested.join("Lesson.mp4")],
-            false, Some(AttachmentTarget::Unit(unit_id.clone())),
+            false, Some(MaterialTarget::Unit(unit_id.clone())),
         ).is_err());
         let (_, plan) = prepare_review(
             4, link(), "Drawing".into(), &[unit_resource],
-            false, Some(AttachmentTarget::Unit(unit_id.clone())),
+            false, Some(MaterialTarget::Unit(unit_id.clone())),
         ).unwrap();
         assert_eq!(plan.files.len(), 1);
         let files = selected_files(&plan, &[0]).unwrap();
         assert!(import_selected(&mut repo, link(), "Drawing".into(), files.clone(),
-            Some(&AttachmentTarget::Unit("section-missing".into()))).is_err());
+            Some(&MaterialTarget::Unit("section-missing".into()))).is_err());
         assert_eq!(repo.data.library.len(), 5);
         for _ in 0..2 {
             let course = import_selected(&mut repo, link(), "Drawing".into(), files.clone(), plan.target.as_ref()).unwrap();
@@ -1118,7 +1172,7 @@ mod tests {
             assert_eq!(unit.lessons[0].notes[0].text, "Keep this");
         }
         assert!(import_selected(&mut repo, link(), "Drawing".into(), files,
-            Some(&AttachmentTarget::Unit(repeated.sections[1].id.clone()))).is_err());
+            Some(&MaterialTarget::Unit(repeated.sections[1].id.clone()))).is_err());
         assert_eq!(repo.data.library.len(), 6);
         assert!(repo.data.jobs.is_empty());
         drop(repo);

@@ -108,6 +108,9 @@ try {
   await search.fill("");
   assert.equal(await closingUnit.evaluate(element => element.open), true);
   const lessonId = course.sections[0].lessons[0].id;
+  await assert.rejects(rpc("preview_course_materials", {
+    provider: "domestika", url, title, folder: false, lessonId, playback: true, droppedPaths: [fixture],
+  }), /valid destination/);
   await rpc("course_learned", { courseId: course.id, lessonId, learned: true });
   await rpc("save_course_note", { courseId: course.id, lessonId, text: "Nota de estudio", time: null, noteId: null, remove: false });
   const updated = await rpc("course_manual_outline", { ...request, save: true, text: "# Unidad práctica\nCrear una muestra\nPreparar el material" });
