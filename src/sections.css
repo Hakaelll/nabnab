@@ -267,8 +267,23 @@ body[data-page="settings"] .settings-prose > .preference-group > p { margin: 0 0
 .cache-confirm .button-group { justify-content: flex-end; }
 body[data-page="settings"] .engine-list { border-radius: 12px; border-color: var(--section-edge); overflow: hidden; }
 body[data-page="settings"] .engine-list li { padding-block: 17px; border-color: var(--section-edge); }
-body[data-page="settings"] .component-row { border-color: var(--section-edge); padding-block: 20px; }
-body[data-page="settings"] .optional-components { border-color: var(--section-edge); }
+.optional-components { margin-top: 32px; border-top: 1px solid var(--section-edge); padding-top: 22px; }
+.optional-components > h3 { font-size: 17px; margin-bottom: 4px; }
+.component-list { margin-top: 18px; }
+.component-row { display: grid; gap: 5px; min-width: 0; border-top: 1px solid var(--section-edge); padding: 17px 0; }
+.component-heading, .component-footer, .component-actions { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+.component-heading, .component-footer { justify-content: space-between; }
+.component-heading h4 { margin: 0; font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
+.component-status { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 12px; }
+.component-status[data-enabled="true"] { color: var(--text); }
+.component-status svg { width: 14px; height: 14px; }
+.component-size { color: var(--text); font-size: 12px; font-variant-numeric: tabular-nums; }
+.component-requirements { color: var(--muted); font-size: 12px; line-height: 1.55; }
+.component-footer { align-items: flex-start; margin-top: 3px; }
+.component-footer details { min-width: 0; flex: 1 1 150px; color: var(--muted); font-size: 12px; }
+.component-footer summary { cursor: pointer; width: fit-content; max-width: 100%; padding: 9px 4px 9px 0; }
+.component-footer small { display: block; margin-top: 3px; overflow-wrap: anywhere; font-size: inherit; }
+.component-actions .button { min-height: 34px; }
 
 @media (hover:hover) {
   body[data-page="downloads"] .job-row:hover:not(.is-transferring) { background: var(--secondary); }

@@ -25,6 +25,10 @@ const jobs=[
 {id:"failed",title:"Colección de imágenes",state:"error",provider:"Wikimedia Commons",source:{kind:"publicFile",selection:{sourceUrl:"https://commons.wikimedia.org/wiki/File:Fixture.jpg",filename:"Fixture.jpg",assetId:"commons:fixture",collection:"Referencias",author:null,license:null,attribution:null,sha256:null,version:null,size:null}},progress:null,outputs:[],error:{code:"network",message:"La conexión se interrumpió. Puedes reintentar el trabajo.",technical:"UI fixture only",retryable:true,retryAfter:null}}
 ].map((job,index)=>({...job,runId:1,createdAt:Date.now()-index*60000,updatedAt:Date.now(),folder:settings.folder,thumbnail:null,attempt:1,groupId:null}));
 const state={settings,library,jobs,collections:["Entrevistas","Lecturas"],drafts:[],sources:[],rules:[],presets:[],smartCollections:[]};
+const components=[
+  {id:"upscale",name:"Ampliar imagen · Real-ESRGAN",version:"0.2.5.0",size:38482789,installedSize:43253760,license:"MIT · BSD-3-Clause",source:"https://github.com/xinntao/Real-ESRGAN/releases/tag/v0.2.5.0",installed:true,enabled:true,available:true,note:"Windows x64 · Requiere una GPU compatible con Vulkan."},
+  {id:"stems",name:"Separar pistas · Spleeter",version:"2.0.1",size:41104179,installedSize:56413389,license:"Apache-2.0 · MIT",source:"https://github.com/k2-fsa/sherpa-onnx/releases/tag/v2.0.1",installed:false,enabled:false,available:true,note:"Windows x64 · CPU · Requiere Microsoft Visual C++ Redistributable."},
+];
 window.sectionFixture={state,calls:[],voiceCache:{bytes:67108864,files:24}};
 mockIPC(async(cmd,args={})=>{
 window.sectionFixture.calls.push({cmd,args});
@@ -36,7 +40,14 @@ if(cmd==="library_search"){
 }
 if(cmd==="local_timezone")return "Romance Standard Time";
 if(cmd==="engine_status")return ["yt-dlp","FFmpeg","ffprobe","Deno"].map(name=>({name,version:"Installed fixture",path:"C:/Components/"+name,size:1024,status:"installed",source:"Local UI fixture"}));
-if(cmd==="optional_components"||cmd==="sessions_status"||cmd==="list_courses"||cmd==="ocr_models"||cmd==="translation_drafts"||cmd==="personal_archive_list")return [];
+if(cmd==="optional_components")return structuredClone(components);
+if(cmd==="enable_component"){components.find(component=>component.id===args.id).enabled=args.enabled;return true;}
+if(cmd==="remove_component"){
+  if(!window.sectionFixture.confirmComponentRemoval)return false;
+  const component=components.find(component=>component.id===args.id);
+  component.installed=false;component.enabled=false;return true;
+}
+if(cmd==="sessions_status"||cmd==="list_courses"||cmd==="ocr_models"||cmd==="translation_drafts"||cmd==="personal_archive_list")return [];
 if(cmd==="ocr_status")return {installed:false,enabled:false};
 if(cmd==="cache_status")return {bytes:0,files:0};
 if(cmd==="voice_cache_status")return {...window.sectionFixture.voiceCache};
@@ -64,6 +75,39 @@ async function capture(section,width,height){
 try{
   await page.goto(base);await page.locator("#url").waitFor();
   await page.locator('[data-page="settings"]').click();
+  await page.locator('[data-action="settings-section"][data-section="engines"]').click();
+  const optional = page.locator(".optional-components");
+  const upscale = optional.locator(".component-row", { hasText: "Real-ESRGAN" });
+  const stems = optional.locator(".component-row", { hasText: "Spleeter" });
+  for (const [width, height] of [[1180, 780], [900, 620]]) {
+    await page.setViewportSize({ width, height });
+    await optional.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `${directory}/components-${before ? "before" : "after"}-${width}.png` });
+  }
+  if (!before) {
+    await stems.getByText("Procedencia y licencia", { exact: true }).press("Enter");
+    await stems.getByText(/Apache-2\.0 · MIT/).waitFor();
+    await upscale.getByRole("button", { name: "Desactivar", exact: true }).press("Enter");
+    const enable = upscale.getByRole("button", { name: "Activar", exact: true });
+    await enable.waitFor();
+    assert.ok(await enable.evaluate(element => document.activeElement === element));
+    assert.match(await upscale.innerText(), /41.3 MiB en disco/);
+    assert.match(await stems.innerText(), /39.2 MiB de descarga/);
+    assert.equal(await stems.locator("details").getAttribute("open"), "");
+    assert.ok(await optional.evaluate(element => element.scrollWidth <= element.clientWidth + 1));
+    const remove = upscale.getByRole("button", { name: "Eliminar", exact: true });
+    await remove.press("Enter");
+    await page.waitForFunction(() => window.sectionFixture.calls.some(call => call.cmd === "remove_component"));
+    assert.ok(await remove.evaluate(element => document.activeElement === element));
+    assert.equal(await enable.isVisible(), true);
+    await page.evaluate(() => { window.sectionFixture.confirmComponentRemoval = true; });
+    await remove.press("Enter");
+    const install = upscale.getByRole("button", { name: "Instalar", exact: true });
+    await install.waitFor();
+    assert.ok(await install.evaluate(element => document.activeElement === element));
+    assert.match(await upscale.innerText(), /36.7 MiB de descarga · 41.3 MiB tras instalar/);
+    console.log("Component size, license disclosure, disable, removal and focus passed at desktop widths.");
+  }
   await page.locator('[data-action="settings-section"][data-section="sessions"]').click();
   const thumbnails = page.getByRole("heading", { name: "Caché de miniaturas" });
   const speech = page.getByRole("region", { name: "Caché de voz" });

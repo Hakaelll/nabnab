@@ -49,6 +49,7 @@ interface Component {id:string;name:string;version:string;size:number;installedS
 interface Hooks {command:<T>(name:string,args?:Record<string,unknown>)=>Promise<T>;snapshot:()=>Snapshot;render:()=>void;refresh:()=>Promise<void>;t:Copy;openLink:(url:string)=>void;notify:(message:string)=>void;showError:(error:unknown)=>void}
 export function createPlatformsController(hooks:Hooks){
   const {t}=hooks;const federatedAuth=createFederatedAuthController({command:hooks.command,render:hooks.render,notify:hooks.notify,showError:hooks.showError,t});const galleryAuth=createGalleryAuth({command:hooks.command,render:hooks.render,notify:hooks.notify,t});let consent=false;let query='',group:Group|'all'='all',current:Platform|null=null,url='',gallery:Gallery|null=null,busy=false,collection='',kind='all',minimum='',minimumHeight='',fromDate='',toDate='',components:Component[]|null=null;
+  let installingComponent: string | null = null;
   const selected=new Set<string>();
   function showCatalog(){current=null;gallery=null;selected.clear();}
   const previews=new Map<string,string>();const previewing=new Set<string>();const attempted=new Set<string>();
@@ -77,8 +78,34 @@ export function createPlatformsController(hooks:Hooks){
       case 'gallery-select':for(const a of gallery?.assets??[])if(assetVisible(a))selected.add(a.id);hooks.render();return true;
       case 'gallery-clear':selected.clear();hooks.render();return true;
       case 'gallery-queue':if(gallery){busy=true;hooks.render();try{const jobs=await hooks.command<Job[]>('queue_gallery',{galleryId:gallery.id,ids:[...selected],collection:collection.trim()||current?.name||'Galería',clientRequest:crypto.randomUUID()});await hooks.refresh();selected.clear();hooks.notify(jobs.length?t('Selección añadida a Descargas.','Selection added to Downloads.'):t('Estos archivos ya están en la cola.','These files are already queued.'));}finally{busy=false;hooks.render();}}return true;
-      case 'component-remove':await hooks.command('remove_component',{id:button.dataset.id});components=await hooks.command<Component[]>('optional_components');hooks.render();return true;
-      case 'component-install':busy=true;hooks.render();try{await hooks.command('install_component',{id:button.dataset.id});components=await hooks.command<Component[]>('optional_components');}finally{busy=false;hooks.render();}return true;
+      case 'component-remove': {
+        const restoreFocus = document.activeElement === button;
+        const id = button.dataset.id;
+        const removed = await hooks.command<boolean>('remove_component', { id });
+        if (!removed) return true;
+        await loadComponents();
+        hooks.render();
+        if (restoreFocus) document.getElementById(`component-primary-${id}`)?.focus({ preventScroll: true });
+        return true;
+      }
+      case 'component-install': {
+        const id = button.dataset.id;
+        if (!id || installingComponent) return true;
+        const restoreFocus = document.activeElement === button;
+        installingComponent = id;
+        hooks.render();
+        try {
+          await hooks.command('install_component', { id });
+          await loadComponents();
+        } finally {
+          installingComponent = null;
+          hooks.render();
+          if (restoreFocus && document.activeElement === document.body) {
+            document.getElementById(`component-primary-${id}`)?.focus({ preventScroll: true });
+          }
+        }
+        return true;
+      }
       case 'component-toggle':await hooks.command('enable_component',{id:button.dataset.id,enabled:button.dataset.enabled==='true'});components=await hooks.command<Component[]>('optional_components');hooks.render();return true;
       default:return false;
     }
@@ -91,7 +118,41 @@ export function createPlatformsController(hooks:Hooks){
   async function handleSubmit(form:HTMLFormElement){if(await federatedAuth.handleSubmit(form)||await galleryAuth.handleSubmit(form))return true;if(form.id!=='platform-form')return false;if(current?.gallery)await inspect();else hooks.openLink(url);return true;}
   function openGallery(input:string){current=platforms.find(p=>p.gallery&&p.host.split(' · ').some(host=>{try{const actual=new URL(input).hostname;return actual===host||actual.endsWith(`.${host}`);}catch{return false;}}))??null;if(!current)return false;url=input;gallery=null;selected.clear();consent=false;collection=current.name;if(current.id==='pixiv')void galleryAuth.load().catch(hooks.showError);return true;}
   async function loadComponents(){components=await hooks.command<Component[]>('optional_components');}
-  function renderComponents(){return `<div class="optional-components"><h3>${t('Componentes opcionales','Optional components')}</h3><p class="field-note">${t('Instala únicamente lo que uses. Desactivar impide nuevas tareas; los archivos se conservan.','Install only what you use. Disabling prevents new tasks; files are kept.')}</p>${components?.map(c=>`<div class="component-row"><div><strong>${h(c.name)}</strong><p>${h(c.version)} · ${(c.size/1048576).toFixed(1)} MiB${c.installedSize ? ` ${t('de descarga','download')} · ${(c.installedSize/1048576).toFixed(1)} MiB ${t('en disco','on disk')}` : ''} · ${h(c.license)}</p><small>${h(c.source)}</small>${c.note?`<p class="field-note">${h(c.note)}</p>`:""}</div><span>${c.installed?t(c.enabled?'Activado':'Desactivado',c.enabled?'Enabled':'Disabled'):t('No instalado','Not installed')}</span>${c.installed?`<button class="button secondary" data-action="component-toggle" data-id="${h(c.id)}" data-enabled="${!c.enabled}">${c.enabled?t('Desactivar','Disable'):t('Activar','Enable')}</button>`:`<button class="button secondary" data-action="component-install" data-id="${h(c.id)}" ${busy||!c.available?'disabled':''}>${!c.available?t('Preparación requerida','Setup required'):busy?t('Instalando…','Installing…'):t('Instalar','Install')}</button>`}${c.installed&&c.id!=="voice"&&c.id!=="capture"?`<button class="button quiet" data-action="component-remove" data-id="${h(c.id)}">${t('Eliminar','Remove')}</button>`:''}</div>`).join('')??`<p>${t('Cargando componentes…','Loading components…')}</p>`}</div>`;}
+  function renderComponents() {
+    const mib = (bytes: number) => `${(bytes / 1048576).toFixed(1)} MiB`;
+    const rows = components?.map(component => {
+      const id = h(component.id);
+      const removable = component.installed && component.id !== "voice" && component.id !== "capture";
+      const installing = installingComponent === component.id;
+      const status = component.installed
+        ? component.enabled ? t("Activado", "Enabled") : t("Desactivado", "Disabled")
+        : t("No instalado", "Not installed");
+      const size = component.installed && component.installedSize != null
+        ? t(`${mib(component.installedSize)} en disco`, `${mib(component.installedSize)} on disk`)
+        : component.size > 0 ? t(`${mib(component.size)} de descarga`, `${mib(component.size)} download`) : "";
+      const estimate = !component.installed && component.installedSize != null
+        ? t(`${mib(component.installedSize)} tras instalar`, `${mib(component.installedSize)} after installation`) : "";
+      const installLabel = !component.available ? t("Preparación requerida", "Setup required")
+        : installing ? t("Instalando…", "Installing…") : t("Instalar", "Install");
+      return `<article class="component-row" aria-labelledby="component-name-${id}">
+        <header class="component-heading"><h4 id="component-name-${id}">${h(component.name)}</h4>
+          <span class="component-status" data-enabled="${component.enabled}">${component.enabled ? icon("check") : ""}${status}</span></header>
+        <p class="component-size">${[size, estimate].filter(Boolean).join(" · ") || t("Usa archivos del sistema o de nabnab", "Uses system or bundled files")}</p>
+        ${component.note ? `<p class="component-requirements">${h(component.note)}</p>` : ""}
+        <div class="component-footer">
+          <details id="component-details-${id}"><summary>${t("Procedencia y licencia", "Source and license")}</summary>
+            <p>${h(component.version)} · ${h(component.license)}</p><small>${h(component.source)}</small></details>
+          <div class="component-actions">${component.installed
+            ? `<button type="button" id="component-primary-${id}" class="button secondary" data-action="component-toggle" data-id="${id}" data-enabled="${!component.enabled}">${component.enabled ? t("Desactivar", "Disable") : t("Activar", "Enable")}</button>`
+            : `<button type="button" id="component-primary-${id}" class="button secondary" data-action="component-install" data-id="${id}" ${installingComponent || !component.available ? "disabled" : ""}>${installLabel}</button>`}
+            ${removable ? `<button type="button" class="button quiet" data-action="component-remove" data-id="${id}">${t("Eliminar", "Remove")}</button>` : ""}</div>
+        </div></article>`;
+    }).join("");
+    return `<section class="optional-components" aria-labelledby="optional-components-title">
+      <h3 id="optional-components-title">${t("Componentes opcionales", "Optional components")}</h3>
+      <p class="field-note">${t("Desactiva un componente para dejar de usarlo. Elimínalo para liberar espacio.", "Disable a component to stop using it. Remove it to free disk space.")}</p>
+      <div class="component-list">${rows ?? `<p role="status">${t("Cargando componentes…", "Loading components…")}</p>`}</div></section>`;
+  }
   function bind(){if(!gallery)return;const galleryId=gallery.id;for(const image of document.querySelectorAll<HTMLImageElement>('[data-gallery-preview]')){const id=image.dataset.galleryPreview;if(!id)continue;const cached=previews.get(id);if(cached){image.src=cached;image.hidden=false;continue;}if(attempted.has(id)||previewing.size>=4)continue;attempted.add(id);previewing.add(id);void hooks.command<[string,number[]]>('gallery_preview',{galleryId,assetId:id}).then(([mime,bytes])=>{if(!['image/jpeg','image/png','image/webp','image/gif','image/avif'].includes(mime)||bytes.length>2097152)return;let binary='';for(let index=0;index<bytes.length;index+=8192)binary+=String.fromCharCode(...bytes.slice(index,index+8192));const source='data:'+mime+';base64,'+btoa(binary);if(previews.size>=100)previews.clear();previews.set(id,source);if(image.isConnected){image.src=source;image.hidden=false;}}).catch(()=>{}).finally(()=>{previewing.delete(id);queueMicrotask(bind);});}}
   return {render,bind,handleClick,handleInput,handleSubmit,openGallery,showCatalog,loadComponents,renderComponents};
 }

@@ -65,7 +65,7 @@ The animated character field on Home cycles through eleven patterns. The sidebar
 
 Open **Settings → Sessions and privacy → Temporary storage** to see how much space thumbnails and reusable narration or dubbing segments occupy. Clearing those caches frees space while keeping your Library entries and exported files. nabnab regenerates cached material as needed. [Local voice cache](docs/LOCAL-VOICE.md)
 
-Open **Settings → Components** to check download size, installed size, requirements, and licenses before installing an optional component. Local processing runs on your computer. For development builds, see [Run from source](#run-from-source) for the Cargo cleanup command. [Engines and privacy](docs/NETWORK.md)
+Open **Settings → Components** to review download size, disk space, and hardware requirements. Expand **Source and license** for the version, origin, and license. Disable a component to stop using it, or remove it to reclaim its space. nabnab also clears obsolete managed engine sets on startup and keeps the previous set available for rollback. For development builds, see [Run from source](#run-from-source) for the Cargo cleanup command. [Optional components in Settings](docs/settings-optional-components.png) · [Engines and privacy](docs/NETWORK.md)
 
 ## Browser extension and local automation
 
