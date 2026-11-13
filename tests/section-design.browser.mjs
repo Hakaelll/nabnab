@@ -150,6 +150,10 @@ try{
     const sidebar = page.getByRole("navigation", { name: "Navegación principal" });
     const downloadNav = sidebar.getByRole("button", { name: "Descargas" });
     const sidebarWidth = width => page.waitForFunction(width => Math.abs(document.querySelector(".sidebar").getBoundingClientRect().width - width) < 1, width);
+    const sidebarMaterial = () => sidebar.evaluate(node => {
+      const { backgroundColor, backdropFilter } = getComputedStyle(node);
+      return { backgroundColor, backdropFilter };
+    });
     assert.equal(await sidebar.locator(".sidebar-header, #toggle-sidebar, .sidebar-mark").count(), 0);
     for (const [width, height] of [[1180, 780], [900, 620]]) {
       await page.setViewportSize({ width, height });
@@ -157,24 +161,27 @@ try{
       await sidebarWidth(64);
       const mainBounds = await page.locator("#main").boundingBox();
       const icon = await downloadNav.locator("svg").first().boundingBox();
+      const compactMaterial = await sidebarMaterial();
+      assert.match(compactMaterial.backgroundColor, /^rgba\(9, 10, 12, 0\.0/);
       await page.screenshot({ path: `${directory}/sidebar-compact-${width}.png` });
       await downloadNav.hover();
       await sidebarWidth(200);
-      assert.match(await sidebar.evaluate(node => getComputedStyle(node).backgroundColor), /^rgba\(9, 10, 12, 0\.66/);
-      assert.equal(await sidebar.evaluate(node => getComputedStyle(node).backdropFilter), "blur(4px)");
+      await page.screenshot({ path: `${directory}/sidebar-expanded-${width}.png` });
+      assert.deepEqual(await sidebarMaterial(), compactMaterial, "Hover preserves the translucent sidebar material.");
       assert.equal(await downloadNav.locator(".nav-label").evaluate(label => getComputedStyle(label).opacity), "1");
       assert.deepEqual(await page.locator("#main").boundingBox(), mainBounds);
       assert.deepEqual(await downloadNav.locator("svg").first().boundingBox(), icon);
       await page.mouse.move(150, icon.y + 9);
       assert.equal((await sidebar.boundingBox()).width, 200);
-      await page.screenshot({ path: `${directory}/sidebar-expanded-${width}.png` });
       await page.mouse.move(width - 40, height - 40);
       await sidebarWidth(64);
     }
+    const compactMaterial = await sidebarMaterial();
     await page.getByRole("button", { name: "Cerrar", exact: true }).focus();
     await page.keyboard.press("Tab");
     assert.equal(await sidebar.getByRole("button", { name: "Inicio" }).evaluate(button => button === document.activeElement), true);
     await sidebarWidth(200);
+    assert.deepEqual(await sidebarMaterial(), compactMaterial, "Keyboard focus preserves the translucent sidebar material.");
     await page.keyboard.press("Tab");
     assert.equal(await downloadNav.evaluate(button => button === document.activeElement), true);
     await page.locator("#job-search").focus();
@@ -186,7 +193,7 @@ try{
     await sidebarWidth(200);
     await page.mouse.move(400, 180);
     await sidebarWidth(64);
-    checks.push("Sidebar expands by pointer or keyboard and keeps the workspace and icons fixed.");
+    checks.push("Sidebar expands by pointer or keyboard with the same translucent material and keeps the workspace and icons fixed.");
     assert.equal(await page.locator(".job-row").count(),5);
     assert.deepEqual(await page.locator(".job-section-heading h2").allTextContents(),["En curso","En espera","Finalizadas"]);
     assert.equal(await page.getByRole("progressbar", {name:"Un recorrido por la ciudad"}).getAttribute("aria-valuenow"),"43.2");

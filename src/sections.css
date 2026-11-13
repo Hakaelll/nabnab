@@ -3,8 +3,10 @@
 .app-shell {
   --work-top: 40px;
   --work-gutter: 12px;
+  --sidebar-open-width: 200px;
 }
 .work-area {
+  --nav-overlap-mask: linear-gradient(to right, transparent 76px, black calc(var(--sidebar-open-width) - var(--sidebar-width)));
   display: grid;
   isolation: isolate;
   grid-template-rows: minmax(0, 1fr) auto;
@@ -25,25 +27,22 @@
   padding: calc(var(--work-top) + 8px) 8px 22px;
   border-inline-end: 1px solid transparent;
   overflow: clip;
-  background: var(--sidebar-fill, var(--nav-smoke));
-  backdrop-filter: var(--sidebar-filter, none);
+  background: var(--nav-smoke);
   transition: width var(--surface-entry) var(--ease-out);
 }
 .sidebar:has(.nav-item:focus-visible) {
-  --sidebar-extent: 200px;
-  --sidebar-fill: var(--nav-expanded-smoke);
-  --sidebar-filter: var(--nav-expanded-blur);
+  --sidebar-extent: var(--sidebar-open-width);
   --sidebar-label-opacity: 1;
   border-color: var(--edge-quiet);
 }
+.sidebar:has(.nav-item:focus-visible) + .work-area { mask-image: var(--nav-overlap-mask); }
 @media (hover: hover) {
   .sidebar:hover:not([data-dismissed]) {
-    --sidebar-extent: 200px;
-    --sidebar-fill: var(--nav-expanded-smoke);
-    --sidebar-filter: var(--nav-expanded-blur);
+    --sidebar-extent: var(--sidebar-open-width);
     --sidebar-label-opacity: 1;
     border-color: var(--edge-quiet);
   }
+  .sidebar:hover:not([data-dismissed]) + .work-area { mask-image: var(--nav-overlap-mask); }
 }
 .titlebar-search {
   display: flex;
