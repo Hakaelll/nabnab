@@ -194,10 +194,12 @@ try {
   await writeFile(repository, JSON.stringify(fixture));
   const drafts = path.join(data, "subtitle-translations");
   await mkdir(drafts, { recursive: true });
-  await writeFile(path.join(drafts, `${draftId}.json`), JSON.stringify({ id: draftId, revision: 1, name: "Subtítulos originales", selection, original: cues,
+  const draftFile = path.join(drafts, `${draftId}.json`);
+  const initialDraft = { id: draftId, revision: 1, name: "Subtítulos originales", selection, original: cues,
     translated: ["This sentence is deliberately far too long to fit inside the first short subtitle interval even after speeding it up moderately.", "See you soon.",
       "The final sentence is deliberately long as well, so the test can check how a second timing warning opens its own line in the editor."],
-    contextualBlocks: 1, edited: [] }));
+    contextualBlocks: 1, edited: [] };
+  await writeFile(draftFile, JSON.stringify(initialDraft));
 
   await launch();
   const errors = [];
@@ -470,7 +472,58 @@ try {
     await page.screenshot({ path: path.join(data, `dubbing-${width}.png`), animations: "disabled" });
     if (width === 1180) await section.screenshot({ path: path.join(data, "dubbing-results.png"), animations: "disabled" });
   }
+
+  const voiceId = await page.locator("#dub-voice").inputValue();
+  const timedSelection = { draftId, revision: reviewed.revision, settings: { voiceId, rate: 0, volume: 100 } };
+  const preview = (index, requestId) => rpc("dub_sample", { index, requestId, selection: timedSelection });
+  const natural = await preview(1, 9701);
+  assert.equal(natural.fit, "fits");
+  const shortened = path.join(data, "Intervalo de prueba.srt");
+  const availableMs = Math.round(natural.speechSeconds / 1.17 * 1000);
+  const end = `${String(Math.floor(availableMs / 1000)).padStart(2, "0")},${String(availableMs % 1000).padStart(3, "0")}`;
+  await writeFile(shortened, `1\n00:00:00,000 --> 00:00:${end}\nNos vemos pronto.\n`);
+  const { library: importedShort } = await rpc("import_paths", { paths: [shortened] });
+  const shortFile = importedShort.find(candidate => candidate.name === path.basename(shortened));
+  const shortInput = { libraryId: shortFile.id, trackId: shortFile.details.tracks[0].id };
+  const shortSource = await rpc("translation_source", { input: shortInput });
+  const savedDraft = await readFile(draftFile);
+  const shortDraft = { ...JSON.parse(savedDraft), selection: { input: shortInput, sourceHash: shortSource.sourceHash, pair: "es-en" },
+    original: shortSource.cues, translated: [reviewed.translated[1]], edited: [] };
+  let adjusted;
+  try {
+    await writeFile(draftFile, JSON.stringify(shortDraft));
+    adjusted = await preview(0, 9702);
+    assert.equal(adjusted.fit, "needsAcceleration");
+    assert.equal(adjusted.speechSeconds, natural.speechSeconds);
+    assert.ok(adjusted.duration < natural.duration && adjusted.duration <= adjusted.availableSeconds,
+      JSON.stringify({ natural: natural.duration, adjusted: adjusted.duration, available: adjusted.availableSeconds }));
+    assert.deepEqual(await readdir(path.join(data, "local-previews")), []);
+
+    const cue = page.locator("#dub-cue");
+    await cue.fill("1");
+    await cue.press("Tab");
+    await page.locator("#dub-play-sample").press("Enter");
+    const accelerated = page.getByRole("status").filter({ hasText: "Muestra con voz acelerada" });
+    await accelerated.waitFor();
+    assert.match(await accelerated.innerText(), /s originales → .* s ajustados · .* s disponibles/);
+    await wait(() => sample.evaluate((audio, duration) => Math.abs(audio.duration - duration) < 0.001, adjusted.duration));
+    for (const [width, height] of [[900, 620], [1180, 780]]) {
+      await page.setViewportSize({ width, height });
+      assert.ok(await accelerated.evaluate(node => node.scrollWidth <= node.clientWidth + 1));
+      await page.locator(".dub-sample").screenshot({ path: path.join(base, `dub-sample-adjusted-${width}.png`), animations: "disabled" });
+    }
+
+    await rpc("queue_dub_voice", { selection: timedSelection, clientRequest: "preview-export-parity" });
+    const fittedJob = await jobOf("dubVoice", 2, "completed");
+    const fittedWav = await readFile(fittedJob.outputs[0]);
+    const samplePcm = Buffer.from(adjusted.wav).subarray(44);
+    assert.deepEqual(fittedWav.subarray(44, 44 + samplePcm.length), samplePcm);
+    assert.ok(fittedWav.subarray(44 + samplePcm.length).every(byte => byte === 0));
+  } finally {
+    await writeFile(draftFile, savedDraft);
+  }
   console.log(JSON.stringify({ draftFixture: true, catalogAndPalette: true, editsPreservedBetweenTools: true, sapiSample: true, returnedToEditedCue: 3, timingIssue: tooLong.error.technical, reusedCues: 1, synchronizedSeconds: 8.5,
+    adjustedPreviewSeconds: adjusted.duration, previewMatchesExport: true,
     alternateTracks: 3, failedMixKeptWav: true, selectedMixHz: 710, separatedInstrumentalHz: 540, staleInstrumentalRejected: true,
     mixedTracks: 1, unchangedOriginal: true, shares: 3, viewports: [1180, 900] }));
 } catch (error) {

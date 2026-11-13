@@ -43,7 +43,7 @@ export function createDubbing(hooks: Hooks) {
   let originalAudioId = "";
   let instrumentalId = "";
   let player: HTMLAudioElement | null = null, sampleUrl = "", sampleText = "", requestId = 0;
-  let sampleTiming: Omit<TimedSample, "wav" | "duration" | "segmentText"> | null = null;
+  let sampleTiming: Omit<TimedSample, "wav" | "segmentText"> | null = null;
   let focusSample = false;
   let observed = "";
 
@@ -164,14 +164,18 @@ export function createDubbing(hooks: Hooks) {
 
   function sampleResult(): string {
     if (!sampleTiming) return "";
-    const { fit, speechSeconds, availableSeconds, truncated } = sampleTiming;
+    const { fit, speechSeconds, availableSeconds, duration, truncated } = sampleTiming;
     const seconds = new Intl.NumberFormat(hooks.snapshot().settings.language, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const speech = seconds.format(speechSeconds), available = seconds.format(availableSeconds);
     const label = fit === "tooLong" ? t("Supera el tiempo disponible", "Exceeds the available time")
-      : fit === "needsAcceleration" ? t("Necesita acelerar la voz", "Speech needs to speed up")
+      : fit === "needsAcceleration" ? t("Muestra con voz acelerada", "Preview with faster speech")
         : t("Cabe en el intervalo", "Fits the cue");
+    const adjusted = fit === "needsAcceleration" && !truncated ? seconds.format(duration) : null;
+    const timing = adjusted
+      ? t(`${speech} s originales → ${adjusted} s ajustados · ${available} s disponibles`, `${speech} s original → ${adjusted} s adjusted · ${available} s available`)
+      : t(`${speech} s de voz · ${available} s disponibles`, `${speech} s of speech · ${available} s available`);
     return `<div class="dub-sample-feedback"><div role="status" data-fit="${fit}">
-      <strong>${label}</strong><span>${t(`${speech} s de voz · ${available} s disponibles`, `${speech} s of speech · ${available} s available`)}</span>
+      <strong>${label}</strong><span>${timing}</span>
       ${truncated ? `<small>${t("La escucha incluye los primeros 12 segundos.", "The preview plays the first 12 seconds.")}</small>` : ""}
       </div>${fit === "tooLong" ? action("dub-edit-sample", t("Editar este segmento", "Edit this cue"), "document", "quiet") : ""}</div>`;
   }
@@ -360,8 +364,8 @@ export function createDubbing(hooks: Hooks) {
           const sample = await hooks.command<TimedSample>("dub_sample", { selection: choice, index: Math.min(sampleCue, draft.count - 1), requestId: id });
           if (requestId !== id) return;
           sampleUrl = URL.createObjectURL(audioBlob(sample.wav)); sampleText = sample.segmentText;
-          const { fit, speechSeconds, availableSeconds, truncated } = sample;
-          sampleTiming = { fit, speechSeconds, availableSeconds, truncated };
+          const { fit, speechSeconds, availableSeconds, duration, truncated } = sample;
+          sampleTiming = { fit, speechSeconds, availableSeconds, duration, truncated };
           player = document.createElement("audio"); player.controls = true; player.src = sampleUrl;
           player.setAttribute("aria-label", t("Muestra de la voz traducida", "Translated voice sample"));
           hooks.render();

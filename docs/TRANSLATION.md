@@ -30,7 +30,9 @@ Abre **Herramientas → Subtítulos → Crear doblaje** o búscalo con **Ctrl + 
 
 **Generar WAV sincronizado** añade un trabajo a Descargas. La voz ocupa el intervalo de cada subtítulo y las pausas quedan en silencio. Cuando dos intervalos se superponen, la primera frase dispone de tiempo hasta el comienzo de la siguiente. Si hace falta, la voz se acelera hasta un 25 %. El flujo admite hasta 4096 segmentos en las primeras dos horas de la pista. [Filtro `atempo` de FFmpeg](https://ffmpeg.org/ffmpeg-filters.html#atempo)
 
-**Escuchar muestra** compara la duración de la voz con el tiempo disponible. Indica si la frase cabe a su ritmo actual, si necesita acelerarse o si supera el límite. En este último caso, **Editar este segmento** abre la traducción correspondiente. La muestra reproduce el ritmo elegido y la generación del WAV verifica el ajuste final.
+**Escuchar muestra** compara la duración de la voz con el tiempo disponible. Si necesita acelerarse, reproduce el mismo ajuste que usa el WAV. El panel muestra el tiempo original, la duración ajustada y el intervalo disponible. Si la frase sigue siendo demasiado larga, **Editar este segmento** abre la traducción correspondiente.
+
+![Muestra de 1,70 segundos ajustada a 1,41 segundos para un intervalo de 1,45 segundos](dubbing-adjusted-preview.png)
 
 ![Muestra de doblaje con la duración de la voz y el tiempo disponible](dubbing-sample-fit.png)
 

@@ -91,6 +91,7 @@ pub async fn dub_sample(
     request_id: u64,
 ) -> Result<voice::timed::TimedSample, String> {
     crate::voice_operations::require_enabled(&app)?;
+    let engines = crate::dependencies::engine_root(&app)?;
     let root = {
         let guard = state.repository.lock().unwrap();
         translation::commands::completed_root(
@@ -103,6 +104,7 @@ pub async fn dub_sample(
         Ok(draft) => {
             voice::timed::sample(
                 &root,
+                &engines,
                 &draft,
                 index,
                 &selection.settings,

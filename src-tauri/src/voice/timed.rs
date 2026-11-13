@@ -144,6 +144,7 @@ enum Fit {
 
 pub async fn sample(
     root: &Path,
+    engines: &Path,
     draft: &Draft,
     index: usize,
     settings: &VoiceSettings,
@@ -183,20 +184,45 @@ pub async fn sample(
     }
     let cached =
         cache::cached(root, &key, true, &cancel).ok_or("The sample could not be verified.")?;
-    let (wav, duration, truncated) = wave::sample_bytes(&cached.path, 12)?;
     let length = cached.wave.length / 2;
     let available = end.saturating_sub(start);
-    let fit = match tempo(length, available) {
-        Some(1.0) => Fit::Fits,
-        Some(_) => Fit::NeedsAcceleration,
-        None => Fit::TooLong,
+    let (bytes, fit) = match tempo(length, available) {
+        Some(1.0) => (wave::sample_bytes(&cached.path, 12)?, Fit::Fits),
+        Some(rate) => {
+            let scratch = Workspace::new(root)?;
+            let fitted = scratch.path.join("fitted.wav");
+            let audio = accelerate(engines, &cached.path, &fitted, rate, cancel.clone()).await?;
+            let fit = if audio.length / 2 <= available { Fit::NeedsAcceleration } else { Fit::TooLong };
+            (wave::sample_bytes(&fitted, 12)?, fit)
+        }
+        None => (wave::sample_bytes(&cached.path, 12)?, Fit::TooLong),
     };
+    let (wav, duration, truncated) = bytes;
     Ok(TimedSample {
         voice: Sample { wav, duration, segment_text: text, truncated },
         speech_seconds: length as f64 / f64::from(wave::SAMPLE_RATE),
         available_seconds: available as f64 / f64::from(wave::SAMPLE_RATE),
         fit,
     })
+}
+
+async fn accelerate(
+    engines: &Path,
+    input: &Path,
+    output: &Path,
+    rate: f64,
+    cancel: watch::Receiver<bool>,
+) -> Result<wave::Wave, String> {
+    engine::tool(
+        engines,
+        "ffmpeg.exe",
+        vec![
+            "-v".into(), "error".into(), "-y".into(), "-i".into(), input.to_string_lossy().into_owned(),
+            "-af".into(), format!("atempo={rate:.8}"), "-c:a".into(), "pcm_s16le".into(), output.to_string_lossy().into_owned(),
+        ],
+        cancel,
+    ).await?;
+    wave::inspect(output)
 }
 
 fn tempo(length: u64, available: u64) -> Option<f64> {
@@ -304,25 +330,7 @@ pub async fn render(
             .and_then(Option::as_ref)
             .ok_or("A cached cue is unavailable.")?;
         let (path, audio) = if rate > 1.0 {
-            engine::tool(
-                engines,
-                "ffmpeg.exe",
-                vec![
-                    "-v".into(),
-                    "error".into(),
-                    "-y".into(),
-                    "-i".into(),
-                    cached.path.to_string_lossy().into_owned(),
-                    "-af".into(),
-                    format!("atempo={rate:.8}"),
-                    "-c:a".into(),
-                    "pcm_s16le".into(),
-                    compressed.to_string_lossy().into_owned(),
-                ],
-                cancel.clone(),
-            )
-            .await?;
-            (&compressed, wave::inspect(&compressed)?)
+            (&compressed, accelerate(engines, &cached.path, &compressed, rate, cancel.clone()).await?)
         } else {
             (&cached.path, cached.wave.clone())
         };
