@@ -345,15 +345,15 @@ impl Job {
             self.next_retry_at = None;
             self.updated_at = now();
         }
-        if self.state == JobState::Paused && self.run_id != 0 {
-            if let Source::PersonalFile { selection } = &self.source {
-                if selection.can_pause_copy() {
-                    self.progress = stage_path(self).ok()
-                        .and_then(|(_, path)| owned_stage(self, &path).ok())
-                        .and_then(|staging| selection.paused_progress(&staging, self.run_id));
-                }
-            }
+        if !matches!(self.state, JobState::Paused | JobState::Cancelled) || self.run_id == 0 { return; }
+        let Source::PersonalFile { selection } = &self.source else { return; };
+        if self.state == JobState::Cancelled {
+            let _ = discard_personal_partial(self);
+            return;
         }
+        let staging = stage_path(self).ok().and_then(|(_, path)| owned_stage(self, &path).ok());
+        self.progress = staging.as_ref().and_then(|path| selection.paused_progress(path, self.run_id));
+        if let Some(staging) = staging { let _ = discard_personal_scratch(&staging, self.run_id); }
     }
     pub(crate) fn new(
         source: Source,
@@ -1156,12 +1156,21 @@ fn discard_personal_partial(job: &Job) -> Result<(), String> {
     let Source::PersonalFile { selection } = &job.source else { return Ok(()); };
     if job.run_id == 0 { return Ok(()); }
     let (_, stage) = stage_path(job)?;
-    let Some(path) = selection.partial_path(&stage) else { return Ok(()); };
-    match fs::symlink_metadata(&stage) {
+    let owned = match fs::symlink_metadata(&stage) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        _ => { owned_stage(job, &stage)?; }
+        _ => owned_stage(job, &stage)?,
+    };
+    discard_personal_scratch(&owned, job.run_id)?;
+    if let Some(path) = selection.partial_path(&owned) {
+        remove_personal_partial(&path)?;
     }
-    if crate::direct::partial_len(&path)?.is_some() {
+    Ok(())
+}
+fn discard_personal_scratch(staging: &Path, run_id: u64) -> Result<(), String> {
+    remove_personal_partial(&crate::personal_servers::fresh_copy_path(staging, run_id))
+}
+fn remove_personal_partial(path: &Path) -> Result<(), String> {
+    if crate::direct::partial_len(path)?.is_some() {
         fs::remove_file(path).map_err(|error| format!("Could not discard the personal server partial: {error}"))?;
     }
     Ok(())
@@ -3003,7 +3012,11 @@ mod tests {
         job.state = JobState::Downloading;
         let stage = stage(&job).unwrap();
         let partial = selection.partial_path(&stage).unwrap();
+        let scratch = crate::personal_servers::fresh_copy_path(&stage, job.run_id);
+        let unrelated = stage.join("keep.txt");
         fs::write(&partial, [0; 25]).unwrap();
+        fs::write(&scratch, [0; 40]).unwrap();
+        fs::write(&unrelated, b"keep").unwrap();
         let id = job.id.clone();
         repo.data.jobs.push(job);
         repo.save().unwrap();
@@ -3014,14 +3027,25 @@ mod tests {
         assert_eq!(recovered.id, id);
         assert_eq!(recovered.state, JobState::Paused);
         assert_eq!(recovered.progress.as_ref().and_then(|progress| progress.downloaded), Some(25.0));
+        assert!(!scratch.exists());
+        assert_eq!(fs::read(&unrelated).unwrap(), b"keep");
+        let mut cancelled = recovered.clone();
+        cancelled.state = JobState::Cancelled;
+        fs::write(&scratch, [0; 40]).unwrap();
+        cancelled.recover();
+        assert!(!scratch.exists());
+        assert!(!partial.exists());
+        assert_eq!(fs::read(&unrelated).unwrap(), b"keep");
         fs::write(&partial, [0; 100]).unwrap();
         recovered.recover();
         assert!(recovered.progress.is_none());
         fs::write(&partial, [0; 25]).unwrap();
+        fs::write(&scratch, [0; 40]).unwrap();
         fs::write(stage.join(OWNER), b"{}").unwrap();
         recovered.recover();
         assert!(recovered.progress.is_none());
         assert_eq!(fs::read(partial).unwrap(), [0; 25]);
+        assert_eq!(fs::read(scratch).unwrap(), [0; 40]);
         drop(repo);
         fs::remove_dir_all(root).unwrap();
     }

@@ -31,6 +31,10 @@ pub(crate) fn interrupted(error: &str) -> bool {
     error.starts_with(WEBDAV_INTERRUPTED) || error.starts_with(MOUNTED_INTERRUPTED)
 }
 
+pub(crate) fn fresh_copy_path(staging: &Path, run_id: u64) -> PathBuf {
+    staging.join(format!(".personal-{run_id}.part"))
+}
+
 fn copy_progress(run_id: u64, total: u64, written: u64) -> Progress {
     Progress {
         request_id: run_id,
@@ -702,7 +706,7 @@ pub async fn execute(
     };
     let temporary = partial
         .clone()
-        .unwrap_or_else(|| staging.join(format!(".personal-{run_id}.part")));
+        .unwrap_or_else(|| fresh_copy_path(staging, run_id));
     let result = match &config {
         Config::Webdav(config) => {
             webdav::download(

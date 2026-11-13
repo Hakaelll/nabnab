@@ -116,7 +116,7 @@ async function verifyWebdav(openssl) {
   const password = "local-fixture-only";
   const auth = `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
   let version = 1, redirect = false, outside = false, redirected = 0;
-  let interrupt = false, holdCopy = false, ignoreRange = false, invalidRange = false;
+  let interrupt = false, holdCopy = false, ignoreRange = false, invalidRange = false, weakValidator = false;
   const fixtureContent = () => version <= 2 ? Buffer.from(version === 1 ? original : replacement) : Buffer.alloc(210_000, 48 + version);
   const requests = [];
   const trap = createServer({ key, cert }, (_req, res) => { redirected++; res.writeHead(403).end(); });
@@ -126,9 +126,9 @@ async function verifyWebdav(openssl) {
     if (req.headers.authorization !== auth) return res.writeHead(401).end();
     if (redirect) return res.writeHead(302, { Location: `https://localhost:${trap.address().port}${folder}` }).end();
     const content = fixtureContent();
-    const etag = `"dav-v${version}"`;
+    const etag = `${weakValidator ? "W/" : ""}"dav-v${version}"`;
     if (req.method === "GET" && req.url === remoteFile) {
-      if (req.headers["if-match"] !== etag) return res.writeHead(412).end();
+      if (weakValidator ? req.headers["if-unmodified-since"] !== modified : req.headers["if-match"] !== etag) return res.writeHead(412).end();
       const headers = { "Content-Type": "text/plain", "Last-Modified": modified, ETag: etag };
       if (interrupt || holdCopy) {
         interrupt = false;
@@ -314,8 +314,12 @@ async function verifyWebdav(openssl) {
       const { path: relative, stamp } = entries.find(entry => !entry.directory);
       const [queued] = await rpc("personal_server_copy", { selections: [{ serverId: webdavId, path: relative, stamp }], referenceId: null, clientRequest: randomUUID() });
       await wait(async () => {
-        const [part] = await parts(queued);
-        return part && (await stat(path.join(output, ".nabnab-" + queued.id, part))).size === 96_000;
+        const active = (await rpc("get_snapshot")).jobs.find(item => item.id === queued.id);
+        assert.notEqual(active.state, "error", JSON.stringify(active.error));
+        const [part] = weakValidator ? [`.personal-${active.runId}.part`] : await parts(queued);
+        return part && (await stat(path.join(output, ".nabnab-" + queued.id, part)).catch(error => {
+          if (error.code !== "ENOENT") throw error;
+        }))?.size === 96_000;
       });
       return queued;
     };
@@ -401,13 +405,47 @@ async function verifyWebdav(openssl) {
     await wait(async () => (await rpc("get_snapshot")).jobs.find(item => item.id === discardAfterRestart.id)?.state === "cancelled");
     assert.deepEqual(await parts(discardAfterRestart), []);
 
+    weakValidator = true;
+    const freshCopy = await startHeldCopy(15);
+    const activeFresh = (await rpc("get_snapshot")).jobs.find(item => item.id === freshCopy.id);
+    const temporaryName = `.personal-${activeFresh.runId}.part`;
+    const scratch = path.join(output, `.nabnab-${freshCopy.id}`);
+    const freshSnapshot = await restartDuringCopy();
+    holdCopy = false;
+    const fresh = freshSnapshot.jobs.find(item => item.id === freshCopy.id);
+    assert.equal(fresh.state, "paused");
+    assert.deepEqual(fresh.outputs, []);
+    assert.equal(fresh.progress?.downloaded ?? 0, 0);
+    await assert.rejects(stat(path.join(scratch, temporaryName)), { code: "ENOENT" });
+    await page.locator('[data-page="downloads"]').click();
+    const freshRow = row(fresh);
+    const retry = freshRow.getByRole("button", { name: "Reintentar", exact: true });
+    await retry.waitFor();
+    await freshRow.getByText(/Sin parcial reanudable/).waitFor();
+    assert.equal(await freshRow.getByRole("button", { name: "Descartar parcial", exact: true }).count(), 0);
+    for (const [width, height] of [[900, 620], [1180, 780]]) {
+      await page.setViewportSize({ width, height });
+      assert.ok(await freshRow.evaluate(node => node.scrollWidth <= node.clientWidth + 1));
+      await freshRow.screenshot({ path: path.join(data, `webdav-retry-${width}.png`) });
+    }
+    const beforeRetry = requests.length;
+    await retry.press("Enter");
+    const restartedCopy = await wait(async () => {
+      const item = (await rpc("get_snapshot")).jobs.find(item => item.id === fresh.id);
+      return item.runId > fresh.runId && ["completed", "error"].includes(item.state) && item;
+    });
+    assert.equal(restartedCopy.state, "completed", JSON.stringify(restartedCopy.error));
+    assert.deepEqual(await readFile(restartedCopy.outputs[0]), fixtureContent());
+    assert.deepEqual(requests.slice(beforeRetry).filter(request => request.method === "GET").map(request => request.range), [undefined]);
+    weakValidator = false;
+
     const browse = requestId => rpc("personal_server_browse", { serverId: webdavId, path: [], requestId });
     outside = true;
     await assert.rejects(browse(1), error => String(error).includes("outside the authorized root"));
     redirect = true;
     await assert.rejects(browse(2), error => String(error).includes("redirected the request"));
     assert.equal(redirected, 0);
-    console.log("Native WebDAV verified private TLS, scope, redirects, manual pause, range continuation, changed versions, full-response restart, and resume or discard after an interrupted session.");
+    console.log("Native WebDAV verified private TLS, scope, redirects, manual pause, range continuation, changed versions, and cleanup and retry from byte zero after a crash without a strong ETag.");
   } finally {
     await Promise.all([close(server), close(trap)]);
   }

@@ -46,6 +46,10 @@ La prueba de pausa manual usa el teclado en Descargas y comprueba que el foco pa
 
 Si nabnab se cierra durante una copia reanudable, al volver a abrirlo la fila queda en **En pausa**. El contador usa el tamaño que tiene el archivo temporal del trabajo en disco. **Reanudar** vuelve a comprobar la versión antes de pedir los bytes pendientes. **Descartar parcial** permite liberar ese espacio desde Descargas.
 
+Si la copia necesita volver a descargar el archivo completo, por ejemplo en SFTP o en WebDAV con un ETag débil, el arranque retira el temporal de transferencia del trabajo. **Sin parcial reanudable** y **Reintentar** identifican este caso en Descargas. La prueba nativa interrumpe una copia WebDAV con un ETag débil, comprueba que el temporal desaparece y verifica que el reintento pide el archivo completo.
+
+![Copia WebDAV sin parcial reanudable tras volver a abrir nabnab](personal-server-retry.png)
+
 ![Copia WebDAV recuperada tras un cierre inesperado en Windows](personal-server-recovered.png)
 
 ![Copia WebDAV en pausa con los bytes guardados y las acciones para reanudar o descartar](personal-server-paused.png)

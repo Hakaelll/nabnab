@@ -40,6 +40,9 @@ export function needsPersonalCopyReview(job: Job): job is Job & { source: Extrac
 function savedPersonalBytes(job: Job): number {
   return job.state === "paused" && job.source.kind === "personalFile" ? job.progress?.downloaded ?? 0 : 0;
 }
+function personalCopyWithoutPartial(job: Job): boolean {
+  return job.state === "paused" && job.source.kind === "personalFile" && job.runId > 0 && savedPersonalBytes(job) === 0;
+}
 function activityLabel(job:Job,t:Copy):string{
   if (interruptedCopy(job)) return t("Interrumpida", "Interrupted");
   if (job.state === "paused" && job.source.kind === "personalFile") return t("En pausa", "Paused");
@@ -52,7 +55,7 @@ function jobActions(job: Job, t: Copy): string {
   const tag = stamp?.etag ?? "";
   const canPauseCopy = (stamp?.size ?? 0) > 0 && (/^nas-[\da-f]{64}$/.test(tag)
     || tag.length <= 512 && (stamp?.size ?? 0) <= 128 * 1024 ** 3 && /^"[\x21\x23-\x7e]*"$/.test(tag));
-  const retry = job.state === "paused" || partial ? t("Reanudar", "Resume") : t("Reintentar", "Retry");
+  const retry = (job.state === "paused" && !personalCopyWithoutPartial(job)) || partial ? t("Reanudar", "Resume") : t("Reintentar", "Retry");
   const discard = t("Descartar parcial", "Discard partial");
   const hasPartial = partial || savedPersonalBytes(job) > 0;
   const cancel = hasPartial ? discard : t("Cancelar", "Cancel");
@@ -128,7 +131,8 @@ export function downloadsView(snapshot: Snapshot, view: DownloadView, t: Copy): 
       const source=snapshot.sources?.find(source=>source.id===job.sourceId);
       const origin = sourceLabel(job,t);
       const originLabel = job.source.kind === "personalFile"
-        ? origin + (saved ? t(` · ${bytesLabel(saved)} guardados`, ` · ${bytesLabel(saved)} saved`) : "")
+        ? origin + (saved ? t(` · ${bytesLabel(saved)} guardados`, ` · ${bytesLabel(saved)} saved`)
+          : personalCopyWithoutPartial(job) ? t(" · Sin parcial reanudable", " · No resumable partial") : "")
         : `${job.provider} · ${origin}`;
       const heading=job.groupId&&(startsSection||ordered[index-1].groupId!==job.groupId)?`<li class="job-group-summary">${h(source?.name??t('Lote de operaciones','Operations batch'))} · ${finished}/${members.length} ${t('salidas terminadas','outputs complete')}${finished&&errors?` · ${t('Éxito parcial. Puedes reintentar las salidas fallidas.','Partial success. Failed outputs can be retried.')}`:errors?` · ${errors} ${t('con incidencias','with issues')}`:''}</li>`:'';
       return `${sectionHeading}${heading}<li class="job-row ${selected ? "is-selected" : ""} ${transferring ? "is-transferring" : ""}" data-state="${job.state}"><input type="checkbox" data-select-job="${h(job.id)}" aria-label="${h(t("Seleccionar ", "Select ") + job.title)}" ${view.selected.has(job.id) ? "checked" : ""}>
