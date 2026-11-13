@@ -79,6 +79,55 @@ pub fn cancel_file_source_inspection(state: State<Arc<AppState>>, request_id: u6
 }
 
 #[tauri::command]
+pub async fn verify_zenodo_copy(
+    state: State<'_, Arc<AppState>>,
+    library_id: String,
+    request_id: u64,
+) -> Result<bool, String> {
+    let item = {
+        let guard = state.repository.lock().unwrap();
+        let repo = guard.as_ref().ok_or("Open nabnab first.")?;
+        repo.data.library.iter().find(|item| item.id == library_id).cloned().ok_or("The copy is no longer in Library.")?
+    };
+    let cancel = begin(&state, request_id)?;
+    let result = async {
+        let _permit = queue::processing_permit(&state, cancel.clone()).await?;
+        tokio::task::spawn_blocking(move || check_zenodo_copy(item, &cancel)).await.map_err(|error| error.to_string())?
+    }.await;
+    finish(&state, request_id);
+    result
+}
+
+fn check_zenodo_copy(item: crate::library::LibraryItem, cancel: &watch::Receiver<bool>) -> Result<bool, String> {
+    use sha2::Digest;
+    if !item.details.content_id.as_deref().is_some_and(|id| id.starts_with("zenodo:")) {
+        return Err("Choose a Zenodo file in Library.".into());
+    }
+    let checksum = item.details.source_checksum.as_deref().filter(|value| valid_checksum(value))
+        .ok_or("Zenodo did not publish a supported checksum for this copy.")?;
+    let path = crate::library::authorized_path(&item.path)?;
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(windows)]
+    std::os::windows::fs::OpenOptionsExt::share_mode(&mut options, windows_sys::Win32::Storage::FileSystem::FILE_SHARE_READ);
+    let file = options.open(&path).map_err(|e| e.to_string())?;
+    let before = file.metadata().map_err(|e| e.to_string())?;
+    if !before.is_file() { return Err("Choose a regular local file.".into()); }
+    if before.len() != item.size { return Ok(false); }
+    let actual = if checksum.starts_with("md5:") {
+        queue::hash_reader(&file, cancel, md5::Md5::new())?
+    } else {
+        queue::hash_reader(&file, cancel, sha2::Sha256::new())?
+    };
+    let after = file.metadata().map_err(|e| e.to_string())?;
+    if *cancel.borrow() { return Err(crate::engine::CANCELLED.into()); }
+    if before.len() != after.len() || before.modified().ok() != after.modified().ok() {
+        return Err("The local file changed during verification. Check it again.".into());
+    }
+    Ok(checksum.split_once(':').is_some_and(|(_, expected)| actual.eq_ignore_ascii_case(expected)))
+}
+
+#[tauri::command]
 pub async fn librivox_catalog_languages() -> Result<Vec<public_sources::CatalogLanguage>, String> {
     public_sources::librivox_languages().await
 }
@@ -262,5 +311,31 @@ mod tests {
         assert!(begin(&state,7).is_err());
         assert!(!*receiver.borrow());finish(&state,7);
         assert!(begin(&state,7).is_ok());
+    }
+
+    #[test]
+    fn zenodo_copy_checks_actual_bytes_and_supports_cancellation() {
+        let root = std::env::temp_dir().join(format!("nabnab-zenodo-check-{}-{}", std::process::id(), queue::now()));
+        std::fs::create_dir(&root).unwrap();
+        let path = root.join("data.txt");
+        std::fs::write(&path, b"abc").unwrap();
+        let mut item = crate::library::index(&path, None, None, None).unwrap();
+        item.details.content_id = Some("zenodo:7:data.txt".into());
+        let (stop, cancel) = watch::channel(false);
+        for checksum in [
+            "md5:900150983cd24fb0d6963f7d28e17f72",
+            "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+        ] {
+            item.details.source_checksum = Some(checksum.into());
+            assert!(check_zenodo_copy(item.clone(), &cancel).unwrap());
+            std::fs::write(&path, b"axc").unwrap();
+            assert!(!check_zenodo_copy(item.clone(), &cancel).unwrap());
+            assert_eq!(std::fs::read(&path).unwrap(), b"axc");
+            std::fs::write(&path, b"abc").unwrap();
+        }
+        stop.send(true).unwrap();
+        assert_eq!(check_zenodo_copy(item, &cancel).unwrap_err(), crate::engine::CANCELLED);
+        std::fs::remove_file(path).unwrap();
+        std::fs::remove_dir(root).unwrap();
     }
 }

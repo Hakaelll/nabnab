@@ -70,6 +70,7 @@ const setup = `
     if(cmd==="plugin:window|is_maximized")return false;
     if(cmd==="startup")return {...copy(state),folder:settings.folder,enginesReady:true,engineError:null};
     if(cmd==="get_snapshot")return copy(state);
+    if(cmd==="verify_zenodo_copy")return fixture.zenodoChecksumMatches !== false;
     if(cmd==="local_timezone")return "Romance Standard Time";
     if(cmd==="librivox_catalog_languages")return [{id:5,name:"Spanish"},{id:1,name:"English"},{id:48,name:"North American Indian (undetermined dialect)"}];
     if(cmd==="cloud_status")return copy(connections);
@@ -323,6 +324,22 @@ try {
       await page.locator(".file-source-filter").evaluate(element => element.scrollIntoView({ block: "start" }));
       await page.screenshot({ path: `${directory}/zenodo-saved-record-${width}.png` });
     }
+    const verifyCopy = page.getByRole("button", { name: "Verificar copia de samples.csv", exact: true });
+    await verifyCopy.press("Enter", { timeout: 3000 });
+    const verification = page.locator(".file-source-saved-copy").getByRole("status");
+    await verification.getByText("El checksum coincide.", { exact: true }).waitFor();
+    assert.ok(await verifyCopy.evaluate(button => button === document.activeElement));
+    await page.evaluate(() => { window.fileSourceFixture.zenodoChecksumMatches = false; });
+    await verifyCopy.press("Enter");
+    await verification.getByText("El checksum es distinto.", { exact: true }).waitFor();
+    for (const [width, height] of [[900, 620], [1180, 780]]) {
+      await page.setViewportSize({ width, height });
+      await checkNoHorizontalOverflow(`Zenodo checksum ${width}`);
+      await verification.evaluate(element => element.scrollIntoView({ block: "center" }));
+      await page.screenshot({ path: `${directory}/zenodo-copy-check-${width}.png` });
+    }
+    const checkCalls = await page.evaluate(() => window.fileSourceFixture.calls.filter(call => call.cmd === "verify_zenodo_copy"));
+    assert.deepEqual(checkCalls.map(call => call.args.libraryId), ["zenodo-copy-v1", "zenodo-copy-v1"]);
     await savedDatasetFolder.press("Enter");
     await page.waitForFunction(() => window.fileSourceFixture.calls.some(call =>
       call.cmd === "open_media" && call.args.id === "zenodo-copy-v1" && call.args.folder === true));

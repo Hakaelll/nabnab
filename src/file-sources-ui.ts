@@ -133,7 +133,8 @@ export function createFileSources(hooks: FileSourceHooks) {
   let chapterLanguage = "";
   let query = "";
   let publicSelectionReview = false;
-  let busy: "inspect" | "queue" | "connect" | "configure" | "revoke" | null = null;
+  let busy: "inspect" | "verify" | "queue" | "connect" | "configure" | "revoke" | null = null;
+  let checkedCopy: { id: string; matches: boolean } | null = null;
   let error = "";
   let activeRequest = 0;
   let requestCounter = Date.now();
@@ -143,7 +144,7 @@ export function createFileSources(hooks: FileSourceHooks) {
   const publicSelected = new Map<string, PublicAsset>();
   const cloudSelected = new Map<string, CloudEntry>();
   const exports = new Map<string, string>();
-  function clearPublicSelection() { publicSelected.clear(); publicSelectionReview = false; }
+  function clearPublicSelection() { publicSelected.clear(); publicSelectionReview = false; checkedCopy = null; }
   function clearSelection() { clearPublicSelection(); cloudSelected.clear(); exports.clear(); }
   function canReviewPublicSelection() {
     return tab === "public" && publicPage !== null && publicPage.assets.length > 0
@@ -332,7 +333,12 @@ export function createFileSources(hooks: FileSourceHooks) {
         : action("reveal-media", t("Mostrar carpeta", "Show folder"), "folder", "quiet", `data-id="${h(saved.id)}" aria-label="${h(t(`Mostrar carpeta de ${asset.filename}`, `Show folder for ${asset.filename}`))}"`);
       return `<div class="file-source-saved-row">${row}<div class="file-source-saved-copy">
         <span>${t("En Biblioteca", "In Library")} · ${h(fileSize(saved.size, t))}</span>
-        ${copyAction}
+        <div class="button-group">${copyAction}${provider === "zenodo" && asset.checksum
+          ? action("verify-zenodo-copy", t("Verificar copia", "Verify copy"), "check", "quiet",
+            `data-id="${h(saved.id)}" aria-label="${h(t(`Verificar copia de ${asset.filename}`, `Verify copy of ${asset.filename}`))}" ${busy ? "disabled" : ""}`)
+          : ""}</div>
+        ${checkedCopy?.id === saved.id ? `<span role="status" class="file-source-check-result">${checkedCopy.matches
+          ? t("El checksum coincide.", "The checksum matches.") : t("El checksum es distinto.", "The checksum differs.")}</span>` : ""}
       </div></div>`;
     }).join("") || `<p class="file-source-empty">${empty}</p>`}</div>`;
   }
@@ -402,7 +408,7 @@ export function createFileSources(hooks: FileSourceHooks) {
     return `${header}
       ${isPublic ? catalogReturn ? "" : `<form id="file-source-form" class="file-source-form"><label for="file-source-url">${t("Enlace, identificador o DOI", "Link, identifier or DOI")}</label><div><input id="file-source-url" type="text" required value="${h(url)}" maxlength="8192" placeholder="https://… · arXiv:2401.00001 · 10.5281/zenodo.1234" autocomplete="off" spellcheck="false" ${busy ? "disabled" : ""}><button type="submit" class="button secondary" ${busy ? "disabled" : ""}>${icon("search")}${t("Explorar", "Browse")}</button></div><p class="field-note">GitHub Releases · Internet Archive · Wikimedia Commons · arXiv · Zenodo · LibriVox</p></form>${catalogSearch()}` : `<div class="file-source-cloud-toolbar"><div><strong>${h(cloudName(provider))}</strong><p class="field-note">${t("Solo los archivos a los que tu cuenta tiene acceso.", "Only files your account can access.")}</p></div>${action("file-source-cloud-root", t("Mis archivos", "My files"), "folder", "secondary", busy || !status(provider)?.connected ? "disabled" : "")}${action("cloud-configure-open", t("Conexión", "Connection"), "settings", "quiet", `data-provider="${tab}" ${busy ? "disabled" : ""}`)}</div><form id="cloud-shared-form" class="file-source-form"><label for="cloud-shared-url">${t("Enlace compartido, opcional", "Shared link, optional")}</label><div><input id="cloud-shared-url" type="url" value="${h(sharedUrl ?? "")}" maxlength="8192" placeholder="https://…" autocomplete="off" spellcheck="false" ${busy ? "disabled" : ""}><button class="button secondary" type="submit" ${busy || !status(provider)?.connected ? "disabled" : ""}>${t("Abrir enlace", "Open link")}</button></div></form>${connectionEditor === tab || !status(provider)?.connected ? connectionCard(provider) : ""}`}
       ${isPublic && catalogReturn ? `<div class="file-source-return">${action("file-source-back-results", returnLabel, "back", "quiet", busy ? "disabled" : "")}</div>` : ""}
-      ${error ? `<div class="file-source-error" role="alert">${icon("error")}<span>${h(error)}</span></div>` : ""}${busy === "inspect" || busy === "connect" ? `<div class="file-source-progress" role="status"><span>${busy === "connect" ? t("Esperando autorización en el navegador…", "Waiting for browser authorization…") : t("Consultando archivos del origen…", "Reading source files…")}</span>${action("file-source-cancel", t("Cancelar", "Cancel"), "close", "quiet")}</div>` : ""}
+      ${error ? `<div class="file-source-error" role="alert">${icon("error")}<span>${h(error)}</span></div>` : ""}${busy === "inspect" || busy === "connect" || busy === "verify" ? `<div class="file-source-progress" role="status"><span>${busy === "connect" ? t("Esperando autorización en el navegador…", "Waiting for browser authorization…") : busy === "verify" ? t("Comprobando el archivo local…", "Checking the local file…") : t("Consultando archivos del origen…", "Reading source files…")}</span>${action("file-source-cancel", t("Cancelar", "Cancel"), "close", "quiet")}</div>` : ""}
       ${hasPage ? `<div class="file-source-results"><div class="file-source-result-heading"><div>
         <span class="file-source-eyebrow">${isPublic ? zenodoHistory ? t("Zenodo · Historial de versiones", "Zenodo · Version history")
           : zenodoCommunity ? t("Zenodo · Comunidad", "Zenodo · Community") : h(publicPage ? publicNames[publicPage.provider] : "") : h(cloudName(provider))}</span>
@@ -591,8 +597,18 @@ export function createFileSources(hooks: FileSourceHooks) {
         break;
       case "file-source-follow": if (!busy && publicPage) hooks.followSource?.(publicPage.sourceUrl, isCatalogSearch(publicPage) ? "publicSearch" : "github"); break;
       case "file-source-destination": hooks.chooseFolder?.(); break;
+      case "verify-zenodo-copy": {
+        const id = element.dataset.id;
+        if (!id || busy || publicPage?.provider !== "zenodo") break;
+        checkedCopy = null;
+        await perform("verify", async requestId => {
+          const matches = await hooks.command<boolean>("verify_zenodo_copy", { libraryId: id, requestId });
+          if (activeRequest === requestId) checkedCopy = { id, matches };
+        });
+        if (busy === null) document.querySelector<HTMLElement>(`[data-action="verify-zenodo-copy"][data-id="${CSS.escape(id)}"]`)?.focus({ preventScroll: true });
+      } break;
       case "file-source-cancel": {
-        if (busy !== "inspect" && busy !== "connect") break;
+        if (busy !== "inspect" && busy !== "connect" && busy !== "verify") break;
         const requestId = activeRequest; activeRequest = ++requestCounter; busy = null;
         try { await hooks.command("cancel_file_source_inspection", { requestId }); } catch (failure) { hooks.showError(failure); }
         hooks.render();

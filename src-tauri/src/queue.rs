@@ -1240,11 +1240,18 @@ fn cleanup(job: &Job, staging: &Path) -> Result<(), String> {
 pub(crate) fn file_hash(file: &Path, cancel: &watch::Receiver<bool>) -> Result<String, String> {
     hash_with(file, cancel, Sha256::new())
 }
-fn hash_with<D: Digest>(file: &Path, cancel: &watch::Receiver<bool>, mut hash: D) -> Result<String, String>
+fn hash_with<D: Digest>(file: &Path, cancel: &watch::Receiver<bool>, hash: D) -> Result<String, String>
 where
     sha2::digest::Output<D>: std::fmt::LowerHex,
 {
-    let mut file = fs::File::open(file).map_err(|e| e.to_string())?;
+    let file = fs::File::open(file).map_err(|e| e.to_string())?;
+    hash_reader(file, cancel, hash)
+}
+
+pub(crate) fn hash_reader<D: Digest>(mut file: impl Read, cancel: &watch::Receiver<bool>, mut hash: D) -> Result<String, String>
+where
+    sha2::digest::Output<D>: std::fmt::LowerHex,
+{
     let mut bytes = [0u8; 64 * 1024];
     loop {
         if *cancel.borrow() {

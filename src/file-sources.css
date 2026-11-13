@@ -67,9 +67,11 @@ label.file-source-row { cursor: pointer; }
 .file-source-saved-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; min-width: 0; border: 1px solid var(--edge-quiet); border-radius: 10px; background: var(--secondary); }
 .file-source-research-list .file-source-saved-row > .file-source-row { grid-template-columns: 18px 36px minmax(0, 1fr); border: 0; background: transparent; }
 .file-source-saved-row:has(.file-source-row.is-selected) { border-color: var(--action); background: var(--surface); }
-.file-source-saved-copy { display: grid; justify-items: end; gap: 1px; padding-inline: 8px 12px; }
+.file-source-saved-copy { display: grid; justify-items: end; gap: 6px; padding: 8px 12px 8px 8px; }
 .file-source-saved-copy > span { font-size: 12px; color: var(--muted); }
 .file-source-saved-copy .button { min-height: 32px; }
+.file-source-saved-copy .button-group { flex-wrap: wrap; justify-content: flex-end; gap: 2px 6px; }
+.file-source-saved-copy .file-source-check-result { font-weight: 600; color: var(--text); }
 .file-source-folder { display: block; min-width: 0; background: none; border: 0; color: var(--text); font: inherit; text-align: left; padding: 4px 0; cursor: pointer; }
 .file-source-folder strong { display: block; font-weight: 500; overflow-wrap: anywhere; }
 .file-source-folder small { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }

@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 
@@ -292,6 +292,21 @@ try {
     await copyFilter.selectOption("saved");
     assert.equal(await page.locator("[data-file-source-select]").count(), 1);
     assert.equal(await page.getByRole("button", { name: "Marcar archivos sin copia" }).isDisabled(), true);
+    const verifyCopy = page.getByRole("button", { name: "Verificar copia de Fig_3b_left.csv", exact: true });
+    const result = page.locator(".file-source-saved-copy").getByRole("status");
+    await verifyCopy.press("Enter");
+    await result.getByText("El checksum coincide.", { exact: true }).waitFor();
+    const original = await readFile(item.path);
+    const edited = Buffer.from(original);
+    edited[0] ^= 1;
+    try {
+      await writeFile(item.path, edited);
+      await verifyCopy.press("Enter");
+      await result.getByText("El checksum es distinto.", { exact: true }).waitFor();
+      assert.deepEqual(await readFile(item.path), edited);
+    } finally {
+      await writeFile(item.path, original);
+    }
     await copyFilter.selectOption("missing");
     assert.equal(await showFolder.count(), 0);
     assert.equal(await page.locator(`[data-file-source-select="${asset.id}"]`).count(), 0);
