@@ -166,7 +166,7 @@ impl Selection {
     }
 
     pub(crate) fn partial_path(&self, staging: &Path) -> Option<PathBuf> {
-        let kind = if self.can_resume_mounted() {
+        let kind = if nas::resume_size(&self.stamp).is_some() {
             "nas"
         } else if webdav::resume_size(&self.stamp).is_some() {
             "webdav"
@@ -176,12 +176,16 @@ impl Selection {
         Some(staging.join(format!(".personal-{kind}-{}.part", fingerprint(self))))
     }
 
-    pub(crate) fn can_resume_mounted(&self) -> bool {
-        nas::resume_size(&self.stamp).is_some()
+    fn resume_size(&self) -> Option<u64> {
+        nas::resume_size(&self.stamp).or_else(|| webdav::resume_size(&self.stamp))
+    }
+
+    pub(crate) fn can_pause_copy(&self) -> bool {
+        self.resume_size().is_some()
     }
 
     pub(crate) fn paused_progress(&self, staging: &Path, run_id: u64) -> Option<crate::model::Progress> {
-        let total = nas::resume_size(&self.stamp)?;
+        let total = self.resume_size()?;
         let path = self.partial_path(staging)?;
         let written = crate::direct::partial_len(&path).ok().flatten()
             .filter(|length| *length > 0 && *length < total)?;
@@ -693,7 +697,7 @@ pub async fn execute(
     };
     let partial = match &config {
         Config::Webdav(_) if webdav::resume_size(&selection.stamp).is_some() => candidate,
-        Config::Nas(_) if selection.can_resume_mounted() => candidate,
+        Config::Nas(_) if nas::resume_size(&selection.stamp).is_some() => candidate,
         _ => None,
     };
     let temporary = partial

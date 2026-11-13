@@ -37,24 +37,26 @@ export function needsPersonalCopyReview(job: Job): job is Job & { source: Extrac
   return job.state === "error" && job.source.kind === "personalFile"
     && (code === "mounted_changed" || code === "webdav_changed" || code === "sftp_changed");
 }
+function savedPersonalBytes(job: Job): number {
+  return job.state === "paused" && job.source.kind === "personalFile" ? job.progress?.downloaded ?? 0 : 0;
+}
 function activityLabel(job:Job,t:Copy):string{
   if (interruptedCopy(job)) return t("Interrumpida", "Interrupted");
-  if (job.state === "paused" && job.source.kind === "personalFile" && job.progress?.downloaded) {
-    const saved = bytesLabel(job.progress.downloaded);
-    return t(`En pausa · ${saved} guardados`, `Paused · ${saved} saved`);
-  }
+  if (job.state === "paused" && job.source.kind === "personalFile") return t("En pausa", "Paused");
   return job.source.kind==='live'&&job.state==='downloading'?t('Grabando','Recording'):job.progress?.phase==='seeding'?t('Compartiendo','Seeding'):stateLabel(job.state,t);
 }
 function jobActions(job: Job, t: Copy): string {
   const id = `data-id="${h(job.id)}"`;
   const partial = interruptedCopy(job);
-  const mounted = job.source.kind === "personalFile" && (job.source.selection.stamp.size ?? 0) > 0
-    && /^nas-[\da-f]{64}$/i.test(job.source.selection.stamp.etag ?? "");
+  const stamp = job.source.kind === "personalFile" ? job.source.selection.stamp : null;
+  const tag = stamp?.etag ?? "";
+  const canPauseCopy = (stamp?.size ?? 0) > 0 && (/^nas-[\da-f]{64}$/.test(tag)
+    || tag.length <= 512 && (stamp?.size ?? 0) <= 128 * 1024 ** 3 && /^"[\x21\x23-\x7e]*"$/.test(tag));
   const retry = job.state === "paused" || partial ? t("Reanudar", "Resume") : t("Reintentar", "Retry");
   const discard = t("Descartar parcial", "Discard partial");
-  const hasPartial = partial || mounted && job.state === "paused" && Boolean(job.progress?.downloaded);
+  const hasPartial = partial || savedPersonalBytes(job) > 0;
   const cancel = hasPartial ? discard : t("Cancelar", "Cancel");
-  return `${job.source.kind==="captionTranslation"&&job.state==="completed"?action("translation-open-draft",t("Abrir borrador","Open draft"),"document","icon-button",id):""}${job.source.kind==='live'&&job.state==='downloading'&&job.progress?.phase.startsWith('recording:')?action("stop-recording",t("Detener y guardar","Stop and save"),"check","secondary",id):""}${(job.state === "pending"||job.source.kind==='voice'&&activeStates.includes(job.state)||(job.source.kind==='torrent'||job.source.kind==='advancedFile'||mounted)&&job.state==='downloading') ? action("pause-job", t("Pausar", "Pause"), "pause", "icon-button", id + ` title="${t("Pausar trabajo", "Pause job")}"`) : ""}
+  return `${job.source.kind==="captionTranslation"&&job.state==="completed"?action("translation-open-draft",t("Abrir borrador","Open draft"),"document","icon-button",id):""}${job.source.kind==='live'&&job.state==='downloading'&&job.progress?.phase.startsWith('recording:')?action("stop-recording",t("Detener y guardar","Stop and save"),"check","secondary",id):""}${(job.state === "pending"||job.source.kind==='voice'&&activeStates.includes(job.state)||(job.source.kind==='torrent'||job.source.kind==='advancedFile'||canPauseCopy)&&job.state==='downloading') ? action("pause-job", t("Pausar", "Pause"), "pause", "icon-button", id + ` title="${t("Pausar trabajo", "Pause job")}"`) : ""}
     ${needsPersonalCopyReview(job) ? action("review-personal-copy", t("Revisar versión", "Review version"), "file", "secondary", id)
       : ["error", "cancelled", "paused"].includes(job.state) ? action("retry-job", retry, "retry", "icon-button", id + ` title="${retry}"`) : ""}
     ${cancellableStates.includes(job.state) || hasPartial ? action("cancel-job", cancel, "close", "icon-button", id + ` title="${cancel}"`) : ""}`;
@@ -110,6 +112,7 @@ export function downloadsView(snapshot: Snapshot, view: DownloadView, t: Copy): 
       const selected = view.detailId === job.id;
       const size = job.state === "completed" || interruptedCopy(job) ? null : job.progress?.total;
       const received = job.progress?.downloaded;
+      const saved = savedPersonalBytes(job);
       const metric = transferring && job.progress?.speed ? bytesLabel(job.progress.speed) + "/s"
         : transferring && job.source.kind === "personalFile" && typeof received === "number" && typeof size === "number"
           ? `${bytesLabel(received)} / ${bytesLabel(size)}`
@@ -124,7 +127,9 @@ export function downloadsView(snapshot: Snapshot, view: DownloadView, t: Copy): 
       const finished=members.filter(item=>item.state==='completed').length;const errors=members.filter(item=>item.state==='error'||item.state==='cancelled').length;
       const source=snapshot.sources?.find(source=>source.id===job.sourceId);
       const origin = sourceLabel(job,t);
-      const originLabel = job.source.kind === "personalFile" ? origin : `${job.provider} · ${origin}`;
+      const originLabel = job.source.kind === "personalFile"
+        ? origin + (saved ? t(` · ${bytesLabel(saved)} guardados`, ` · ${bytesLabel(saved)} saved`) : "")
+        : `${job.provider} · ${origin}`;
       const heading=job.groupId&&(startsSection||ordered[index-1].groupId!==job.groupId)?`<li class="job-group-summary">${h(source?.name??t('Lote de operaciones','Operations batch'))} · ${finished}/${members.length} ${t('salidas terminadas','outputs complete')}${finished&&errors?` · ${t('Éxito parcial. Puedes reintentar las salidas fallidas.','Partial success. Failed outputs can be retried.')}`:errors?` · ${errors} ${t('con incidencias','with issues')}`:''}</li>`:'';
       return `${sectionHeading}${heading}<li class="job-row ${selected ? "is-selected" : ""} ${transferring ? "is-transferring" : ""}" data-state="${job.state}"><input type="checkbox" data-select-job="${h(job.id)}" aria-label="${h(t("Seleccionar ", "Select ") + job.title)}" ${view.selected.has(job.id) ? "checked" : ""}>
         <div class="row-thumbnail"${!job.thumbnail && preview ? ` data-thumbnail-id="${h(preview)}"` : ""}>${job.thumbnail ? `<img src="${h(job.thumbnail)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : icon(job.source.kind === "transform" ? "tools" : job.source.kind === "cloudFile" || job.source.kind === "personalFile" || job.source.kind === "publicFile" || job.source.kind === "attribution" ? "document" : "video")}</div>

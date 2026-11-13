@@ -875,7 +875,16 @@ async function handleAction(action: string, button: HTMLButtonElement, event?: M
       else {downloads.filter='all';downloads.query='';navigate('downloads');}
       break;
     case 'cancel-job':await actOnJobs([id],'cancel');break;
-    case 'pause-job':await actOnJobs([id],'pause');break;
+    case 'pause-job': {
+      const moveFocus = document.activeElement === button;
+      const scope = inspectorBody.contains(button) ? inspectorBody : required('#page-content');
+      await actOnJobs([id], 'pause');
+      if (moveFocus && !button.isConnected && document.activeElement === document.body) {
+        [...scope.querySelectorAll<HTMLElement>('[data-action="retry-job"]')]
+          .find(control => control.dataset.id === id)?.focus();
+      }
+      break;
+    }
     case 'retry-job':await actOnJobs([id],'retry');break;
     case 'review-personal-copy': {
       const job = snapshot.jobs.find(job => job.id === id);

@@ -94,7 +94,7 @@ async function verifyWebdav(openssl) {
   const password = "local-fixture-only";
   const auth = `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
   let version = 1, redirect = false, outside = false, redirected = 0;
-  let interrupt = false, ignoreRange = false, invalidRange = false;
+  let interrupt = false, holdCopy = false, ignoreRange = false, invalidRange = false;
   const fixtureContent = () => version <= 2 ? Buffer.from(version === 1 ? original : replacement) : Buffer.alloc(210_000, 48 + version);
   const requests = [];
   const trap = createServer({ key, cert }, (_req, res) => { redirected++; res.writeHead(403).end(); });
@@ -108,11 +108,11 @@ async function verifyWebdav(openssl) {
     if (req.method === "GET" && req.url === remoteFile) {
       if (req.headers["if-match"] !== etag) return res.writeHead(412).end();
       const headers = { "Content-Type": "text/plain", "Last-Modified": modified, ETag: etag };
-      if (interrupt) {
+      if (interrupt || holdCopy) {
         interrupt = false;
         res.writeHead(200, { ...headers, "Content-Length": content.length });
         res.write(content.subarray(0, 96_000));
-        setTimeout(() => res.destroy(), 300);
+        if (!holdCopy) setTimeout(() => res.destroy(), 300);
         return;
       }
       const range = /^bytes=(\d+)-$/.exec(req.headers.range ?? "");
@@ -285,13 +285,73 @@ async function verifyWebdav(openssl) {
     await wait(async () => (await rpc("get_snapshot")).jobs.find(job => job.id === discard.id)?.state === "cancelled");
     assert.deepEqual(await parts(discard), []);
 
+    const startHeldCopy = async nextVersion => {
+      version = nextVersion;
+      holdCopy = true;
+      const entries = await rpc("personal_server_browse", { serverId: webdavId, path: ["Cuadernos"], requestId: ++requestId });
+      const { path: relative, stamp } = entries.find(entry => !entry.directory);
+      const [queued] = await rpc("personal_server_copy", { selections: [{ serverId: webdavId, path: relative, stamp }], referenceId: null, clientRequest: randomUUID() });
+      await wait(async () => {
+        const [part] = await parts(queued);
+        return part && (await stat(path.join(output, ".nabnab-" + queued.id, part))).size === 96_000;
+      });
+      return queued;
+    };
+    const activeCopy = await startHeldCopy(9);
+    const activeRow = row(activeCopy);
+    const pause = activeRow.getByRole("button", { name: "Pausar", exact: true });
+    for (const [width, height] of [[1180, 780], [900, 620]]) {
+      await page.setViewportSize({ width, height });
+      await pause.waitFor();
+      await page.screenshot({ path: path.join(data, `webdav-pause-active-${width}.png`) });
+    }
+    await pause.waitFor({ timeout: 3000 });
+    await pause.press("Enter");
+    const paused = await wait(async () => {
+      const item = (await rpc("get_snapshot")).jobs.find(item => item.id === activeCopy.id);
+      return item.state === "paused" && item.progress?.downloaded === 96_000 && item;
+    });
+    assert.deepEqual(paused.outputs, []);
+    await activeRow.getByText("En pausa", { exact: true }).waitFor();
+    await activeRow.getByText(/guardados/).waitFor();
+    await activeRow.getByRole("button", { name: "Descartar parcial", exact: true }).waitFor();
+    assert.ok(await activeRow.getByRole("button", { name: "Reanudar", exact: true }).evaluate(button => button === document.activeElement));
+    for (const [width, height] of [[1180, 780], [900, 620]]) {
+      await page.setViewportSize({ width, height });
+      assert.ok(await activeRow.evaluate(node => node.scrollWidth <= node.clientWidth + 1));
+      await page.screenshot({ path: path.join(data, `webdav-paused-${width}.png`) });
+    }
+    holdCopy = false;
+    const manuallyResumed = await continueCopy(paused, 8);
+    assert.equal(manuallyResumed.state, "completed", JSON.stringify(manuallyResumed.error));
+    assert.deepEqual(await readFile(manuallyResumed.outputs[0]), fixtureContent());
+    assert.ok(requests.some(request => request.validator === '"dav-v9"' && request.range === "bytes=96000-"));
+    const cancelledCopy = await startHeldCopy(10);
+    await row(cancelledCopy).getByRole("button", { name: "Cancelar", exact: true }).click();
+    await wait(async () => (await parts(cancelledCopy)).length === 0);
+    assert.equal((await rpc("get_snapshot")).jobs.find(item => item.id === cancelledCopy.id)?.state, "cancelled");
+    const changedWhilePaused = await startHeldCopy(11);
+    await row(changedWhilePaused).getByRole("button", { name: "Pausar", exact: true }).click();
+    const reviewedCopy = await wait(async () => {
+      const item = (await rpc("get_snapshot")).jobs.find(item => item.id === changedWhilePaused.id);
+      return item.state === "paused" && item.progress?.downloaded === 96_000 && item;
+    });
+    holdCopy = false;
+    version = 12;
+    const getCount = requests.filter(request => request.method === "GET").length;
+    const refused = await continueCopy(reviewedCopy, 10);
+    assert.equal(refused.error.code, "webdav_changed");
+    assert.deepEqual(refused.outputs, []);
+    assert.deepEqual(await parts(refused), []);
+    assert.equal(requests.filter(request => request.method === "GET").length, getCount);
+
     const browse = requestId => rpc("personal_server_browse", { serverId: webdavId, path: [], requestId });
     outside = true;
     await assert.rejects(browse(1), error => String(error).includes("outside the authorized root"));
     redirect = true;
     await assert.rejects(browse(2), error => String(error).includes("redirected the request"));
     assert.equal(redirected, 0);
-    console.log("Native WebDAV verified private TLS, scope, redirect blocking, range continuation, changed and invalid ranges, full-response restart and partial discard.");
+    console.log("Native WebDAV verified private TLS, scope, redirects, manual pause, range continuation, changed versions, full-response restart and partial cleanup.");
   } finally {
     await Promise.all([close(server), close(trap)]);
   }

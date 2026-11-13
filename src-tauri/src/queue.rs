@@ -972,7 +972,7 @@ fn action_authorized(state: &AppState, ids: &[String], action: &str, client_id:O
             "pause" if job.state == JobState::Pending => job.state = JobState::Paused,
             "pause" if job.state.active()&&matches!(job.source,Source::Voice {..})=>{job.state=JobState::Paused;job.progress=None;job.next_retry_at=None;cancellations.push(job.id.clone());},
             "pause" if job.state==JobState::Downloading&&matches!(job.source,Source::Torrent{..}|Source::AdvancedFile{..})=>{job.state=JobState::Paused;job.progress=None;job.next_retry_at=None;cancellations.push(job.id.clone());},
-            "pause" if job.state == JobState::Downloading && matches!(&job.source, Source::PersonalFile { selection } if selection.can_resume_mounted()) => {
+            "pause" if job.state == JobState::Downloading && matches!(&job.source, Source::PersonalFile { selection } if selection.can_pause_copy()) => {
                 job.state = JobState::Paused;
                 job.progress = None;
                 cancellations.push(job.id.clone());

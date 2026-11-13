@@ -22,7 +22,7 @@ Desde una referencia, **Revisar en servidor** abre su carpeta y compara los meta
 
 Cuando una copia falla porque cambió el archivo, pulsa **Revisar versión** en Descargas. El panel compara la versión solicitada con la actual y muestra el destino local. **Copiar versión actual** crea un trabajo nuevo para ese archivo y muestra la confirmación en el mismo panel. **Volver a Descargas** devuelve el foco al trabajo anterior. Si la conexión se ha retirado, el panel lo indica.
 
-Las copias verifican los metadatos seleccionados y comprueban el recurso al finalizar. En WebDAV, si se interrumpe una copia con ETag fuerte y tamaño conocido, **Reanudar** solicita los bytes pendientes de esa versión. Si el servidor devuelve el mismo archivo completo, la copia vuelve a empezar. [Rangos HTTP y combinación de fragmentos](https://www.rfc-editor.org/rfc/rfc9110.html#name-combining-parts)
+Las copias verifican los metadatos seleccionados y comprueban el recurso al finalizar. En WebDAV, **Pausar** está disponible cuando el servidor informa un ETag fuerte y un tamaño conocido. Descargas muestra los bytes guardados y ofrece **Reanudar** o **Descartar parcial**. Al reanudar tras una pausa o un corte, nabnab vuelve a comprobar la versión y solicita los bytes pendientes. Si el servidor devuelve el mismo archivo completo, la copia vuelve a empezar. [Rangos HTTP y combinación de fragmentos](https://www.rfc-editor.org/rfc/rfc9110.html#name-combining-parts)
 
 En una carpeta montada puedes **Pausar** la copia desde Descargas. Si se interrumpe después de guardar datos, vuelve a conectar la carpeta en Windows y pulsa **Reanudar**. La aplicación comprueba el volumen, la identidad del archivo, el tamaño y las marcas de escritura y cambio antes de saltar a los bytes pendientes y al terminar. **Descartar parcial** elimina los datos guardados por el trabajo. Si cambia la versión, nabnab descarta el parcial y pide elegir el archivo de nuevo. [Identidad del archivo en Windows](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-file_id_info) · [Marcas del archivo abierto](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-file_basic_info)
 
@@ -41,6 +41,10 @@ El ensayo SFTP conecta OpenSSH de Windows a un servidor local de prueba con clav
 Para repetir la prueba nativa, inicia Vite en el puerto 1420 y ejecuta `node tests/native-personal-servers.browser.mjs` con Playwright y el ejecutable de depuración de Windows disponibles. Define `NABNAB_TEST_OPENSSL` con la ruta a OpenSSL 3 para incluir el ensayo WebDAV y generar los certificados efímeros. Para SFTP, define `NABNAB_TEST_SSH2_MODULE` con la ruta absoluta a una copia de ssh2 1.17.0 instalada para pruebas.
 
 La prueba también cortó una copia HTTPS después de 96.000 bytes. Verificó el rango de reanudación, el resultado byte a byte, el reinicio ante una respuesta completa y el descarte de rangos o versiones incompatibles.
+
+La prueba de pausa manual usa el teclado en Descargas y comprueba que el foco pasa a **Reanudar**. Comprueba los bytes guardados a 900 y 1180 píxeles, que cancelar una copia en curso retira el parcial y que un cambio de versión durante la pausa impide reutilizarlo.
+
+![Copia WebDAV en pausa con los bytes guardados y las acciones para reanudar o descartar](personal-server-paused.png)
 
 ![Copia WebDAV interrumpida y acciones de recuperación en Windows, con datos de prueba](personal-server-resume.png)
 

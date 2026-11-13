@@ -828,7 +828,7 @@ pub(super) async fn download(
     let copy = async {
         let mut last = Instant::now();
         while let Some(chunk) = response.chunk().await.map_err(|_| INTERRUPTED)? {
-            written = written
+            let next = written
                 .checked_add(chunk.len() as u64)
                 .filter(|length| {
                     *length <= MAX_DOWNLOAD && expected.size.is_none_or(|size| *length <= size)
@@ -836,10 +836,11 @@ pub(super) async fn download(
                 .ok_or("The WebDAV file exceeded its inspected size or the copy limit.")?;
             file.write_all(&chunk)
                 .map_err(|_| "Could not write the local WebDAV copy.")?;
-            if last.elapsed() >= Duration::from_millis(200) {
-                progress(written);
+            if written == offset || last.elapsed() >= Duration::from_millis(200) {
+                progress(next);
                 last = Instant::now();
             }
+            written = next;
         }
         if expected.size.is_some_and(|size| size != written) {
             return Err(INTERRUPTED.into());
@@ -848,17 +849,17 @@ pub(super) async fn download(
         file.sync_all()
             .map_err(|_| "Could not finalize the local WebDAV copy.".into())
     };
-    let result = tokio::select! { biased;
+    let result: Result<(), String> = tokio::select! { biased;
         _ = cancelled(cancel) => Err(crate::engine::CANCELLED.into()),
         result = copy => result,
     };
-    let keep = result.as_ref().is_err_and(|error| error == INTERRUPTED)
+    let keep = result.as_ref().is_err_and(|error| matches!(error.as_str(), INTERRUPTED | crate::engine::CANCELLED))
         && resumable.is_some_and(|size| written > 0 && written < size)
         && file.sync_all().is_ok();
     drop(file);
     if keep {
         progress(written);
-        return Err(WEBDAV_INTERRUPTED.into());
+        return result.map_err(|error| if error == INTERRUPTED { WEBDAV_INTERRUPTED.into() } else { error });
     }
     if result.is_err() {
         let _ = fs::remove_file(destination);
