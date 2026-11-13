@@ -35,6 +35,9 @@
 .audio-album-identity > div { display: grid; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
 .audio-album h2 { font-size: 17px; letter-spacing: -.02em; }
 .audio-album p { font-size: 12px; }
+.audio-edition .audio-edition-source { color: var(--muted); font-weight: 600; }
+.audio-edition .audio-edition-count { color: var(--text); font-variant-numeric: tabular-nums; }
+.audio-edition-gap { margin: 0 0 12px; padding: 8px 10px; border-inline-start: 2px solid var(--border); font-size: 12px; }
 .audio-continue { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 14px; margin-bottom: 18px; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); }
 .audio-continue-copy { flex: 1 1 140px; }
 .audio-continue-copy > span { color: var(--muted); font-size: 11px; font-weight: 600; }

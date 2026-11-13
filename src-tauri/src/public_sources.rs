@@ -31,6 +31,8 @@ pub struct AudiobookChapter {
     pub chapter: u32,
     pub reader: Option<String>,
     pub language: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edition_files: Option<u32>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

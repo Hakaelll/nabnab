@@ -2,6 +2,7 @@ import "./file-sources.css";
 import { arxivCopies } from "./arxiv-copies";
 import { escapeHtml as h, type Copy, type LibraryItem } from "./contracts";
 import type { AudiobookChapter } from "./library-types";
+import { librivoxLanguageLabel } from "./librivox-language";
 import { action, icon, option } from "./views-common";
 
 type CloudProvider = "drive" | "onedrive" | "dropbox";
@@ -67,12 +68,6 @@ const publicNames = {
   arxiv: "arXiv", zenodo: "Zenodo", librivox: "LibriVox",
 };
 const searches: CatalogSearch[] = ["arxiv", "librivox"];
-const librivoxSpanish = new Map(Object.entries({
-  English: "Inglés", Spanish: "Español", French: "Francés", German: "Alemán", Italian: "Italiano",
-  Portuguese: "Portugués", Catalan: "Catalán", Galician: "Gallego", Chinese: "Chino",
-  Japanese: "Japonés", Russian: "Ruso", Arabic: "Árabe", Dutch: "Neerlandés",
-  Multilingual: "Multilingüe",
-}));
 function isCloud(value: string): value is CloudProvider { return providers.some(provider => provider.id === value); }
 function cloudName(provider: CloudProvider): string { return providers.find(value => value.id === provider)?.name ?? provider; }
 function zenodoCopies(assets: readonly PublicAsset[], library: readonly LibraryItem[]): Map<string, LibraryItem> {
@@ -240,7 +235,7 @@ export function createFileSources(hooks: FileSourceHooks) {
       ${choices.map(({ name, label }) => option(name, label, language)).join("")}</select>`;
   }
   function displayLibrivoxLanguage(name: string): string {
-    return t(librivoxSpanish.get(name) ?? name, name);
+    return librivoxLanguageLabel(name, t);
   }
   function catalogSearch(): string {
     const disabled = busy ? "disabled" : "";

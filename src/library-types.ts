@@ -8,7 +8,7 @@ export interface Bookmark { id: string; name: string; time: number }
 export interface ClipReference { requestedStart: number; requestedEnd: number; actualStart: number | null; actualEnd: number | null }
 export interface NarrationReference { planRef: string | null; textHash: string; sourceVersion: string; voiceName: string; language: string; engineFingerprint: string }
 export interface RecordingReference { captureRef: string | null; sourceLabel: string; kind: string; durationMs: number; interrupted: boolean; reason: string | null }
-export interface AudiobookChapter { bookId: string; bookTitle: string; chapter: number; reader: string | null; language: string | null }
+export interface AudiobookChapter { bookId: string; bookTitle: string; chapter: number; reader: string | null; language: string | null; editionFiles?: number }
 export interface AudioTags {
   title: string | null; artist: string | null; albumArtist: string | null; album: string | null;
   genre: string | null; disc: number | null; track: number | null; embeddedCover: boolean;

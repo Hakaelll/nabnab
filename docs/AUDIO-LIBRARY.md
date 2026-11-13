@@ -16,6 +16,10 @@ En **Ajustes → Sesiones y privacidad → Caché de miniaturas** puedes ver cu�
 
 La **Estantería** de audiolibros agrupa capítulos de LibriVox y reconoce archivos M4B. **Continuar** recupera el punto guardado del capítulo o abre el siguiente si el anterior llegó al final. La cola de capítulos se limita al libro que estás escuchando. El minirreproductor ofrece velocidad, retroceso de 15 segundos y temporizador por minutos o al final del capítulo. Los marcadores se guardan en Biblioteca. Si hay capítulos incrustados, se puede saltar a ellos.
 
+Abre una edición de LibriVox para ver cuántos capítulos tienes disponibles frente al total publicado, cuando ese dato acompañe a la descarga. La ficha distingue los archivos indexados que faltan y mantiene los recuentos al buscar por título, lector o idioma. **Ver edición en LibriVox** abre el catálogo en nabnab para revisar qué capítulos quedan por guardar. Las ediciones guardadas sin el total muestran el número de capítulos disponibles.
+
+![Ficha de una edición con tres de cinco capítulos disponibles, con datos de prueba](audio-librivox-edition.png)
+
 Al sacar el minirreproductor a una ventana, puedes usar esos controles con nabnab minimizado. El título del capítulo aparece debajo del libro cuando el archivo incluye un índice. Al volver a la barra se mantienen la posición, la velocidad y el temporizador de la sesión.
 
 ![Audiolibro en el minirreproductor flotante con el descanso al final del capítulo seleccionado](playback/mini-audiobook.png)

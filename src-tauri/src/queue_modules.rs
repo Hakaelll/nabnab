@@ -228,6 +228,7 @@ pub(super) async fn run(app:&AppHandle,state:&Arc<AppState>,job:&Job,staging:&Pa
     let emit=move|update|progress(&handle,&shared,&id,run_id,update);
     let mut narration=None;
     let mut media_info=None;
+    let mut verified_audiobook = None;
     let output=match &job.source{
         Source::Voice {plan_id}=>{
             if !crate::components::root(app)?.join("voice.enabled").is_file(){return Err("Enable Local voice in Settings → Components before generating narration.".into());}
@@ -414,6 +415,7 @@ pub(super) async fn run(app:&AppHandle,state:&Arc<AppState>,job:&Job,staging:&Pa
                     return Err("arXiv did not return a PDF. No document was added to the library.".into());
                 }
             }
+            verified_audiobook = asset.audiobook;
             Some((file,Some(selection.source_url.clone()),None))
         },
         Source::CloudFile {selection,..} => {
@@ -541,7 +543,7 @@ pub(super) async fn run(app:&AppHandle,state:&Arc<AppState>,job:&Job,staging:&Pa
             item.details.source_version = selection.version.clone();
             item.details.source_published_at = selection.published_at.clone();
             item.details.source_checksum = selection.checksum.clone();
-            item.details.audiobook = selection.audiobook.clone();
+            item.details.audiobook = verified_audiobook;
             if selection.asset_id.starts_with("skillshare:") { item.details.platform = Some("Skillshare".into()); }
             if let Some(chapter) = &selection.audiobook {
                 item.kind = "audio".into();

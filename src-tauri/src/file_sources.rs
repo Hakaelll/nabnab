@@ -47,11 +47,18 @@ impl PublicSelection {
     }
     pub fn verify(&self, asset: &public_sources::Asset) -> Result<(), String> {
         self.validate()?;
+        let chapter_matches = match (&self.audiobook, &asset.audiobook) {
+            (Some(selected), Some(current)) => selected.book_id == current.book_id
+                && selected.book_title == current.book_title && selected.chapter == current.chapter
+                && selected.reader == current.reader && selected.language == current.language,
+            (None, None) => true,
+            _ => false,
+        };
         if self.asset_id!=asset.id || self.source_url!=asset.source_url || self.filename!=asset.filename
             || self.version!=asset.version || self.size!=asset.size
             || self.sha256.as_ref().is_some_and(|hash|asset.sha256.as_ref()!=Some(hash))
             || self.checksum.as_ref().is_some_and(|checksum|asset.checksum.as_ref()!=Some(checksum))
-            || self.audiobook != asset.audiobook
+            || !chapter_matches
         { return Err("The selected source file changed. Inspect it again to create a new local version.".into()); }
         Ok(())
     }
@@ -296,6 +303,23 @@ mod tests {
         current.version=Some("new".into());assert!(selection.verify(&current).is_err());
         current=asset();current.size=Some(8);assert!(selection.verify(&current).is_err());
         current=asset();current.id="github:456".into();assert!(selection.verify(&current).is_err());
+    }
+    #[test]
+    fn queued_audiobook_without_edition_count_still_verifies_its_chapter() {
+        let mut selection = selected();
+        let mut current = asset();
+        let chapter = serde_json::from_value::<public_sources::AudiobookChapter>(serde_json::json!({
+            "bookId": "librivox:65", "bookTitle": "Tales", "chapter": 2, "reader": "Reader A", "language": "English"
+        })).unwrap();
+        selection.source_url = "https://librivox.org/api/feed/audiobooks/id/65".into();
+        selection.asset_id = "librivox:65:45".into();
+        current.source_url.clone_from(&selection.source_url);
+        current.id.clone_from(&selection.asset_id);
+        selection.audiobook = Some(chapter.clone());
+        current.audiobook = Some(public_sources::AudiobookChapter { edition_files: Some(3), ..chapter });
+        selection.verify(&current).unwrap();
+        current.audiobook.as_mut().unwrap().chapter = 3;
+        assert!(selection.verify(&current).is_err());
     }
     #[test]
     fn persisted_jobs_contain_identity_and_metadata_without_download_url() {

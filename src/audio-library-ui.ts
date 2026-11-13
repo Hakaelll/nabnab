@@ -3,6 +3,7 @@ import { audioTitle, type createAudioPlayer } from "./audio-player";
 import { escapeHtml as h, type Copy, type LibraryItem, type Snapshot } from "./contracts";
 import { detailsFor } from "./library-features";
 import type { AudioPlaylist, AudioPlaylistEntry, AudioTags, Chapter, LibraryDetails, Lyric } from "./library-types";
+import { librivoxLanguageLabel } from "./librivox-language";
 import { audiobookChapterComplete, audiobookResumePosition, chapterAt, isAudiobook, isPlayable } from "./playback-preferences";
 import { durationLabel, errorLabel, searchKey } from "./presentation";
 import { action, icon, option, type Icon } from "./views-common";
@@ -56,6 +57,26 @@ function albumKey(item: LibraryItem) {
 
 function bookKey(item: LibraryItem) {
   return item.details?.audiobook?.bookId ?? item.id;
+}
+
+function librivoxEdition(key: string) {
+  return /^librivox:([1-9]\d{0,19})$/.exec(key)?.[1];
+}
+
+function editionAvailability(items: readonly LibraryItem[]) {
+  const indexed = new Set<string>();
+  const saved = new Set<string>();
+  const counts = new Set<number>();
+  for (const item of items) {
+    const chapter = item.details?.audiobook;
+    if (!chapter) continue;
+    const key = item.details?.contentId ?? String(chapter.chapter);
+    indexed.add(key);
+    if (isPlayable(item)) saved.add(key);
+    if (chapter.editionFiles && Number.isSafeInteger(chapter.editionFiles)) counts.add(chapter.editionFiles);
+  }
+  const total = counts.size === 1 ? counts.values().next().value : undefined;
+  return { saved: saved.size, missing: indexed.size - saved.size, total: total && total >= indexed.size ? total : undefined };
 }
 
 function adjacentChapters(group: readonly LibraryItem[], current: LibraryItem): LibraryItem[] {
@@ -179,14 +200,16 @@ export function createAudioLibrary(hooks: Hooks) {
     const byCategory = all.filter(item => category === "books" ? isAudiobook(item)
       : category === "podcasts" ? !isAudiobook(item) && isPodcast(item)
       : !isAudiobook(item) && !isPodcast(item));
-    const needle = views[category].query.trim().toLocaleLowerCase();
+    const needle = searchKey(views[category].query.trim());
     const results = byCategory.filter(item => {
       const meta = item.details?.audio;
       if (category === "music" && (artist && artist !== JSON.stringify(meta?.artist ?? "")
         || album && album !== albumKey(item) || genre && genre !== JSON.stringify(meta?.genre ?? ""))) return false;
       if (category === "books" && book && bookKey(item) !== book) return false;
-      return !needle || [audioTitle(item), item.name, meta?.artist, meta?.albumArtist, meta?.album, meta?.genre, item.details?.audiobook?.bookTitle]
-        .filter(Boolean).join(" ").toLocaleLowerCase().includes(needle);
+      const chapter = item.details?.audiobook;
+      return !needle || searchKey([audioTitle(item), item.name, meta?.artist, meta?.albumArtist, meta?.album, meta?.genre,
+        chapter?.bookTitle, chapter?.reader, chapter?.language, chapter?.language && librivoxLanguageLabel(chapter.language, t)]
+        .filter(Boolean).join(" ")).includes(needle);
     });
     results.sort(category === "books" ? compareChapters : category === "podcasts" ? (a, b) => b.addedAt - a.addedAt : compareTracks);
     return { byCategory, results };
@@ -210,7 +233,8 @@ export function createAudioLibrary(hooks: Hooks) {
       genres.set(JSON.stringify(meta?.genre ?? ""), meta?.genre ?? noMetadata());
       books.set(bookKey(item), item.details?.audiobook?.bookTitle ?? audioTitle(item));
     }
-    return `<div class="audio-filters"><label>${t("Buscar audio", "Search audio")}<input id="audio-query" type="search" value="${h(query)}" placeholder="${t("Título o artista", "Title or artist")}"></label>
+    const placeholder = category === "books" ? t("Título, lector o idioma", "Title, reader or language") : t("Título o artista", "Title or artist");
+    return `<div class="audio-filters"><label>${t("Buscar audio", "Search audio")}<input id="audio-query" type="search" value="${h(query)}" placeholder="${placeholder}"></label>
       ${category === "music" ? filterSelect("artist", tagName("artist"), artists, artist) + filterSelect("album", tagName("album"), albums, album) + filterSelect("genre", tagName("genre"), genres, genre)
         : category === "books" ? filterSelect("book", t("Libro", "Book"), books, book) : ""}</div>`;
   }
@@ -245,7 +269,31 @@ export function createAudioLibrary(hooks: Hooks) {
     </section>`;
   }
 
-  function shelf(items: LibraryItem[], selectedAlbum: LibraryItem[]) {
+  function editionCount({ saved, total }: ReturnType<typeof editionAvailability>) {
+    return total ? t(`${saved} de ${total} disponibles`, `${saved} of ${total} available`)
+      : t(`${saved} ${saved === 1 ? "disponible" : "disponibles"}`, `${saved} available`);
+  }
+
+  function editionDetails(items: LibraryItem[]) {
+    const first = items[0];
+    const edition = first?.details?.audiobook;
+    const source = edition && librivoxEdition(edition.bookId);
+    if (!edition || !source) return "";
+    const readers = new Set(items.map(item => item.details?.audiobook?.reader).filter(Boolean));
+    const reader = readers.size > 1 ? t("Varias lecturas", "Multiple narrations") : readers.values().next().value;
+    const art = items.find(item => !item.missing && (item.details?.audioCover || item.details?.audio?.embeddedCover)) ?? first;
+    const availability = editionAvailability(items);
+    const { missing } = availability;
+    const status = [editionCount(availability), missing ? t(`${missing} ${missing === 1 ? "archivo ausente" : "archivos ausentes"}`,
+      `${missing} missing ${missing === 1 ? "file" : "files"}`) : ""].filter(Boolean).join(" · ");
+    return `<section class="audio-album audio-edition" aria-labelledby="audio-shelf-title">
+      <div class="audio-album-identity">${cover(art, "book")}<div><p class="audio-edition-source">LibriVox</p>
+        <h2 id="audio-shelf-title" tabindex="-1">${h(edition.bookTitle)}</h2>
+        ${reader ? `<p>${h(reader)}</p>` : ""}<p class="audio-edition-count">${h(status)}</p></div></div>
+      ${action("open-audiobook-catalog", t("Ver edición en LibriVox", "View LibriVox edition"), "link", "secondary", `data-id="${source}"`)}</section>`;
+  }
+
+  function shelf(items: LibraryItem[], all: LibraryItem[]) {
     if (category !== "music" && category !== "books") return "";
     const music = category === "music";
     const chosen = music ? album : book;
@@ -253,8 +301,10 @@ export function createAudioLibrary(hooks: Hooks) {
     const titleFor = (item: LibraryItem) => music ? item.details?.audio?.album || t("Sin álbum", "No album")
       : item.details?.audiobook?.bookTitle || audioTitle(item);
     if (chosen) {
-      const detail = music ? albumDetails(selectedAlbum) : "";
-      return `<div class="audio-shelf-trail">${action("audio-shelf-clear", music ? t("Todos los álbumes", "All albums") : t("Todos los libros", "All books"), "back", "quiet")}${!detail && items[0] ? `<h2 id="audio-shelf-title" tabindex="-1">${h(titleFor(items[0]))}</h2>` : ""}</div>${detail}`;
+      const selectedBook = music ? [] : all.filter(item => bookKey(item) === chosen).sort(compareChapters);
+      const detail = music ? albumDetails(albumTracks(all)) : editionDetails(selectedBook);
+      const first = music ? items[0] : selectedBook[0];
+      return `<div class="audio-shelf-trail">${action("audio-shelf-clear", music ? t("Todos los álbumes", "All albums") : t("Todos los libros", "All books"), "back", "quiet")}${!detail && first ? `<h2 id="audio-shelf-title" tabindex="-1">${h(titleFor(first))}</h2>` : ""}</div>${detail}`;
     }
 
     const groups = new Map<string, LibraryItem[]>();
@@ -265,6 +315,15 @@ export function createAudioLibrary(hooks: Hooks) {
       if (group) group.push(item); else groups.set(key, [item]);
     }
     if (!groups.size) return "";
+    const editions = new Map<string, LibraryItem[]>();
+    if (!music) {
+      for (const item of all) {
+        if (!item.details?.audiobook) continue;
+        const key = bookKey(item);
+        const edition = editions.get(key);
+        if (edition) edition.push(item); else editions.set(key, [item]);
+      }
+    }
     const label = music ? t("Álbumes", "Albums") : t("Estantería", "Bookshelf");
     const entries = [...groups.entries()];
     const view = views[category];
@@ -277,14 +336,15 @@ export function createAudioLibrary(hooks: Hooks) {
       <ul class="audio-shelf-items">${entries.slice(shelfOffset, shelfOffset + SHELF_SIZE).map(([key, group]) => {
         const item = group[0];
         const art = group.find(candidate => !candidate.missing && (candidate.details?.audioCover || candidate.details?.audio?.embeddedCover)) ?? item;
-        const subtitle = music ? item.details?.audio?.albumArtist || item.details?.audio?.artist : item.details?.audiobook?.reader;
+        const edition = editions.get(key);
+        const subtitle = music ? item.details?.audio?.albumArtist || item.details?.audio?.artist : edition ? "LibriVox" : "";
         const chapters = !music && !item.details?.audiobook ? item.details?.chapters.length ?? 0 : 0;
         const total = chapters || group.length;
         const count = music ? (total === 1 ? t("pista", "track") : t("pistas", "tracks"))
           : chapters || item.details?.audiobook ? (total === 1 ? t("capítulo", "chapter") : t("capítulos", "chapters"))
           : (total === 1 ? t("archivo", "file") : t("archivos", "files"));
         return `<li><button type="button" class="audio-shelf-item" data-action="audio-shelf-open" data-id="${h(key)}">
-          ${cover(art, music ? "album" : "book")}<span class="audio-shelf-copy"><strong>${h(titleFor(item))}</strong>${subtitle ? `<span>${h(subtitle)}</span>` : ""}<small>${total} ${count}</small></span>
+          ${cover(art, music ? "album" : "book")}<span class="audio-shelf-copy"><strong>${h(titleFor(item))}</strong>${subtitle ? `<span>${h(subtitle)}</span>` : ""}<small>${edition ? editionCount(editionAvailability(edition)) : `${total} ${count}`}</small></span>
           ${icon("arrow")}</button></li>`;
       }).join("")}</ul></section>`;
   }
@@ -326,7 +386,8 @@ export function createAudioLibrary(hooks: Hooks) {
         const missing = missingThrough === end + 1
           ? t(`Falta el capítulo ${end + 1} en Biblioteca.`, `Chapter ${end + 1} is missing from Library.`)
           : t(`Faltan los capítulos ${end + 1}–${missingThrough} en Biblioteca.`, `Chapters ${end + 1}–${missingThrough} are missing from Library.`);
-        const source = /^librivox:([1-9]\d{0,19})$/.exec(key)?.[1];
+        if (book) return `<p class="audio-edition-gap" role="status">${h(missing)}</p>`;
+        const source = librivoxEdition(key);
         return `<section class="audio-continue" aria-label="${t("Audiolibro incompleto", "Incomplete audiobook")}">
           ${cover(last, "book")}<div class="audio-continue-copy"><span>${t("Audiolibro incompleto", "Incomplete audiobook")}</span>
           <h2>${h(last.details?.audiobook?.bookTitle ?? audioTitle(last))}</h2><small>${h(missing)}</small></div>
@@ -375,7 +436,7 @@ export function createAudioLibrary(hooks: Hooks) {
     const tags = item.details?.audio;
     const chapter = item.details?.audiobook;
     const title = audioTitle(item);
-    const description = chapter ? [chapter.bookTitle, chapter.reader].filter(Boolean).join(" · ")
+    const description = chapter ? [book ? null : chapter.bookTitle, chapter.reader, chapter.language && librivoxLanguageLabel(chapter.language, t)].filter(Boolean).join(" · ")
       : [tags?.artist ?? item.details?.creator, tags?.album, tags?.genre].filter(Boolean).join(" · ");
     const sequence = chapter ? `${t("Cap.", "Ch.")} ${chapter.chapter}`
       : tags?.track ? `${tags.disc ? `${tags.disc}.` : ""}${tags.track}` : "";
@@ -620,7 +681,7 @@ export function createAudioLibrary(hooks: Hooks) {
       <p>${t("Música, podcasts y audiolibros de tu biblioteca.", "Music, podcasts and audiobooks from your library.")}</p></div>
       ${action("audio-import-media", t("Importar audio", "Import audio"), "add", "secondary", disabled())}</div>
       <nav class="audio-category-nav" aria-label="${t("Tipo de audio", "Audio type")}">${categories.map(value => `<button type="button" data-action="audio-category" data-id="${value}" ${value === category ? 'aria-current="page"' : ""}>${icon(categoryIcons[value])}${categoryName(value)}</button>`).join("")}</nav>
-      <div class="audio-layout"><div class="audio-content">${category === "playlists" ? imported ? importView(imported) : playlistView() : `${continueBook(byCategory)}${shelf(results, albumTracks(byCategory))}${filters(byCategory)}
+      <div class="audio-layout"><div class="audio-content">${category === "playlists" ? imported ? importView(imported) : playlistView() : `${continueBook(byCategory)}${shelf(results, byCategory)}${filters(byCategory)}
         ${embeddedChapters(chapterFile)}
         ${selection(next?.item, visible)}${editTags()}${request ? `<p role="status" class="field-note">${t("Leyendo etiquetas locales…", "Reading local tags…")} ${action("audio-cancel-read", t("Cancelar", "Cancel"), undefined, "quiet")}</p>` : ""}
         ${visible.length ? `<ol class="audio-rows">${visible.map(row).join("")}</ol>`

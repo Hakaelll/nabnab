@@ -224,6 +224,7 @@ try {
     assert.equal(result.jobs.length, 1);
     assert.equal(result.item.kind, "audio");
     assert.deepEqual(result.item.details.audiobook, chapter.audiobook);
+    assert.ok(chapter.audiobook.editionFiles >= 3);
     assert.equal((await readFile(result.item.path)).length, chapter.size);
     const openShelf = page.getByRole("button", { name: "Abrir en Estantería", exact: true });
     await openShelf.waitFor();
@@ -238,6 +239,9 @@ try {
     await openShelf.press("Enter");
     await page.waitForFunction(() => document.activeElement?.id === "audio-shelf-title");
     assert.equal(await page.locator("#audio-shelf-title").textContent(), chapter.audiobook.bookTitle);
+    const edition = page.getByRole("region", { name: chapter.audiobook.bookTitle, exact: true });
+    assert.match(await edition.innerText(), new RegExp(`1 de ${chapter.audiobook.editionFiles} disponibles`));
+    assert.equal(await edition.getByRole("button", { name: "Ver edición en LibriVox" }).getAttribute("data-id"), chapter.audiobook.bookId.split(":")[1]);
     assert.deepEqual(await page.locator(".audio-row .audio-track-number").allTextContents(), ["Cap. 3"]);
     assert.equal(await page.locator("html.has-audio-player").count(), 0);
     assert.equal((await getSnapshot()).jobs.length, 1);

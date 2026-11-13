@@ -725,6 +725,9 @@ fn chapter_asset(
         chapter: chapter.number,
         reader: chapter.reader,
         language: chapter.language.or_else(|| field(book, "language", 80)),
+        edition_files: numeric(&book["num_sections"])
+            .and_then(|count| u32::try_from(count).ok())
+            .filter(|count| *count > 0),
     });
     Ok(Some(asset))
 }
@@ -955,7 +958,7 @@ mod tests {
 
     #[test]
     fn archive_chapters_follow_catalog_order_and_preserve_readers_and_identity() {
-        let book = json!({"language":"English","url_librivox":"https://librivox.org/tales/","sections":[
+        let book = json!({"language":"English","num_sections":"3","url_librivox":"https://librivox.org/tales/","sections":[
             {"id":"44","section_number":"10","title":"Part 10","listen_url":"http://www.archive.org/download/edition/part10.mp3","readers":[{"display_name":"Reader A"},{"display_name":"Reader B"}]},
             {"id":"45","section_number":"2","title":"Part 2","listen_url":"https://archive.org/download/edition/part02.mp3"},
             {"id":"46","section_number":"0","title":"Preface","listen_url":"https://librivox.org/uploads/reader/preface.mp3"}
@@ -998,10 +1001,9 @@ mod tests {
             asset.checksum.as_deref(),
             Some("md5:002e4d5b1c2dc7102f01f41c80ea213d")
         );
-        assert_eq!(
-            asset.audiobook.unwrap().reader.as_deref(),
-            Some("Reader A, Reader B")
-        );
+        let chapter = asset.audiobook.unwrap();
+        assert_eq!(chapter.reader.as_deref(), Some("Reader A, Reader B"));
+        assert_eq!(chapter.edition_files, Some(3));
         assert!(asset.attribution.unwrap().contains("Archive rights note"));
 
         let restricted = json!({"name":"part02.mp3","private":"true"});
