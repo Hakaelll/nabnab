@@ -44,6 +44,10 @@ La prueba también cortó una copia HTTPS después de 96.000 bytes. Verificó el
 
 La prueba de pausa manual usa el teclado en Descargas y comprueba que el foco pasa a **Reanudar**. Comprueba los bytes guardados a 900 y 1180 píxeles, que cancelar una copia en curso retira el parcial y que un cambio de versión durante la pausa impide reutilizarlo.
 
+Si nabnab se cierra durante una copia reanudable, al volver a abrirlo la fila queda en **En pausa**. El contador usa el tamaño que tiene el archivo temporal del trabajo en disco. **Reanudar** vuelve a comprobar la versión antes de pedir los bytes pendientes. **Descartar parcial** permite liberar ese espacio desde Descargas.
+
+![Copia WebDAV recuperada tras un cierre inesperado en Windows](personal-server-recovered.png)
+
 ![Copia WebDAV en pausa con los bytes guardados y las acciones para reanudar o descartar](personal-server-paused.png)
 
 ![Copia WebDAV interrumpida y acciones de recuperación en Windows, con datos de prueba](personal-server-resume.png)

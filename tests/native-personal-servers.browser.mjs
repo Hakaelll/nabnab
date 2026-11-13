@@ -42,14 +42,36 @@ await writeFile(path.join(secrets, "personal-servers.bin"), Buffer.concat([Buffe
 
 const port = process.env.NABNAB_PERSONAL_SERVER_DEBUG_PORT || 9258;
 const endpoint = `http://127.0.0.1:${port}`;
-const child = spawn(process.env.NABNAB_PERSONAL_SERVER_TEST_EXE || path.join(root, "src-tauri/target/debug/nabnab.exe"), [], {
+const start = () => spawn(process.env.NABNAB_PERSONAL_SERVER_TEST_EXE || path.join(root, "src-tauri/target/debug/nabnab.exe"), [], {
   cwd: root, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
   env: { ...process.env, NABNAB_TEST_DATA_DIR: data, WEBVIEW2_USER_DATA_FOLDER: path.join(data, "webview"),
     TEMP: temporary, TMP: temporary,
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}` },
 });
-let browser, page, log = "";
-for (const stream of [child.stdout, child.stderr]) stream.on("data", chunk => { log = (log + chunk).slice(-5000); });
+let child, browser, page, log = "";
+
+async function launch() {
+  child = start();
+  for (const stream of [child.stdout, child.stderr]) stream.on("data", chunk => { log = (log + chunk).slice(-5000); });
+  browser = await wait(async () => {
+    try {
+      if ((await fetch(`${endpoint}/json/version`, { signal: AbortSignal.timeout(400) })).ok) {
+        return await chromium.connectOverCDP(endpoint, { timeout: 2000 });
+      }
+    } catch { /* Wait for WebView2 to become available. */ }
+    return null;
+  });
+  page = await wait(() => browser.contexts()[0]?.pages().find(tab => /:1420/.test(tab.url())));
+  return wait(async () => { try { return await rpc("get_snapshot"); } catch { return null; } });
+}
+
+async function restartDuringCopy() {
+  const exited = new Promise(resolve => child.once("exit", resolve));
+  assert.ok(child.kill());
+  await exited;
+  await browser.close().catch(() => {});
+  return launch();
+}
 
 async function wait(check, timeout = 20_000) {
   const end = Date.now() + timeout;
@@ -345,13 +367,47 @@ async function verifyWebdav(openssl) {
     assert.deepEqual(await parts(refused), []);
     assert.equal(requests.filter(request => request.method === "GET").length, getCount);
 
+    const crashed = await startHeldCopy(13);
+    const beforeRestart = (await rpc("get_snapshot")).jobs.find(item => item.id === crashed.id);
+    assert.equal(beforeRestart.state, "downloading");
+    const afterRestart = await restartDuringCopy();
+    holdCopy = false;
+    const recovered = afterRestart.jobs.find(item => item.id === crashed.id);
+    assert.equal(recovered.state, "paused");
+    assert.equal(recovered.progress?.downloaded, 96_000);
+    assert.equal(recovered.runId, beforeRestart.runId);
+    assert.deepEqual(recovered.outputs, []);
+    await page.locator('[data-page="downloads"]').click();
+    const recoveredRow = row(recovered);
+    await recoveredRow.getByText(/94 KB guardados/).waitFor();
+    await recoveredRow.getByRole("button", { name: "Descartar parcial", exact: true }).waitFor();
+    for (const [width, height] of [[900, 620], [1180, 780]]) {
+      await page.setViewportSize({ width, height });
+      assert.ok(await recoveredRow.evaluate(node => node.scrollWidth <= node.clientWidth + 1));
+      await recoveredRow.screenshot({ path: path.join(data, `webdav-recovered-${width}.png`) });
+    }
+    const resumedAfterRestart = await continueCopy(recovered, 11);
+    assert.equal(resumedAfterRestart.state, "completed", JSON.stringify(resumedAfterRestart.error));
+    assert.deepEqual(await readFile(resumedAfterRestart.outputs[0]), fixtureContent());
+    assert.ok(requests.some(request => request.validator === '"dav-v13"' && request.range === "bytes=96000-"));
+    await wait(async () => (await parts(resumedAfterRestart)).length === 0);
+
+    const discardAfterRestart = await startHeldCopy(14);
+    const discardedSnapshot = await restartDuringCopy();
+    holdCopy = false;
+    assert.equal(discardedSnapshot.jobs.find(item => item.id === discardAfterRestart.id).progress?.downloaded, 96_000);
+    await page.locator('[data-page="downloads"]').click();
+    await row(discardAfterRestart).getByRole("button", { name: "Descartar parcial", exact: true }).press("Enter");
+    await wait(async () => (await rpc("get_snapshot")).jobs.find(item => item.id === discardAfterRestart.id)?.state === "cancelled");
+    assert.deepEqual(await parts(discardAfterRestart), []);
+
     const browse = requestId => rpc("personal_server_browse", { serverId: webdavId, path: [], requestId });
     outside = true;
     await assert.rejects(browse(1), error => String(error).includes("outside the authorized root"));
     redirect = true;
     await assert.rejects(browse(2), error => String(error).includes("redirected the request"));
     assert.equal(redirected, 0);
-    console.log("Native WebDAV verified private TLS, scope, redirects, manual pause, range continuation, changed versions, full-response restart and partial cleanup.");
+    console.log("Native WebDAV verified private TLS, scope, redirects, manual pause, range continuation, changed versions, full-response restart, and resume or discard after an interrupted session.");
   } finally {
     await Promise.all([close(server), close(trap)]);
   }
@@ -466,16 +522,7 @@ async function verifySftp(module) {
 }
 
 try {
-  browser = await wait(async () => {
-    try {
-      if ((await fetch(`${endpoint}/json/version`, { signal: AbortSignal.timeout(400) })).ok) {
-        return await chromium.connectOverCDP(endpoint, { timeout: 2000 });
-      }
-    } catch { /* Wait for WebView2 to become available. */ }
-    return null;
-  });
-  page = await wait(() => browser.contexts()[0]?.pages().find(tab => /:1420/.test(tab.url())));
-  const initial = await wait(async () => { try { return await rpc("get_snapshot"); } catch { return null; } });
+  const initial = await launch();
   await rpc("save_settings", { settings: { ...initial.settings, language: "es", folder: output, reducedMotion: true, trayEnabled: false, closeToTray: false } });
   if (process.env.NABNAB_TEST_SSH2_MODULE) {
     await page.route(/\/src\/personal-servers-ui\.ts(?:\?.*)?$/, async route => {
@@ -643,7 +690,7 @@ try {
   throw error;
 } finally {
   try { await page?.evaluate(async () => { const { getCurrentWindow } = await import("/node_modules/@tauri-apps/api/window.js"); await getCurrentWindow().close(); }); } catch {}
-  if (child.exitCode === null) {
+  if (child?.exitCode === null) {
     const exited = new Promise(resolve => child.once("exit", resolve));
     await Promise.race([exited, new Promise(resolve => setTimeout(resolve, 4000))]);
     if (child.exitCode === null) { child.kill(); await exited; }

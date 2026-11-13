@@ -345,6 +345,15 @@ impl Job {
             self.next_retry_at = None;
             self.updated_at = now();
         }
+        if self.state == JobState::Paused && self.run_id != 0 {
+            if let Source::PersonalFile { selection } = &self.source {
+                if selection.can_pause_copy() {
+                    self.progress = stage_path(self).ok()
+                        .and_then(|(_, path)| owned_stage(self, &path).ok())
+                        .and_then(|staging| selection.paused_progress(&staging, self.run_id));
+                }
+            }
+        }
     }
     pub(crate) fn new(
         source: Source,
@@ -2976,6 +2985,45 @@ mod tests {
             job.recover();
             assert_eq!(job.state, state);
         }
+    }
+
+    #[test]
+    fn recovered_personal_copy_reports_only_an_owned_incomplete_file() {
+        let (root, mut repo) = fixture();
+        let selection: crate::personal_servers::Selection = serde_json::from_value(serde_json::json!({
+            "serverId": "a".repeat(64),
+            "path": ["report.pdf"],
+            "stamp": { "size": 100, "modified": null, "etag": "\"strong\"" },
+        })).unwrap();
+        let mut job = Job::new(
+            Source::PersonalFile { selection: selection.clone() },
+            "report.pdf".into(), root.clone(), "recovered-copy".into(), None,
+        );
+        job.run_id = 1;
+        job.state = JobState::Downloading;
+        let stage = stage(&job).unwrap();
+        let partial = selection.partial_path(&stage).unwrap();
+        fs::write(&partial, [0; 25]).unwrap();
+        let id = job.id.clone();
+        repo.data.jobs.push(job);
+        repo.save().unwrap();
+        drop(repo);
+
+        let mut repo = Repository::open(&root, &root).unwrap();
+        let recovered = &mut repo.data.jobs[0];
+        assert_eq!(recovered.id, id);
+        assert_eq!(recovered.state, JobState::Paused);
+        assert_eq!(recovered.progress.as_ref().and_then(|progress| progress.downloaded), Some(25.0));
+        fs::write(&partial, [0; 100]).unwrap();
+        recovered.recover();
+        assert!(recovered.progress.is_none());
+        fs::write(&partial, [0; 25]).unwrap();
+        fs::write(stage.join(OWNER), b"{}").unwrap();
+        recovered.recover();
+        assert!(recovered.progress.is_none());
+        assert_eq!(fs::read(partial).unwrap(), [0; 25]);
+        drop(repo);
+        fs::remove_dir_all(root).unwrap();
     }
 
     fn state_fixture() -> (PathBuf, AppState, String) {
