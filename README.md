@@ -19,10 +19,10 @@ After a restart, interrupted jobs are paused for review. Choose **Retry** to run
 
 ## Sources and courses
 
-- **Research.** Open an exact arXiv PDF version or review the files and sizes in a Zenodo record. Use **Local copy** to find and select the files you still need, or open the saved copies for that version. Follow public Zenodo communities in **Library → Sources**. [Research sources](docs/RESEARCH-SOURCES.md) · [Zenodo file selection](docs/zenodo-files-without-copy.png)
+- **Research.** Open an exact arXiv PDF version or review the files and sizes in a Zenodo record. Use **Local copy** to find the files you still need. For saved files with a published checksum, choose **Verify copy** to check whether the local file still matches. Follow public Zenodo communities in **Library → Sources**. [Research sources](docs/RESEARCH-SOURCES.md) · [Zenodo copy verification](docs/zenodo-copy-check.png)
 - **Audiobooks.** Browse LibriVox editions, combine language and reader filters with local availability, and select the missing chapters in the results. [LibriVox workflow](docs/RESEARCH-SOURCES.md) · [Missing chapters](docs/librivox-missing-chapters.png)
 - **Media and subscriptions.** Review individual gallery and social attachments, follow podcast RSS feeds, and import or export OPML subscriptions. The BitTorrent workflow offers file selection and requires explicit P2P consent. Telegram attachment selection requires the optional TDLib component and an authorized account. [Sources and tools](docs/EXPANSION.md) · [Podcasts](docs/PODCASTS.md)
-- **Personal servers.** Browse Nextcloud, WebDAV, SFTP, or a network folder that Windows can access. Review the total size and destination before saving references or queuing local copies. If the folder becomes unavailable, retry the listing. A successful refresh keeps selections whose file details still match. [Personal servers](docs/PERSONAL-SERVERS.md) · [Folder recovery](docs/personal-server-offline.png)
+- **Personal servers.** Browse Nextcloud, WebDAV, SFTP, or a network folder that Windows can access. Use **Selected only** to review the files, total size, and destination before queuing local copies. If a copy fails because the server file changed, open **Review version** from **Downloads** to compare the requested and current versions. [Personal servers](docs/PERSONAL-SERVERS.md) · [Copy review](docs/personal-server-copy-review.png)
 
 ### Study offline
 
