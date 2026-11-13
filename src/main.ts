@@ -101,6 +101,7 @@ let localTimezone='UTC';
 const transcriptionManager=createTranscriptionManager({command,render:renderCurrent});
 const torrents=createTorrentsController({command,refresh,notify,showError,t,render:renderCurrent,settings:()=>{preferences.section='engines';navigate('settings');void loadSettingsSection().catch(showError);},folder:()=>snapshot.settings.folder});
 let platformModule:'catalog'|'torrent'|'courses'|'telegram'|'live'|'exports'|'files'|'fileSources'='catalog';
+let courseDownloadOrigin: { jobId: string; controlId: string } | null = null;
 const mediaEdits=createMediaEdits({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t});
 const palettes=createPalettes({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t});
 const personalServers=createPersonalServers({
@@ -405,6 +406,7 @@ function renderInspector(force=false): void {
   const aside=required("#inspector");const dialog=required<HTMLDialogElement>("#detail-dialog");const opening=!inspectorKey&&!!key;
   if(!key){aside.hidden=true;if(dialog.open)dialog.close();inspectorKey="";required(".content-layout").classList.remove("has-inspector");return;}
   if(force||key!==inspectorKey){inspectorBody.innerHTML=job?jobInspector(job,snapshot,t):item?mediaInspector(item,snapshot,t):"";inspectorKey=key;
+    if(job&&job.id===courseDownloadOrigin?.jobId){inspectorBody.querySelector('.inspector-heading')?.insertAdjacentHTML('afterend',`<button type="button" class="button quiet" data-action="return-to-course">${icon('back')}${t('Volver al material','Back to material')}</button>`);}
     if(item?.kind==='article')inspectorBody.insertAdjacentHTML("beforeend",articles.renderInspector(item));
     if(item?.details?.ocrRef)inspectorBody.insertAdjacentHTML("beforeend",ocr.renderInspector(item));
     if(item&&(item.kind==='article'||item.details?.ocrRef||item.kind==='document'&&/\.(pdf|epub|txt|md)$/i.test(item.name)))inspectorBody.insertAdjacentHTML('beforeend',`<section class="local-narration-action"><button class="button secondary" data-action="voice-from-library" data-id="${h(item.id)}">${icon('audio')}${t('Preparar narración local','Prepare local narration')}</button></section>`);
@@ -574,6 +576,7 @@ async function locateMedia(id: string): Promise<void> {
   renderInspector(true);
 }
 function navigate(next: Page): void {
+  if(next!=='downloads')courseDownloadOrigin=null;
   if(next!=='tools'){voice.deactivate();stemsTool.leave();}
   else if(localToolModule!=='stems')stemsTool.leave();
   if(next!=='library'||librarySection!=='archives')personalArchives.leave();
@@ -753,6 +756,7 @@ async function queueTool(): Promise<void> {
 function closeInspector(): void {
   const id=page==='downloads'?downloads.detailId:library.detailId;
   downloads.detailId=null;library.detailId=null;renderInspector();
+  courseDownloadOrigin=null;
   const source=[...document.querySelectorAll<HTMLButtonElement>('[data-action="inspect-job"], [data-action="inspect-media"]')].find(button=>button.dataset.id===id);
   source?.focus({preventScroll:true});
 }
@@ -873,11 +877,24 @@ async function handleAction(action: string, button: HTMLButtonElement, event?: M
     case 'choose-folder':await chooseFolder();break;
     case 'prepare-engines':preferences.section='engines';navigate('settings');break;
     case 'job-filter':{const value=button.dataset.filter;if(value==='all'||value==='activity'||value==='pending'||value==='completed'||value==='error'){downloads.filter=value;renderCurrent();}break;}
-    case 'inspect-job':
+    case 'inspect-job': {
+      const courseControl=page==='platforms'&&platformModule==='courses'&&button.hasAttribute('data-course-download');
+      if(courseControl)courseDownloadOrigin={jobId:id,controlId:button.id};
+      else if(courseDownloadOrigin?.jobId!==id)courseDownloadOrigin=null;
       downloads.detailId=id;
       if(page==='downloads')renderCurrent();
       else {downloads.filter='all';downloads.query='';navigate('downloads');}
+      if(courseControl)inspectorBody.querySelector<HTMLElement>('[data-action="close-inspector"]')?.focus();
       break;
+    }
+    case 'return-to-course': {
+      if(!courseDownloadOrigin)break;
+      const {controlId}=courseDownloadOrigin;
+      downloads.detailId=null;
+      platformModule='courses';navigate('platforms');
+      (document.getElementById(controlId)??document.getElementById('course-materials-heading'))?.focus();
+      break;
+    }
     case 'cancel-job':await actOnJobs([id],'cancel');break;
     case 'pause-job': {
       const moveFocus = document.activeElement === button;
@@ -889,7 +906,14 @@ async function handleAction(action: string, button: HTMLButtonElement, event?: M
       }
       break;
     }
-    case 'retry-job':await actOnJobs([id],'retry');break;
+    case 'retry-job': {
+      const returnToCourse=courseDownloadOrigin?.jobId===id&&inspectorBody.contains(button)&&button===document.activeElement;
+      await actOnJobs([id],'retry');
+      if(returnToCourse&&courseDownloadOrigin?.jobId===id&&document.activeElement===document.body){
+        inspectorBody.querySelector<HTMLElement>('[data-action="return-to-course"]')?.focus();
+      }
+      break;
+    }
     case 'review-personal-copy': {
       const job = snapshot.jobs.find(job => job.id === id);
       if (job && needsPersonalCopyReview(job)) await personalServers.reviewCopy(job.id, job.source.selection);

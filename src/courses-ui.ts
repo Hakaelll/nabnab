@@ -1,4 +1,4 @@
-import { escapeHtml as h, type Copy, type LibraryItem, type Job } from "./contracts";
+import { cancellableStates, escapeHtml as h, type Copy, type LibraryItem, type Job } from "./contracts";
 import type { createAudioPlayer } from "./audio-player";
 import { isPlayable, resumePosition } from "./playback-preferences";
 import { bytesLabel, durationLabel, searchKey } from "./presentation";
@@ -115,15 +115,24 @@ export function createCoursesController(hooks: CourseHooks) {
       if (isPlayable(item)) return item;
     }
   }
-  const active = (asset: CourseAsset) => asset.jobIds.some(id => hooks.getSnapshot().jobs.some(job => job.id === id && ["pending", "paused", "analyzing", "ready", "downloading", "processing", "verifying"].includes(job.state)));
-  const failed = (asset: CourseAsset) => asset.jobIds.some(id => hooks.getSnapshot().jobs.some(job => job.id === id && job.state === "error"));
-  const available = (asset: CourseAsset) => asset.status === "downloadable" && !local(asset) && !active(asset);
-  function status(asset: CourseAsset, item: LibraryItem | undefined) {
+  const active = (job: Job) => cancellableStates.includes(job.state);
+  function downloadFor(asset: CourseAsset): Job | undefined {
+    if (!asset.jobIds.length) return;
+    const jobs = hooks.getSnapshot().jobs.filter(job => asset.jobIds.includes(job.id));
+    return jobs.sort((a, b) => Number(active(b)) - Number(active(a)) || b.createdAt - a.createdAt)[0];
+  }
+  const available = (asset: CourseAsset, job = downloadFor(asset)) => asset.status === "downloadable" && !local(asset) && (!job || !active(job));
+  function status(asset: CourseAsset, item: LibraryItem | undefined, job?: Job) {
     if (item && !item.missing) return t("Guardado", "Saved");
-    if (active(asset)) return t("En cola", "Queued");
+    if (job?.state === "paused") return t("Descarga pausada", "Download paused");
+    if (job && active(job)) return t("En cola", "Queued");
     if (item?.missing) return t("Archivo ausente", "Missing file");
     if (asset.status === "drm") return "DRM";
-    if (asset.status === "downloadable") return failed(asset) ? t("Descarga fallida", "Download failed") : t("Descarga autorizada disponible", "Authorized download available");
+    if (asset.status === "downloadable") {
+      if (job?.state === "error") return t("Descarga fallida", "Download failed");
+      if (job?.state === "cancelled") return t("Descarga cancelada", "Download cancelled");
+      return t("Descarga autorizada disponible", "Authorized download available");
+    }
     if (asset.id.startsWith("coursera-item-")) return t("Consultar en Coursera", "View in Coursera");
     return asset.status === "local" ? t("Archivo ausente", "Missing file") : t("Sin descarga autorizada", "No authorized download");
   }
@@ -141,15 +150,18 @@ export function createCoursesController(hooks: CourseHooks) {
 
   function materialRow(asset: CourseAsset, localStudy: boolean): string {
     const item = indexed(asset);
+    const job = downloadFor(asset);
     const titleId = `course-material-title-${asset.id}`;
     const fileAttributes = item ? `id="course-file-${h(asset.id)}" data-id="${h(item.id)}" aria-describedby="${h(titleId)}"` : "";
     return `<article class="source-item">
       ${localStudy && asset.status !== "downloadable" ? "" : `<label><input type="checkbox" data-course-asset="${h(asset.id)}"
-        ${selected.has(asset.id) ? "checked" : ""} ${available(asset) ? "" : "disabled"} aria-label="${h(t("Seleccionar ", "Select ") + asset.title)}"></label>`}
+        ${selected.has(asset.id) ? "checked" : ""} ${available(asset, job) ? "" : "disabled"} aria-label="${h(t("Seleccionar ", "Select ") + asset.title)}"></label>`}
       <div class="source-item-main"><strong id="${h(titleId)}">${h(asset.title)}</strong>
-        <span>${h(materialKind(asset.kind, localStudy))} · ${h(status(asset, item))}</span>${asset.restriction ? `<small>${h(asset.restriction)}</small>` : ""}</div>
+        <span>${h(materialKind(asset.kind, localStudy))} · ${h(status(asset, item, job))}</span>${asset.restriction ? `<small>${h(asset.restriction)}</small>` : ""}</div>
       ${item?.missing ? action("course-locate-file", t("Localizar archivo", "Locate file"), "folder", "secondary", `${fileAttributes} ${busy ? "disabled" : ""}`)
-        : item ? action("course-open-file", t("Ver en biblioteca", "View in library"), undefined, "quiet", fileAttributes) : ""}
+        : item ? action("course-open-file", t("Ver en biblioteca", "View in library"), undefined, "quiet", fileAttributes)
+        : job ? action("inspect-job", t("Ver en Descargas", "View in Downloads"), "downloads", "quiet",
+          `id="course-download-${h(asset.id)}" data-course-download data-id="${h(job.id)}" aria-describedby="${h(titleId)}"`) : ""}
     </article>`;
   }
 
@@ -552,7 +564,7 @@ export function createCoursesController(hooks: CourseHooks) {
       return `${navigation}<p class="field-note course-search-status" role="status">${h(summary)}</p>${groups}</nav>`;
     }
     return `${navigation}${course.sections.map(section => {
-      const selectable = !localStudy || section.lessons.some(lesson => lesson.assets.some(available));
+      const selectable = !localStudy || section.lessons.some(lesson => lesson.assets.some(asset => available(asset)));
       const sectionElementId = `course-section-${section.id}`;
       const open = expansionBeforeSearch?.get(sectionElementId) ?? (section.lessons.some(lesson => lesson.id === lessonId) || !lessonId);
       return `<details id="${h(sectionElementId)}" ${open ? "open" : ""}>

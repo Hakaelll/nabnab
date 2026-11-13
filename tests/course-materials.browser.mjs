@@ -21,6 +21,11 @@ const setup = `
   const settings = {folder:"C:/Downloads/nabnab-fixture",language:"es",networkLimit:3,processingLimit:1,reducedMotion:true,reducedTransparency:true,sidebarExpanded:true,trayEnabled:false,closeToTray:false,startWithWindows:false};
   const state = {settings,jobs:[],library:[],collections:[],drafts:[],sources:[],rules:[],smartCollections:[],presets:[]};
   const fixture = window.courseFixture = {state,calls:[],courses:[],cancel:true};
+  const courseJob = asset => ({id:"queued-" + asset.id, runId:1, createdAt:Date.UTC(2026,10,13,9,30), updatedAt:1,
+    state:"pending", title:asset.title, provider:"Skillshare", folder:state.settings.folder, outputs:[],
+    progress:null, thumbnail:null, error:null, attempt:1, groupId:null,
+    source:{kind:"publicFile", selection:{sourceUrl:"https://static.skillshare.com/uploads/attachment/fixture.pdf", filename:asset.title}},
+  });
   mockIPC(async (cmd, args = {}) => {
     fixture.calls.push({cmd,args:structuredClone(args)});
     if (cmd === "startup") return {...structuredClone(state),folder:settings.folder,enginesReady:true,engineError:null};
@@ -83,12 +88,18 @@ const setup = `
       const course = fixture.courses.find(course => course.id === args.courseId);
       const queued = course.sections.flatMap(section => section.lessons).flatMap(lesson => lesson.assets)
         .filter(asset => args.assetIds.includes(asset.id)).map(asset => {
-          const id = "queued-" + asset.id;
-          asset.jobIds.push(id);
-          return {id,runId:1,updatedAt:1,state:"pending",outputs:[]};
+          const job = courseJob(asset);
+          asset.jobIds.push(job.id);
+          return job;
         });
       state.jobs.push(...queued);
       return structuredClone(queued);
+    }
+    if (cmd === "job_action" && args.action === "retry") {
+      for (const job of state.jobs.filter(job => args.ids.includes(job.id))) {
+        Object.assign(job, {state:"pending",runId:job.runId+1,updatedAt:job.updatedAt+1,error:null,attempt:job.attempt+1});
+      }
+      return structuredClone(state);
     }
     if (cmd === "preview_course_materials") {
       if (fixture.cancel) return null;
@@ -476,10 +487,25 @@ try {
   assert.deepEqual(sent.assetIds, ["skillshare-resource-0"]);
   await page.evaluate(async () => {
     const {emit} = await import("/node_modules/@tauri-apps/api/event.js");
-    await emit("job-update", {id:"queued-skillshare-resource-0",runId:1,updatedAt:2,state:"error",outputs:[]});
+    const job = window.courseFixture.state.jobs.find(job => job.id === "queued-skillshare-resource-0");
+    Object.assign(job, {updatedAt:2,state:"error",error:{code:"network",message:"El servidor no respondió al pedir la guía.",technical:"Fixture request timed out",retryable:true,retryAfter:null}});
+    await emit("job-update", job);
   });
   await page.getByText("Adjunto · Descarga fallida", {exact:true}).waitFor();
   assert.equal(await page.getByRole("checkbox", {name:"Seleccionar Guía del proyecto.pdf"}).isEnabled(), true);
+  await page.getByRole("button", {name:"Ver en Descargas",exact:true}).press("Enter");
+  const jobDetails = page.getByRole("complementary", {name:"Detalles",exact:true});
+  await jobDetails.getByText("El servidor no respondió al pedir la guía.", {exact:true}).waitFor();
+  await page.screenshot({path:`${directory}/course-download-error-1180.png`,animations:"disabled"});
+  await jobDetails.getByRole("button", {name:"Reintentar",exact:true}).press("Enter");
+  await jobDetails.getByText("Pendiente", {exact:true}).waitFor();
+  assert.deepEqual(await page.evaluate(() => window.courseFixture.calls.find(call => call.cmd === "job_action").args),
+    {ids:["queued-skillshare-resource-0"],action:"retry"});
+  const returnToMaterial = jobDetails.getByRole("button", {name:"Volver al material",exact:true});
+  assert.ok(await returnToMaterial.evaluate(node => node === document.activeElement));
+  await page.keyboard.press("Enter");
+  await page.getByText("Adjunto · En cola", {exact:true}).waitFor();
+  assert.ok(await page.getByRole("button", {name:"Ver en Descargas",exact:true}).evaluate(node => node === document.activeElement));
   await page.getByRole("button", {name:"Plantillas.zip",exact:true}).click();
   assert.equal(await page.getByRole("checkbox", {name:"Seleccionar Plantillas.zip"}).isChecked(), false);
   const lessonResource = "https://static.skillshare.com/uploads/attachment/12345680/90abcded/Referencias.pdf";
@@ -515,6 +541,17 @@ try {
   await page.getByText("Adjunto · En cola", {exact:true}).waitFor();
   const queuedLesson = await page.evaluate(() => window.courseFixture.calls.filter(call => call.cmd === "queue_course_assets").at(-1).args);
   assert.deepEqual(queuedLesson.assetIds, ["skillshare-lesson-resource"]);
+  await page.setViewportSize({width:900,height:620});
+  const lessonDownload = page.getByRole("button", {name:"Ver en Descargas",exact:true});
+  await page.locator(".course-study").scrollIntoViewIfNeeded();
+  await page.screenshot({path:`${directory}/course-download-900.png`,animations:"disabled"});
+  await lessonDownload.press("Enter");
+  const downloadDialog = page.getByRole("dialog", {name:"Detalles",exact:true});
+  await downloadDialog.getByRole("heading", {name:"Referencias.pdf",exact:true}).waitFor({timeout:3000});
+  assert.ok(await downloadDialog.getByRole("button", {name:"Cerrar detalles",exact:true}).evaluate(node => node === document.activeElement));
+  await downloadDialog.getByRole("button", {name:"Volver al material",exact:true}).press("Enter");
+  assert.ok(await lessonDownload.evaluate(node => node === document.activeElement));
+  await page.getByText("Revisar la cuadrícula",{exact:true}).waitFor();
 
   await page.locator("button[data-page='platforms']").click();
   await page.locator("[data-action='open-courses'][data-id='coursera']").click();

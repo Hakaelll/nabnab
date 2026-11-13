@@ -128,6 +128,10 @@ Si ya importaste las lecciones del curso, usa **Guardar en** para elegir una de 
 
 La cola acepta documentos, imágenes y archivos comprimidos desde el CDN oficial `static.skillshare.com`, con un límite de 104 MiB por archivo. Los adjuntos conservan su nombre y se ordenan como se pegaron. Volver a revisar el mismo adjunto conserva su estado y sus notas. Para un recurso que solo se pueda guardar en el navegador, usa **Elegir archivos guardados**. El flujo de enlaces revisa los adjuntos elegidos y deja el currículo y las videolecciones en Skillshare.
 
+Desde **Materiales**, pulsa **Ver en Descargas** para abrir el trabajo de ese adjunto. Si falla, allí puedes consultar el error y reintentar el mismo trabajo. **Volver al material** recupera la lección y devuelve el foco a su adjunto.
+
+![Detalle de una descarga de curso fallida con datos de prueba](course-attachment-download.png)
+
 Las pruebas usan enlaces y archivos sintéticos. Rust comprueba la selección persistente y la conservación de notas, y la interfaz en Edge comprueba la revisión y el envío selectivo a la cola a 900 y 1180 px. Queda por verificar la transferencia contra el CDN de Skillshare desde una clase autorizada.
 
 ![Selección de adjuntos de Skillshare con datos de prueba](course-skillshare-resources.png)
