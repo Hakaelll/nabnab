@@ -1,7 +1,18 @@
-import type { LibraryItem } from "./contracts";
+import type { Copy, LibraryItem } from "./contracts";
 import type { Chapter } from "./library-types";
 
 export const playbackRates = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+const sleepMinutes = ["10", "20", "30", "45", "60"] as const;
+export type SleepTimer = "off" | "chapter" | typeof sleepMinutes[number];
+
+export function sleepTimerOptions(t: Copy): [SleepTimer, string][] {
+  return [["off", t("Descanso", "Sleep timer")], ...sleepMinutes.map<[SleepTimer, string]>(minutes => [minutes, `${minutes} min`]),
+    ["chapter", t("Fin del capítulo", "End of chapter")]];
+}
+
+export function isSleepTimer(value: string): value is SleepTimer {
+  return value === "off" || value === "chapter" || sleepMinutes.some(minutes => value === minutes);
+}
 export type Repeat = "off" | "all" | "one";
 
 export interface PlaybackPreferences {
@@ -32,6 +43,10 @@ const defaults: PlaybackPreferences = {
 
 export function isPlayable(item: LibraryItem | undefined): item is LibraryItem & { kind: "audio" | "video" } {
   return Boolean(item && !item.missing && (item.kind === "audio" || item.kind === "video"));
+}
+
+export function isAudiobook(item: LibraryItem): boolean {
+  return Boolean(item.details?.audiobook) || /\.m4b$/i.test(item.name);
 }
 
 export function audiobookChapterComplete(position: number, duration?: number | null): boolean {

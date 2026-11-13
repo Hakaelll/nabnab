@@ -1,8 +1,9 @@
 import "./mini-player.css";
 import { escapeHtml as h, type Copy, type LibraryItem } from "./contracts";
+import { chapterAt, isAudiobook, playbackRates, sleepTimerOptions, type SleepTimer } from "./playback-preferences";
 import { durationLabel } from "./presentation";
 import type { PlaybackSignal } from "./playback-signal";
-import { icon } from "./views-common";
+import { icon, option } from "./views-common";
 
 export function playerButton(id: string, label: string, symbol: Parameters<typeof icon>[0], extra = "", caption = "") {
   return `<button id="${id}" type="button" class="stage-button" aria-label="${h(label)}" title="${h(label)}" ${extra}>${icon(symbol)}${caption ? `<span>${h(caption)}</span>` : ""}</button>`;
@@ -29,6 +30,7 @@ interface Hooks {
   volume(value: number): void;
   move(direction: -1 | 1): void;
   sound(): { muted: boolean; volume: number };
+  reading(): { rate: number; sleep: SleepTimer };
   signal(dt: number): PlaybackSignal | undefined;
   expand(): void;
   dock(): void;
@@ -55,8 +57,14 @@ export function createMiniPlayer(host: HTMLElement, media: HTMLVideoElement, hoo
     <div class="mini-monitor" data-mini-audio aria-hidden="true">
       <canvas width="216" height="48"></canvas><span class="mini-monitor-time">0:00</span>
     </div>
+    <div class="mini-reading" hidden>
+      <select id="mini-rate" aria-label="${t("Velocidad", "Playback speed")}">${playbackRates.map(rate => option(String(rate), `${rate}×`, "1")).join("")}</select>
+      <select id="mini-sleep" aria-label="${t("Temporizador de descanso", "Sleep timer")}">${sleepTimerOptions(t).map(([value, label]) => option(value, label, "off")).join("")}</select>
+      <span class="mini-reading-time" aria-hidden="true">0:00</span>
+    </div>
     <div class="mini-controls">
       ${playerButton("mini-previous", t("Pista anterior", "Previous track"), "previous", 'data-mini-audio')}
+      ${playerButton("mini-back", t("Retroceder 15 segundos", "Back 15 seconds"), "rewind", "", "15 s")}
       ${playerButton("mini-toggle", t("Reproducir", "Play"), "play")}
       ${playerButton("mini-next", t("Pista siguiente", "Next track"), "next", 'data-mini-audio')}
       ${playerButton("mini-mute", t("Silenciar", "Mute"), "volume")}
@@ -82,6 +90,10 @@ export function createMiniPlayer(host: HTMLElement, media: HTMLVideoElement, hoo
   const mute = view.querySelector<HTMLButtonElement>("#mini-mute")!;
   const volume = view.querySelector<HTMLInputElement>("#mini-volume")!;
   const wheel = view.querySelector<HTMLButtonElement>("#mini-wheel")!;
+  const reading = view.querySelector<HTMLElement>(".mini-reading")!;
+  const readingTime = view.querySelector<HTMLElement>(".mini-reading-time")!;
+  const rate = view.querySelector<HTMLSelectElement>("#mini-rate")!;
+  const sleep = view.querySelector<HTMLSelectElement>("#mini-sleep")!;
   const floating = view.querySelector<HTMLButtonElement>("#mini-float");
   const canvas = view.querySelector<HTMLCanvasElement>("canvas")!;
   const monitorTime = view.querySelector<HTMLElement>(".mini-monitor-time")!;
@@ -89,6 +101,7 @@ export function createMiniPlayer(host: HTMLElement, media: HTMLVideoElement, hoo
   let frame = 0;
   let previous = 0;
   let artwork = "";
+  let book: LibraryItem | null = null;
 
   function draw(time: number) {
     frame = 0;
@@ -117,7 +130,7 @@ export function createMiniPlayer(host: HTMLElement, media: HTMLVideoElement, hoo
 
   function syncMonitor() {
     const reduce = document.documentElement.classList.contains("reduced-motion") || matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const active = !reduce && !view.hidden && host.dataset.mini === "audio" && !media.paused && !media.ended && !document.hidden;
+    const active = !reduce && !book && !view.hidden && host.dataset.mini === "audio" && !media.paused && !media.ended && !document.hidden;
     if (active && !frame) frame = requestAnimationFrame(draw);
     if (!active) {
       cancelAnimationFrame(frame);
@@ -141,6 +154,15 @@ export function createMiniPlayer(host: HTMLElement, media: HTMLVideoElement, hoo
     const elapsedLabel = durationLabel(position);
     elapsed.textContent = elapsedLabel;
     monitorTime.textContent = elapsedLabel;
+    if (book) {
+      readingTime.textContent = elapsedLabel;
+      const state = hooks.reading();
+      if (rate.value !== String(state.rate)) rate.value = String(state.rate);
+      if (sleep.value !== state.sleep) sleep.value = state.sleep;
+      const subtitle = chapterAt(book.details?.chapters ?? [], position)?.title || playerArtist(book) || book.details?.audiobook?.reader || "";
+      if (artist.textContent !== subtitle) artist.textContent = artist.title = subtitle;
+      artist.hidden = !subtitle;
+    }
     end.textContent = durationLabel(duration);
     seek.max = String(duration);
     seek.value = String(position);
@@ -160,9 +182,12 @@ export function createMiniPlayer(host: HTMLElement, media: HTMLVideoElement, hoo
   function sync(item: LibraryItem, issue: string) {
     if (view.hidden) return;
     host.dataset.mini = item.kind;
+    book = item.kind === "audio" && isAudiobook(item) ? item : null;
+    view.classList.toggle("is-audiobook", Boolean(book));
+    reading.hidden = !book;
     host.setAttribute("aria-label", item.kind === "audio" ? t("Minirreproductor de audio", "Audio mini player") : t("Minirreproductor de vídeo", "Video mini player"));
     title.textContent = title.title = hooks.title(item);
-    artist.textContent = playerArtist(item);
+    artist.textContent = artist.title = playerArtist(item);
     artist.hidden = !artist.textContent;
     const nextArt = item.kind === "audio" ? playerArtwork(item) : "";
     if (artwork !== nextArt) {
@@ -186,6 +211,7 @@ export function createMiniPlayer(host: HTMLElement, media: HTMLVideoElement, hoo
     hooks.drag?.();
   });
   view.querySelector("#mini-previous")!.addEventListener("click", () => hooks.move(-1));
+  view.querySelector("#mini-back")!.addEventListener("click", () => hooks.seek(media.currentTime - 15));
   view.querySelector("#mini-next")!.addEventListener("click", () => hooks.move(1));
   view.querySelector("#mini-expand")!.addEventListener("click", hooks.expand);
   view.querySelector("#mini-dock")!.addEventListener("click", hooks.dock);
@@ -210,6 +236,7 @@ export function createMiniPlayer(host: HTMLElement, media: HTMLVideoElement, hoo
       if (view.hidden) return;
       host.hidden = view.hidden = true;
       delete host.dataset.mini;
+      book = null;
       syncMonitor();
     },
     sync, update,

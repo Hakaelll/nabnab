@@ -1,9 +1,9 @@
 import "./audio-library.css";
-import { audioTitle, isAudiobook, type createAudioPlayer } from "./audio-player";
+import { audioTitle, type createAudioPlayer } from "./audio-player";
 import { escapeHtml as h, type Copy, type LibraryItem, type Snapshot } from "./contracts";
 import { detailsFor } from "./library-features";
 import type { AudioPlaylist, AudioPlaylistEntry, AudioTags, Chapter, LibraryDetails, Lyric } from "./library-types";
-import { audiobookChapterComplete, audiobookResumePosition, chapterAt, isPlayable } from "./playback-preferences";
+import { audiobookChapterComplete, audiobookResumePosition, chapterAt, isAudiobook, isPlayable } from "./playback-preferences";
 import { durationLabel, errorLabel, searchKey } from "./presentation";
 import { action, icon, option, type Icon } from "./views-common";
 

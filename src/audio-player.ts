@@ -3,7 +3,7 @@ import { detailsFor } from "./library-features";
 import type { AudioPlaylist, LocalTrack } from "./library-types";
 import { createMiniPlayer, hasPlayerArtwork, playerArtist } from "./mini-player";
 import type { createSceneControls } from "./music-scene-controls";
-import { audiobookResumePosition, chapterAt, isPlayable, playbackRates, readPlayback, resumePosition, savePlayback, type PlaybackQueue } from "./playback-preferences";
+import { audiobookResumePosition, chapterAt, isAudiobook, isPlayable, isSleepTimer, playbackRates, readPlayback, resumePosition, savePlayback, sleepTimerOptions, type PlaybackQueue, type SleepTimer } from "./playback-preferences";
 import { connectPlaybackSignal } from "./playback-signal";
 import { createPlaybackStage, type StageState } from "./playback-stage";
 import { durationLabel } from "./presentation";
@@ -12,10 +12,6 @@ import { icon, option } from "./views-common";
 
 export function audioTitle(item: LibraryItem): string {
   return item.details?.audio?.title || item.name.replace(/\.[^.]+$/, "");
-}
-
-export function isAudiobook(item: LibraryItem): boolean {
-  return Boolean(item.details?.audiobook) || /\.m4b$/i.test(item.name);
 }
 
 interface Hooks {
@@ -40,7 +36,7 @@ interface Comparison {
   queue: PlaybackQueue | null;
   time: number;
   playing: boolean;
-  sleep: string;
+  sleep: SleepTimer;
   sleepUntil: number;
   stopAt: number;
 }
@@ -77,7 +73,7 @@ export function createAudioPlayer(hooks: Hooks) {
   let pendingSeek: number | null = null;
   let resumeChoice = 0;
   let mediaState: StageState = "loading";
-  let sleep = "off";
+  let sleep: SleepTimer = "off";
   let sleepUntil = 0;
   let stoppedBySleep = false;
   let stopAt = 0;
@@ -412,7 +408,15 @@ export function createAudioPlayer(hooks: Hooks) {
       ?? (Number.isFinite(media.duration) ? media.duration : 0);
   }
 
-  function setSleep(value: string) {
+  function setRate(value: number) {
+    if (!media || preferences.rate === value || !playbackRates.includes(value)) return;
+    preferences.rate = value;
+    media.playbackRate = value;
+    saveSession();
+  }
+
+  function setSleep(value: SleepTimer) {
+    if (sleep === value) return;
     clearTimer();
     sleep = value;
     if (value === "chapter") stopAt = chapterBoundary();
@@ -472,13 +476,13 @@ export function createAudioPlayer(hooks: Hooks) {
         <span class="audio-playing-label"><strong>${h(title)}</strong>${subtitle ? `<small>${h(subtitle)}</small>` : ""}</span>
       </button>
       <div class="audio-timeline"><div class="audio-transport-controls">
-        ${book ? button("back", t("Retroceder 15 segundos", "Back 15 seconds"), "seekBack") : button("previous", t("Anterior", "Previous"), "previous")}
+        ${book ? button("back", t("Retroceder 15 segundos", "Back 15 seconds"), "rewind") : button("previous", t("Anterior", "Previous"), "previous")}
         ${button("toggle", t("Reproducir", "Play"), "play")}
         ${button("next", t("Siguiente", "Next"), "next")}
       </div><div class="audio-progress"><span data-audio-elapsed>0:00</span><input type="range" id="audio-seek" min="0" max="0" step="0.1" value="0" aria-label="${t("Posición de reproducción", "Playback position")}" disabled><span data-audio-duration>0:00</span></div></div>
       <div class="audio-playback-options">${book ? `
         <select id="audio-rate" aria-label="${t("Velocidad", "Playback speed")}">${playbackRates.map(speed => `<option value="${speed}" ${speed === preferences.rate ? "selected" : ""}>${speed}×</option>`).join("")}</select>
-        <select id="audio-sleep" aria-label="${t("Temporizador de descanso", "Sleep timer")}">${[["off", t("Descanso", "Sleep timer")], ["10", "10 min"], ["20", "20 min"], ["30", "30 min"], ["45", "45 min"], ["60", "60 min"], ["chapter", t("Fin del capítulo", "End of chapter")]].map(([value, name]) => `<option value="${value}" ${value === sleep ? "selected" : ""}>${name}</option>`).join("")}</select>
+        <select id="audio-sleep" aria-label="${t("Temporizador de descanso", "Sleep timer")}">${sleepTimerOptions(t).map(([value, name]) => option(value, name, sleep)).join("")}</select>
       ` : ""}
       <div class="audio-volume">${button("mute", t("Silenciar", "Mute"), "volume")}<input id="audio-volume" type="range" min="0" max="1" step="0.01" value="${preferences.volume}" aria-label="${t("Volumen", "Volume")}"></div>
       ${item.kind === "audio" ? `<button type="button" class="icon-button audio-visualize" data-action="audio-player-open" aria-label="${t("Abrir visualización", "Open visualization")}" title="${t("Abrir visualización", "Open visualization")}">${icon("wave")}</button>` : ""}
@@ -821,7 +825,7 @@ export function createAudioPlayer(hooks: Hooks) {
       audioSelection: () => audioSelection, switchAudio,
       musicTitle: audioTitle, queue: () => queueMarkup(true), trackInfo, sceneControls: () => scenes?.render(),
       toggle: () => { if (element.paused) void playMedia(); else element.pause(); },
-      rate: value => { preferences.rate = value; element.playbackRate = value; saveSession(); },
+      rate: setRate,
       preference: (key, value) => { preferences[key] = value; saveSession(); },
       captionSize: value => { preferences.captionSize = value; saveSession(); },
       fullscreen: () => { void setFullscreen(!fullscreen); },
@@ -855,6 +859,7 @@ export function createAudioPlayer(hooks: Hooks) {
     mini = createMiniPlayer(stageHost, element, {
       t, seek, mute, volume, title: audioTitle, thumbnails: hooks.thumbnails,
       sound: () => preferences,
+      reading: () => ({ rate: preferences.rate, sleep }),
       signal: dt => signal?.read(dt, mediaState === "playing"),
       toggle: () => { if (element.paused) void playMedia(); else element.pause(); },
       move: direction => move(direction, true),
@@ -883,6 +888,7 @@ export function createAudioPlayer(hooks: Hooks) {
         seek(position);
       }
       if (resumeChoice && !resumePosition(resumeChoice, element.duration)) resumeChoice = 0;
+      if (sleep === "chapter" && !stopAt) stopAt = chapterBoundary();
       const item = current();
       if (item?.kind === "video" && expanded) stage?.render(item, preferences, resumeChoice, issue);
       if (element.paused && mediaState === "loading") mediaState = "paused";
@@ -952,14 +958,12 @@ export function createAudioPlayer(hooks: Hooks) {
     if (element instanceof HTMLInputElement && (element.id === "audio-resume-music" || element.id === "audio-resume-music-compact")) {
       preferences.resumeMusic = element.checked; saveSession(); return true;
     }
-    if (element instanceof HTMLSelectElement && element.id === "audio-rate") {
-      preferences.rate = Number(element.value);
-      if (media) media.playbackRate = preferences.rate;
-      saveSession();
+    if (element instanceof HTMLSelectElement && (element.id === "audio-rate" || element.id === "mini-rate")) {
+      setRate(Number(element.value));
       return true;
     }
-    if (element instanceof HTMLSelectElement && element.id === "audio-sleep") {
-      if (element.value === "off" || element.value === "chapter" || ["10", "20", "30", "45", "60"].includes(element.value)) setSleep(element.value);
+    if (element instanceof HTMLSelectElement && (element.id === "audio-sleep" || element.id === "mini-sleep")) {
+      if (isSleepTimer(element.value)) setSleep(element.value);
       return true;
     }
     return false;

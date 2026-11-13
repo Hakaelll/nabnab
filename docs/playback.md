@@ -8,6 +8,8 @@ Abre el **minirreproductor** desde la barra o la vista grande. Se queda en una e
 
 Pulsa **Sacar a una ventana** o minimiza nabnab con el mini abierto. La ventana flotante se queda sobre el escritorio y puedes arrastrarla desde el título de la pista. Al volver desde la barra de tareas, el reproductor regresa a la barra compacta. El mismo WebView2 conserva el archivo, la posición y la cola. Los títulos largos se muestran con puntos suspensivos y puedes leerlos completos al colocar el puntero encima.
 
+Para audiolibros, la ventana flotante muestra el capítulo incrustado cuando está disponible y ofrece velocidad, retroceso de 15 segundos y temporizador de descanso. [Minirreproductor de audiolibros](playback/mini-audiobook.png)
+
 En Windows, pulsa **Ctrl + Mayús + M** para abrir el mini de audio o vídeo con un archivo cargado, aunque nabnab esté minimizado. Si el mini ya está flotando, el atajo le da el foco. Con **Ajustes → General → Mostrar icono en la bandeja** activado, también puedes elegir **Abrir minirreproductor** en el menú del icono junto al reloj.
 
 Con una pista de audio en la sesión, abre **Salto rápido** desde la barra de reproducción o el mini de audio. También puedes mantener **Alt** y girar la rueda. En Windows, el gesto funciona con nabnab minimizado y el mini cerrado. Las portadas aparecen junto al puntero y el escritorio se ve entre las tarjetas y los controles. Suelta **Alt** para reproducir la tarjeta central o pulsa **Esc** para cancelar. Puedes pulsar una tarjeta o usar **↑**, **↓** e **Intro**. **Volver a la pista** deshace el último salto dentro de la misma cola. Los dos atajos están en **Ajustes → General → Reproducción desde el escritorio**. [Referencia de la rueda](https://github.com/ffoouuaadd/skip-dat)

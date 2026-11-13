@@ -63,6 +63,23 @@
 }
 .mini-monitor canvas { width: min(60%, 155px); height: 24px; }
 .mini-monitor-time { font: 600 15px/1 ui-monospace, Consolas, monospace; letter-spacing: .08em; }
+.mini-player:not(.is-audiobook) #mini-back,
+.mini-player.is-audiobook :is(.mini-monitor, #mini-previous) { display: none; }
+.mini-reading {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+}
+.mini-reading select { min-height: 34px; padding: 4px 7px; font-size: 12px; }
+.mini-reading-time {
+  padding: 0 8px;
+  min-width: 50px;
+  color: var(--action);
+  text-align: end;
+  font: 600 14px/1 ui-monospace, Consolas, monospace;
+}
+.mini-player #mini-back { display: inline-flex; gap: 4px; font-size: 12px; white-space: nowrap; }
 [data-mini="audio"] #mini-wheel { display: inline-flex; gap: 6px; margin-inline-start: auto; padding-inline: 7px; font-size: 12px; white-space: nowrap; }
 .playback-stage[data-mini="audio"] .mini-controls { padding-inline-start: 3px; }
 .playback-stage[data-mini="audio"] #mini-elapsed { display: none; }

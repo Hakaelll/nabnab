@@ -420,12 +420,50 @@ async function verifyEmbeddedBook() {
   assert.equal(paused.details.chapterPositions[0].position, earlier);
   await shutdown();
   await launch();
+  windowCommand("resize", 1180, 800);
   await openBook();
   await page.getByRole("button", { name: /Continuar · Viaje de prueba · Paso de montaña · 0:02/ }).waitFor();
   await page.getByRole("button", { name: "Retomar · Salida", exact: true }).press("Enter");
   await wait(async () => !(await playing()).paused && Math.abs((await playing()).time - earlier) < .4);
   await save(2.4);
   await page.getByRole("button", { name: /Continuar · Viaje de prueba · Salida · 0:02/ }).waitFor();
+  const engine = await page.locator("#audio-engine").elementHandle();
+  await page.locator("#audio-sleep").selectOption("10");
+  await page.locator("#audio-mini").click();
+  await stage().locator("#mini-float").click();
+  await wait(async () => await mainMinimized() && await page.evaluate(() => innerWidth <= 400));
+  const mini = stage().locator(".mini-player");
+  await mini.screenshot({path:path.join(output, "audiobook-mini.png"), animations:"disabled"});
+  const speed = mini.getByRole("combobox", { name: "Velocidad", exact: true });
+  const sleep = mini.getByRole("combobox", { name: "Temporizador de descanso", exact: true });
+  await speed.waitFor({ timeout: 3000 });
+  assert.equal(await sleep.inputValue(), "10");
+  await speed.press("ArrowDown");
+  await wait(async () => (await playing()).rate === 1.25);
+  await mini.locator("#mini-seek").evaluate(slider => {
+    slider.value = "4.5";
+    slider.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await wait(async () => Math.abs((await playing()).time - 4.5) < .1);
+  await sleep.focus();
+  await sleep.selectOption("chapter");
+  assert.ok(await sleep.evaluate(control => control === document.activeElement));
+  assert.equal(await mini.evaluate(panel => panel.scrollWidth <= panel.clientWidth && panel.scrollHeight <= panel.clientHeight), true);
+  await mini.screenshot({path:path.join(output, "audiobook-mini-chapter.png"), animations:"disabled"});
+  await mini.getByRole("button", { name: "Reproducir", exact: true }).press("Enter");
+  await wait(async () => (await playing()).paused && (await playing()).time >= 8);
+  assert.ok((await playing()).time < 8.6);
+  assert.equal(await sleep.inputValue(), "off");
+  await mini.getByRole("button", { name: "Retroceder 15 segundos" }).press("Enter");
+  await wait(async () => (await playing()).time === 0 && (await playing()).paused);
+  assert.equal(await mainMinimized(), true);
+  windowCommand("restore");
+  await wait(async () => !await mainMinimized() && await page.evaluate(() => innerWidth >= 900
+    && !document.documentElement.classList.contains("has-detached-mini")));
+  await stage().waitFor({ state: "hidden" });
+  assert.ok(await engine.evaluate(element => element === document.getElementById("audio-engine")));
+  assert.equal(await page.locator("#audio-rate").inputValue(), "1.25");
+  assert.equal(await page.locator("#audio-sleep").inputValue(), "off");
   for (const [width,height] of [[1180,780],[900,620]]) {
     await page.setViewportSize({width,height});
     const index = page.locator(".audio-book-chapters");
@@ -433,7 +471,7 @@ async function verifyEmbeddedBook() {
     await index.scrollIntoViewIfNeeded();
     await page.screenshot({path:path.join(output, `embedded-book-${width}.png`),animations:"disabled"});
   }
-  console.log("Native M4B import, chapter selection and independent resume points survived a desktop restart.");
+  console.log("Native M4B chapter resume, floating controls, chapter sleep timer and desktop restore passed.");
 }
 
 async function verifyBookContinuation(ids) {

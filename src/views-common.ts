@@ -26,6 +26,7 @@ const paths = {
   next: '<path d="M19 5v14M5 5l11 7-11 7V5Z"/>',
   back: '<path d="M20 12H4m6-6-6 6 6 6"/>',
   seekBack: '<path d="M7 4 3 8l4 4M3 8h10a6 6 0 0 1 0 12h-2"/><path d="M9 12v4m-1-3 1-1m4 0c-2 0-2 4 0 4s2-4 0-4Z"/>',
+  rewind: '<path d="m7 4-4 4 4 4M3 8h10a6 6 0 0 1 0 12h-2"/>',
   seekForward: '<path d="m17 4 4 4-4 4m4-4H11a6 6 0 0 0 0 12h2"/><path d="M9 12v4m-1-3 1-1m4 0c-2 0-2 4 0 4s2-4 0-4Z"/>',
   volume: '<path d="M3 9v6h4l5 4V5L7 9H3Zm13 0a4 4 0 0 1 0 6m3-8a7 7 0 0 1 0 10"/>',
   muted: '<path d="M3 9v6h4l5 4V5L7 9H3Zm13 1 5 5m0-5-5 5"/>',
