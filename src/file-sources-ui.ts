@@ -55,6 +55,9 @@ function isZenodoCommunity(page: PublicPage | null): boolean {
 function isLibrivoxLanguageBrowse(page: PublicPage | null): boolean {
   return page?.provider === "librivox" && page.sourceUrl.startsWith("https://librivox.org/search/?language_id=");
 }
+function isArxivFamily(page: PublicPage | null): boolean {
+  return page?.provider === "arxiv" && page.sourceUrl.startsWith("https://arxiv.org/abs/") && !/v[1-9]\d*$/.test(page.sourceUrl);
+}
 function isCatalogSearch(page: PublicPage | null): boolean {
   return isZenodoHistory(page) || isZenodoCommunity(page) || Boolean(page && (page.provider === "arxiv" || page.provider === "librivox")
     && page.sourceUrl.startsWith(`https://${page.provider}.org/search/?`));
@@ -135,6 +138,7 @@ export function createFileSources(hooks: FileSourceHooks) {
   let publicSelectionReview = false;
   let busy: "inspect" | "verify" | "queue" | "connect" | "configure" | "revoke" | null = null;
   let checkedCopy: { id: string; matches: boolean } | null = null;
+  let arxivDetails: { id: string; page: PublicPage } | null = null;
   let error = "";
   let activeRequest = 0;
   let requestCounter = Date.now();
@@ -144,7 +148,7 @@ export function createFileSources(hooks: FileSourceHooks) {
   const publicSelected = new Map<string, PublicAsset>();
   const cloudSelected = new Map<string, CloudEntry>();
   const exports = new Map<string, string>();
-  function clearPublicSelection() { publicSelected.clear(); publicSelectionReview = false; checkedCopy = null; }
+  function clearPublicSelection() { publicSelected.clear(); publicSelectionReview = false; checkedCopy = null; arxivDetails = null; }
   function clearSelection() { clearPublicSelection(); cloudSelected.clear(); exports.clear(); }
   function canReviewPublicSelection() {
     return tab === "public" && publicPage !== null && publicPage.assets.length > 0
@@ -279,7 +283,8 @@ export function createFileSources(hooks: FileSourceHooks) {
     if (!publicPage?.description) return "";
     const paragraph = `<p class="file-source-description">${h(publicPage.description)}</p>`;
     if (isCatalogSearch(publicPage)) return paragraph;
-    const summary = publicPage.provider === "arxiv" ? t("Resumen del artículo", "Article abstract")
+    const summary = publicPage.provider === "arxiv" ? isArxivFamily(publicPage)
+      ? t("Resumen de la versión más reciente", "Latest version abstract") : t("Resumen del artículo", "Article abstract")
       : publicPage.provider === "librivox" ? t("Detalles de la edición", "Edition details")
       : publicPage.provider === "zenodo" ? t("Descripción del registro", "Record description") : "";
     return summary ? `<details class="file-source-abstract"><summary>${summary}</summary>${paragraph}</details>` : paragraph;
@@ -318,7 +323,11 @@ export function createFileSources(hooks: FileSourceHooks) {
       const title = chapter ? asset.title : version ? `${t("Versión", "Version")} ${version}` : asset.filename;
       const name = chapter ? `${t("Capítulo", "Chapter")} ${chapter.chapter} · ${title}` : version ? `${title} · ${asset.filename}` : "";
       const metadata = [version ? asset.filename : chapter ? null : asset.mime, chapter || version ? null : asset.version, asset.publishedAt, chapter?.reader, chapter?.language && displayLibrivoxLanguage(chapter.language), asset.platform, asset.architecture].filter(Boolean).join(" · ");
-      const attribution = [asset.author, research && rights === asset.license ? null : asset.license].filter(Boolean).join(" · ");
+      const family = Boolean(version && isArxivFamily(publicPage));
+      const license = family ? asset.license
+        ? t(`Licencia indicada: ${asset.license}`, `Reported license: ${asset.license}`)
+        : t("Licencia sin indicar", "License not reported") : "";
+      const attribution = [asset.author, license || (research && rights === asset.license ? null : asset.license)].filter(Boolean).join(" · ");
       const checked = publicSelected.has(asset.id);
       const saved = version || provider === "zenodo" ? copies?.get(asset.id) : undefined;
       const localChapterId = chapter && localChapters.has(asset.id) ? `file-source-local-chapter-${index}` : "";
@@ -326,20 +335,29 @@ export function createFileSources(hooks: FileSourceHooks) {
         <input type="checkbox" data-file-source-select="${h(asset.id)}" ${name ? `aria-label="${h(name)}"` : ""} ${localChapterId ? `aria-describedby="${localChapterId}"` : ""} ${checked ? "checked" : ""} ${busy || publicSelected.size >= 199 && !checked ? "disabled" : ""}>
         <span class="file-source-file-icon" aria-hidden="true">${chapter ? String(chapter.chapter).padStart(2, "0") : icon(asset.mime.startsWith("image/") ? "image" : asset.mime.startsWith("audio/") ? "audio" : "file")}</span>
         <span class="file-source-row-main"><strong>${h(title)}</strong>${metadata ? `<small>${h(metadata)}</small>` : ""}${provider === "archive" ? `<small>${asset.original ? t("Original", "Original") : t("Derivado", "Derivative")}</small>` : ""}${attribution ? `<small>${h(attribution)}</small>` : ""}${asset.checksum || asset.sha256 ? `<small class="file-source-checksum" title="${h(asset.checksum ?? asset.sha256 ?? "")}">${h(asset.checksum ?? `sha256:${asset.sha256}`)}</small>` : ""}</span>
-        ${saved ? "" : `<span class="file-source-size">${localChapterId ? `<strong id="${localChapterId}" class="file-source-chapter-saved">${t("En Biblioteca", "In Library")}</strong>` : ""}${h(fileSize(asset.size, t))}</span>`}</label>`;
-      if (!saved) return row;
-      const copyAction = version
+        ${saved || family ? "" : `<span class="file-source-size">${localChapterId ? `<strong id="${localChapterId}" class="file-source-chapter-saved">${t("En Biblioteca", "In Library")}</strong>` : ""}${h(fileSize(asset.size, t))}</span>`}</label>`;
+      if (!saved && !family) return row;
+      const details = arxivDetails?.id === asset.id ? arxivDetails.page : null;
+      const detailsLabel = t(`Ficha de la versión ${version}`, `Version ${version} details`);
+      const detailsId = `arxiv-version-details-${index}`;
+      const copyAction = !saved ? "" : version
         ? action("open-media", t("Abrir copia", "Open copy"), "arrow", "quiet", `data-id="${h(saved.id)}" aria-label="${h(t(`Abrir copia de la versión ${version}`, `Open copy of version ${version}`))}"`)
         : action("reveal-media", t("Mostrar carpeta", "Show folder"), "folder", "quiet", `data-id="${h(saved.id)}" aria-label="${h(t(`Mostrar carpeta de ${asset.filename}`, `Show folder for ${asset.filename}`))}"`);
       return `<div class="file-source-saved-row">${row}<div class="file-source-saved-copy">
-        <span>${t("En Biblioteca", "In Library")} · ${h(fileSize(saved.size, t))}</span>
-        <div class="button-group">${copyAction}${provider === "zenodo" && asset.checksum
+        <span>${saved ? `${t("En Biblioteca", "In Library")} · ${h(fileSize(saved.size, t))}` : h(fileSize(asset.size, t))}</span>
+        <div class="button-group">${family ? action("file-source-arxiv-details", t("Ver ficha", "View details"), "document", "quiet",
+          `data-id="${h(asset.id)}" aria-label="${h(detailsLabel)}" aria-expanded="${Boolean(details)}" ${details ? `aria-controls="${detailsId}"` : ""} ${busy ? "disabled" : ""}`) : ""}${copyAction}${saved && provider === "zenodo" && asset.checksum
           ? action("verify-zenodo-copy", t("Verificar copia", "Verify copy"), "check", "quiet",
             `data-id="${h(saved.id)}" aria-label="${h(t(`Verificar copia de ${asset.filename}`, `Verify copy of ${asset.filename}`))}" ${busy ? "disabled" : ""}`)
           : ""}</div>
-        ${checkedCopy?.id === saved.id ? `<span role="status" class="file-source-check-result">${checkedCopy.matches
+        ${checkedCopy && checkedCopy.id === saved?.id ? `<span role="status" class="file-source-check-result">${checkedCopy.matches
           ? t("El checksum coincide.", "The checksum matches.") : t("El checksum es distinto.", "The checksum differs.")}</span>` : ""}
-      </div></div>`;
+      </div>${details ? `<section id="${detailsId}" class="file-source-version-details" aria-label="${h(detailsLabel)}" tabindex="-1">
+        <div><h4>${h(details.title)}</h4>${action("file-source-arxiv-close", t("Cerrar ficha", "Close details"), "close", "quiet", `data-id="${h(asset.id)}"`)}</div>
+        <p class="field-note">${h([asset.id, details.assets[0]?.author, details.assets[0]?.publishedAt].filter(Boolean).join(" · "))}</p>
+        <p class="field-note">${h(details.rights ? t(`Licencia indicada: ${details.rights}`, `Reported license: ${details.rights}`) : t("Licencia sin indicar", "License not reported"))}</p>
+        <p>${h(details.description ?? t("arXiv no ha facilitado un resumen para esta versión.", "arXiv did not provide an abstract for this version."))}</p>
+      </section>` : ""}</div>`;
     }).join("") || `<p class="file-source-empty">${empty}</p>`}</div>`;
   }
   function cloudRows(): string {
@@ -376,6 +394,7 @@ export function createFileSources(hooks: FileSourceHooks) {
     if (tab === "personal") return `${header}${hooks.renderPersonal()}</section>`;
     const provider: CloudProvider = tab === "public" ? "drive" : tab;
     const isSearch = isCatalogSearch(publicPage);
+    const family = isArxivFamily(publicPage);
     const zenodoHistory = isZenodoHistory(publicPage);
     const zenodoCommunity = isZenodoCommunity(publicPage);
     const languageBrowse = isLibrivoxLanguageBrowse(publicPage);
@@ -418,7 +437,7 @@ export function createFileSources(hooks: FileSourceHooks) {
         ${bookId && localCount ? action("open-audiobook", t("Abrir en Estantería", "Open in Bookshelf"), "library", "secondary", `data-id="${h(bookId)}" ${busy ? "disabled" : ""}`) : ""}
         ${isPublic && !catalogReturn && publicPage?.zenodo?.versionsUrl ? action("file-source-versions", t("Historial de versiones", "Version history"), "list", "quiet", busy ? "disabled" : "") : ""}
         ${isPublic && (publicPage?.provider === "github" || isSearch) && hooks.followSource ? action("file-source-follow", followLabel, "add", "quiet", busy ? "disabled" : "") : ""}
-        ${!isPublic && trail.length ? action("file-source-parent", t("Volver", "Back"), undefined, "quiet", busy ? "disabled" : "") : ""}</div>${isPublic ? publicDescription() : ""}${isPublic && publicPage?.rights ? `<p class="field-note">${t("Derechos indicados por el origen", "Rights stated by the source")}: ${h(publicPage.rights)}</p>` : ""}${warningList(isPublic ? publicPage?.warnings ?? [] : cloudPage?.warnings ?? [])}
+        ${!isPublic && trail.length ? action("file-source-parent", t("Volver", "Back"), undefined, "quiet", busy ? "disabled" : "") : ""}</div>${isPublic ? publicDescription() : ""}${isPublic && !family && publicPage?.rights ? `<p class="field-note">${t("Derechos indicados por el origen", "Rights stated by the source")}: ${h(publicPage.rights)}</p>` : ""}${warningList(isPublic ? publicPage?.warnings ?? [] : cloudPage?.warnings ?? [])}
         ${zenodoCommunity ? `<p class="field-note">${publicPage?.entries.length
           ? t("Abre un registro para comprobar su licencia y los archivos disponibles.", "Open a record to check its license and available files.")
           : t("La comunidad no ha devuelto registros en esta consulta.", "The community returned no records for this request.")}</p>` : ""}
@@ -597,6 +616,32 @@ export function createFileSources(hooks: FileSourceHooks) {
         break;
       case "file-source-follow": if (!busy && publicPage) hooks.followSource?.(publicPage.sourceUrl, isCatalogSearch(publicPage) ? "publicSearch" : "github"); break;
       case "file-source-destination": hooks.chooseFolder?.(); break;
+      case "file-source-arxiv-details":
+      case "file-source-arxiv-close": {
+        const id = element.dataset.id;
+        const asset = publicPage?.assets.find(asset => asset.id === id);
+        if (busy || !asset || !isArxivFamily(publicPage)) break;
+        const trigger = () => document.querySelector<HTMLElement>(
+          `[data-action="file-source-arxiv-details"][data-id="${CSS.escape(asset.id)}"]`);
+        if (arxivDetails?.id === asset.id) {
+          arxivDetails = null;
+          hooks.render();
+          trigger()?.focus({ preventScroll: true });
+          break;
+        }
+        arxivDetails = null;
+        await perform("inspect", async requestId => {
+          const page = await hooks.command<PublicPage>("public_source_inspect", { url: asset.sourceUrl, cursor: null, requestId, metadataOnly: true });
+          if (activeRequest !== requestId) return;
+          if (page.provider !== "arxiv" || page.sourceUrl !== asset.sourceUrl) {
+            throw new Error(t("arXiv no devolvió la versión elegida.", "arXiv did not return the selected version."));
+          }
+          arxivDetails = { id: asset.id, page };
+        });
+        const control = trigger();
+        const detailsId = control?.getAttribute("aria-controls");
+        (detailsId ? document.getElementById(detailsId) : control)?.focus();
+      } break;
       case "verify-zenodo-copy": {
         const id = element.dataset.id;
         if (!id || busy || publicPage?.provider !== "zenodo") break;

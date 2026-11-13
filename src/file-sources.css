@@ -72,6 +72,19 @@ label.file-source-row { cursor: pointer; }
 .file-source-saved-copy .button { min-height: 32px; }
 .file-source-saved-copy .button-group { flex-wrap: wrap; justify-content: flex-end; gap: 2px 6px; }
 .file-source-saved-copy .file-source-check-result { font-weight: 600; color: var(--text); }
+.file-source-version-details {
+  grid-column: 1 / -1;
+  min-width: 0;
+  margin-inline: 12px;
+  padding: 12px 8px 16px;
+  border-top: 1px solid var(--edge-quiet);
+  overflow-wrap: anywhere;
+}
+.file-source-version-details > div { display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: 6px 12px; }
+.file-source-version-details h4 { margin: 0; font-size: 14px; }
+.file-source-version-details p { margin: 6px 0 0; }
+.file-source-version-details:focus-visible { outline-offset: -2px; border-radius: 6px; }
+.file-source-version-details > p:last-child { max-width: 78ch; line-height: 1.55; }
 .file-source-folder { display: block; min-width: 0; background: none; border: 0; color: var(--text); font: inherit; text-align: left; padding: 4px 0; cursor: pointer; }
 .file-source-folder strong { display: block; font-weight: 500; overflow-wrap: anywhere; }
 .file-source-folder small { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
@@ -83,7 +96,7 @@ label.file-source-row { cursor: pointer; }
 .file-source-pagination p { color: var(--muted); font-size: 12px; max-width: 540px; margin: 0; }
 .file-source-selection { display: grid; grid-template-columns: minmax(120px, 1fr) minmax(140px, 1fr) auto; gap: 12px 20px; align-items: end; padding: 20px; margin-top: 24px; border: 1px solid var(--border); border-radius: 12px; background: var(--secondary); box-shadow: var(--contact); }
 @media (min-width: 1021px) and (min-height: 760px) {
-  .file-source-selection:has([data-action="file-source-clear"]) { position: sticky; bottom: 0; z-index: 2; }
+  .file-sources:not(:has(.file-source-version-details)) .file-source-selection:has([data-action="file-source-clear"]) { position: sticky; bottom: 0; z-index: 2; }
 }
 .file-source-selection-title { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; grid-column: 1 / -1; }
 .file-source-selection-title > strong { font-size: 14px; font-weight: 600; }

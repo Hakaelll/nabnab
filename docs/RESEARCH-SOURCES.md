@@ -5,11 +5,14 @@ En **Plataformas → Archivos y documentos**, pega un enlace, un identificador o
 ## arXiv
 
 - Busca por título, autor o categoría. Puedes abrir un identificador como `arXiv:2401.00001` o un enlace de artículo.
-- Cada PDF tiene su propia fila con número de versión, nombre de archivo y fecha si el origen la indica. Puedes desplegar el resumen en la misma ficha. La referencia guardada identifica la versión exacta y conserva autores, fecha y licencia cuando los informa el origen.
+- Cada PDF tiene su propia fila con número de versión, nombre de archivo, fecha y licencia cuando arXiv las informa. **Ver ficha** abre el resumen, los autores y el identificador exacto de esa versión en la misma fila. Puedes consultar la ficha mientras preparas la descarga de otras versiones. **Cerrar ficha** devuelve el foco al botón que la abrió.
+- El resumen encima de la lista corresponde a la versión más reciente. La referencia guardada identifica la versión exacta y conserva autores, fecha y licencia cuando los informa el origen.
 - Si ya tienes esa versión en Biblioteca, la fila muestra el tamaño de la copia y **Abrir copia**. En **Fuentes** también puedes abrirla directamente. Las demás versiones mantienen su propio estado de revisión.
 - La búsqueda consulta hasta 20 resultados por página y 200 por búsqueda. La API Atom se consulta de una en una, con tres segundos entre peticiones y una caché acotada en memoria.
 
-[Manual de la API](https://info.arxiv.org/help/api/user-manual.html) · [Condiciones de la API](https://info.arxiv.org/help/api/tou.html) · [Disponibilidad por versión](https://info.arxiv.org/help/versions.html)
+[Manual de la API](https://info.arxiv.org/help/api/user-manual.html) · [Condiciones de la API](https://info.arxiv.org/help/api/tou.html) · [Disponibilidad por versión](https://info.arxiv.org/help/versions.html) · [Licencias de arXiv](https://info.arxiv.org/help/license/index.html)
+
+![Ficha exacta de un PDF de arXiv con una versión distinta marcada para descargar](arxiv-version-details.png)
 
 ## Zenodo
 
@@ -52,6 +55,8 @@ El flujo de Rocketseat, Coursera, Domestika y Skillshare utiliza el sitio oficia
 ## Comprobaciones
 
 La prueba de interfaz usa datos simulados. Recorre la selección por versión, el retorno con teclado tras paginar o encontrar un error, y la selección de capítulos en ventanas de 1180 × 780 y 900 × 620. Las pruebas Rust cubren identidad por versión, lectura de metadatos, capítulos ordenados y seguimiento manual.
+
+Con `NABNAB_RESEARCH_ARXIV_DETAILS_ONLY=1`, la prueba de Windows abre la ficha pública de `2506.08399v1` mientras está marcada la v2. Comprueba que conserva la selección y el foco al cerrar y que la consulta de la ficha por sí sola no prepara una descarga. La prueba de Edge usa dos licencias y resúmenes distintos para verificar a qué versión corresponde cada dato. [Artículo de arXiv](https://arxiv.org/abs/2506.08399v1)
 
 La prueba nativa descargó dos versiones distintas del mismo PDF de arXiv y comprobó que ambas se conservan. Descargó un CSV de Zenodo de 450 bytes y verificó el MD5 publicado. Descargó dos capítulos de LibriVox en orden inverso y comprobó el orden de lectura en Biblioteca. [Artículo de arXiv](https://arxiv.org/abs/2506.08399) · [Registro de Zenodo](https://zenodo.org/records/14634897) · [Edición de LibriVox](https://librivox.org/aesops-fables-volume-1-fables-1-25/)
 

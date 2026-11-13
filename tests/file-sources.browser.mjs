@@ -109,7 +109,14 @@ const setup = `
         return sourcePage(args.url,{provider:"arxiv",title:"arXiv · fixture search",entries:[{...paper,prerelease:false,publishedAt:"2024-01-02"}],nextCursor:args.cursor?null:"2"});
       }
       if(args.url.includes("/error"))throw "Fixture source permission denied. Choose another source or retry.";
-      if(args.url.startsWith("https://arxiv.org/abs/"))return sourcePage(args.url,{provider:"arxiv",title:"A versioned paper",assets:[1,2].map(version=>asset("arxiv:2401.00001v"+version,"arxiv-2401.00001v"+version+".pdf",{mime:"application/pdf",size:null,version:"v"+version,publishedAt:"2024-01-02",author:"Fixture Author"}))});
+      if(args.url.startsWith("https://arxiv.org/abs/")){
+        const exact = args.url.endsWith("v1") ? 1 : args.url.endsWith("v2") ? 2 : null;
+        const licenses = ["https://arxiv.org/licenses/nonexclusive-distrib/1.0/", "https://creativecommons.org/licenses/by/4.0/"];
+        return sourcePage(args.url,{provider:"arxiv",title:"A versioned paper",rights:licenses[(exact??2)-1],
+          description:exact===1?"The original abstract for version one.":"The revised abstract for version two.",
+          assets:(exact?[exact]:[1,2]).map(version=>asset("arxiv:2401.00001v"+version,"arxiv-2401.00001v"+version+".pdf",{
+            sourceUrl:"https://arxiv.org/abs/2401.00001v"+version,mime:"application/pdf",size:null,version:"v"+version,publishedAt:"2024-01-02",author:"Fixture Author",license:licenses[version-1]}))});
+      }
       if(args.url==="10.5281/zenodo.1234")return dataset("https://doi.org/10.5281/zenodo.1234",1236,"v2");
       if(args.url===communityUrl)return sourcePage(communityUrl,{provider:"zenodo",title:"Comunidad de prueba",
         entries:[{id:args.cursor?"zenodo:1235":"zenodo:1236",title:args.cursor?"Dataset histórico":"Dataset reciente",
@@ -239,6 +246,28 @@ try {
     assert.deepEqual(localOpen, { id: "local-v1", folder: false });
     await page.getByRole("checkbox", { name: /^Versión 2 · / }).check();
     assert.match(await page.locator(".file-source-selection-title").innerText(), /Tamaño desconocido/);
+    const versionDetails = page.getByRole("button", { name: "Ficha de la versión 1", exact: true });
+    await versionDetails.waitFor({ timeout: 3000 });
+    const versionRowFor = version => page.locator(".file-source-saved-row").filter({ has: page.getByRole("checkbox", { name: new RegExp("^Versión " + version + " · ") }) });
+    assert.match(await versionRowFor(1).innerText(), /nonexclusive-distrib/);
+    assert.doesNotMatch(await versionRowFor(1).innerText(), /creativecommons/);
+    assert.match(await versionRowFor(2).innerText(), /creativecommons/);
+    await versionDetails.press("Enter");
+    const details = page.getByRole("region", { name: "Ficha de la versión 1" });
+    await details.getByText("The original abstract for version one.").waitFor();
+    assert.equal(await page.evaluate(() => window.fileSourceFixture.calls.filter(call => call.cmd === "public_source_inspect").at(-1).args.metadataOnly), true);
+    assert.match(await details.innerText(), /nonexclusive-distrib/);
+    assert.ok(!await details.getByText(/The revised abstract/).count());
+    assert.ok(await page.getByRole("checkbox", { name: /^Versión 2 · / }).isChecked());
+    for (const [width, height] of [[1180, 780], [900, 620]]) {
+      await page.setViewportSize({ width, height });
+      await details.scrollIntoViewIfNeeded();
+      await checkNoHorizontalOverflow(`arXiv version details ${width}`);
+      await page.locator(".file-source-list").scrollIntoViewIfNeeded();
+      await page.screenshot({ path: `${directory}/arxiv-version-details-${width}.png` });
+    }
+    await details.getByRole("button", { name: "Cerrar ficha" }).press("Enter");
+    assert.ok(await versionDetails.evaluate(node => node === document.activeElement));
     const back = page.getByRole("button", { name: "Volver a resultados" });
     const inspectCount = () => page.evaluate(() => window.fileSourceFixture.calls.filter(call => call.cmd === "public_source_inspect").length);
     const callsBeforeBack = await inspectCount();

@@ -133,12 +133,13 @@ pub async fn librivox_catalog_languages() -> Result<Vec<public_sources::CatalogL
 }
 
 #[tauri::command]
-pub async fn public_source_inspect(state: State<'_, Arc<AppState>>, url: String, cursor: Option<String>, request_id: u64) -> Result<public_sources::Page, String> {
+pub async fn public_source_inspect(state: State<'_, Arc<AppState>>, url: String, cursor: Option<String>, request_id: u64, metadata_only: Option<bool>) -> Result<public_sources::Page, String> {
     let cancel = begin(&state, request_id)?;
     let result = public_sources::inspect(&url, cursor.as_deref(), cancel.clone()).await;
     finish(&state, request_id);
     let page = result?;
     if *cancel.borrow() { return Err(crate::engine::CANCELLED.into()); }
+    if metadata_only == Some(true) { return Ok(page); }
     let mut pages = state.file_sources.pages.lock().unwrap();
     if pages.len() >= 16 && !pages.contains_key(&page.source_url) { pages.clear(); }
     if cursor.is_some() {

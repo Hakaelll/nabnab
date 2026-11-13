@@ -17,7 +17,8 @@ const languageOnly = process.env.NABNAB_RESEARCH_LANGUAGE_ONLY === "1";
 const chaptersOnly = process.env.NABNAB_RESEARCH_CHAPTER_FILTERS_ONLY === "1";
 const communityOnly = process.env.NABNAB_RESEARCH_COMMUNITY_ONLY === "1";
 const zenodoOnly = process.env.NABNAB_RESEARCH_ZENODO_ONLY === "1";
-const allProviders = !languageOnly && !chaptersOnly && !communityOnly && !zenodoOnly;
+const arxivDetailsOnly = process.env.NABNAB_RESEARCH_ARXIV_DETAILS_ONLY === "1";
+const allProviders = !languageOnly && !chaptersOnly && !communityOnly && !zenodoOnly && !arxivDetailsOnly;
 const port = process.env.NABNAB_RESEARCH_DEBUG_PORT || 9259;
 const endpoint = `http://127.0.0.1:${port}`;
 const child = spawn(process.env.NABNAB_RESEARCH_TEST_EXE ?? path.join(root, "src-tauri/target/debug/nabnab.exe"), [], {
@@ -243,6 +244,30 @@ try {
     return { chapter: chapter.audiobook.chapter, language: chapter.audiobook.language, reader: chapter.audiobook.reader, bytes: chapter.size, openedInBookshelf: true };
   });
 
+  if (arxivDetailsOnly) await verify("arXiv version details", async () => {
+    const article = "https://arxiv.org/abs/2506.08399";
+    await page.getByRole("button", { name: "Inicio", exact: true }).click();
+    await page.locator("#url").fill(article);
+    await page.locator("#load").click();
+    const versionTwo = page.getByRole("checkbox", { name: /^Versión 2 · / });
+    await versionTwo.waitFor({ timeout: 60_000 });
+    await versionTwo.check();
+    const open = page.getByRole("button", { name: "Ficha de la versión 1", exact: true });
+    await open.press("Enter");
+    const details = page.getByRole("region", { name: "Ficha de la versión 1" });
+    await details.waitFor({ timeout: 60_000 });
+    assert.match(await details.innerText(), /arxiv:2506\.08399v1.*Jiachen Ma/);
+    assert.equal(await details.evaluate(node => node === document.activeElement), true);
+    await details.getByRole("button", { name: "Cerrar ficha" }).press("Enter");
+    assert.equal(await open.evaluate(node => node === document.activeElement), true);
+    assert.ok(await versionTwo.isChecked());
+    assert.equal((await getSnapshot()).jobs.length, 0);
+    await assert.rejects(rpc("queue_public_files", {
+      sourceUrl: article + "v1", assetIds: ["arxiv:2506.08399v1"], collection: "", clientRequest: randomUUID(),
+    }), /Inspect the source again/);
+    return { exactVersion: "2506.08399v1", queueUnchanged: true };
+  });
+
   if (allProviders) await verify("arXiv", async () => {
     const paper = "2506.08399";
     const source = await inspect(`https://arxiv.org/abs/${paper}`);
@@ -333,6 +358,7 @@ try {
     return { chapters: assets.map(asset => asset.audiobook.chapter), bytes: assets.map(asset => asset.size) };
   });
   const expected = communityOnly ? ["Zenodo community"] : chaptersOnly ? ["LibriVox chapter filters"] : languageOnly ? ["LibriVox language"] : zenodoOnly ? ["Zenodo"]
+    : arxivDetailsOnly ? ["arXiv version details"]
     : ["LibriVox language", "arXiv", "Zenodo", "LibriVox"];
   assert.deepEqual(results, expected, errors.map(String).join("\n"));
 } catch (error) {
