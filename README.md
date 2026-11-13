@@ -15,14 +15,25 @@ The unsigned 0.2.0 installer requires WebView2. Upgrading from ytnabber keeps yo
 3. To add files you already have, open **Library** and import files or folders in place. Double-click a media file to open it.
 4. Open **Tools** to convert, trim, or process a file. The queue writes a new output and keeps the source file.
 
-After a restart, interrupted jobs are paused for review. Choose **Retry** to run one again. nabnab creates a separate output if a file already exists. Removing a Library entry leaves the file on disk. [Download profiles and formats](docs/PLATFORMS.md) · [Local tools](docs/TOOLS.md)
+After a restart, interrupted jobs are paused for review. Choose **Retry** to run a job again or **Resume** when a supported server copy has saved bytes. nabnab creates a separate output if a file already exists. Removing a Library entry leaves the file on disk. [Download profiles and formats](docs/PLATFORMS.md) · [Local tools](docs/TOOLS.md)
+
+### Keyboard shortcuts
+
+| Shortcut | Action |
+| --- | --- |
+| **Ctrl + K** | Open global search. |
+| **↑** / **↓** | Adjust volume by five percentage points while the player has focus. |
+| **Ctrl + Shift + M** | Open or focus the floating player with audio or video loaded, even while nabnab is minimized. |
+| **Alt + mouse wheel** | Browse the audio queue in Quick Skip, even while nabnab is minimized. Release **Alt** to play the selected track or press **Esc** to cancel. |
+
+The two desktop shortcuts are listed in **Settings → General → Desktop playback**. [Playback controls](docs/playback.md) · [Audio mini player](docs/playback/mini-audio.png) · [Video mini player](docs/playback/mini-video.png) · [Quick Skip](docs/playback/quick-skip-desktop.png)
 
 ## Sources and courses
 
 - **Research.** Compare arXiv PDF versions and open each version's abstract, authors, and reported license. In Zenodo, use **Local copy** to find the files you still need. Choose **Verify copy** to check a saved file against its published checksum. Follow public Zenodo communities in **Library → Sources**. [Research sources](docs/RESEARCH-SOURCES.md) · [arXiv version details](docs/arxiv-version-details.png) · [Zenodo copy verification](docs/zenodo-copy-check.png)
 - **Audiobooks.** Browse LibriVox editions, combine language and reader filters with local availability, and select the missing chapters in the results. [LibriVox workflow](docs/RESEARCH-SOURCES.md) · [Missing chapters](docs/librivox-missing-chapters.png)
 - **Media and subscriptions.** Review individual gallery and social attachments, follow podcast RSS feeds, and import or export OPML subscriptions. The BitTorrent workflow offers file selection and requires explicit P2P consent. Telegram attachment selection requires the optional TDLib component and an authorized account. [Sources and tools](docs/EXPANSION.md) · [Podcasts](docs/PODCASTS.md)
-- **Personal servers.** Browse Nextcloud, WebDAV, SFTP, or a network folder that Windows can access. Use **Selected only** to review the files, total size, and destination before queuing local copies. Pause and resume verified WebDAV or mounted-folder copies from **Downloads**. If a server file changes, use **Review version** to compare the requested and current versions. [Personal servers](docs/PERSONAL-SERVERS.md) · [Paused WebDAV copy](docs/personal-server-paused.png)
+- **Personal servers.** Browse Nextcloud, WebDAV, SFTP, or a network folder that Windows can access. Use **Selected only** to review the files, total size, and destination before queuing local copies. In **Downloads**, pause supported WebDAV and mounted-folder copies, then resume or discard the saved bytes, including after a restart. If a server file changes, use **Review version** to compare the requested and current versions. [Personal servers](docs/PERSONAL-SERVERS.md) · [Recovered WebDAV copy](docs/personal-server-recovered.png)
 
 ### Study offline
 
@@ -36,8 +47,7 @@ Udemy, Hotmart, and Kiwify use separate authorized connections. With a Coursera 
 
 - **Music.** Browse by artist, album, or genre. Play an album or playlist, or queue it next while the current song keeps playing. Import M3U, M3U8, PLS, or CSV playlists and match their entries to local tracks. If a recording has a different name, search Library from that entry and compare its duration and file path before choosing it. Open local LRC lyrics during playback. [Audio Library](docs/AUDIO-LIBRARY.md) · [Playlist controls](docs/audio-playlist-playback.png)
 - **Audiobook playback.** Open a LibriVox book or local M4B from the Bookshelf. In the floating player, change speed, rewind 15 seconds, or set a sleep timer while nabnab is minimized. Playback stops at a missing chapter. Open the exact LibriVox edition from the Bookshelf to review the chapters you still need. [Audiobook guide](docs/AUDIO-LIBRARY.md) · [Floating audiobook player](docs/playback/mini-audiobook.png)
-- **Playback.** Switch between the compact bar, full player, and mini player with the same queue and position. The music view has scenes that respond to the sound, including Phosphor and Cassette. Use **↑** and **↓** to adjust volume while the player has focus. [Playback guide](docs/playback.md) · [Phosphor scene](docs/playback/phosphor-full.png)
-- **Desktop shortcuts.** With a file loaded, press **Ctrl + Shift + M** to open the floating audio or video player. For audio, hold **Alt** and scroll to browse the queue in **Quick Skip**. Release **Alt** to play the selected track, or press **Esc** to cancel. Both shortcuts work while the main window is minimized. [Audio mini player](docs/playback/mini-audio.png) · [Video mini player](docs/playback/mini-video.png) · [Quick Skip](docs/playback/quick-skip-desktop.png)
+- **Playback.** Switch between the compact bar, full player, and mini player with the same queue and position. The music view includes thirteen scenes that respond to the sound, including Phosphor and Cassette. Mark favorites, enable automatic rotation, or use a still image. [Playback guide](docs/playback.md) · [Phosphor scene](docs/playback/phosphor-full.png)
 - **Personal archives.** Browse official Instagram, Facebook, X, Spotify, and LinkedIn exports by account, category, and date. Before importing a date range, review record counts and attachment sizes. In an imported archive, **Export contents** shows which public categories the source package contained, including empty, missing, or unsupported categories. Contacts and messages require explicit selection. [Personal archives](docs/PERSONAL-ARCHIVES.md) · [Export contents](docs/personal-archive-coverage.png)
 
 The animated character field on Home cycles through eleven patterns. The sidebar uses the same translucent material across sections. In **Settings → Appearance**, you can reduce motion or transparency. [Home and the compact sidebar](docs/nabnab-sidebar.png) · [Library](docs/nabnab-library.png) · [Design reference](docs/design-reference.md)
@@ -51,7 +61,11 @@ The animated character field on Home cycles through eleven patterns. The sidebar
 - **Documents and captures.** Search scanned pages after local OCR, or read a saved PDF or EPUB and add bookmarks. Capture a monitor, window, or region, with separate controls for microphone and system audio. [Local documents](docs/DOCUMENTS.md) · [Screen capture](docs/SCREEN-CAPTURE.md)
 - **Send to device.** Review files, a portable ZIP, a public link, or a selected passage from an archived article, PDF, or EPUB before handing the request to KDE Connect. nabnab reports whether the KDE Connect command accepted the request and keeps the details visible if the handoff is uncertain. Follow the transfer and confirm receipt in KDE Connect. [KDE Connect setup and status](docs/DEVICE-SHARE.md) · [Portable collections](docs/PORTABLE-COLLECTIONS.md)
 
-Open **Settings → Components** to check download size, installed size, requirements, and licenses before installing an optional component. Local processing runs on your computer. To inspect or clear the thumbnail cache or reusable speech segments, open **Settings → Sessions and privacy → Temporary storage**. [Engines and privacy](docs/NETWORK.md) · [Local voice](docs/LOCAL-VOICE.md)
+### Storage and optional components
+
+Open **Settings → Sessions and privacy → Temporary storage** to see how much space thumbnails and reusable narration or dubbing segments occupy. Clearing those caches frees space while keeping your Library entries and exported files. nabnab regenerates cached material as needed. [Local voice cache](docs/LOCAL-VOICE.md)
+
+Open **Settings → Components** to check download size, installed size, requirements, and licenses before installing an optional component. Local processing runs on your computer. For development builds, see [Run from source](#run-from-source) for the Cargo cleanup command. [Engines and privacy](docs/NETWORK.md)
 
 ## Browser extension and local automation
 
