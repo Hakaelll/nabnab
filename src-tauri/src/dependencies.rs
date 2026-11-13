@@ -281,6 +281,83 @@ fn safe_resource(name: &str) -> bool {
                     .all(|v| v.is_ascii_alphanumeric() || matches!(v, b'-' | b'_' | b'.'))))
 }
 
+fn generated_set_name(name: &str) -> bool {
+    valid_set_name(name) && name.strip_prefix("set-")
+        .and_then(|rest| rest.split_once('-'))
+        .is_some_and(|(pid, stamp)| pid.parse::<u32>().is_ok() && stamp.parse::<u128>().is_ok())
+}
+
+fn disposable_set(path: &Path) -> std::io::Result<bool> {
+    let metadata = fs::symlink_metadata(path)?;
+    if !metadata.is_dir() || crate::library::is_link(&metadata) {
+        return Ok(false);
+    }
+    for entry in fs::read_dir(path)? {
+        let entry = entry?;
+        let metadata = fs::symlink_metadata(entry.path())?;
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { return Ok(false) };
+        if crate::library::is_link(&metadata) {
+            return Ok(false);
+        }
+        if name == "licenses" && metadata.is_dir() {
+            for license in fs::read_dir(entry.path())? {
+                let license = license?;
+                let metadata = fs::symlink_metadata(license.path())?;
+                if !metadata.is_file() || crate::library::is_link(&metadata)
+                    || !license.file_name().to_str().is_some_and(|name| safe_resource(&format!("licenses/{name}")))
+                {
+                    return Ok(false);
+                }
+            }
+        } else if !metadata.is_file() || !(safe_resource(name) || matches!(name, "checksums.json" | "deno.zip")) {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+fn cleanup_managed_sets(root: &Path) -> Result<(), String> {
+    if !root.exists() {
+        return Ok(());
+    }
+    crate::library::authorized_path(root)?;
+    let lock = OpenOptions::new().write(true).create(true).truncate(false)
+        .open(root.join("repair.lock")).map_err(|error| error.to_string())?;
+    if lock.try_lock().is_err() {
+        return Ok(());
+    }
+    let pointer = root.join("active.json");
+    let active = match fs::symlink_metadata(&pointer) {
+        Ok(metadata) if metadata.is_file() && !crate::library::is_link(&metadata) && metadata.len() <= 4096 => {
+            let bytes = fs::read(pointer).map_err(|error| error.to_string())?;
+            let Ok(active) = serde_json::from_slice::<Active>(&bytes) else { return Ok(()) };
+            if [&active.current, &active.previous].iter().any(|name| *name != "bundled" && !valid_set_name(name)) {
+                return Ok(());
+            }
+            active
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Active::default(),
+        Ok(_) => return Ok(()),
+        Err(error) => return Err(error.to_string()),
+    };
+    for entry in fs::read_dir(root).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let name = entry.file_name();
+        if name.to_str().is_some_and(|name| {
+            generated_set_name(name) && !name.eq_ignore_ascii_case(&active.current)
+                && !name.eq_ignore_ascii_case(&active.previous)
+        }) && disposable_set(&entry.path()).unwrap_or(false) {
+            let _ = fs::remove_dir_all(entry.path());
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn cleanup(app: &AppHandle) -> Result<(), String> {
+    cleanup_managed_sets(&managed_root(app)?)
+}
+
 fn checksum_file(path: &Path) -> Result<String, String> {
     let mut file = fs::File::open(path).map_err(|_| "A bundled engine resource is unreadable.")?;
     let mut buffer = [0u8; 64 * 1024];
@@ -736,6 +813,30 @@ mod tests {
         }
         assert!(!valid_set_name("set-../../outside"));
         assert!(!valid_set_name("../../set-owned"));
+    }
+
+    #[test]
+    fn managed_cleanup_defers_to_repair_and_preserves_sets_with_an_invalid_pointer() {
+        let root = std::env::temp_dir().join(format!("nabnab-engine-cleanup-{}", nonce()));
+        let obsolete = root.join("set-100-1000");
+        fs::create_dir_all(&obsolete).unwrap();
+        fs::write(obsolete.join("deno.exe"), b"fixture").unwrap();
+        let lock = OpenOptions::new().write(true).create_new(true).open(root.join("repair.lock")).unwrap();
+        lock.try_lock().unwrap();
+        cleanup_managed_sets(&root).unwrap();
+        assert!(obsolete.is_dir());
+        drop(lock);
+        fs::write(root.join("active.json"), b"incomplete state").unwrap();
+        cleanup_managed_sets(&root).unwrap();
+        assert!(obsolete.is_dir());
+        fs::write(root.join("active.json"), br#"{"current":"bundled","previous":"../set-100-1000"}"#).unwrap();
+        cleanup_managed_sets(&root).unwrap();
+        assert!(obsolete.is_dir());
+        fs::write(root.join("active.json"), br#"{"current":"bundled","previous":"bundled"}"#).unwrap();
+        cleanup_managed_sets(&root).unwrap();
+        assert!(!obsolete.exists());
+        cleanup_managed_sets(&root).unwrap();
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

@@ -31,7 +31,7 @@ FFmpeg and ffprobe remain the compiled build already distributed with nabnab. Re
 
 Deno extraction uses Windows' `System32/tar.exe`, resolved by the Windows API rather than PATH. Before extraction, the complete archive entry list must contain one `deno.exe` entry. Absolute paths, traversal, duplicate entries and extra entries are rejected. The extracted executable must be a regular authorized file. Version smoke tests run before activation.
 
-Managed sets live in `app_local_data_dir/managed-engines/set-<pid>-<nonce>`. Only a complete staged set is atomically activated. Its previous managed set, or the packaged set on the first repair, remains available for rollback. A failed repair leaves the active pointer unchanged and removes only its owned staging directory. A crash can leave an inactive set; it is never selected merely because its directory exists.
+Managed sets live in `app_local_data_dir/managed-engines/set-<pid>-<nonce>`. Only a complete staged set is atomically activated. Its previous managed set, or the packaged set on the first repair, remains available for rollback. A failed repair leaves the active pointer unchanged and removes its staging directory. On the next launch, nabnab clears superseded sets and staging left by an interrupted repair. Cleanup keeps both sets named in the active pointer and skips unfamiliar contents, links, and junctions. If the pointer is unreadable, cleanup leaves the sets available for recovery.
 
 Production resolution uses the active managed set or packaged resources. Debug builds additionally recognize the repository's explicit `src-tauri/engines` directory. Installed builds do not depend on a developer's PATH or a hardcoded copy of an older application.
 

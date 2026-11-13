@@ -23,6 +23,18 @@ for(const [index,file] of seededThumbnails.slice(0,3).entries()){
   const old=new Date(Date.UTC(2000+index,0,1));
   await utimes(file,old,old);
 }
+const managed = path.join(data, "managed-engines");
+const current = "set-100-1000";
+const previous = "set-100-2000";
+const obsolete = "set-100-3000";
+const interrupted = "set-100-4000";
+const unrelated = "set-100-5000";
+await Promise.all([current, previous, obsolete, interrupted, unrelated].map(name => mkdir(path.join(managed, name), {recursive:true})));
+const active = JSON.stringify({current, previous});
+await writeFile(path.join(managed, "active.json"), active);
+for (const name of [current, previous, obsolete]) await writeFile(path.join(managed, name, "deno.exe"), name);
+await writeFile(path.join(managed, interrupted, "deno.zip"), "interrupted fixture");
+await writeFile(path.join(managed, unrelated, "keep.txt"), "unrecognized fixture");
 const port=Number(process.env.NABNAB_DEBUG_PORT||9223);
 let child,browser,page;
 const results=[];
@@ -44,6 +56,11 @@ async function close(){if(page&&!page.isClosed()){try{await page.evaluate(async(
 async function completed(id){return waitFor(async()=>{const snapshot=await rpc("get_snapshot");const job=snapshot.jobs.find(j=>j.id===id);if(job?.state==="error")throw Error(`${job.error?.code}: ${job.error?.technical}`);return job?.state==="completed"?job:false;},90000);}
 try{
   await launch();
+  assert.equal(await readFile(path.join(managed, "active.json"), "utf8"), active);
+  for (const name of [current, previous]) assert.equal(await readFile(path.join(managed, name, "deno.exe"), "utf8"), name);
+  assert.equal(await readFile(path.join(managed, unrelated, "keep.txt"), "utf8"), "unrecognized fixture");
+  for (const name of [obsolete, interrupted]) await assert.rejects(stat(path.join(managed, name)), {code:"ENOENT"});
+  results.push({case:"managed engine startup cleanup",status:"passed"});
   assert.deepEqual(await rpc("cache_status"),{files:512,bytes:2048,maxFiles:512,maxBytes:128*1024*1024});
   await assert.rejects(stat(seededThumbnails[0]),{code:"ENOENT"});
   await assert.rejects(stat(seededThumbnails[1]),{code:"ENOENT"});
@@ -52,7 +69,7 @@ try{
   await page.screenshot({path:path.join(data,'home-native.png')});
   const state=await rpc("get_snapshot");
   engines=(await rpc('engine_status')).map(({name,version,status})=>({name,version,status}));
-  assert.ok(engines.length===4&&engines.every(engine=>engine.status==='installed'));
+  assert.ok(engines.length===4&&engines.every(engine=>engine.status==='installed'), JSON.stringify(engines));
   assert.equal(state.settings.trayEnabled,false);assert.equal(state.settings.startWithWindows,false);
   await rpc("save_settings",{settings:{...state.settings,folder:output}});
   const imported=await rpc("import_paths",{paths:[fixture]});
