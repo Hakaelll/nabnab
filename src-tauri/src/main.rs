@@ -230,6 +230,9 @@ fn open_repository(app: &AppHandle, state: &AppState) -> Result<store::Settings,
     if let Err(error) = support::trim_thumbnail_cache(&root) {
         let _ = app.emit("app-warning", error);
     }
+    if let Err(error) = voice::trim_cache(&root) {
+        let _ = app.emit("app-warning", error);
+    }
     let settings = repo.data.settings.clone();
     *guard = Some(repo);
     Ok(settings)

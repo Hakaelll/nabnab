@@ -1,5 +1,5 @@
 mod cache;
-pub(crate) use cache::{cache_status, clear_cache, CacheStatus};
+pub(crate) use cache::{cache_status, clear_cache, trim_cache, CacheStatus};
 pub(crate) mod timed;
 mod wave;
 use crate::{
@@ -17,6 +17,17 @@ use std::{
     sync::{Arc, Mutex},
 };
 use tokio::sync::watch;
+
+pub(crate) async fn trim_after_work(app: &tauri::AppHandle, root: &Path) {
+    use tauri::Emitter;
+    let root = root.to_owned();
+    let warning = match tokio::task::spawn_blocking(move || trim_cache(&root)).await {
+        Ok(Ok(())) => return,
+        Ok(Err(error)) => error,
+        Err(error) => format!("Could not check the voice cache: {error}"),
+    };
+    let _ = app.emit("app-warning", warning);
+}
 
 pub const MAX_TEXT: usize = 1_000_000;
 pub const MAX_TEXT_BYTES: usize = 4 * 1024 * 1024;
@@ -1084,7 +1095,7 @@ mod tests {
         assert!(pending.is_file());
         drop(active);
 
-        let empty = serde_json::json!({"bytes": 0, "files": 0});
+        let empty = serde_json::json!({"bytes": 0, "files": 0, "maxBytes": 536870912, "maxFiles": 8192});
         assert_eq!(serde_json::to_value(clear_cache(&root).unwrap()).unwrap(), empty);
         assert_eq!(serde_json::to_value(cache_status(&root).unwrap()).unwrap(), empty);
         assert_eq!(serde_json::to_value(clear_cache(&root).unwrap()).unwrap(), empty);

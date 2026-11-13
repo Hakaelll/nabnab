@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { openTool } from "./tool-navigation.mjs";
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, open, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -478,6 +478,25 @@ try {
   const preview = (index, requestId) => rpc("dub_sample", { index, requestId, selection: timedSelection });
   const natural = await preview(1, 9701);
   assert.equal(natural.fit, "fits");
+  const abandoned = path.join(caches, "voice-1-1.pending");
+  await writeFile(abandoned, "interrupted cache write");
+  const oversized = "e".repeat(64);
+  const oldWave = path.join(caches, `${oversized}.wav`);
+  const oldReceipt = path.join(caches, `${oversized}.json`);
+  const oldFile = await open(oldWave, "wx");
+  try { await oldFile.truncate((await rpc("voice_cache_status")).maxBytes + 1); }
+  finally { await oldFile.close(); }
+  await writeFile(oldReceipt, "{}");
+  const old = new Date("2000-01-01T00:00:00Z");
+  for (const file of [oldWave, oldReceipt]) {
+    const handle = await open(file, "r+");
+    try { await handle.utimes(old, old); }
+    finally { await handle.close(); }
+  }
+  const recovered = await preview(1, 9703);
+  assert.deepEqual(recovered.wav, natural.wav);
+  const managed = await readdir(caches);
+  assert.ok(!managed.includes(path.basename(abandoned)) && !managed.some(name => name.startsWith(oversized)));
   const shortened = path.join(data, "Intervalo de prueba.srt");
   const availableMs = Math.round(natural.speechSeconds / 1.17 * 1000);
   const end = `${String(Math.floor(availableMs / 1000)).padStart(2, "0")},${String(availableMs % 1000).padStart(3, "0")}`;

@@ -17,7 +17,9 @@ pub(super) async fn run_dubbing(
             let draft = selection.draft(&root)?;
             let handle = app.clone(); let shared = state.clone(); let id = job.id.clone();
             let file = crate::voice::timed::render(&root, &engines, staging, &draft, &selection.settings, cancel.clone(), run_id,
-                move |update| progress(&handle, &shared, &id, run_id, update)).await?;
+                move |update| progress(&handle, &shared, &id, run_id, update)).await;
+            crate::voice::trim_after_work(app, &root).await;
+            let file = file?;
             let info = crate::media::probe(&engines, &file, cancel.clone()).await?;
             (file, info, draft.selection.input.library_id, format!("Translated voice - {}.wav", job.id))
         }
@@ -235,7 +237,9 @@ pub(super) async fn run(app:&AppHandle,state:&Arc<AppState>,job:&Job,staging:&Pa
             let (root,_)=crate::file_operations::context(state)?;
             let plan=crate::voice::read_plan(&root,plan_id)?;
             let _permit=processing_permit(state,cancel.clone()).await?;phase(app,state,&job.id,run_id,JobState::Processing)?;
-            let output=crate::voice::execute(&root,plan_id,staging,cancel.clone(),run_id,emit.clone()).await?;
+            let result=crate::voice::execute(&root,plan_id,staging,cancel.clone(),run_id,emit.clone()).await;
+            crate::voice::trim_after_work(app, &root).await;
+            let output=result?;
             let file=output.file.clone();let parent=plan.origin.library_id.clone();
             narration=Some((plan,output));
             Some((file,None,parent))

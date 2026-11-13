@@ -39,6 +39,7 @@ pub async fn voice_sample(app: AppHandle, state: State<'_, Arc<AppState>>, plan_
     let cancel = crate::file_sources::begin(&state, request_id)?;
     let result = voice::sample(&root, &plan_id, cancel, request_id, |_| {}).await;
     crate::file_sources::finish(&state, request_id);
+    voice::trim_after_work(&app, &root).await;
     result
 }
 #[tauri::command]

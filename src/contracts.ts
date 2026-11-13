@@ -89,7 +89,7 @@ export interface LibraryView { contentMatches?:Set<string>;query: string; filter
 export interface ToolsView { kind: ToolKind; ids: Set<string>; options: ToolOptions; picking: boolean }
 export type SettingsSection = "automation" | "connections" | "general" | "downloads" | "formats" | "organization" | "engines" | "sessions" | "appearance" | "browser" | "about";
 export interface ThumbnailCacheStatus { bytes: number; files: number; maxBytes?: number; maxFiles?: number }
-export type VoiceCacheStatus = Pick<ThumbnailCacheStatus, "bytes" | "files">;
+export type VoiceCacheStatus = ThumbnailCacheStatus;
 export interface SettingsView { section: SettingsSection; engines: EngineStatus[] | null; sessions: SessionStatus[] | null; bridge: BridgeStatus | null; pairing: { token: string; port: number } | null; cache: ThumbnailCacheStatus | "unavailable" | null; voiceCache: VoiceCacheStatus | "unavailable" | null; voiceCacheClearing: boolean; working: boolean }
 
 export const initialSettings: Settings = { folder: "", language: "es", networkLimit: 3, processingLimit: 1, reducedMotion: false, reducedTransparency: false, sidebarExpanded: true, trayEnabled: false, closeToTray: false, startWithWindows: false };

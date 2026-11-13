@@ -29,7 +29,7 @@ const components=[
   {id:"upscale",name:"Ampliar imagen · Real-ESRGAN",version:"0.2.5.0",size:38482789,installedSize:43253760,license:"MIT · BSD-3-Clause",source:"https://github.com/xinntao/Real-ESRGAN/releases/tag/v0.2.5.0",installed:true,enabled:true,available:true,note:"Windows x64 · Requiere una GPU compatible con Vulkan."},
   {id:"stems",name:"Separar pistas · Spleeter",version:"2.0.1",size:41104179,installedSize:56413389,license:"Apache-2.0 · MIT",source:"https://github.com/k2-fsa/sherpa-onnx/releases/tag/v2.0.1",installed:false,enabled:false,available:true,note:"Windows x64 · CPU · Requiere Microsoft Visual C++ Redistributable."},
 ];
-window.sectionFixture={state,calls:[],voiceCache:{bytes:67108864,files:24}};
+window.sectionFixture={state,calls:[],voiceCache:{bytes:67108864,files:24,maxBytes:536870912,maxFiles:8192}};
 mockIPC(async(cmd,args={})=>{
 window.sectionFixture.calls.push({cmd,args});
 if(cmd==="startup")return {...structuredClone(state),folder:settings.folder,enginesReady:true,engineError:null};
@@ -51,7 +51,7 @@ if(cmd==="sessions_status"||cmd==="list_courses"||cmd==="ocr_models"||cmd==="tra
 if(cmd==="ocr_status")return {installed:false,enabled:false};
 if(cmd==="cache_status")return {bytes:0,files:0};
 if(cmd==="voice_cache_status")return {...window.sectionFixture.voiceCache};
-if(cmd==="clear_voice_cache")return window.sectionFixture.voiceCache={bytes:0,files:0};
+if(cmd==="clear_voice_cache")return window.sectionFixture.voiceCache={...window.sectionFixture.voiceCache,bytes:0,files:0};
 if(cmd==="cloud_status")return ["drive","onedrive","dropbox"].map(provider=>({provider,configured:false,connected:false,accountId:null,scope:"Read selected files",redirectUri:"http://127.0.0.1:53687/callback"}));
 if(cmd==="bridge_status")return {enabled:false,clients:[],port:49587};
 if(cmd==="save_settings"){state.settings=args.settings;return structuredClone(state);}
@@ -120,6 +120,7 @@ try{
   if (!before) {
     const clearSpeech = speech.getByRole("button", { name: "Vaciar caché de voz…" });
     assert.match(await speech.innerText({ timeout: 3000 }), /64\.0 MB/);
+    await speech.getByText(/512\.0 MB o 4096 segmentos/).waitFor();
     await clearSpeech.press("Space");
     const confirm = page.getByRole("dialog", { name: "¿Vaciar la caché de voz?" });
     assert.ok(await confirm.getByRole("button", { name: "Cancelar" }).evaluate(element => document.activeElement === element));

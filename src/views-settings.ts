@@ -50,6 +50,10 @@ export function settingsView(snapshot: Snapshot, view: SettingsView, t: Copy, de
         : !voiceCache ? t("Consultando caché…", "Checking cache…")
         : voiceCache.files ? t(`${bytesLabel(voiceCache.bytes)} en uso`, `${bytesLabel(voiceCache.bytes)} used`)
         : t("Caché vacía", "Cache is empty");
+      const voiceLimit = voiceCache && voiceCache !== "unavailable" && voiceCache.maxBytes && voiceCache.maxFiles
+        ? t(`Al quedar libre, nabnab conserva hasta ${bytesLabel(voiceCache.maxBytes)} o ${voiceCache.maxFiles / 2} segmentos.`,
+          `When idle, nabnab keeps up to ${bytesLabel(voiceCache.maxBytes)} or ${voiceCache.maxFiles / 2} segments.`)
+        : "";
       content=`<div class="settings-prose"><p>${t("Las sesiones se importan solo con tu permiso y se protegen mediante Windows. Nunca se incluyen en los diagnósticos.", "Sessions are imported only with your permission and protected by Windows. They are never included in diagnostics.")}</p><form id="session-form" class="inline-form"><label>${t("Sitio", "Site")}<select id="session-site">${sessionSites.map(site=>option(site.id,site.label,"youtube")).join("")}</select></label><button class="button secondary" type="submit" ${!desktop?'disabled':''}>${t("Importar archivo de cookies", "Import cookie file")}</button></form>${view.sessions?.length?`<ul class="simple-list">${view.sessions.map(session=>`<li><span>${h(sessionSites.find(site=>site.id===session.site)?.label??session.site)}</span>${action("revoke-session",t("Eliminar sesión", "Remove session"),"close","quiet",`data-site="${h(session.site)}"`)}</li>`).join("")}</ul>`:`<p class="field-note">${t("No hay sesiones guardadas.", "No saved sessions.")}</p>`}<hr><p>${t("Sin telemetría, fuentes remotas ni servicios de conversión externos. No se vigila el portapapeles. La biblioteca y las herramientas preparadas funcionan sin conexión.", "No telemetry, remote fonts or external conversion services. The clipboard is not monitored. The library and prepared tools work offline.")}</p>
         <section class="preference-group" aria-labelledby="cache-storage-heading">
           <h3 id="cache-storage-heading">${t("Almacenamiento temporal", "Temporary storage")}</h3>
@@ -70,7 +74,7 @@ export function settingsView(snapshot: Snapshot, view: SettingsView, t: Copy, de
           <section class="cache-storage-row" aria-labelledby="voice-cache-heading">
             <div><h4 id="voice-cache-heading" tabindex="-1">${t("Caché de voz", "Voice cache")}</h4>
             <p class="field-note" role="status"><strong>${voiceUsage}</strong></p>
-            <p>${t("Segmentos reutilizables de narración y doblaje.", "Reusable narration and dubbing segments.")}</p></div>
+            <p>${t("Segmentos reutilizables de narración y doblaje.", "Reusable narration and dubbing segments.")} ${voiceLimit}</p></div>
             ${action("clear-voice-cache", t("Vaciar caché de voz…", "Clear voice cache…"), undefined, "secondary", desktop && voiceCache && voiceCache !== "unavailable" && voiceCache.files && !view.voiceCacheClearing ? "" : "disabled")}
             <dialog id="voice-cache-confirm" class="cache-confirm" aria-labelledby="voice-cache-confirm-title" aria-describedby="voice-cache-confirm-description">
               <h2 id="voice-cache-confirm-title">${t("¿Vaciar la caché de voz?", "Clear the voice cache?")}</h2>

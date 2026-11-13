@@ -34,7 +34,7 @@ Cada plan admite hasta un millón de caracteres Unicode, 4 MiB de texto y 4.096 
 
 Los planes y el audio intermedio se guardan bajo `voice-plans` y `voice-cache`, en directorios privados de la configuración local. Pueden contener texto y voz de documentos privados elegidos por el usuario. No forman parte de un servicio público. El cliente solo transmite identidades opacas y números de segmento; las rutas de los archivos temporales y de caché se construyen dentro del backend.
 
-En **Ajustes → Sesiones y privacidad → Almacenamiento temporal**, consulta cuánto ocupan los segmentos de narración y doblaje. **Vaciar caché de voz** conserva los planes y las exportaciones. Al reanudar una narración después de vaciarla, nabnab vuelve a generar sus segmentos. Si hay una muestra o un trabajo usando la caché, deja que termine o pausa el trabajo antes de vaciarla.
+En **Ajustes → Sesiones y privacidad → Almacenamiento temporal**, consulta cuánto ocupan los segmentos de narración y doblaje. Al iniciar y después de generar voz, nabnab retira los temporales abandonados y los segmentos más antiguos hasta dejar 512 MiB y 4096 segmentos como máximo. Una muestra o un trabajo activo puede superar ese límite mientras usa la caché. **Vaciar caché de voz** conserva los planes y las exportaciones. Al reanudar una narración, nabnab vuelve a generar los segmentos que se hayan retirado.
 
 ![Cachés de miniaturas y de voz en Ajustes, con tamaños de prueba](voice-cache-settings.png)
 

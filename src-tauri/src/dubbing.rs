@@ -116,6 +116,7 @@ pub async fn dub_sample(
         Err(error) => Err(error),
     };
     crate::file_sources::finish(&state, request_id);
+    voice::trim_after_work(&app, &root).await;
     result
 }
 
