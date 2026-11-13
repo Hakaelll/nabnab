@@ -64,9 +64,28 @@
 .stage-scrub input::-webkit-slider-thumb { appearance: none; width: 10px; height: 10px; margin-top: -3.5px; border-radius: 50%; background: var(--action); opacity: 0; }
 .stage-scrub input:is(:hover, :focus-visible, :active)::-webkit-slider-runnable-track { height: 5px; }
 .stage-scrub input:is(:hover, :focus-visible, :active)::-webkit-slider-thumb { opacity: 1; margin-top: -2.5px; }
-.stage-scrub output { position: absolute; bottom: 100%; transform: translateX(-50%); display: grid; gap: 4px; padding: 4px; background: var(--secondary); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 12px; white-space: nowrap; pointer-events: none; }
+.stage-chapter-marks { position: absolute; inset: 0 5px; pointer-events: none; }
+.stage-chapter-mark {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 2px;
+  height: 7px;
+  border-radius: 1px;
+  background: var(--action);
+  box-shadow: 0 0 0 1px #050607;
+}
+.playback-stage[data-state="loading"] .stage-chapter-marks,
+.playback-stage[data-state="error"] .stage-chapter-marks { display: none; }
+.stage-scrub output { position: absolute; bottom: 100%; z-index: 1; transform: translateX(-50%); display: grid; justify-items: center; gap: 4px; padding: 4px; background: var(--secondary); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 12px; white-space: nowrap; pointer-events: none; }
 .stage-scrub output img { width: 148px; height: 84px; object-fit: contain; background: #050607; }
 .stage-scrub output span { text-align: center; padding-inline: 3px; }
+.stage-scrub output:has(.stage-hover-chapter:not([hidden])) { width: 188px; padding-bottom: 7px; }
+.stage-hover-chapter { width: 100%; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.stage-hover-chapter:not([hidden]) + span { color: var(--muted); }
+@media (forced-colors: active) {
+  .stage-chapter-mark { background: CanvasText; }
+}
 .stage-status { padding-inline: 4px; font-size: 12px; color: var(--text); }
 .stage-status:empty { display: none; }
 .playback-stage[data-state="loading"] .stage-scrub input::-webkit-slider-runnable-track {
@@ -77,6 +96,7 @@
 .stage-panel, .stage-prompt, .stage-error { position: absolute; padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--secondary); pointer-events: auto; }
 .stage-panel { display: grid; gap: 10px; width: min(330px, calc(100vw - 32px)); max-height: calc(100vh - 140px); overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .stage-options { top: 62px; right: var(--stage-gutter); }
+.stage-chapter-picker { display: grid; gap: 6px; }
 .stage-options label.toggle { flex-direction: row; align-items: center; gap: 8px; min-height: 36px; }
 .stage-options .toggle input { margin: 0; }
 #stage-audio-options { display: grid; gap: 6px; padding-block: 10px; border-block: 1px solid var(--edge-quiet); }

@@ -2,7 +2,7 @@ import "./playback-stage.css";
 import { escapeHtml as h, type Copy, type LibraryItem } from "./contracts";
 import { durationLabel } from "./presentation";
 import { createPlaybackPreview } from "./playback-preview";
-import { playbackRates, type PlaybackPreferences } from "./playback-preferences";
+import { chapterAt, playbackRates, type PlaybackPreferences } from "./playback-preferences";
 import { createStyledCaptions } from "./styled-captions";
 import { icon, option, type Icon } from "./views-common";
 
@@ -105,6 +105,7 @@ export function createPlaybackStage(host: HTMLElement, media: HTMLVideoElement, 
   const audioTracks = () => Array.from((media as MediaTracks).audioTracks ?? []);
   const nativeCaptions = () => Array.from(media.textTracks).filter(track => track.kind === "subtitles" || track.kind === "captions");
   const localCaptions = () => item?.details?.tracks ?? [];
+  const videoChapters = () => item?.kind === "video" ? item.details?.chapters ?? [] : [];
   const styled = createStyledCaptions(host, media, hooks.command, () => {
     setStyledStatus(t("No se pudo dibujar la pista ASS/SSA.", "The ASS/SSA track could not be rendered."));
   });
@@ -354,7 +355,17 @@ export function createPlaybackStage(host: HTMLElement, media: HTMLVideoElement, 
       seek.disabled = total <= 0 || state === "error" || resumeAt > 0;
       seek.max = String(total);
       if (!dragging) seek.value = String(time);
-      seek.setAttribute("aria-valuetext", durationLabel(dragging ? Number(seek.value) : time));
+      const position = dragging ? Number(seek.value) : time;
+      const chapter = chapterAt(videoChapters(), position);
+      const timestamp = durationLabel(position);
+      seek.setAttribute("aria-valuetext", chapter ? `${timestamp} · ${chapter.title}` : timestamp);
+      const markers = find(".stage-chapter-marks");
+      if (markers && markers.dataset.duration !== seek.max) {
+        markers.dataset.duration = seek.max;
+        markers.innerHTML = videoChapters()
+          .filter(chapter => chapter.start > 0 && chapter.start < total)
+          .map(chapter => `<span class="stage-chapter-mark" style="left:${chapter.start / total * 100}%"></span>`).join("");
+      }
       let buffered = 0;
       for (let index = 0; index < media.buffered.length; index++) {
         if (media.buffered.start(index) <= time + 0.25 && media.buffered.end(index) > time) buffered = media.buffered.end(index);
@@ -423,7 +434,8 @@ export function createPlaybackStage(host: HTMLElement, media: HTMLVideoElement, 
         <label for="stage-rate">${t("Velocidad", "Speed")}<select id="stage-rate">${playbackRates.map(rate => option(String(rate), `${rate}×`, String(preferences.rate))).join("")}</select></label>
         ${music ? `<label class="toggle"><input type="checkbox" id="audio-resume-music" ${preferences.resumeMusic ? "checked" : ""}>${t("Reanudar pistas de música", "Resume music tracks")}</label>` : `<label for="stage-fit">${t("Imagen", "Picture")}<select id="stage-fit">${option("contain", t("Ajustar", "Fit"), preferences.fill ? "cover" : "contain")}${option("cover", t("Rellenar · recorta la imagen", "Fill · crops the image"), preferences.fill ? "cover" : "contain")}</select></label>`}
         ${music ? "" : '<div id="stage-audio-options" hidden></div>'}
-        ${chapterOptions.length ? `<label for="stage-chapter">${t("Capítulos", "Chapters")}<select id="stage-chapter">${option("", t("Ir a un capítulo", "Go to a chapter"), "")}${chapterOptions.join("")}</select></label>` : ""}
+        ${chapterOptions.length ? `<div class="stage-chapter-picker"><label for="stage-chapter">${t("Capítulos", "Chapters")}</label>
+          <select id="stage-chapter">${option("", t("Ir a un capítulo", "Go to a chapter"), "")}${chapterOptions.join("")}</select></div>` : ""}
         <label class="toggle"><input type="checkbox" id="stage-autoplay" ${preferences.autoplay ? "checked" : ""}>${t("Reproducir el siguiente archivo", "Play next file")}</label>
       </div>
       ${progress ? `<section class="stage-prompt" aria-label="${t("Posición guardada", "Saved position")}">
@@ -436,7 +448,11 @@ export function createPlaybackStage(host: HTMLElement, media: HTMLVideoElement, 
       <footer class="stage-bottom">
         <div class="stage-status" role="status"></div>
         <div class="stage-timeline">${music ? elapsed : ""}
-          <div class="stage-scrub"><output id="stage-hover" aria-hidden="true" hidden><img alt="" hidden><span></span></output><input id="stage-seek" type="range" min="0" max="0" step="0.01" value="0" aria-label="${t("Posición de reproducción", "Playback position")}" disabled></div>
+          <div class="stage-scrub">
+            <output id="stage-hover" aria-hidden="true" hidden><img alt="" hidden><span class="stage-hover-chapter" hidden></span><span data-stage-hover-time></span></output>
+            <input id="stage-seek" type="range" min="0" max="0" step="0.01" value="0" aria-label="${t("Posición de reproducción", "Playback position")}" disabled>
+            ${videoChapters().length ? '<div class="stage-chapter-marks" aria-hidden="true"></div>' : ""}
+          </div>
           ${music ? duration : ""}
         </div>
         <div class="stage-toolbar">
@@ -605,13 +621,20 @@ export function createPlaybackStage(host: HTMLElement, media: HTMLVideoElement, 
     hover.hidden = event.target !== seek || !Number.isFinite(media.duration) || seek.disabled;
     if (!hover.hidden) {
       const bounds = seek.getBoundingClientRect();
-      const ratio = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width));
+      const thumbRadius = 5;
+      const ratio = Math.max(0, Math.min(1, (event.clientX - bounds.left - thumbRadius) / Math.max(1, bounds.width - thumbRadius * 2)));
       const time = Math.min(ratio * media.duration, media.duration - 0.01);
-      const label = hover.querySelector("span");
+      const label = hover.querySelector("[data-stage-hover-time]");
+      const chapterTitle = hover.querySelector<HTMLElement>(".stage-hover-chapter");
+      const chapter = chapterAt(videoChapters(), time);
       const image = hover.querySelector("img");
       if (label) label.textContent = durationLabel(time);
-      const margin = Math.min(83, bounds.width / 2);
-      hover.style.left = `${Math.min(bounds.width - margin, Math.max(margin, ratio * bounds.width))}px`;
+      if (chapterTitle) {
+        chapterTitle.textContent = chapter?.title ?? "";
+        chapterTitle.hidden = !chapter?.title;
+      }
+      const margin = Math.min(chapter?.title ? 98 : 83, bounds.width / 2);
+      hover.style.left = `${Math.min(bounds.width - margin, Math.max(margin, event.clientX - bounds.left))}px`;
       if (image && item?.kind === "video" && !dragging) preview.hover(image, item.id, time);
     } else preview.leave();
   });
@@ -701,7 +724,13 @@ export function createPlaybackStage(host: HTMLElement, media: HTMLVideoElement, 
         hooks.preference("captionContrast", target instanceof HTMLInputElement && target.checked);
         host.dataset.captionContrast = String(target instanceof HTMLInputElement && target.checked); break;
       case "stage-audio-track": void chooseAudio(target.value); break;
-      case "stage-chapter": if (target.value) { hooks.seek(Number(target.value)); closePanel(); } break;
+      case "stage-chapter":
+        if (target.value) {
+          hooks.seek(Number(target.value));
+          target.value = "";
+          closePanel(true);
+        }
+        break;
       case "stage-autoplay": hooks.preference("autoplay", target instanceof HTMLInputElement && target.checked); break;
     }
   });

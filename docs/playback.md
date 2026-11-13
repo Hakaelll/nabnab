@@ -41,6 +41,10 @@ El renderizado usa un hilo dedicado, un lienzo de hasta 480.000 píxeles y una s
 
 Al detener el puntero sobre el progreso, FFmpeg extrae un fotograma del vídeo en el equipo. La petición anterior se cancela al mover el puntero o cambiar de archivo. La caché conserva hasta 28 JPEG de 48 KiB como máximo por fotograma, en memoria durante la sesión. El tiempo se muestra aunque el archivo tarde en producir una miniatura.
 
+Si el vídeo contiene capítulos, la barra marca dónde comienza cada uno. La previsualización muestra el título del capítulo junto al tiempo y la miniatura. Al recorrer la barra con teclado, el valor accesible incluye el título. En **Opciones de reproducción → Capítulos** puedes ir directamente al inicio de uno.
+
+![Capítulos y previsualización de la barra en un MP4 sintético](playback/video-chapters.png)
+
 ## Música inmersiva
 
 Pulsa **Abrir visualización** o la portada en la barra compacta. El transporte queda centrado debajo de la escena, con el tiempo transcurrido y la duración a ambos lados de la línea de progreso. **Escenas** muestra 13 visualizaciones con miniaturas, favoritas y controles de rotación. El tratamiento sobrio es el inicial. Puedes elegir Color, ajustar la intensidad o seleccionar Imagen fija. La rotación automática se puede activar con un intervalo inicial de 45 segundos. El fundido gráfico dura 3,6 segundos y conserva el audio.

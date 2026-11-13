@@ -22,6 +22,7 @@ const courseResumeOnly = process.env.NABNAB_PLAYBACK_COURSE_RESUME === "1";
 const lyricsOnly = process.env.NABNAB_PLAYBACK_LYRICS === "1";
 const miniWheelOnly = process.env.NABNAB_PLAYBACK_MINI_WHEEL === "1";
 const albumOnly = process.env.NABNAB_PLAYBACK_ALBUM === "1";
+const videoChaptersOnly = process.env.NABNAB_PLAYBACK_VIDEO_CHAPTERS === "1";
 const fixtureArtist = windowsMedia ? `Laboratorio nabnab · ${path.basename(data)}` : "Laboratorio nabnab";
 const fixtureTitle = desktopRestore
   ? "Señal para la cola · Grabación completa de prueba para un título largo que debe dejar visibles todos los controles del minirreproductor"
@@ -49,8 +50,13 @@ const audioSamples = [[".wav", "pcm_s16le"], [".m4a", "aac"], [".opus", "libopus
 function encode(...args) {
   return execFileSync(ffmpeg, ["-hide_banner", "-v", "error", ...args], { windowsHide: true });
 }
+const videoChapterMetadata = path.join(data, "video-chapters.ffmetadata");
+const videoChapterTitles = ["Apertura", "Recorrido por la estación", "Cierre"];
+await writeFile(videoChapterMetadata, ";FFMETADATA1\n" + videoChapterTitles.map((title, index) =>
+  `[CHAPTER]\nTIMEBASE=1/1\nSTART=${[0, 6, 15][index]}\nEND=${[6, 15, 22][index]}\ntitle=${title}\n`).join(""));
 encode("-f", "lavfi", "-i", "testsrc2=size=360x640:rate=24:duration=22",
   "-f", "lavfi", "-i", "sine=frequency=440:duration=22", "-f", "lavfi", "-i", "sine=frequency=660:duration=22",
+  "-f", "ffmetadata", "-i", videoChapterMetadata, "-map_chapters", "3",
   "-map", "0:v:0", "-map", "1:a:0", "-map", "2:a:0", "-c:v", "libopenh264", "-c:a", "aac",
   "-metadata:s:a:0", "language=spa", "-metadata:s:a:0", "handler_name=Castellano",
   "-metadata:s:a:1", "language=eng", "-metadata:s:a:1", "handler_name=Original", "-shortest", video);
@@ -1854,6 +1860,66 @@ async function verifyAlbumPlayback(initial) {
   console.log("Verified album order, unavailable tracks, playback continuity and the persisted queue in WebView2.");
 }
 
+async function verifyVideoChapters(initial) {
+  await rpc("save_settings", { settings: { ...initial.settings, language: "es", folder: output, trayEnabled: false, closeToTray: false, reducedMotion: true } });
+  const imported = await rpc("import_paths", { paths: [video, webm] });
+  const source = imported.library.find(item => item.name === path.basename(video));
+  const plain = imported.library.find(item => item.name === path.basename(webm));
+  assert.deepEqual(source.details.chapters.map(chapter => [chapter.start, chapter.title]),
+    [[0, videoChapterTitles[0]], [6, videoChapterTitles[1]], [15, videoChapterTitles[2]]]);
+  await page.locator('[data-page="library"]').click();
+  await play(source.id);
+  await wait(async () => { const media = await playing(); return !media.paused && media.time > 0; });
+  await clickStage("toggle");
+  await seekVideo(10);
+  await wait(async () => (await playing()).paused && Math.abs((await playing()).time - 10) < 0.05);
+  const seek = stage().getByRole("slider", { name: "Posición de reproducción" });
+  await seek.hover();
+  await page.screenshot({ path: path.join(output, "video-chapters-before.png"), animations: "disabled" });
+  assert.match(await seek.getAttribute("aria-valuetext"), /Recorrido por la estación/);
+  await seek.press("Home");
+  await wait(async () => (await playing()).time < 0.1);
+  assert.match(await seek.getAttribute("aria-valuetext"), /Apertura/);
+  assert.equal((await playing()).paused, true);
+
+  for (const [width, height] of [[900, 620], [1180, 780]]) {
+    await page.setViewportSize({ width, height });
+    const rail = await seek.boundingBox();
+    const marks = stage().locator(".stage-chapter-mark");
+    assert.equal(await marks.count(), 2);
+    for (const [index, time] of [6, 15].entries()) {
+      const mark = await marks.nth(index).boundingBox();
+      assert.ok(Math.abs(mark.x + mark.width / 2 - (rail.x + 5 + (rail.width - 10) * time / 22)) < 1);
+    }
+    await seek.hover({ position: { x: 10, y: rail.height / 2 } });
+    const hover = stage().locator("#stage-hover");
+    assert.match(await hover.innerText(), /Apertura/);
+    await seek.hover({ position: { x: rail.width * 10 / 22, y: rail.height / 2 } });
+    assert.match(await hover.innerText(), /Recorrido por la estación/);
+    await wait(() => hover.locator("img").evaluate(image => !image.hidden && image.naturalHeight > 0));
+    await page.screenshot({ path: path.join(output, `video-chapters-${width}.png`), animations: "disabled" });
+    await seek.hover({ position: { x: rail.width - 1, y: rail.height / 2 } });
+    assert.match(await hover.innerText(), /Cierre/);
+    const box = await hover.boundingBox();
+    assert.ok(box.x >= 0 && box.x + box.width <= width);
+  }
+
+  await clickStage("options");
+  const chapters = stage().getByLabel("Capítulos", { exact: true });
+  await chapters.selectOption("15");
+  await wait(async () => (await playing()).paused && Math.abs((await playing()).time - 15) < 0.05);
+  assert.equal(await stage().locator("#stage-options").evaluate(button => button === document.activeElement), true);
+  await clickStage("options");
+  assert.equal(await chapters.inputValue(), "");
+  await chapters.selectOption("15");
+  await clickStage("back");
+  await play(plain.id);
+  await wait(async () => (await playing()).id === plain.id && !(await playing()).paused);
+  assert.equal(await stage().locator(".stage-chapter-mark").count(), 0);
+  assert.doesNotMatch(await seek.getAttribute("aria-valuetext"), /Apertura|Recorrido|Cierre/);
+  console.log("Native MP4 chapter markers, preview, keyboard and source changes passed at 900 and 1180 px.");
+}
+
 try {
   const initial = await launch();
   if (miniWheelOnly) await verifyFloatingMiniWheel();
@@ -1862,6 +1928,7 @@ try {
   else if (bookGapOnly) await verifyBookGap();
   else if (courseResumeOnly) await verifyCourseResume();
   else if (albumOnly) await verifyAlbumPlayback(initial);
+  else if (videoChaptersOnly) await verifyVideoChapters(initial);
   else await verifyPlayback(initial);
 } catch (error) {
   console.error(log);
