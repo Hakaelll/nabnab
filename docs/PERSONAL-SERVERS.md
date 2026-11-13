@@ -8,6 +8,10 @@ Abre **Plataformas → Archivos y documentos → Servidores personales**. Las co
 
 Abre la conexión, navega por carpetas y marca archivos. **Indexar referencia** guarda los metadatos en **Biblioteca → Referencias**. Una referencia depende del servidor y no contiene una copia. **Copiar a mi biblioteca** muestra el destino y envía la selección a Descargas. Las referencias guardadas también ofrecen **Obtener copia local**.
 
+En **Referencias**, busca por nombre de archivo, carpeta o servidor. **Copia local disponible** indica que Biblioteca tiene una copia de la versión guardada. Selecciona la referencia y pulsa **Mostrar carpeta de la copia** para localizarla, incluso si desconectaste el servidor. Otra versión del mismo archivo no cuenta como copia de esa referencia.
+
+![Búsqueda y acceso a la copia local de una referencia de prueba](personal-server-local-copy.png)
+
 **Buscar en esta carpeta** filtra por nombre, también si escribes sin tildes. El filtro usa el listado que ya está cargado y conserva las marcas de los archivos que oculta. Pulsa **Solo seleccionados** para revisar esas marcas, el tamaño total y el destino antes de copiar. Pulsa el botón otra vez para recuperar la búsqueda.
 
 ![Revisión de dos archivos marcados en un servidor de prueba a 900 píxeles](personal-server-selected.png)

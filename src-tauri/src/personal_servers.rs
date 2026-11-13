@@ -205,6 +205,14 @@ struct Reference {
     selection: Selection,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReferenceView {
+    #[serde(flatten)]
+    reference: Reference,
+    content_id: String,
+}
+
 #[derive(Default, Serialize, Deserialize)]
 struct Vault {
     connections: Vec<Connection>,
@@ -215,7 +223,7 @@ struct Vault {
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
     servers: Vec<ServerView>,
-    references: Vec<Reference>,
+    references: Vec<ReferenceView>,
 }
 
 struct Trust {
@@ -301,7 +309,14 @@ fn snapshot(data: Vault) -> Snapshot {
                 }
             })
             .collect(),
-        references: data.references,
+        references: data
+            .references
+            .into_iter()
+            .map(|reference| ReferenceView {
+                content_id: reference.selection.content_id(),
+                reference,
+            })
+            .collect(),
     }
 }
 

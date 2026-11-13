@@ -1,4 +1,4 @@
-import { escapeHtml as h, type Copy } from "./contracts";
+import { escapeHtml as h, type Copy, type LibraryItem } from "./contracts";
 import { bytesLabel, searchKey } from "./presentation";
 import { action, icon } from "./views-common";
 
@@ -9,7 +9,7 @@ export interface PersonalSelection { serverId: string; path: string[]; stamp: St
 interface Entry { path: string[]; directory: boolean; stamp: Stamp; mime: string | null }
 interface SelectionChange { path: string; state: "changed" | "missing" }
 interface Server { id: string; name: string; kind: Kind; location: string }
-interface Reference { id: string; serverName: string; selection: PersonalSelection }
+interface Reference { id: string; serverName: string; selection: PersonalSelection; contentId: string }
 interface Review { kind: "reference" | "copy"; id: string; selection: PersonalSelection }
 interface ServerStatus { servers: Server[]; references: Reference[] }
 interface Challenge { challenge: number; fingerprint: string }
@@ -20,6 +20,7 @@ interface Hooks {
   render(): void;
   refresh(): Promise<void>;
   notify(message: string, kind?: "info" | "success" | "error"): void;
+  library(): readonly LibraryItem[];
   folder(): string;
   chooseFolder(): void;
   openBrowser(): void;
@@ -44,6 +45,7 @@ export function createPersonalServers(hooks: Hooks) {
   let pendingRefresh: Entry[] = [];
   let selectionChanges: SelectionChange[] = [];
   let referenceId = "";
+  let referenceQuery = "";
   let reviewing: Review | null = null;
   let copyQueued = false;
   let error: { operation: Operation; message: string } | null = null;
@@ -323,20 +325,40 @@ export function createPersonalServers(hooks: Hooks) {
   }
 
   function renderReferences() {
-    const chosen = activeReference();
+    const references = status?.references ?? [];
+    const terms = searchKey(referenceQuery).split(/\s+/).filter(Boolean);
+    const visible = references.filter(reference => {
+      const text = searchKey(`${reference.serverName} ${label(reference.selection.path)}`);
+      return terms.every(term => text.includes(term));
+    });
+    const chosen = visible.find(reference => reference.id === referenceId);
     const connected = (ref: Reference) => status?.servers.some(server => server.id === ref.selection.serverId);
-    return `<section class="file-sources personal-servers"><div class="page-heading"><div><h1>${t("Referencias remotas", "Remote references")}</h1>
-      <p>${t("Las referencias apuntan al servidor. Para usar un archivo sin conexión, guarda una copia local.", "References point to the server. To use a file offline, save a local copy.")}</p></div>${action("personal-open", t("Abrir servidores", "Open servers"), "folder", "secondary", disabled())}</div>
-      ${feedback()}${status?.references.length ? `<div class="file-source-entries">${status.references.map(reference => `
+    const copies = new Map<string, LibraryItem>();
+    for (const item of hooks.library()) {
+      const contentId = item.details?.contentId;
+      if (contentId?.startsWith("personal:") && !item.missing && !copies.has(contentId)) copies.set(contentId, item);
+    }
+    const localCopy = chosen && copies.get(chosen.contentId);
+    return `<section class="file-sources personal-servers" aria-labelledby="personal-references-title"><div class="page-heading"><div><h1 id="personal-references-title">${t("Referencias remotas", "Remote references")}</h1>
+      <p>${t("Guarda una copia local para abrir el archivo sin conexión.", "Save a local copy to open the file offline.")}</p></div>${action("personal-open", t("Abrir servidores", "Open servers"), "folder", "secondary", disabled())}</div>
+      ${feedback()}${references.length ? `<div class="file-source-filter personal-folder-filter">
+        <label>${icon("search")}<input type="search" id="personal-reference-query" aria-label="${t("Buscar referencias", "Search references")}"
+          placeholder="${t("Archivo, carpeta o servidor", "File, folder or server")}" value="${h(referenceQuery)}"></label>
+        <span role="status">${visible.length} / ${references.length} ${t("referencias", "references")}</span>
+      </div>` : ""}
+      ${visible.length ? `<div class="file-source-entries">${visible.map(reference => `
         <div class="personal-server-row ${reference.id === referenceId ? "is-selected" : ""}">
         <button class="file-source-entry" data-action="personal-reference" data-id="${h(reference.id)}" aria-pressed="${reference.id === referenceId}" ${disabled()}>
-          <span><strong>${h(reference.selection.path.at(-1) ?? "")}</strong><small>${h(reference.serverName)} · ${h(label(reference.selection.path))} · ${connected(reference) ? t("Remota", "Remote") : t("Servidor desconectado", "Server disconnected")}</small></span>${icon("link")}</button>
+          <span><strong>${h(reference.selection.path.at(-1) ?? "")}</strong><small>${h(reference.serverName)} · ${h(label(reference.selection.path))} · ${connected(reference) ? t("Remota", "Remote") : t("Servidor desconectado", "Server disconnected")}
+            ${copies.has(reference.contentId) ? ` · ${t("Copia local disponible", "Local copy available")}` : ""}</small></span>${icon("link")}</button>
         ${action("personal-remove-reference", t("Quitar referencia", "Remove reference"), undefined, "quiet", `data-id="${h(reference.id)}" ${disabled()}`)}</div>`).join("")}</div>`
-        : !busy ? `<p class="file-source-empty">${t("Aún no hay referencias guardadas.", "There are no saved references yet.")}</p>` : ""}
+        : !busy ? `<p class="file-source-empty">${references.length ? t("Ninguna referencia coincide con la búsqueda.", "No references match your search.")
+          : t("Aún no hay referencias guardadas.", "There are no saved references yet.")}</p>` : ""}
       ${chosen ? `<div class="file-source-selection personal-review"><div class="file-source-selection-title"><strong>${h(chosen.selection.path.at(-1) ?? "")}</strong><span>${chosen.selection.stamp.size === null ? t("Tamaño desconocido", "Unknown size") : bytesLabel(chosen.selection.stamp.size)}</span></div>
         ${destination()}<div class="button-group">
           ${action("personal-review-reference", t("Revisar en servidor", "Review on server"), "folder", "secondary", busy || !connected(chosen) ? "disabled" : "")}
-          ${action("personal-copy-reference", t("Obtener copia local", "Get local copy"), "downloads", "primary", busy || !connected(chosen) ? "disabled" : "")}
+          ${action("personal-copy-reference", t("Obtener copia local", "Get local copy"), "downloads", localCopy ? "quiet" : "primary", busy || !connected(chosen) ? "disabled" : "")}
+          ${localCopy ? action("reveal-media", t("Mostrar carpeta de la copia", "Show local copy folder"), "folder", "primary", `data-id="${h(localCopy.id)}"`) : ""}
         </div></div>` : ""}</section>`;
   }
 
@@ -346,6 +368,11 @@ export function createPersonalServers(hooks: Hooks) {
       return true;
     }
     if (!(element instanceof HTMLInputElement) || !element.id.startsWith("personal-")) return false;
+    if (element.id === "personal-reference-query") {
+      referenceQuery = element.value;
+      hooks.render();
+      return true;
+    }
     if (element.id === "personal-folder-query") {
       folderQuery = element.value;
       hooks.render();

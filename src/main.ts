@@ -105,6 +105,7 @@ const mediaEdits=createMediaEdits({command,snapshot:()=>snapshot,refresh,render:
 const palettes=createPalettes({command,snapshot:()=>snapshot,refresh,render:renderCurrent,notify,t});
 const personalServers=createPersonalServers({
   command, refresh, render: renderCurrent, notify, t,
+  library: () => snapshot.library,
   folder: () => snapshot.settings.folder,
   chooseFolder: () => { void chooseFolder().then(renderCurrent).catch(showError); },
   openBrowser: () => { platformModule = "fileSources"; navigate("platforms"); fileSources.openPersonal(); },

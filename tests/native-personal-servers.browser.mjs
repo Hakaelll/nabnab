@@ -40,18 +40,17 @@ const ciphertext = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractiv
 `], { windowsHide: true, env: { ...process.env, NABNAB_FIXTURE_VAULT: Buffer.from(JSON.stringify(vault)).toString("base64") } });
 await writeFile(path.join(secrets, "personal-servers.bin"), Buffer.concat([Buffer.from("nabnab-module-secret-v1\n"), ciphertext]));
 
-const port = process.env.NABNAB_PERSONAL_SERVER_DEBUG_PORT || 9258;
-const endpoint = `http://127.0.0.1:${port}`;
-const start = () => spawn(process.env.NABNAB_PERSONAL_SERVER_TEST_EXE || path.join(root, "src-tauri/target/debug/nabnab.exe"), [], {
-  cwd: root, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
-  env: { ...process.env, NABNAB_TEST_DATA_DIR: data, WEBVIEW2_USER_DATA_FOLDER: path.join(data, "webview"),
-    TEMP: temporary, TMP: temporary,
-    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}` },
-});
-let child, browser, page, log = "";
+const firstPort = Number(process.env.NABNAB_PERSONAL_SERVER_DEBUG_PORT || 9258);
+let child, browser, page, log = "", launches = 0;
 
 async function launch() {
-  child = start();
+  const port = firstPort + launches++;
+  const endpoint = `http://127.0.0.1:${port}`;
+  child = spawn(process.env.NABNAB_PERSONAL_SERVER_TEST_EXE || path.join(root, "src-tauri/target/debug/nabnab.exe"), [], {
+    cwd: root, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
+    env: { ...process.env, NABNAB_TEST_DATA_DIR: data, WEBVIEW2_USER_DATA_FOLDER: path.join(data, `webview-${port}`),
+      TEMP: temporary, TMP: temporary, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}` },
+  });
   for (const stream of [child.stdout, child.stderr]) stream.on("data", chunk => { log = (log + chunk).slice(-5000); });
   browser = await wait(async () => {
     try {
@@ -598,6 +597,29 @@ try {
   const first = await job(0);
   assert.equal(first.state, "completed", JSON.stringify(first.error));
   assert.equal(await readFile(first.outputs[0], "utf8"), original);
+  const savedCopy = page.getByRole("button", { name: /Cuaderno ñ\.txt.*Copia local disponible/ });
+  await savedCopy.waitFor({ timeout: 5000 });
+  const savedSearch = page.getByRole("searchbox", { name: "Buscar referencias" });
+  await savedSearch.fill("lecturas cuaderno n");
+  assert.equal(await savedCopy.count(), 1);
+  assert.equal(await savedSearch.evaluate(control => control === document.activeElement), true);
+  await savedSearch.fill("inventario");
+  assert.equal(await savedCopy.count(), 0);
+  await page.getByText("Ninguna referencia coincide con la búsqueda.", { exact: true }).waitFor();
+  await savedSearch.clear();
+  const localItem = (await rpc("get_snapshot")).library.find(item => item.path === first.outputs[0]);
+  assert.ok(localItem);
+  await selectReference();
+  const revealCopy = button("Mostrar carpeta de la copia");
+  assert.equal(await revealCopy.getAttribute("data-id"), localItem.id);
+  await button("Cerrar aviso").click();
+  for (const [width, height] of [[900, 620], [1180, 780]]) {
+    await page.setViewportSize({ width, height });
+    const references = page.getByRole("region", { name: "Referencias remotas" });
+    assert.ok(await references.evaluate(panel => panel.scrollWidth <= panel.clientWidth + 1));
+    await page.screenshot({ path: path.join(data, `reference-local-copy-${width}.png`),
+      mask: [references.locator(".file-source-destination strong")], maskColor: "#2b2e34" });
+  }
 
   await rename(mount, offline);
   await selectReference();
@@ -627,6 +649,7 @@ try {
   assert.deepEqual((await rpc("personal_servers_status")).references[0].selection, previousSelection);
   await comparison().screenshot({ path: path.join(data, "reference-reconnected.png") });
   await button("Volver a referencias").click();
+  assert.equal(await savedCopy.count(), 1);
   await selectReference();
   await button("Obtener copia local").click();
   const stale = await job(1);
@@ -682,6 +705,10 @@ try {
   await button("Actualizar referencia").click();
   await comparison().getByRole("status").filter({ hasText: "Los datos visibles coinciden" }).waitFor();
   await button("Volver a referencias").click();
+  await selectReference();
+  const updatedItem = (await rpc("get_snapshot")).library.find(item => item.path === updated.outputs[0]);
+  assert.ok(updatedItem);
+  assert.equal(await revealCopy.getAttribute("data-id"), updatedItem.id);
   console.log("Native Downloads review rejected the old version, preserved both copies, and left the reference unchanged until explicitly updated.");
 
   await rename(mount, offline);
@@ -720,6 +747,12 @@ try {
   assert.equal(await button("Copiar versión actual").count(), 0);
   await button("Volver a Descargas").click();
   assert.equal((await rpc("get_snapshot")).jobs.length, 4);
+  await page.locator('[data-page="library"]').click();
+  await page.locator('[data-action="library-section"][data-section="references"]').click();
+  const disconnectedCopy = button(/Cuaderno ñ\.txt.*Servidor desconectado.*Copia local disponible/);
+  await disconnectedCopy.click();
+  assert.equal(await revealCopy.isEnabled(), true);
+  assert.equal(await button("Obtener copia local").isDisabled(), true);
   if (process.env.NABNAB_TEST_OPENSSL) await verifyWebdav(process.env.NABNAB_TEST_OPENSSL);
   if (process.env.NABNAB_TEST_SSH2_MODULE) await verifySftp(process.env.NABNAB_TEST_SSH2_MODULE);
 } catch (error) {
