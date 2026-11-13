@@ -211,6 +211,20 @@ try {
   await page.locator('[data-action="dub-sample"]').click();
   const sample = page.locator("#dub-sample-slot audio");
   await wait(async () => await sample.count() && sample.evaluate(audio => audio.readyState >= 2 && audio.duration > 0));
+  const fit = page.getByRole("status").filter({ hasText: "Supera el tiempo disponible" });
+  await fit.waitFor({ timeout: 3000 });
+  assert.match(await fit.innerText(), /1[,.]50 s disponibles/);
+  assert.equal((await rpc("get_snapshot")).jobs.filter(job => job.source.kind === "dubVoice").length, 0);
+  for (const [width, height] of [[900, 620], [1180, 780]]) {
+    await page.setViewportSize({ width, height });
+    await fit.scrollIntoViewIfNeeded();
+    assert.ok(await fit.evaluate(node => node.scrollWidth <= node.clientWidth + 1));
+    await page.locator(".dub-sample").screenshot({ path: path.join(base, `dub-sample-fit-${width}.png`), animations: "disabled" });
+  }
+  await page.getByRole("button", { name: "Editar este segmento", exact: true }).press("Enter");
+  await page.waitForFunction(() => document.activeElement?.id === "translation-cue-0");
+  await page.getByRole("button", { name: "Volver a la muestra del segmento 1", exact: true }).press("Enter");
+  await page.waitForFunction(() => document.activeElement?.id === "dub-play-sample");
   await page.locator("#dub-queue-voice").click();
   const tooLong = await jobOf("dubVoice", 0, "error");
   assert.equal(tooLong.error.code, "dubbing_timing");
@@ -252,6 +266,7 @@ try {
   await page.locator("#dub-play-sample").press("Enter");
   await page.locator(".dub-sample").getByText("Goodbye.", { exact: true }).waitFor();
   await wait(async () => await sample.count() && sample.evaluate(audio => audio.readyState >= 2 && audio.duration > 0));
+  await page.getByRole("status").filter({ hasText: "Cabe en el intervalo" }).waitFor();
   await page.locator("#dub-queue-voice").click();
   const wav = await jobOf("dubVoice", 1, "completed");
   const cachedAfter = (await readdir(caches)).filter(name => name.endsWith(".wav")).sort();

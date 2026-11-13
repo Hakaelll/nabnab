@@ -89,7 +89,7 @@ pub async fn dub_sample(
     selection: Selection,
     index: usize,
     request_id: u64,
-) -> Result<voice::Sample, String> {
+) -> Result<voice::timed::TimedSample, String> {
     crate::voice_operations::require_enabled(&app)?;
     let root = {
         let guard = state.repository.lock().unwrap();

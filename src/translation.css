@@ -62,6 +62,11 @@
 .dub-mix-tracks > .dub-instrumental-note { flex-basis: 100%; }
 .dub-sample { display: grid; grid-template-columns: minmax(0, 1fr) minmax(180px, 300px); gap: 10px; align-items: center; overflow-wrap: anywhere; }
 .dub-sample audio { display: block; width: 100%; height: 36px; }
+.dub-sample-feedback { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; padding: 10px 12px; border-inline-start: 2px solid var(--border); background: var(--surface); border-radius: 6px; }
+.dub-sample-feedback [role="status"] { display: grid; gap: 4px; }
+.dub-sample-feedback strong { font-size: 13px; }
+.dub-sample-feedback :is(span, small) { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.dub-sample-feedback [data-fit="tooLong"] strong { color: var(--error); }
 .dub-result { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
 .dub-copy-recovery { flex: 1 0 100%; justify-content: space-between; gap: 12px 16px; padding: 14px; }
 .dub-copy-recovery > div { flex: 1 1 240px; min-width: 0; overflow-wrap: anywhere; }

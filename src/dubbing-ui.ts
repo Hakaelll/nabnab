@@ -13,6 +13,11 @@ export interface DubVideoOptions {
   instrumentalId?: string;
 }
 interface OriginalAudio { id: string; title: string | null; language: string | null; codec: string | null }
+interface TimedSample extends VoiceSample {
+  speechSeconds: number;
+  availableSeconds: number;
+  fit: "fits" | "needsAcceleration" | "tooLong";
+}
 interface DraftContext { id: string; revision: number; pair: "es-en" | "en-es"; sourceId: string; count: number }
 interface Hooks {
   draft(): DraftContext | null;
@@ -38,6 +43,7 @@ export function createDubbing(hooks: Hooks) {
   let originalAudioId = "";
   let instrumentalId = "";
   let player: HTMLAudioElement | null = null, sampleUrl = "", sampleText = "", requestId = 0;
+  let sampleTiming: Omit<TimedSample, "wav" | "duration" | "segmentText"> | null = null;
   let focusSample = false;
   let observed = "";
 
@@ -149,11 +155,25 @@ export function createDubbing(hooks: Hooks) {
     focusSample = false;
     player?.pause(); player?.remove(); player = null;
     if (sampleUrl) URL.revokeObjectURL(sampleUrl);
-    sampleUrl = ""; sampleText = "";
+    sampleUrl = ""; sampleText = ""; sampleTiming = null;
     if (requestId) {
       const id = requestId; requestId = 0;
       void hooks.command("cancel_voice_request", { requestId: id }).catch(() => {});
     }
+  }
+
+  function sampleResult(): string {
+    if (!sampleTiming) return "";
+    const { fit, speechSeconds, availableSeconds, truncated } = sampleTiming;
+    const seconds = new Intl.NumberFormat(hooks.snapshot().settings.language, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const speech = seconds.format(speechSeconds), available = seconds.format(availableSeconds);
+    const label = fit === "tooLong" ? t("Supera el tiempo disponible", "Exceeds the available time")
+      : fit === "needsAcceleration" ? t("Necesita acelerar la voz", "Speech needs to speed up")
+        : t("Cabe en el intervalo", "Fits the cue");
+    return `<div class="dub-sample-feedback"><div role="status" data-fit="${fit}">
+      <strong>${label}</strong><span>${t(`${speech} s de voz · ${available} s disponibles`, `${speech} s of speech · ${available} s available`)}</span>
+      ${truncated ? `<small>${t("La escucha incluye los primeros 12 segundos.", "The preview plays the first 12 seconds.")}</small>` : ""}
+      </div>${fit === "tooLong" ? action("dub-edit-sample", t("Editar este segmento", "Edit this cue"), "document", "quiet") : ""}</div>`;
   }
 
   function resetDraft() {
@@ -239,7 +259,7 @@ export function createDubbing(hooks: Hooks) {
         <label for="dub-cue">${t("Segmento de muestra", "Sample cue")}<input id="dub-cue" type="number" min="1" max="${draft.count}" value="${cue + 1}"></label>
         ${action("dub-sample", t("Escuchar muestra", "Play sample"), "play", "secondary", `id="dub-play-sample"`)}
       </fieldset>
-      ${sampleText ? `<div class="dub-sample"><span>${h(sampleText)}</span><div id="dub-sample-slot"></div></div>` : ""}
+      ${sampleText ? `<div class="dub-sample"><span>${h(sampleText)}</span><div id="dub-sample-slot"></div>${sampleResult()}</div>` : ""}
       ${job && job.id !== wav?.id ? issues.length ? timingReview(issues)
         : `<div class="dub-result" role="status"><span>${stateLabel(job.state, t)} · WAV</span>${job.error ? `<p>${h(job.error.message)}</p>` : ""}</div>` : ""}
       <div class="asset-destination dub-export"><span>${t("Destino", "Destination")}<span class="path field-note">${h(hooks.snapshot().settings.folder)}</span></span>${action("choose-folder", t("Cambiar carpeta", "Change folder"), "folder", "quiet", busy ? "disabled" : "")}
@@ -299,6 +319,10 @@ export function createDubbing(hooks: Hooks) {
       if (!busy && timingIssues().includes(index)) await hooks.focusCue(index);
       return true;
     }
+    if (actionName === "dub-edit-sample") {
+      if (!busy && sampleTiming?.fit === "tooLong") await hooks.focusCue(sampleCue);
+      return true;
+    }
     if (actionName === "dub-review-audio") {
       const videoId = videoChoice();
       if (!videoId || mode !== "mix" || busy || hooks.hasEdits()) return true;
@@ -333,9 +357,11 @@ export function createDubbing(hooks: Hooks) {
         requestId = id;
         hooks.render();
         try {
-          const sample = await hooks.command<VoiceSample>("dub_sample", { selection: choice, index: Math.min(sampleCue, draft.count - 1), requestId: id });
+          const sample = await hooks.command<TimedSample>("dub_sample", { selection: choice, index: Math.min(sampleCue, draft.count - 1), requestId: id });
           if (requestId !== id) return;
           sampleUrl = URL.createObjectURL(audioBlob(sample.wav)); sampleText = sample.segmentText;
+          const { fit, speechSeconds, availableSeconds, truncated } = sample;
+          sampleTiming = { fit, speechSeconds, availableSeconds, truncated };
           player = document.createElement("audio"); player.controls = true; player.src = sampleUrl;
           player.setAttribute("aria-label", t("Muestra de la voz traducida", "Translated voice sample"));
           hooks.render();

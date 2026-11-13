@@ -52,7 +52,7 @@ fn speech(text: &str, index: usize) -> Result<String, String> {
     Ok(text)
 }
 
-fn slots(draft: &Draft) -> Result<(Vec<Slot>, u64), String> {
+fn windows(draft: &Draft) -> Result<(Vec<(usize, u64, u64)>, u64), String> {
     if draft.original.is_empty()
         || draft.original.len() > super::MAX_SEGMENTS
         || draft.original.len() != draft.translated.len()
@@ -80,13 +80,22 @@ fn slots(draft: &Draft) -> Result<(Vec<Slot>, u64), String> {
         let boundary = sorted
             .get(position + 1)
             .map_or(end, |(_, next)| end.min(next.segment.start));
-        if samples(boundary) <= samples(start) {
+        result.push((index, samples(start), samples(boundary)));
+    }
+    Ok((result, duration))
+}
+
+fn slots(draft: &Draft) -> Result<(Vec<Slot>, u64), String> {
+    let (windows, duration) = windows(draft)?;
+    let mut result = Vec::with_capacity(windows.len());
+    for (index, start, end) in windows {
+        if end <= start {
             return Err(timing_error([index]));
         }
         result.push(Slot {
             index,
-            start: samples(start),
-            end: samples(boundary),
+            start,
+            end,
             text: speech(&draft.translated[index], index)?,
         });
     }
@@ -115,6 +124,24 @@ async fn fingerprint(
         })
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TimedSample {
+    #[serde(flatten)]
+    voice: Sample,
+    speech_seconds: f64,
+    available_seconds: f64,
+    fit: Fit,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+enum Fit {
+    Fits,
+    NeedsAcceleration,
+    TooLong,
+}
+
 pub async fn sample(
     root: &Path,
     draft: &Draft,
@@ -122,8 +149,11 @@ pub async fn sample(
     settings: &VoiceSettings,
     cancel: watch::Receiver<bool>,
     run_id: u64,
-) -> Result<Sample, String> {
+) -> Result<TimedSample, String> {
     let _cache = cache::IN_USE.read().await;
+    let (windows, _) = windows(draft)?;
+    let (_, start, end) = windows.into_iter().find(|(cue, _, _)| *cue == index)
+        .ok_or("Choose a cue from this translation.")?;
     let text = draft
         .translated
         .get(index)
@@ -154,15 +184,23 @@ pub async fn sample(
     let cached =
         cache::cached(root, &key, true, &cancel).ok_or("The sample could not be verified.")?;
     let (wav, duration, truncated) = wave::sample_bytes(&cached.path, 12)?;
-    Ok(Sample {
-        wav,
-        duration,
-        segment_text: text,
-        truncated,
+    let length = cached.wave.length / 2;
+    let available = end.saturating_sub(start);
+    let fit = match tempo(length, available) {
+        Some(1.0) => Fit::Fits,
+        Some(_) => Fit::NeedsAcceleration,
+        None => Fit::TooLong,
+    };
+    Ok(TimedSample {
+        voice: Sample { wav, duration, segment_text: text, truncated },
+        speech_seconds: length as f64 / f64::from(wave::SAMPLE_RATE),
+        available_seconds: available as f64 / f64::from(wave::SAMPLE_RATE),
+        fit,
     })
 }
 
 fn tempo(length: u64, available: u64) -> Option<f64> {
+    if available == 0 { return None; }
     let ratio = length as f64 / available as f64;
     (ratio <= MAX_TEMPO).then(|| {
         if ratio <= 1.0 {
