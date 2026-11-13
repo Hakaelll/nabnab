@@ -352,6 +352,54 @@ try {
   assert.equal(await comparison.getByRole("radio").count(), 3);
   assert.equal(await comparison.getByText("C:/fixture/First.mp3", { exact: true }).isVisible(), true);
   const localRecording = comparison.getByRole("radio", { name: /C:\/fixture\/Third\.wav/ });
+  const engine = page.locator("#audio-engine");
+  const previous = await engine.evaluate(media => {
+    media.pause();
+    media.currentTime = 4;
+    return {id: media.dataset.localPlayer, paused: true, time: 4};
+  });
+  await page.waitForFunction(() => !document.getElementById("audio-engine").seeking);
+  const candidate = previous.id === "last" ? "first" : "last";
+  const audition = comparison.locator(`[data-action="audio-audition"][data-id="${candidate}"]`);
+  await audition.press("Enter", {timeout: 3500});
+  await page.waitForFunction(id => {
+    const media = document.getElementById("audio-engine");
+    return media.dataset.localPlayer === id && !media.paused && media.currentTime > 0;
+  }, candidate);
+  assert.equal(await originalReference.isChecked(), true);
+  assert.equal(await page.locator("audio, video").count(), 1);
+  await comparison.locator(".audio-match-candidates").scrollIntoViewIfNeeded();
+  await page.screenshot({path:`${directory}/playlist-audition-900.png`});
+  await page.setViewportSize({width:1180,height:780});
+  await comparison.locator(".audio-match-candidates").scrollIntoViewIfNeeded();
+  assert.ok(await comparison.evaluate(panel => panel.scrollWidth <= panel.clientWidth + 1));
+  await page.screenshot({path:`${directory}/playlist-audition-1180.png`});
+  await page.setViewportSize({width:900,height:620});
+  await audition.press("Enter");
+  await page.waitForFunction(({id, paused, time}) => {
+    const media = document.getElementById("audio-engine");
+    return media.dataset.localPlayer === id && media.paused === paused && Math.abs(media.currentTime - time) < 0.05;
+  }, previous);
+  await audition.press("Enter");
+  await page.waitForFunction(id => {
+    const media = document.getElementById("audio-engine");
+    return media.dataset.localPlayer === id && !media.paused && media.currentTime > 0;
+  }, candidate);
+  await engine.evaluate(media => { media.currentTime = media.duration - 0.1; });
+  await page.waitForFunction(({id, time}) => {
+    const media = document.getElementById("audio-engine");
+    return media.dataset.localPlayer === id && media.paused && Math.abs(media.currentTime - time) < 0.05;
+  }, previous);
+  await audition.press("Enter");
+  await page.waitForFunction(id => document.getElementById("audio-engine").dataset.localPlayer === id, candidate);
+  await section("files").click();
+  await page.waitForFunction(({id, time}) => {
+    const media = document.getElementById("audio-engine");
+    return media.dataset.localPlayer === id && media.paused && Math.abs(media.currentTime - time) < 0.05;
+  }, previous);
+  await section("audio").click();
+  if (await comparison.getAttribute("open") === null) await comparison.locator("summary").press("Enter");
+  assert.equal(await originalReference.isChecked(), true);
   await localRecording.press("Space");
   assert.equal(await localRecording.isChecked(), true);
   assert.ok(await localRecording.evaluate(input => input === document.activeElement));
@@ -406,6 +454,12 @@ try {
   await missingRecording.locator("summary").press("Enter");
   assert.equal(await missingRecording.getByRole("radio", {name:"Conservar referencia original"}).isChecked(), true);
   const replacement = missingRecording.getByRole("radio", {name:/Primera pista/});
+  const savedAudition = missingRecording.getByRole("button", { name: /^Escuchar.*Primera pista/ });
+  const wasPaused = await engine.evaluate(media => media.paused);
+  await savedAudition.press("Enter");
+  await page.waitForFunction(() => document.getElementById("audio-engine").dataset.localPlayer === "first");
+  await page.getByRole("button", { name: "Terminar escucha", exact: true }).press("Enter");
+  assert.equal(await engine.evaluate(media => media.paused), wasPaused);
   await replacement.press("Space");
   assert.deepEqual(await readSavedPlaylist(), imported);
   for (const [width,height] of [[1180,780],[900,620]]) {

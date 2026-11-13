@@ -39,6 +39,7 @@ interface Comparison {
   sleep: SleepTimer;
   sleepUntil: number;
   stopAt: number;
+  restoreAtEnd: boolean;
 }
 
 export function createAudioPlayer(hooks: Hooks) {
@@ -928,7 +929,8 @@ export function createAudioPlayer(hooks: Hooks) {
       mediaState = "ended";
       persist();
       updateTime();
-      if (sleep === "chapter") sleepNow();
+      if (comparison?.restoreAtEnd) restoreComparison();
+      else if (sleep === "chapter") sleepNow();
       else if (!stoppedBySleep) move(1, false);
       if (item && isAudiobook(item) && currentId() === item.id) hooks.render();
     });
@@ -1012,17 +1014,17 @@ export function createAudioPlayer(hooks: Hooks) {
     hooks.render();
   }
 
-  function compareTrack(id: string, group: readonly string[]) {
+  function compareTrack(id: string, group: readonly string[], restoreAtEnd = false) {
     const active = currentId();
-    if (!media || !group.includes(id) || !isPlayable(hooks.item(id)) || (id === active && !issue)) return;
-    const switching = group.includes(active) && !issue;
+    if (!media || !group.includes(id) || !isPlayable(hooks.item(id)) || (!restoreAtEnd && id === active && !issue)) return;
+    const switching = !restoreAtEnd && group.includes(active) && !issue;
     const position = switching ? pendingSeek ?? media.currentTime : 0;
     const autoplay = !switching || !media.paused;
     if (!comparison) {
       persist();
       comparison = {
         queue: currentQueue(), time: pendingSeek ?? (resumeChoice || media.currentTime),
-        playing: wheelPlaying(), sleep, sleepUntil, stopAt,
+        playing: wheelPlaying(), sleep, sleepUntil, stopAt, restoreAtEnd,
       };
       clearTimer();
       sleep = "off";
@@ -1034,6 +1036,10 @@ export function createAudioPlayer(hooks: Hooks) {
     activate(0, false, false, false);
     seek(position);
     if (autoplay) void playMedia();
+  }
+
+  function auditionTrack(id: string) {
+    compareTrack(id, [id], true);
   }
 
   function restoreComparison(resume = true) {
@@ -1165,7 +1171,7 @@ export function createAudioPlayer(hooks: Hooks) {
     return true;
   }
 
-  return { mount, render, restore, play, playAt, playFrom, compareTrack, restoreComparison, comparison: () => comparison?.queue ? "queue" : comparison ? "empty" : undefined, pause: () => media?.pause(), add, playNext, remove, input, click, key, current, nextEntries, seek, persist, detachMini, openFloatingMini,
+  return { mount, render, restore, play, playAt, playFrom, compareTrack, auditionTrack, restoreComparison, comparison: () => comparison?.queue ? "queue" : comparison ? "empty" : undefined, pause: () => media?.pause(), add, playNext, remove, input, click, key, current, nextEntries, seek, persist, detachMini, openFloatingMini,
     nativeMiniRestored: (dock: boolean) => { setDetached(false); if (dock) dockMini(); },
     syncDesktopWheel, wheelAction, isExpanded: () => expanded, isDetached: () => detached,
     timeFor: (id: string) => id === currentId() && matchesSource() && media?.readyState ? media.currentTime : undefined,

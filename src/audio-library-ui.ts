@@ -158,8 +158,17 @@ export function createAudioLibrary(hooks: Hooks) {
   let importPage = 0;
   const resolutions = new Map<number, string>();
   const matchQueries = new Map<number, string>();
+  let audition: { index: number; id: string; title: string } | null = null;
+
+  function stopAudition() {
+    if (!audition) return;
+    const active = player.comparison() && player.current()?.id === audition.id;
+    audition = null;
+    if (active) player.restoreComparison();
+  }
 
   function resetMatchReview() {
+    stopAudition();
     resolutions.clear();
     matchQueries.clear();
     importPage = 0;
@@ -563,7 +572,11 @@ export function createAudioLibrary(hooks: Hooks) {
     const count = preview.rows.length === 1 ? t("1 entrada", "1 entry") : t(`${preview.rows.length} entradas`, `${preview.rows.length} entries`);
     const pending = unresolved === 1 ? t("1 referencia remota o ausente", "1 remote or missing reference")
       : t(`${unresolved} referencias remotas o ausentes`, `${unresolved} remote or missing references`);
+    const playing = audition && player.comparison() && player.current()?.id === audition.id ? audition : null;
     return `<section class="audio-editor audio-import-editor">${header}<p class="field-note" role="status">${count} · ${pending}</p>
+      ${playing ? `<div class="audio-audition" role="group" aria-label="${t("Escucha de comparación", "Comparison playback")}">
+        <div>${icon("audio")}<span>${t("Escuchando para comparar", "Listening to compare")}<strong>${h(playing.title)}</strong></span></div>
+        ${action("audio-end-audition", t("Terminar escucha", "End preview"), "close", "quiet")}</div>` : ""}
       ${reviewRows.length ? "" : `<p class="field-note">${t("Todas las grabaciones de esta lista están disponibles.", "All recordings in this playlist are available.")}</p>`}
       <ol class="audio-rows audio-import-rows" start="${start + 1}">${reviewRows.slice(start, start + 40).map(({row, index, local}) => {
         const selected = resolutions.get(index);
@@ -606,7 +619,11 @@ export function createAudioLibrary(hooks: Hooks) {
               <div class="audio-match-candidates">${candidates.map(candidate => {
                 const details = [candidate.artist, candidate.album, candidate.duration === null ? "" : durationLabel(candidate.duration), candidate.versionMatches ? t("Coincide el texto de la versión", "Version text matches") : ""].filter(Boolean).join(" · ");
                 const filePath = localFiles.get(candidate.id)?.path;
-                return `<label class="audio-match-option">${radio(candidate.id)}<span><strong>${h(candidate.title)}</strong>${details ? `<small>${h(details)}</small>` : ""}${filePath ? `<small class="audio-match-path" dir="auto">${h(filePath)}</small>` : ""}</span></label>`;
+                const active = playing?.id === candidate.id && playing.index === index;
+                const listen = active ? t("Terminar escucha", "End preview") : t("Escuchar", "Listen");
+                return `<div class="audio-match-candidate"><label class="audio-match-option">${radio(candidate.id)}<span><strong>${h(candidate.title)}</strong>${details ? `<small>${h(details)}</small>` : ""}${filePath ? `<small class="audio-match-path" dir="auto">${h(filePath)}</small>` : ""}</span></label>
+                  ${action("audio-audition", listen, active ? "close" : "play", active ? "secondary" : "quiet",
+                    `data-id="${h(candidate.id)}" data-index="${index}" aria-label="${h(`${listen} · ${candidate.title}${filePath ? ` · ${filePath}` : ""}`)}" ${disabled()}`)}</div>`;
               }).join("")}</div>
               ${terms.length && !matches.length ? `<p class="field-note" role="status">${t("No hay grabaciones disponibles con esa búsqueda.", "No available recordings match this search.")}</p>` : ""}
               ${matches.length > 8 ? `<p class="field-note" role="status">${t("Acota la búsqueda para ver otras grabaciones.", "Narrow the search to see other recordings.")}</p>` : ""}
@@ -763,6 +780,7 @@ export function createAudioLibrary(hooks: Hooks) {
   }
 
   function bindLyrics(visible: boolean) {
+    if (!visible) stopAudition();
     lyricPanelElement = visible ? document.getElementById("audio-lyrics") : null;
     lyricList = lyricPanelElement?.querySelector("ol") ?? null;
     lyricIndex = -1;
@@ -795,6 +813,7 @@ export function createAudioLibrary(hooks: Hooks) {
       case "audio-import-media": hooks.importMedia(); break;
       case "audio-category":
         if (id === "music" || id === "books" || id === "podcasts" || id === "playlists") {
+          if (id !== "playlists") stopAudition();
           category = id; hooks.render();
         } break;
       case "audio-play": playTrack(id); break;
@@ -920,6 +939,24 @@ export function createAudioLibrary(hooks: Hooks) {
         imported = null; resetMatchReview(); hooks.render();
         if (saved) document.querySelector<HTMLElement>('[data-action="audio-rematch-list"]')?.focus();
       } break;
+      case "audio-audition": {
+        const row = imported?.kind === "list" ? imported.rows[index] : undefined;
+        const item = itemFor(id);
+        if (!row || !isPlayable(item) || busy) break;
+        if (audition?.id === id && audition.index === index && player.current()?.id === id && player.comparison()) {
+          stopAudition();
+          hooks.render();
+        } else {
+          audition = { index, id, title: audioTitle(item) };
+          player.auditionTrack(id);
+        }
+        break;
+      }
+      case "audio-end-audition":
+        stopAudition();
+        hooks.render();
+        document.getElementById("audio-import-heading")?.focus();
+        break;
       case "audio-import-back": importPage = Math.max(0, importPage - 1); hooks.render(); break;
       case "audio-import-next": importPage++; hooks.render(); break;
       case "audio-import-review": if (imported?.kind === "list") {

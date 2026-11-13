@@ -40,6 +40,10 @@ Desde la pista actual, **Elegir portada** permite asociar un JPEG, PNG o WebP lo
 
 En **Listas → Importar lista** puedes abrir M3U, M3U8, PLS o CSV en UTF-8. En CSV, confirma las columnas y la unidad de duración. nabnab reconoce identificadores y rutas de archivos que ya están en Biblioteca. Abre las sugerencias de una entrada para comparar la duración y la ruta completa de las grabaciones. El indicador de versión compara el texto con el nombre del archivo o del álbum. La referencia remota o ausente queda seleccionada al empezar. Puedes elegir una grabación local y preparar la lista conservando su orden.
 
+Pulsa **Escuchar** debajo de una grabación para reproducirla desde el inicio en la barra compartida. La elección sigue en su radio correspondiente. **Terminar escucha**, salir de Audio o llegar al final vuelve a la pista anterior, con su punto de reproducción y estado de pausa. También puedes escuchar los resultados de búsqueda en **Revisar referencias**.
+
+![Comparación de dos grabaciones locales con una escucha activa](audio-playlist-audition.png)
+
 La cabecera de una lista guardada muestra las pistas disponibles, su duración si se conoce y las referencias remotas o ausentes. **Reproducir lista** empieza en la primera pista disponible y usa el orden de la lista cuando el modo aleatorio está desactivado. **Lista a continuación** coloca las pistas disponibles tras la que está sonando. Si la cola está vacía, deja la primera preparada en pausa.
 
 ![Lista con archivos locales, referencias pendientes y la cola de reproducción](audio-playlist-playback.png)
