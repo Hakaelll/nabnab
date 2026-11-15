@@ -1,6 +1,6 @@
 export const fieldScenes = {
-  current: 0, aurora: 1, weave: 2, rain: 3, dunes: 4, contours: 5,
-  orbit: 6, constellation: 7, tide: 8, prism: 9, interference: 10,
+  current: 0, aurora: 1, ribbons: 11, weave: 2, rain: 3, dunes: 4, contours: 5,
+  orbit: 6, constellation: 7, tide: 8, prism: 9, fan: 12, interference: 10,
 } as const;
 type FieldScene = typeof fieldScenes[keyof typeof fieldScenes];
 export type FieldMix = readonly [from: FieldScene, to: FieldScene, blend: number];
@@ -8,6 +8,18 @@ export type FieldMix = readonly [from: FieldScene, to: FieldScene, blend: number
 const scenes = Object.values(fieldScenes);
 const hold = 6;
 const transition = 8;
+const hues: Record<FieldScene, number> = {
+  [fieldScenes.current]: .57, [fieldScenes.aurora]: .43, [fieldScenes.ribbons]: .72,
+  [fieldScenes.weave]: .86, [fieldScenes.rain]: .59, [fieldScenes.dunes]: .085,
+  [fieldScenes.contours]: .32, [fieldScenes.orbit]: .66, [fieldScenes.constellation]: .60,
+  [fieldScenes.tide]: .47, [fieldScenes.prism]: .78, [fieldScenes.fan]: .97,
+  [fieldScenes.interference]: .48,
+};
+
+export function fieldHue([from, to, blend]: FieldMix): number {
+  const distance = hues[to] - hues[from];
+  return hues[from] + (distance - Math.round(distance)) * blend;
+}
 
 export function fieldMix(seconds: number): FieldMix {
   const period = hold + transition;
@@ -36,6 +48,22 @@ function fieldProfile(scene: FieldScene, u: number, v: number, time: number): nu
       const drop = .5 + .5 * Math.cos(v * 19 - time * 1.28 + 2.3 * Math.sin(x * 22));
       const streams = .49 + .51 * Math.cos(x * 8 + time * .28) ** 2;
       return lane * (.24 + 1.13 * drop ** 3) * streams;
+    }
+    case fieldScenes.ribbons: {
+      const bend = .60 * u + .08 * Math.sin(u * 6 - time * .26);
+      const phase = u * 6.4 - time * .52;
+      const wave = .12 * Math.sin(phase);
+      const a = v - bend - wave, b = v - bend + wave;
+      const shimmer = .44 + .56 * (.5 + .5 * Math.cos(phase + v * 4));
+      return (Math.exp(-a * a * 94) + .71 * Math.exp(-b * b * 117)) * shimmer;
+    }
+    case fieldScenes.fan: {
+      const x = u + .86, y = v - .53;
+      const radius = Math.hypot(x, y);
+      const angle = Math.atan2(y, Math.max(.03, x));
+      const ribs = (.5 + .5 * Math.cos(angle * 23 + radius * 3 + time * .38)) ** 4;
+      const sweep = .46 + .54 * (.5 + .5 * Math.sin(time * .65 - radius * 10 + angle));
+      return 1.25 * ribs * sweep * Math.exp(-((radius - .89) ** 2) * 3.1);
     }
     case fieldScenes.contours: {
       const x = u + .09 * Math.sin(v * 5 + time * .21);

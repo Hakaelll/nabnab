@@ -1,5 +1,5 @@
-import { fieldScenes, type FieldMix } from "./field-motion";
-import { COLOR_CYCLE_SECONDS, COLOR_WAVE_SECONDS, CONTINUOUS_COLOR_CYCLE_SECONDS } from "./graphics-color";
+import { fieldHue, fieldScenes, type FieldMix } from "./field-motion";
+import { COLOR_WAVE_SECONDS, CONTINUOUS_COLOR_CYCLE_SECONDS } from "./graphics-color";
 
 export type Glyph = { x: number; y: number; phase: number; depth: number; glyph: number };
 export type Wave = { x: number; y: number; born: number; strength: number; ellipse: number };
@@ -20,6 +20,7 @@ export function createFieldRenderer(canvas: HTMLCanvasElement) {
     uniform vec4 waves[3];
     uniform vec3 ellipses;
     uniform float fullColor;
+    uniform float sceneHue;
     uniform vec3 morph;
     out float opacity;
     flat out vec2 cell;
@@ -41,6 +42,19 @@ export function createFieldRenderer(canvas: HTMLCanvasElement) {
           float drop=.5+.5*cos(v*19.-time*1.28+2.3*sin(x*22.));
           float stream=cos(x*8.+time*.28);
           return lane*(.24+1.13*drop*drop*drop)*(.49+.51*stream*stream);
+        }
+        case ${fieldScenes.ribbons}: {
+          float bend=.60*u+.08*sin(u*6.-time*.26), phase=u*6.4-time*.52;
+          float wave=.12*sin(phase), a=v-bend-wave, b=v-bend+wave;
+          float shimmer=.44+.56*(.5+.5*cos(phase+v*4.));
+          return (exp(-a*a*94.)+.71*exp(-b*b*117.))*shimmer;
+        }
+        case ${fieldScenes.fan}: {
+          float x=u+.86,y=v-.53;
+          float radius=length(vec2(x,y)),angle=atan(y,max(.03,x));
+          float ribs=pow(.5+.5*cos(angle*23.+radius*3.+time*.38),4.);
+          float sweep=.46+.54*(.5+.5*sin(time*.65-radius*10.+angle));
+          return 1.25*ribs*sweep*exp(-pow(abs(radius-.89),2.)*3.1);
         }
         case ${fieldScenes.contours}: {
           float x=u+.09*sin(v*5.+time*.21);
@@ -142,10 +156,10 @@ export function createFieldRenderer(canvas: HTMLCanvasElement) {
       if (blend>0.) variation=mix(variation,fieldProfile(to,u,v),blend);
       opacity = min(.58,((.027+current*(ribbon*(.39+.12*crest)+filament*.17)+variation*.68)*depth*breathe*(.86+.24*twinkle)
         +light*.19+etch*(.14+.21*current)+glints*.15*current)*quiet);
-      float hue = time/mix(${COLOR_CYCLE_SECONDS.toFixed(1)},${CONTINUOUS_COLOR_CYCLE_SECONDS.toFixed(1)},fullColor) + dot(p/size,vec2(.025,.02));
-      hue += .075*fold + (1.-fullColor)*time/120.;
-      float ambient = max((.09+.30*sweep)*max(ribbon*current,etch),(.20+.28*sweep)*variation);
-      float saturation = mix(max(ambient,min(.72,chroma*.87)),max(.19+ambient,min(.85,chroma)),fullColor);
+      float hue = mix(sceneHue+.026*sin(time*.18),time/${CONTINUOUS_COLOR_CYCLE_SECONDS.toFixed(1)},fullColor)
+        + dot(p/size,vec2(.025,.02)) + .075*fold;
+      float ambient = max((.17+.36*sweep)*max(ribbon*current,etch),(.30+.36*sweep)*variation);
+      float saturation = clamp(mix(max(ambient,min(.72,chroma*.87)),max(.19+ambient,min(.85,chroma)),fullColor),0.,.88);
       vec3 spectrum = clamp(abs(fract(hue+vec3(0.,2./3.,1./3.))*6.-3.)-1.,0.,1.);
       ink = mix(vec3(1.),spectrum,saturation);
       cell = vec2(detail.z,detail.y>.55 ? 1. : 0.);
@@ -194,7 +208,7 @@ export function createFieldRenderer(canvas: HTMLCanvasElement) {
     if (!gl.getProgramParameter(program,gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program) || "Character field could not link.");
   } catch (error) { dispose(); throw error; }
   const uniform = (name: string) => gl.getUniformLocation(program,name);
-  const uniforms = {size:uniform("size"),ratio:uniform("ratio"),time:uniform("time"),readingWidth:uniform("readingWidth"),waveCount:uniform("waveCount"),waves:uniform("waves[0]"),ellipses:uniform("ellipses"),letters:uniform("letters"),fullColor:uniform("fullColor"),morph:uniform("morph")};
+  const uniforms = {size:uniform("size"),ratio:uniform("ratio"),time:uniform("time"),readingWidth:uniform("readingWidth"),waveCount:uniform("waveCount"),waves:uniform("waves[0]"),ellipses:uniform("ellipses"),letters:uniform("letters"),fullColor:uniform("fullColor"),sceneHue:uniform("sceneHue"),morph:uniform("morph")};
   const waveData = new Float32Array(12), ellipseData = new Float32Array(3);
   let count = 0;
   return {
@@ -229,6 +243,7 @@ export function createFieldRenderer(canvas: HTMLCanvasElement) {
       }
       gl.uniform1f(uniforms.time,time); gl.uniform1i(uniforms.waveCount,Math.min(3,waves.length));
       gl.uniform1f(uniforms.fullColor,fullColor?1:0);
+      gl.uniform1f(uniforms.sceneHue,fieldHue(morph));
       gl.uniform3f(uniforms.morph,...morph);
       gl.uniform4fv(uniforms.waves,waveData); gl.uniform3fv(uniforms.ellipses,ellipseData);
       gl.clearColor(9/255,10/255,12/255,1); gl.clear(gl.COLOR_BUFFER_BIT);

@@ -23,13 +23,13 @@ try{
     await page.route(base,async route=>{const response=await route.fetch();const html=(await response.text()).replace(/<script\s+type="module"\s+src="\/src\/main\.ts[^"]*"><\/script>/,`<script type="module">${setup}</script>`);await route.fulfill({response,body:html});});
     await page.goto(base);await page.locator('#url').waitFor();await page.evaluate(()=>document.fonts.ready);
     const shell = () => page.evaluate(() => Object.fromEntries(
-      ["#main", ".sidebar-mark", ".titlebar-search", ".nav-item[data-page='library']"].map(selector => {
+      ["#main", ".sidebar", ".titlebar-search", ".nav-item[data-page='library']"].map(selector => {
         const box = document.querySelector(selector).getBoundingClientRect();
         return [selector, [box.x, box.y, box.width, box.height]];
       })
     ));
     const homeShell = await shell();
-    assert.ok(homeShell[".sidebar-mark"][2] > 0 && homeShell[".titlebar-search"][2] > 0);
+    assert.ok(homeShell[".sidebar"][2] > 0 && homeShell[".titlebar-search"][2] > 0);
     if (!before) assert.deepEqual(await page.locator(".work-area").evaluate(area => {
       const style = getComputedStyle(area);
       return [style.borderTopWidth, style.borderTopLeftRadius, style.backgroundColor];
@@ -62,9 +62,9 @@ try{
     if(patterns){
       assert.equal(await page.locator("#field").evaluate(canvas=>Boolean(canvas.getContext("webgl2"))),!cpu);
       const samples = [
-        ["blend", 70], ["aurora", 60], ["weave", 140], ["rain", 140], ["dunes", 140],
+        ["blend", 70], ["aurora", 60], ...(!before ? [["ribbons", 140]] : []), ["weave", 140], ["rain", 140], ["dunes", 140],
         ["contours", 140], ["orbit", 140], ["constellation", 140], ["tide", 140], ["prism", 140],
-        ["interference", 140], ["loop", 140],
+        ...(!before ? [["fan", 140]] : []), ["interference", 140], ["loop", 140],
       ];
       for(const [name,frames] of samples){
         await page.evaluate(frames=>window.stepMotion(frames,100),frames);

@@ -1,6 +1,6 @@
 import sourcePoints from "./emblem-points.json";
 import { createFieldRenderer, type Glyph, type Wave } from "./field";
-import { fieldMix, fieldScenes, fieldVariation } from "./field-motion";
+import { fieldHue, fieldMix, fieldScenes, fieldVariation } from "./field-motion";
 import { COLOR_WAVE_SECONDS, waveDelay, isFullColor, onColorModeChange, spectrumAt, tintPacked } from "./graphics-color";
 export { handleEmblemClick } from "./graphics-color";
 type Point = { x: number; y: number; z: number; edge: boolean; face: number; hue: number };
@@ -91,6 +91,7 @@ export function startGraphics(background: HTMLCanvasElement, emblem: HTMLCanvasE
     const readingWidth = Math.min(width - 64, width >= 1500 ? 740 : width >= 900 ? 600 : 480);
     const drift = time * 0.16;
     const [from, to, blend] = mix;
+    const sceneHue = fieldHue(mix) + .026 * Math.sin(time * .18);
     const current = from === fieldScenes.current ? 1 - blend : to === fieldScenes.current ? blend : 0;
     for (const g of glyphs) {
       const u = (g.x - width * 0.5) / span, v = (g.y - height * 0.48) / span;
@@ -135,11 +136,11 @@ export function startGraphics(background: HTMLCanvasElement, emblem: HTMLCanvasE
       const level = Math.round(opacity * 108);
       const palette = level * 16;
       const spectrum = spectrumAt(time, x, y, width, height, waves, fullColor, reducedMotion);
-      const ambient = Math.max((.09 + .30 * sweep) * Math.max(ribbon * current, etch), (.20 + .28 * sweep) * variation);
-      const saturation = fullColor ? Math.max(.19 + ambient, Math.min(.85, spectrum.saturation / .9))
-        : Math.max(ambient, Math.min(.72, spectrum.saturation * .87 / .72));
+      const ambient = Math.max((.17 + .36 * sweep) * Math.max(ribbon * current, etch), (.30 + .36 * sweep) * variation);
+      const saturation = Math.min(.88, fullColor ? Math.max(.19 + ambient, Math.min(.85, spectrum.saturation / .9))
+        : Math.max(ambient, Math.min(.72, spectrum.saturation * .87 / .72)));
       const tinted = saturation > .001;
-      const hue = spectrum.hue + .075 * fold + (fullColor ? 0 : time / 120);
+      const hue = .075 * fold + (fullColor ? spectrum.hue : sceneHue + x / width * .025 + y / height * .02);
       const tint = tinted ? tintPacked(hue, saturation) : 0xffffff;
       const redInk=(tint&255)/255,greenInk=((tint>>>8)&255)/255,blueInk=((tint>>>16)&255)/255;
       const mask = masks[g.glyph + (g.depth > 0.55 ? alphabet.length : 0)];
