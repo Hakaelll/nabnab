@@ -433,10 +433,10 @@ export function createCoursesController(hooks: CourseHooks) {
     const pages = status?.pages === 1 ? t("1 página consultada", "1 page fetched")
       : status ? t(`${status.pages} páginas consultadas`, `${status.pages} pages fetched`) : "";
     return `<details id="course-coursera-business" class="course-resource-entry">
-      <summary>${t("Temario de Coursera Business", "Coursera Business outline")}${status ? `<small class="course-outline-status">${status.partial ? `${t("Temario parcial", "Partial outline")} · ` : ""}${pages}</small>` : ""}</summary>
+      <summary>${t("Temario de Coursera Business", "Coursera Business outline")}${status ? `<small class="course-outline-status">${status.partial ? `${t("Consulta parcial", "Partial fetch")} · ` : ""}${pages}</small>` : ""}</summary>
       <form id="course-coursera-form" class="settings-form" aria-busy="${busy}">
         <p class="field-note">${t("Usa un token autorizado de Business, Campus o Government. La consulta guarda el temario y usa el token solo durante la solicitud.", "Use an authorized Business, Campus or Government token. This request saves the outline and uses the token only for the request.")}</p>
-        ${status?.partial ? `<p class="field-note">${t("El temario guardado contiene las páginas que se pudieron consultar. Abre el curso en Coursera para ver el contenido restante.", "The saved outline contains the pages that could be fetched. Open the course in Coursera to see the remaining content.")}</p>` : ""}
+        ${status?.partial ? `<p class="field-note">${t("La última consulta fue parcial. El temario conserva las lecciones y fichas de materiales guardadas anteriormente. Consulta el curso en Coursera para revisar el contenido actual.", "The last fetch was partial. The outline keeps previously saved lessons and material records. Open the course in Coursera to review the current content.")}</p>` : ""}
         <fieldset ${busy ? "disabled" : ""}>
           <div class="form-grid">
             ${idField("organization", t("ID de organización", "Organization ID"), courseraIds.organization)}
@@ -753,7 +753,8 @@ export function createCoursesController(hooks: CourseHooks) {
         courseId = result.id;
         lessonId = course?.id === courseId ? lessonId : result.sections[0]?.lessons[0]?.id ?? null;
         saved = true;
-        hooks.notify(t("Temario guardado.", "Outline saved."), "success");
+        hooks.notify(result.outlineStatus?.partial ? t("Actualización parcial del temario guardada.", "Partial outline update saved.")
+          : t("Temario guardado.", "Outline saved."), "success");
       });
       const entry = document.querySelector<HTMLDetailsElement>("#course-coursera-business");
       if (entry) entry.open = !saved;

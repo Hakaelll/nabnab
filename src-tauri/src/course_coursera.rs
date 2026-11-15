@@ -6,7 +6,7 @@ use super::{
 use crate::{queue, AppState};
 use serde::Deserialize;
 use serde_json::Value;
-use std::{collections::HashMap, future::Future, sync::Arc, time::Duration};
+use std::{collections::{HashMap, HashSet}, future::Future, sync::Arc, time::Duration};
 use tauri::State;
 use url::Url;
 
@@ -284,6 +284,7 @@ fn store_outline(
             );
         }
         course.created_at = previous.created_at;
+        let partial = course.outline_status.is_some_and(|status| status.partial);
         let old_lessons: HashMap<_, _> = previous
             .sections
             .iter()
@@ -296,10 +297,11 @@ fn store_outline(
             .flat_map(|section| &mut section.lessons)
         {
             if let Some(old) = old_lessons.get(&lesson.id) {
+                let received: HashSet<_> = lesson.assets.iter().map(|asset| asset.id.clone()).collect();
                 lesson.assets.extend(
                     old.assets
                         .iter()
-                        .filter(|asset| asset.status == "local")
+                        .filter(|asset| (partial || asset.status == "local") && !received.contains(&asset.id))
                         .cloned(),
                 );
             }
@@ -410,6 +412,22 @@ mod tests {
         assert_eq!(refreshed.created_at, 17);
         assert_eq!(refreshed.outline_status.unwrap().pages, 2);
         assert!(repo.data.jobs.is_empty());
+        let mut incomplete = outline.clone();
+        incomplete.outline_status = Some(OutlineStatus { pages: 1, partial: true });
+        incomplete.sections.truncate(1);
+        incomplete.sections[0].lessons[0].assets.truncate(1);
+        let partial = store_outline(&mut repo, incomplete.clone()).unwrap();
+        assert_eq!(partial.sections.len(), 3);
+        let lesson = &partial.sections[0].lessons[0];
+        assert_eq!(lesson.assets.iter().map(|asset| asset.title.as_str()).collect::<Vec<_>>(),
+            ["Lecture", "Handout", "Check understanding", "Saved notes.pdf"]);
+        assert!(lesson.learned);
+        assert_eq!(lesson.notes[0].text, "Keep this note");
+
+        incomplete.outline_status = Some(status);
+        let complete = store_outline(&mut repo, incomplete).unwrap();
+        assert_eq!(complete.sections[0].lessons[0].assets.iter().map(|asset| asset.title.as_str()).collect::<Vec<_>>(),
+            ["Lecture", "Saved notes.pdf"]);
         let mut other_course = outline;
         other_course.slug = Some("other".into());
         assert!(store_outline(&mut repo, other_course).is_err());

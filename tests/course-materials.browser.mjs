@@ -589,8 +589,8 @@ try {
   assert.equal(await page.locator("[data-action='course-queue']").count(), 0);
   assert.equal(await page.locator("[data-course-asset]").count(), 0);
   const outlineStatus = business.locator(".course-outline-status");
-  assert.equal(await outlineStatus.innerText(), "Temario parcial · 2 páginas consultadas");
-  await page.getByText("Temario guardado.", {exact:true}).waitFor();
+  assert.equal(await outlineStatus.innerText(), "Consulta parcial · 2 páginas consultadas");
+  await page.getByText("Actualización parcial del temario guardada.", {exact:true}).waitFor();
   assert.equal(await page.getByText("Error: Coursera Business returned HTTP 401.", {exact:true}).count(), 0);
   await page.locator("[data-action='dismiss-message']").click();
   const courseCall = await page.evaluate(() => window.courseFixture.calls.filter(call => call.cmd === "inspect_coursera_course").at(-1).args);
@@ -606,8 +606,11 @@ try {
   }
   await page.getByRole("button", { name: "Todos los cursos" }).click();
   await page.locator('[data-action="course-open"][data-id="business-course"]').click();
-  assert.equal(await outlineStatus.innerText(), "Temario parcial · 2 páginas consultadas");
+  assert.equal(await outlineStatus.innerText(), "Consulta parcial · 2 páginas consultadas");
   await business.locator("summary").press("Enter");
+  await business.getByText(/La última consulta fue parcial/).waitFor();
+  await business.scrollIntoViewIfNeeded();
+  await page.screenshot({path:`${directory}/coursera-partial-refresh-900.png`,animations:"disabled"});
   await token.fill("complete-fixture");
   await business.getByRole("button", { name: "Actualizar temario" }).press("Enter");
   await page.waitForFunction(() => document.querySelector(".course-outline-status")?.textContent === "3 páginas consultadas");
