@@ -65,6 +65,10 @@ Abre una lección y pulsa **Editar títulos** para corregir el nombre de la lecc
 
 En Domestika y en un aula de Rocketseat puedes usar **Añadir enlace de lección**. Pega el enlace oficial de la lección del mismo curso y guarda. **Abrir lección en Domestika** o **Abrir lección en Rocketseat** te lleva a esa página en el navegador del sistema. nabnab guarda la ruta de la lección y descarta los parámetros y el fragmento del enlace. Puedes corregirlo o retirarlo desde **Editar títulos**. Si la plataforma pide iniciar sesión, hazlo en el navegador. [Temario de ejemplo en Domestika](https://www.domestika.org/en/courses/262-creative-drawing-techniques-for-beginners/course) · [Página de lección de Rocketseat](https://app.rocketseat.com.br/classroom/jornada-primeira-vaga-01/group/jornada-primeira-vaga-01/lesson/land-aula-01-como-comecar-na-programacao)
 
+También puedes pegar varias lecciones con enlaces de una vez. En **Temario manual**, escribe una línea `Título | URL` por cada lección que quieras enlazar. La revisión muestra las direcciones que se guardarán y avisa si un enlace se repite o corresponde a otro curso. Si corriges el título de una lección dentro de la misma unidad, su enlace guardado permite conservar los archivos, las notas y el progreso.
+
+![Revisión en Windows de un temario con enlaces oficiales, con datos de prueba](course-outline-links.png)
+
 ![Enlace oficial integrado en la vista de estudio con datos de prueba](course-official-lesson-link.png)
 
 ![Edición de los títulos de una unidad y una lección en Windows con datos de prueba](course-outline-titles.png)

@@ -187,6 +187,39 @@ try {
   assert.notEqual(reordered.sections[0].lessons[2].id, lessonId);
   assert.notEqual(reordered.sections[1].id, course.sections[0].id);
 
+  const linkedOutline = `# Taller de preparación\nPreparación corregida | ${official}?token=fixture#start\nCrear una muestra`;
+  const linkedReview = await rpc("course_manual_outline", { ...request, text: linkedOutline });
+  assert.deepEqual(linkedReview.sections[0].lessons.map(item => [item.title, item.sourceUrl]), [
+    ["Preparación corregida", official], ["Crear una muestra", undefined],
+  ]);
+  const linkedSaved = await rpc("course_manual_outline", { ...request, text: linkedOutline, save: true });
+  assert.equal(linkedSaved.sections[0].lessons[0].id, lessonId);
+  assert.equal(linkedSaved.sections[0].lessons[0].notes[0].text, "Nota de estudio");
+  assert.equal(linkedSaved.sections[0].lessons[0].learned, true);
+  for (const text of [
+    `# Taller de preparación\nOtra | ${official.replace("24-", "25-")}`,
+    `# Taller de preparación\nPrimera | ${official}\nSegunda | ${official.replace("/es/", "/en/")}?copy=2`,
+    `# Taller de preparación\nCrear una muestra | ${official}`,
+  ]) {
+    await assert.rejects(rpc("course_manual_outline", { ...request, text, save: true }), /line/i);
+  }
+  await page.getByRole("button", { name: "Plataformas", exact: true }).click();
+  await page.locator("[data-action='open-courses'][data-id='domestika']").click();
+  await page.getByRole("button", { name: new RegExp(title) }).click();
+  await page.locator("#course-manual-outline > summary").press("Enter");
+  const linkedEditor = page.getByLabel("Unidades y lecciones", { exact: true });
+  assert.match(await linkedEditor.inputValue(), /Preparación corregida \| https:/);
+  await linkedEditor.fill(linkedOutline);
+  await page.getByRole("button", { name: "Revisar temario", exact: true }).press("Enter");
+  await page.getByText(official, { exact: true }).waitFor();
+  for (const [width, height] of [[900, 620], [1180, 780]]) {
+    await page.setViewportSize({ width, height });
+    assert.ok(await page.locator(".course-outline-review").evaluate(node => node.scrollWidth <= node.clientWidth + 1));
+    if (process.env.NABNAB_NATIVE_COURSE_ARTIFACTS) await page.screenshot({ path: path.join(artifacts, `course-outline-links-${width}.png`), animations: "disabled" });
+  }
+  await page.getByRole("button", { name: "Guardar temario", exact: true }).press("Enter");
+  await page.getByRole("button", { name: "Abrir lección en Domestika", exact: true }).waitFor();
+
   const skillshare = { provider: "skillshare", url: "https://www.skillshare.com/en/classes/Fixture/123", title: "Clase de prueba", text: "# Práctica\nPreparar" };
   const skillCourse = await rpc("course_manual_outline", { ...skillshare, save: true });
   const skillLesson = skillCourse.sections[0].lessons[0].id;
@@ -201,6 +234,8 @@ try {
   const rocketLesson = rocket.sections[0].lessons[0];
   const rocketEdit = { courseId: rocket.id, lessonId: rocketLesson.id, unitTitle: rocket.sections[0].title, lessonTitle: rocketLesson.title };
   const rocketPage = `${rocket.url}/group/introducao/lesson/primeiro-passo`;
+  const rocketReview = await rpc("course_manual_outline", { ...request, provider:"rocketseat", url:rocket.url, text:`# Unidad práctica\nPreparar el material | ${rocketPage}?token=fixture` });
+  assert.equal(rocketReview.sections[0].lessons[0].sourceUrl, rocketPage);
   await assert.rejects(rpc("rename_course_outline_titles", { ...rocketEdit, sourceUrl: rocketPage.replace("app.rocketseat.com.br", "app.rocketseat.com.br.invalid") }), /invalid-course-lesson-url/);
   await assert.rejects(rpc("rename_course_outline_titles", { ...rocketEdit, sourceUrl: `${rocket.url}/group/introducao` }), /invalid-course-lesson-url/);
   await rpc("rename_course_outline_titles", { ...rocketEdit, sourceUrl: rocketPage + "?token=fixture" });

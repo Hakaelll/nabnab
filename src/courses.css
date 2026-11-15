@@ -101,6 +101,7 @@
 .course-outline-review { overflow-wrap: anywhere; }
 .course-outline-review ol { margin: 0; padding: 0 16px 12px 38px; }
 .course-outline-review li { padding-block: 4px; }
+.course-outline-link { display: block; margin-top: 3px; }
 @media (max-width: 1000px) { .course-layout { grid-template-columns: minmax(0, 1fr); } }
 @media (min-width: 860px) and (max-width: 1000px) {
   .course-layout--browser { grid-template-columns: minmax(180px, 1fr) minmax(0, 2fr); }

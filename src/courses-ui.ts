@@ -21,7 +21,7 @@ const courseProviders: [CourseProvider, string][] = [
 const isBrowserProvider = (value: string): value is BrowserCourseProvider => Object.hasOwn(browserCoursePlatforms, value);
 const hasManualOutline = (provider: string): boolean => provider === "rocketseat" || provider === "domestika" || provider === "skillshare";
 const hasLessonLinks = (provider: string, url: string | null): boolean =>
-  provider === "domestika" || provider === "rocketseat" && Boolean(url?.startsWith("https://app.rocketseat.com.br/classroom/"));
+  provider === "domestika" || provider === "rocketseat" && Boolean(url?.trim().startsWith("https://app.rocketseat.com.br/classroom/"));
 const courseProviderName = (id: string) => courseProviders.find(([value]) => value === id)?.[1] ?? id;
 const skillshareResourceSection = "skillshare-resources";
 const unitResourceId = (unitId: string) => `unit-resources-${unitId}`;
@@ -366,12 +366,16 @@ export function createCoursesController(hooks: CourseHooks) {
 
   function outlineForm(course?: Course): string {
     const saved = course?.sections.filter(isManualUnit)
-      .map(section => [`# ${section.title}`, ...section.lessons.filter(isManualLesson).map(lesson => lesson.title)].join("\n")).join("\n\n") ?? "";
+      .map(section => [`# ${section.title}`, ...section.lessons.filter(isManualLesson)
+        .map(lesson => lesson.sourceUrl ? `${lesson.title} | ${lesson.sourceUrl}` : lesson.title)].join("\n")).join("\n\n") ?? "";
+    const source = course?.provider ?? provider;
+    const linkHint = source === "domestika" ? t("Para añadir un enlace oficial, usa el formato Título | URL.", "To add an official link, use the format Title | URL.")
+      : source === "rocketseat" ? t("Para enlazar una lección de un aula, usa el formato Título | URL.", "To link a classroom lesson, use the format Title | URL.") : "";
     return `<details id="course-manual-outline" class="course-resource-entry">
       <summary>${t("Temario manual", "Manual outline")}</summary>
       <form id="course-outline-form" class="settings-form" aria-busy="${busy}">
         <label for="course-outline-text">${t("Unidades y lecciones", "Units and lessons")}</label>
-        <p id="course-outline-hint" class="field-note">${t("Escribe # antes de cada título de unidad y una lección por línea. Usa solo títulos.", "Start each unit title with # and put one lesson on each following line. Use titles only.")}</p>
+        <p id="course-outline-hint" class="field-note">${t("Escribe # antes de cada título de unidad y una lección por línea.", "Start each unit title with # and put one lesson on each following line.")} ${linkHint}</p>
         <textarea id="course-outline-text" name="outline" required rows="6" maxlength="65536" aria-describedby="course-outline-hint" placeholder="${t("# Unidad 1&#10;Introducción&#10;Primer ejercicio", "# Unit 1&#10;Introduction&#10;First exercise")}" ${busy ? "disabled" : ""}>${h(outlineText ?? saved)}</textarea>
         <div class="button-group"><button type="submit" class="button secondary" ${busy ? "disabled" : ""}>${t("Revisar temario", "Review outline")}</button></div>
       </form></details>`;
@@ -381,7 +385,7 @@ export function createCoursesController(hooks: CourseHooks) {
     return `<section class="course-review course-outline-review">
       <div class="page-heading"><div><h1 id="course-heading" tabindex="-1">${t("Revisar temario", "Review outline")}</h1><p>${h(course.title)} · ${h(courseProviderName(course.provider))}</p></div></div>
       <p class="field-note">${t("Comprueba el orden antes de guardar. Las lecciones guardadas que falten en este temario se conservan.", "Check the order before saving. Saved lessons omitted from this outline are kept.")}</p>
-      <div class="course-review-groups">${course.sections.map(section => `<details open><summary><strong>${h(section.title)}</strong><small>${lessonCount(section.lessons.length)}</small></summary><ol>${section.lessons.map(lesson => `<li>${h(lesson.title)}</li>`).join("")}</ol></details>`).join("")}</div>
+      <div class="course-review-groups">${course.sections.map(section => `<details open><summary><strong>${h(section.title)}</strong><small>${lessonCount(section.lessons.length)}</small></summary><ol>${section.lessons.map(lesson => `<li>${h(lesson.title)}${lesson.sourceUrl ? `<small class="course-outline-link" dir="ltr">${h(lesson.sourceUrl)}</small>` : ""}</li>`).join("")}</ol></details>`).join("")}</div>
       <footer class="course-review-footer"><output>${lessonCount(studyLessonCount(course))}</output><div class="button-group">
         ${action("course-outline-back", t("Editar temario", "Edit outline"), undefined, "quiet", busy ? "disabled" : "")}
         ${action("course-outline-save", t("Guardar temario", "Save outline"), "add", "primary", busy ? "disabled" : "")}</div></footer>

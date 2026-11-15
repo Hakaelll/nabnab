@@ -192,18 +192,35 @@ fn new_outline_id(prefix: &str, key: &str, occupied: &mut HashSet<String>) -> St
     id
 }
 
-fn outline_sections(text: &str, previous: Option<&Course>) -> Result<Vec<CourseSection>, String> {
+fn outline_link_key(provider: &str, page: &Url) -> Option<String> {
+    if provider != "domestika" {
+        return Some(page.path().to_owned());
+    }
+    let (_, tail) = page.path().rsplit_once("/units/")?;
+    let (unit, lesson) = tail.split_once("/lessons/")?;
+    Some(format!("{}:{}", number(unit.split_once('-')?.0)?, number(lesson.split_once('-')?.0)?))
+}
+
+fn outline_sections(text: &str, link: &CourseLink, previous: Option<&Course>) -> Result<Vec<CourseSection>, String> {
     if text.len() > 64 * 1024 {
-        return Err("The outline is too long. Use up to 64 KiB of titles.".into());
+        return Err("The outline is too long. Use up to 64 KiB of titles and links.".into());
     }
     let mut sections: Vec<CourseSection> = Vec::new();
     let mut used = HashSet::new();
+    let mut used_links = HashSet::new();
+    let mut used_lesson_ids = HashSet::new();
     let saved_sections = previous.map_or(&[][..], |course| course.sections.as_slice());
     let saved_units: HashMap<_, _> = saved_sections.iter().filter(|unit| unit.id.starts_with(OUTLINE_SECTION))
         .map(|unit| (unit.title.to_lowercase(), unit)).collect();
     let saved_lessons: HashMap<_, _> = saved_sections.iter().flat_map(|unit| unit.lessons.iter()
         .filter(|lesson| lesson.id.starts_with(OUTLINE_LESSON))
         .map(|lesson| ((unit.id.as_str(), lesson.title.to_lowercase()), lesson))).collect();
+    let mut saved_links = HashMap::<_, Vec<_>>::new();
+    for ((unit, _), lesson) in &saved_lessons {
+        let key = lesson.source_url.as_deref().and_then(|url| Url::parse(url).ok())
+            .and_then(|page| outline_link_key(link.provider, &page));
+        if let Some(key) = key { saved_links.entry((*unit, key)).or_default().push(*lesson); }
+    }
     let mut occupied: HashSet<_> = saved_sections.iter().flat_map(|unit| {
         std::iter::once(unit.id.clone()).chain(unit.lessons.iter().map(|lesson| lesson.id.clone()))
     }).collect();
@@ -212,7 +229,21 @@ fn outline_sections(text: &str, previous: Option<&Course>) -> Result<Vec<CourseS
         let line = line.trim();
         if line.is_empty() { continue; }
         let heading = line.strip_prefix("# ");
-        let title = heading.unwrap_or(line).trim();
+        let (title, url) = if let Some(heading) = heading {
+            (heading, None)
+        } else if let Some((title, url)) = line.rsplit_once(" | ").filter(|(_, url)| url.contains("://")) {
+            let url = lesson_page(link.provider, link.page.as_str(), url)
+                .ok_or_else(|| format!("Use an official lesson link from this course on line {}.", index + 1))?;
+            let key = outline_link_key(link.provider, &url)
+                .ok_or_else(|| format!("Invalid lesson link on line {}.", index + 1))?;
+            if !used_links.insert(key.clone()) {
+                return Err(format!("Duplicate lesson link on line {}.", index + 1));
+            }
+            (title, Some((url.to_string(), key)))
+        } else {
+            (line, None)
+        };
+        let title = title.trim();
         let invalid = || format!("Check outline line {}. Use # followed by a unit title, then one lesson title per line.", index + 1);
         if !valid_outline_title(title) { return Err(invalid()); }
         let key = title.to_lowercase();
@@ -224,11 +255,23 @@ fn outline_sections(text: &str, previous: Option<&Course>) -> Result<Vec<CourseS
         } else {
             let section = sections.last_mut().ok_or_else(invalid)?;
             if !used.insert((Some(section.id.clone()), key.clone())) { return Err(format!("Duplicate lesson on line {}.", index + 1)); }
-            let previous = saved_lessons.get(&(section.id.as_str(), key.clone()));
+            let by_title = saved_lessons.get(&(section.id.as_str(), key.clone())).copied();
+            let by_link = match url.as_ref().and_then(|(_, key)| saved_links.get(&(section.id.as_str(), key.clone()))).map(Vec::as_slice) {
+                Some([lesson]) => Some(*lesson),
+                Some(_) => return Err(format!("The link matches multiple saved lessons on line {}.", index + 1)),
+                None => None,
+            };
+            if by_link.zip(by_title).is_some_and(|(a, b)| a.id != b.id) {
+                return Err(format!("The title and link refer to different saved lessons on line {}.", index + 1));
+            }
+            let previous = by_link.or(by_title);
             let id = previous.map(|lesson| lesson.id.clone())
                 .unwrap_or_else(|| new_outline_id(OUTLINE_LESSON, &format!("{}:{key}", section.id), &mut occupied));
+            if !used_lesson_ids.insert(id.clone()) {
+                return Err(format!("A saved lesson appears twice on line {}.", index + 1));
+            }
             section.lessons.push(CourseLesson { id, title: title.into(), learned: false, assets: Vec::new(), notes: Vec::new(),
-                source_url: previous.and_then(|lesson| lesson.source_url.clone()) });
+                source_url: url.map(|(url, _)| url).or_else(|| previous.and_then(|lesson| lesson.source_url.clone())) });
             lessons += 1;
         }
         if sections.len() > 50 || lessons > 400 { return Err("Use up to 50 units and 400 lessons.".into()); }
@@ -252,8 +295,9 @@ pub fn course_manual_outline(
     let mut guard = state.repository.lock().unwrap();
     let repo = guard.as_mut().ok_or("Open the app first.")?;
     let previous = repo.data.courses.iter().find(|previous| previous.id == link.id);
+    let sections = outline_sections(&text, &link, previous)?;
     let mut course = Course { id: link.id, title, provider, url: Some(link.page.to_string()),
-        slug: None, sections: outline_sections(&text, previous)?, created_at: queue::now(), outline_status: None };
+        slug: None, sections, created_at: queue::now(), outline_status: None };
     if !save { return Ok(course); }
     if let Some(previous) = previous {
         course.created_at = previous.created_at;
