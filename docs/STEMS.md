@@ -28,6 +28,8 @@ El paquete usa Spleeter de Deezer en FP16, convertido para sherpa-onnx 2.0.1. La
 
 La cola comparte el límite de procesamiento con ampliación y transcripción. Cancelar la muestra o la tarea detiene su proceso. Los fragmentos de inferencia solapados acotan la memoria y los archivos intermedios se eliminan al terminar. Si cierras nabnab por la fuerza, el siguiente inicio retira los temporales que quedaron en la carpeta privada de previsualizaciones. Las pistas exportadas siguen disponibles en Biblioteca. El límite de 30 minutos por archivo acota el espacio temporal.
 
+Al recuperar una separación interrumpida, nabnab elimina los temporales de inferencia que quedaron dentro de su carpeta de trabajo. Conserva las salidas y los datos que permiten recuperar una publicación. Puedes reintentar la separación desde Descargas.
+
 ## Verificación
 
 En Edge se comprobó el arrastre, el ajuste por teclado y la entrada numérica a 900 y 1180 px con audio sintético. Cambiar el tramo retiró la comparación anterior y deshabilitó la exportación hasta generar otra muestra. En WebView2 se verificó la línea de tiempo con un vídeo local y la comparación de dos FLAC ya exportados.

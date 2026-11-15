@@ -103,8 +103,28 @@ try {
   fixture.jobs.push({ id: "19999-1", runId: 1, clientRequest: "fixture-stems-results", title: "Pistas de prueba", createdAt: 19999, updatedAt: 19999,
     state: "completed", source: { kind: "stems", selection: { libraryId: source.id, inputHash: createHash("sha256").update(await readFile(original)).digest("hex") } },
     folder: output, provider: "Spleeter", thumbnail: null, progress: null, outputs: files.map(item => item.path), error: null, attempt: 1, groupId: null, associations: [] });
+  const stemsJob = fixture.jobs.find(job => job.id === "19999-1");
+  const dub = { kind: "dubVoice", selection: { draftId: "19999-5", revision: 1, settings: { voiceId: "0".repeat(64), rate: 0, volume: 100 } } };
+  for (const [id, owner, jobSource] of [["19999-2", "19999-2", stemsJob.source], ["19999-3", "19999-4", stemsJob.source], ["19999-6", "19999-6", dub]]) {
+    fixture.jobs.push({ ...stemsJob, id, clientRequest: `fixture-recovery-${id}`, source: jobSource, state: "processing", outputs: [] });
+    const stage = path.join(output, `.nabnab-${id}`);
+    const scratch = path.join(stage, "local-previews", "19999-0");
+    await mkdir(scratch, { recursive: true });
+    await writeFile(path.join(scratch, "decoded.wav"), "unfinished scratch");
+    await writeFile(path.join(stage, "owner.json"), JSON.stringify({ schemaVersion: 1, jobId: owner, runId: 1 }));
+    await writeFile(path.join(stage, "publication.new"), "keep publication scratch");
+    await writeFile(path.join(stage, "Vocals.flac"), "keep job output");
+  }
   await writeFile(repository, JSON.stringify(fixture));
-  await launch();
+  const recovered = await launch();
+  for (const id of ["19999-2", "19999-6"]) {
+    assert.equal(recovered.jobs.find(job => job.id === id)?.state, "paused");
+    const stage = path.join(output, `.nabnab-${id}`);
+    await assert.rejects(stat(path.join(stage, "local-previews", "19999-0")), { code: "ENOENT" });
+    assert.equal(await readFile(path.join(stage, "publication.new"), "utf8"), "keep publication scratch");
+    assert.equal(await readFile(path.join(stage, "Vocals.flac"), "utf8"), "keep job output");
+  }
+  assert.equal(await readFile(path.join(output, ".nabnab-19999-3", "local-previews", "19999-0", "decoded.wav"), "utf8"), "unfinished scratch");
   const errors = [];
   page.on("pageerror", error => errors.push(error.message));
   const media = page.locator("#audio-engine");

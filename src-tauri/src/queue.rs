@@ -346,6 +346,13 @@ impl Job {
             self.updated_at = now();
         }
         if !matches!(self.state, JobState::Paused | JobState::Cancelled) || self.run_id == 0 { return; }
+        if matches!(self.source, Source::Stems { .. } | Source::DubVoice { .. }) {
+            if let Ok((_, path)) = stage_path(self) {
+                if let Ok(staging) = owned_stage(self, &path) {
+                    let _ = crate::workspaces::cleanup(&staging);
+                }
+            }
+        }
         let Source::PersonalFile { selection } = &self.source else { return; };
         if self.state == JobState::Cancelled {
             let _ = discard_personal_partial(self);

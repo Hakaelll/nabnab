@@ -40,6 +40,8 @@ Si quedan frases que no caben, el panel muestra hasta 16 avisos por intento. Cad
 
 ![Dos avisos de doblaje con acceso a sus segmentos](dubbing-timing-review.png)
 
+Al recuperar un WAV de doblaje interrumpido, nabnab elimina los temporales de ajuste de duración que quedaron dentro de su carpeta de trabajo. Conserva la caché de segmentos y los datos de recuperación de la salida.
+
 ![Acceso a la muestra del segmento 14 después de guardar la edición](dubbing-return-to-sample.png)
 
 Cada segmento se reutiliza según su texto, voz, volumen y ritmo. Al editar el borrador, la nueva versión puede aprovechar el audio de los segmentos que conservan esos datos. La caché de voz comparte el espacio administrado con Narración local. El WAV y las copias de vídeo se guardan en el destino seleccionado.
