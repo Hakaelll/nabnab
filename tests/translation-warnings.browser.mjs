@@ -23,6 +23,13 @@ const setup = `
     error: { code: "dubbing_timing", technical: "DUB_TIMING 2, 14", message: "Some cues do not fit." } };
   const snapshot = { settings, jobs: [job, dub], library: [], collections: [], drafts: [], sources: [], rules: [], smartCollections: [], presets: [], audioPlaylists: [] };
   const calls = window.translationCalls = [];
+  window.setDubbingJob = async state => {
+    const paused = { ...dub, id: "fixture-resumable-dub", state, error: null, createdAt: 3, updatedAt: 3, folder: "C:/Doblaje guardado",
+      source: { ...dub.source, selection: { ...dub.source.selection, revision: 3 } } };
+    snapshot.jobs.push(paused);
+    const { emit } = await import("/node_modules/@tauri-apps/api/event.js");
+    await emit("job-update", paused);
+  };
   const original = Array.from({ length: 15 }, (_, index) => ({ identifier: "escena-" + (index + 1), start: index * 8, end: index * 8 + (index === 13 ? 0.8 : 5), text: index === 2 ? "<i>Aquí continúa</i> la escena." : "Segmento original " + (index + 1) }));
   const translated = original.map((cue, index) => "Cue " + (index + 1));
   translated[0] = "This line is deliberately wider than the suggested line width.";
@@ -36,6 +43,11 @@ const setup = `
     if (command === "voice_status") return { enabled: true, available: true, voices: [{ id: "fixture-voice", name: "Fixture voice", language: "en-US", enabled: true }] };
     if (command === "translation_drafts") return [draft.id];
     if (command === "translation_read") return structuredClone(draft);
+    if (command === "job_action" && args.action === "retry") {
+      const existing = snapshot.jobs.find(job => job.id === args.ids[0]);
+      Object.assign(existing, { state: "pending", runId: existing.runId + 1, updatedAt: existing.updatedAt + 1 });
+      return snapshot;
+    }
     if (command === "translation_edit") {
       for (const { index, text } of args.edits) draft.translated[index] = text;
       draft = { ...draft, revision: draft.revision + 1, edited: args.edits.map(edit => edit.index) };
@@ -182,6 +194,21 @@ try {
   assert.deepEqual(await page.evaluate(() => window.translationCalls.filter(call => call.command === "translation_edit").at(-1).args), {
     draftId: "fixture", revision: 2, edits: [{ index: 13, text: "See you." }, { index: 1, text: "Hello." }],
   });
+  await page.evaluate(() => window.setDubbingJob("paused"));
+  const resume = dubbing.getByRole("button", { name: "Reanudar WAV", exact: true });
+  await resume.waitFor({timeout:3000});
+  assert.equal(await dubbing.locator(".dub-export .path").innerText(), "C:/Doblaje guardado");
+  assert.equal(await dubbing.getByRole("button", {name:"Cambiar carpeta",exact:true}).count(), 0);
+  for (const [width, height] of [[1180, 780], [900, 620]]) {
+    await page.setViewportSize({width, height});
+    await resume.scrollIntoViewIfNeeded();
+    assert.ok(await dubbing.evaluate(element => element.scrollWidth <= element.clientWidth + 1));
+    await page.screenshot({path:path.join(directory, `resume-wav-${width}.png`)});
+  }
+  await resume.press("Enter");
+  await dubbing.getByText("Pendiente · WAV", {exact:true}).waitFor();
+  assert.deepEqual(await page.evaluate(() => window.translationCalls.filter(call => ["queue_dub_voice", "job_action"].includes(call.command))),
+    [{command:"job_action",args:{ids:["fixture-resumable-dub"],action:"retry"}}]);
   assert.deepEqual(errors, []);
   console.log("Warnings focus cues across pages, keep edits until save, and return to the last dubbing cue.");
 } finally {

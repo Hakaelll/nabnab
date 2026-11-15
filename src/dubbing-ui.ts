@@ -252,6 +252,8 @@ export function createDubbing(hooks: Hooks) {
     const video = publishedTranslationFile(mux, library);
     const issues = timingIssues(job);
     const disabled = busy || hooks.hasEdits();
+    const paused = job?.state === "paused";
+    const voiceInProgress = !audio && job && pending(job);
     const cue = Math.min(sampleCue, draft.count - 1);
     return `<section class="dub-expanded" aria-label="${t("Preparar la voz y el vídeo", "Prepare voice and video")}">
       ${!status ? `<p class="field-note" role="status">${busy ? t("Buscando voces locales…", "Finding local voices…") : t("Actualiza la lista de voces instaladas.", "Refresh installed voices.")}</p>` : !status.enabled || !status.available ? `<p class="field-note">${t("Activa Voz local en Ajustes y comprueba las voces de Windows.", "Enable Local voice in Settings and check Windows voices.")}</p>` : !choice ? `<p class="field-note">${t("Windows no tiene una voz local instalada para el idioma de destino.", "Windows has no installed local voice for the target language.")}</p>` : ""}
@@ -266,8 +268,8 @@ export function createDubbing(hooks: Hooks) {
       ${sampleText ? `<div class="dub-sample"><span>${h(sampleText)}</span><div id="dub-sample-slot"></div>${sampleResult()}</div>` : ""}
       ${job && job.id !== wav?.id ? issues.length ? timingReview(issues)
         : `<div class="dub-result" role="status"><span>${stateLabel(job.state, t)} · WAV</span>${job.error ? `<p>${h(job.error.message)}</p>` : ""}</div>` : ""}
-      <div class="asset-destination dub-export"><span>${t("Destino", "Destination")}<span class="path field-note">${h(hooks.snapshot().settings.folder)}</span></span>${action("choose-folder", t("Cambiar carpeta", "Change folder"), "folder", "quiet", busy ? "disabled" : "")}
-        ${audio ? "" : action("dub-queue-voice", t("Generar WAV sincronizado", "Generate synchronized WAV"), "audio", "primary", `id="dub-queue-voice" ${disabled || pending(job) ? "disabled" : ""}`)}</div>
+      <div class="asset-destination dub-export"><span>${t("Destino", "Destination")}<span class="path field-note">${h(voiceInProgress ? job.folder : hooks.snapshot().settings.folder)}</span></span>${voiceInProgress ? "" : action("choose-folder", t("Cambiar carpeta", "Change folder"), "folder", "quiet", busy ? "disabled" : "")}
+        ${audio ? "" : action("dub-queue-voice", paused ? t("Reanudar WAV", "Resume WAV") : t("Generar WAV sincronizado", "Generate synchronized WAV"), paused ? "retry" : "audio", "primary", `id="dub-queue-voice" ${disabled || pending(job) && !paused ? "disabled" : ""}`)}</div>
       ${audio ? translationOutput(audio, t("Voz sincronizada · WAV", "Synchronized voice · WAV"), t, t("Escuchar WAV", "Play WAV")) : ""}
       ${wav ? `<fieldset id="dub-video-controls" class="translation-fields" ${disabled ? "disabled" : ""}><legend>${t("2. Copia de vídeo", "2. Video copy")}</legend>
         <label for="dub-video">${t("Vídeo de Biblioteca", "Library video")}<select id="dub-video">${option("", t("Selecciona el vídeo correspondiente", "Select the matching video"), videoChoice())}${videos().map(item => option(item.id, item.name, videoChoice())).join("")}</select></label>
@@ -372,7 +374,13 @@ export function createDubbing(hooks: Hooks) {
           requestAnimationFrame(() => { if (sampleUrl) void player?.play().catch(() => {}); });
         } finally { if (requestId === id) requestId = 0; }
       } else if (actionName === "dub-queue-voice") {
-        await hooks.command("queue_dub_voice", { selection: choice, clientRequest: crypto.randomUUID() });
+        const previous = matchingVoices()[0];
+        if (completedVoice() || pending(previous) && previous?.state !== "paused") return;
+        if (previous?.state === "paused") {
+          await hooks.command("job_action", { ids: [previous.id], action: "retry" });
+        } else {
+          await hooks.command("queue_dub_voice", { selection: choice, clientRequest: crypto.randomUUID() });
+        }
         await hooks.refresh();
       } else {
         const voiceJobId = completedVoice()?.id;
