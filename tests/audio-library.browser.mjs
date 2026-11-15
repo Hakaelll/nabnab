@@ -445,6 +445,14 @@ try {
   await page.setViewportSize({width:900,height:620});
   await reviewReferences.scrollIntoViewIfNeeded();
   await page.screenshot({path:`${directory}/saved-references-before-900.png`});
+  const findRecording = page.locator(".audio-list-entries li").filter({hasText:"Ausente"}).getByRole("button", { name: "Buscar grabación", exact: true });
+  await findRecording.press("Enter");
+  await missingRecording.waitFor();
+  assert.equal(await missingRecording.getAttribute("open"), "");
+  assert.ok(await missingRecording.locator("summary").evaluate(summary => summary === document.activeElement));
+  await closeReview.press("Enter");
+  assert.ok(await findRecording.evaluate(button => button === document.activeElement));
+  assert.deepEqual(await readSavedPlaylist(), imported);
   await reviewReferences.press("Enter");
   await missingRecording.waitFor();
   assert.equal(await page.locator("#audio-import-heading").evaluate(heading => heading === document.activeElement), true);
@@ -529,6 +537,23 @@ try {
   await closeReview.press("Enter");
   await originalRecordingMissing(false);
   await page.locator(".audio-list-entries").getByText("Improvisación", { exact: true }).waitFor();
+  await page.evaluate(async firstEntry => {
+    const { state } = window.audioFixture;
+    state.audioPlaylists.push({ id: "long-list", name: "Lista larga", entries: [firstEntry,
+      ...Array.from({length: 41}, (_, index) => ({kind:"missing", locator:`track-${index}.mp3`, title:`Grabación ${index + 1}`})),
+    ] });
+    const { emit } = await import("/node_modules/@tauri-apps/api/event.js");
+    await emit("library-update");
+  }, imported.entries[0]);
+  await page.locator("#audio-active-list").selectOption("long-list");
+  const lastRecording = page.locator(".audio-list-entries li").filter({hasText:"Grabación 41"}).getByRole("button", {name:"Buscar grabación",exact:true});
+  await lastRecording.press("Enter");
+  const lastReference = page.locator(".audio-import-rows li[value='42'] details[open]");
+  await lastReference.waitFor();
+  assert.ok(await lastReference.locator("summary").evaluate(summary => summary === document.activeElement));
+  await closeReview.press("Enter");
+  assert.ok(await lastRecording.evaluate(button => button === document.activeElement));
+  await page.locator("#audio-active-list").selectOption(imported.id);
 
   await page.evaluate(async () => {
     window.audioFixture.state.audioPlaylists.push({

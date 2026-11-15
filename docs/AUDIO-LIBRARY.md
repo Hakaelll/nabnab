@@ -50,6 +50,10 @@ La cabecera de una lista guardada muestra las pistas disponibles, su duración s
 
 Cuando incorpores más música, abre la lista guardada y pulsa **Revisar referencias**. Verás las entradas remotas o ausentes en su posición original, con las grabaciones disponibles en Biblioteca. Elige una grabación, pulsa **Preparar cambios** y después **Guardar lista**. La lista conserva el título de origen y, si la exportación los incluía, el identificador, el artista, la duración y la versión. Si la copia local deja de estar disponible, nabnab usa esos datos en la siguiente revisión y te deja confirmar la grabación. Las entradas antiguas usan el título, el identificador o la ruta que ya tengan guardados.
 
+Para ir directamente a una entrada, pulsa **Buscar grabación** en su fila. Se abre la página de revisión que le corresponde, con sus sugerencias y la búsqueda local a mano. **Cerrar revisión** vuelve a la misma fila.
+
+![Acceso a la búsqueda desde dos entradas pendientes de una lista de prueba](audio-playlist-find-recording.png)
+
 Si la grabación está guardada con otro nombre, abre **Buscar en Biblioteca** en su entrada. Puedes buscar por título, artista, álbum o nombre de archivo, tanto al importar como al revisar una lista guardada. Compara la duración y la ruta antes de elegir. La grabación elegida queda visible al cambiar la búsqueda. Usa **Conservar referencia original** para deshacer esa elección antes de guardar.
 
 ![Búsqueda manual de una grabación con la copia elegida y otro resultado local](audio-playlist-manual-match.png)
