@@ -242,7 +242,13 @@ fn filters(dimensions: Dimensions, options: Options, preview: bool) -> String {
     if options.softness > 0 {
         graph.push_str(&format!(",gblur=sigma={}", options.softness));
     }
-    graph.push_str("[predicted];[0:v]format=rgba,split=2[color][alpha];[alpha]alphaextract[original];[original][predicted]blend=all_mode=multiply:shortest=1[opacity];");
+    graph.push_str("[predicted];[0:v]format=rgba");
+    graph.push_str(if preview {
+        ",split=3[color][alpha][source];"
+    } else {
+        ",split=2[color][alpha];"
+    });
+    graph.push_str("[alpha]alphaextract[original];[original][predicted]blend=all_mode=multiply:shortest=1[opacity];");
     let (visible_w, visible_h) = if preview && width.max(height) > PREVIEW_EDGE {
         let largest = width.max(height);
         (
@@ -254,6 +260,7 @@ fn filters(dimensions: Dimensions, options: Options, preview: bool) -> String {
     };
     if preview {
         graph.push_str(&format!("[opacity]split=2[apply][mask];[mask]scale={visible_w}:{visible_h}:flags=area,format=gray[mask_preview];"));
+        graph.push_str(&format!("[source]scale={visible_w}:{visible_h}:flags=area,format=rgba[source_preview];"));
     } else {
         graph.push_str("[opacity]null[apply];");
     }
@@ -276,14 +283,14 @@ async fn render(
     dimensions: Dimensions,
     options: Options,
     output: &Path,
-    mask_preview: Option<&Path>,
+    preview_directory: Option<&Path>,
     cancel: watch::Receiver<bool>,
     request: u64,
 ) -> Result<(), String> {
     let mut args = input_args(input)?;
     let size = format!("{0}x{0}", worker::SIDE);
-    let filter = filters(dimensions, options, mask_preview.is_some());
-    let png = mask_preview.is_some() || options.format == Format::Png;
+    let filter = filters(dimensions, options, preview_directory.is_some());
+    let png = preview_directory.is_some() || options.format == Format::Png;
     args.extend(
         [
             "-protocol_whitelist",
@@ -334,25 +341,20 @@ async fn render(
         .to_vec()
     });
     args.push(output.to_string_lossy().into_owned());
-    if let Some(mask_preview) = mask_preview {
-        args.extend(
-            [
-                "-map",
-                "[mask_preview]",
-                "-frames:v",
-                "1",
-                "-map_metadata",
-                "-1",
-                "-threads",
-                "2",
-                "-c:v",
-                "png",
-                "-pix_fmt",
-                "gray",
-                &mask_preview.to_string_lossy(),
-            ]
-            .map(str::to_owned),
-        );
+    if let Some(directory) = preview_directory {
+        for (stream, format, filename) in [
+            ("[mask_preview]", "gray", "mask.png"),
+            ("[source_preview]", "rgba", "original.png"),
+        ] {
+            let path = directory.join(filename);
+            args.extend(
+                [
+                    "-map", stream, "-frames:v", "1", "-map_metadata", "-1", "-threads", "2",
+                    "-c:v", "png", "-pix_fmt", format, &path.to_string_lossy(),
+                ]
+                .map(str::to_owned),
+            );
+        }
     }
     engine::run_process(
         engines.join("ffmpeg.exe"),
@@ -370,6 +372,7 @@ async fn render(
 #[serde(rename_all = "camelCase")]
 pub struct Sample {
     dimensions: Dimensions,
+    original: Vec<u8>,
     result: Vec<u8>,
     mask: Vec<u8>,
 }
@@ -388,7 +391,6 @@ pub async fn sample(
     let files = MaskFiles::new(directory);
     infer(engines, model, input, &files, cancel.clone(), request).await?;
     let result = directory.join("result.png");
-    let mask = directory.join("mask.png");
     render(
         engines,
         input,
@@ -396,7 +398,7 @@ pub async fn sample(
         dimensions,
         options,
         &result,
-        Some(&mask),
+        Some(directory),
         cancel,
         request,
     )
@@ -411,8 +413,9 @@ pub async fn sample(
     };
     Ok(Sample {
         dimensions,
+        original: read(&directory.join("original.png"))?,
         result: read(&result)?,
-        mask: read(&mask)?,
+        mask: read(&directory.join("mask.png"))?,
     })
 }
 
@@ -454,4 +457,49 @@ pub async fn execute(
         return Err("The background result does not match the original dimensions.".into());
     }
     Ok((output, info))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    #[ignore = "requires the verified production FFmpeg engines"]
+    async fn real_engines_background_original_uses_the_same_preview_geometry() {
+        let engines = fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("engines")).unwrap();
+        let root = std::env::temp_dir().join(format!("nabnab-cutout-test-{}-{}", std::process::id(), crate::queue::now()));
+        fs::create_dir(&root).unwrap();
+        let workspace = crate::workspaces::Workspace::new(&root).unwrap();
+        let source = workspace.path.join("source.png");
+        let result = workspace.path.join("result.png");
+        let raw_mask = workspace.path.join("mask.gray");
+        let ffmpeg = engines.join("ffmpeg.exe");
+        let (_sender, cancel) = watch::channel(false);
+        engine::run_process(ffmpeg.clone(), [
+            "-f", "lavfi", "-i", "color=c=red:s=800x480", "-frames:v", "1", "-c:v", "png", &source.to_string_lossy(),
+        ].map(str::to_owned).to_vec(), cancel.clone(), 1, false, |_| {}).await.unwrap();
+        fs::write(&raw_mask, vec![0; (worker::SIDE * worker::SIDE) as usize]).unwrap();
+        render(&engines, &source, &raw_mask, Dimensions { width: 800, height: 480 },
+            Options {format: Format::Png, fill: Fill::Transparent, edge: 0, softness: 0},
+            &result, Some(&workspace.path), cancel, 2).await.unwrap();
+        let original = workspace.path.join("original.png");
+        for path in [&original, &result, &workspace.path.join("mask.png")] {
+            assert_eq!(image_assets::png_dimensions(path).unwrap(), (640, 384));
+        }
+        let pixel = |path: &Path| {
+            let output = std::process::Command::new(&ffmpeg)
+                .args(["-v", "error", "-i"]).arg(path)
+                .args(["-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"])
+                .output().unwrap();
+            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+            <[u8; 4]>::try_from(&output.stdout[..4]).unwrap()
+        };
+        let [red, green, blue, alpha] = pixel(&original);
+        assert!(red > 240 && green < 10 && blue < 10);
+        assert_eq!(alpha, 255);
+        assert_eq!(pixel(&result)[3], 0);
+        drop(workspace);
+        fs::remove_dir(root.join("local-previews")).unwrap();
+        fs::remove_dir(root).unwrap();
+    }
 }

@@ -14,6 +14,10 @@ Select **Zoom preview 2×** to inspect the edges. Scroll the preview or focus it
 
 ![Synchronized cutout and mask zoom with a synthetic preview](background-edge-zoom.png)
 
+Select **Compare with original** to put the source image beside the cutout at the same scale. Zoom and pan stay synchronized so you can compare fine details in the same area. The comparison uses the existing preview and its export settings.
+
+![The cutout and the original zoomed to the same area in a test image](background-original-comparison.png)
+
 Adjust the mask by up to eight pixels in either direction and select the amount of smoothing. Generate a new preview after changing an export setting. Choose a transparent background or a solid color, then export a PNG or lossless WebP. The queued result preserves the stored pixel dimensions and is linked to the original in Library. The source stays intact.
 
 For a transparent export, select **Create sticker** next to the file in **Latest export**. You can also open a completed cutout job in **Downloads** and select the same action. The sticker editor starts with that file selected and lets you choose a profile before generating a preview. [Sticker export](STICKERS.md)

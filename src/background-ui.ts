@@ -6,8 +6,9 @@ import { action, icon, option } from "./views-common";
 
 type Format = "png" | "webp";
 type Surface = "grid" | "light" | "dark";
+type Comparison = "mask" | "overlay" | "original";
 interface Component { id: string; installed: boolean; enabled: boolean; available: boolean; size: number }
-interface Preview { previewId: number; dimensions: { width: number; height: number }; result: number[]; mask: number[] }
+interface Preview { previewId: number; dimensions: { width: number; height: number }; result: number[]; mask: number[]; original: number[] }
 interface Hooks {
   snapshot(): Snapshot;
   command<T>(name: string, args?: Record<string, unknown>): Promise<T>;
@@ -31,9 +32,9 @@ export function createBackgroundTool(hooks: Hooks) {
   let edge = 0, softness = 1, format: Format = "png", transparent = true, color = "#f2f2f3";
   let surface: Surface = "grid";
   let zoomed = false;
-  let overlay = false;
+  let view: Comparison = "mask";
   let pan = { x: 0.5, y: 0.5 };
-  let preview: (Omit<Preview, "result" | "mask"> & { result: string; mask: string }) | null = null;
+  let preview: (Pick<Preview, "previewId" | "dimensions"> & Record<"result" | "mask" | "original", string>) | null = null;
   let busy = false, requestId = 0, error = "";
   const images = () => hooks.snapshot().library.filter(item => item.kind === "image" && !item.missing && /\.(png|jpe?g|webp)$/i.test(item.name));
   const selected = () => images().find(item => item.id === libraryId);
@@ -100,6 +101,7 @@ export function createBackgroundTool(hooks: Hooks) {
   function comparison() {
     if (!preview) return `<p class="background-empty">${t("Genera una muestra para revisar el recorte y su máscara.", "Generate a preview to review the cutout and its mask.")}</p>`;
     const { width, height } = preview.dimensions;
+    const overlay = view === "overlay";
     const viewport = (label: string) => zoomed ? `role="region" tabindex="0" aria-label="${label}" aria-describedby="background-pan-note"` : "";
     return `<div class="background-pair" data-zoomed="${zoomed}" data-overlay="${overlay}" style="--background-ratio:${width} / ${height}">
       <figure><figcaption>${overlay ? t("Resultado con máscara", "Result with mask") : t("Resultado", "Result")}</figcaption>
@@ -108,7 +110,9 @@ export function createBackgroundTool(hooks: Hooks) {
           ${overlay ? `<span class="background-mask-overlay" style="--background-mask:url('${preview.mask}')" aria-hidden="true"></span>` : ""}
         </div>
       </figure>
-      ${overlay ? "" : `<figure><figcaption>${t("Máscara", "Mask")}</figcaption><div class="asset-preview-image" id="background-mask" ${viewport(t("Máscara ampliada", "Zoomed mask"))}>
+      ${view === "original" ? `<figure><figcaption>${t("Original", "Original")}</figcaption><div class="asset-preview-image" id="background-original" data-surface="${surface}" ${viewport(t("Original ampliado", "Zoomed original"))}>
+        <img src="${preview.original}" alt="${t("Imagen antes del recorte", "Image before the cutout")}"></div></figure>`
+        : overlay ? "" : `<figure><figcaption>${t("Máscara", "Mask")}</figcaption><div class="asset-preview-image" id="background-mask" ${viewport(t("Máscara ampliada", "Zoomed mask"))}>
         <img src="${preview.mask}" alt="${t("Máscara de opacidad: blanco conserva, negro recorta", "Opacity mask: white keeps, black removes")}"></div></figure>`}
     </div>
     <div class="background-review-controls"><span class="field-note">${width} × ${height} px</span>
@@ -124,9 +128,9 @@ export function createBackgroundTool(hooks: Hooks) {
   function bind() {
     if (!zoomed) return;
     const result = document.getElementById("background-result");
-    const mask = document.getElementById("background-mask");
+    const reference = document.getElementById("background-mask") ?? document.getElementById("background-original");
     if (!result) return;
-    const frames = mask ? [result, mask] : [result];
+    const frames = reference ? [result, reference] : [result];
 
     const extent = (frame: HTMLElement) => ({ x: frame.scrollWidth - frame.clientWidth, y: frame.scrollHeight - frame.clientHeight });
     function place(frame: HTMLElement) {
@@ -159,7 +163,8 @@ export function createBackgroundTool(hooks: Hooks) {
             ${requestId ? action("background-cancel", t("Cancelar muestra", "Cancel preview"), "close", "quiet") : ""}
           </div></div>
           ${preview ? `<div class="background-view-actions button-group">
-            ${action("background-overlay", t("Superponer máscara", "Overlay mask"), "copy", "quiet", `aria-pressed="${overlay}"`)}
+            ${action("background-original", t("Comparar con original", "Compare with original"), "image", "quiet", `aria-pressed="${view === "original"}"`)}
+            ${action("background-overlay", t("Superponer máscara", "Overlay mask"), "copy", "quiet", `aria-pressed="${view === "overlay"}"`)}
             ${action("background-zoom", t("Ampliar muestra 2×", "Zoom preview 2×"), "search", "quiet", `aria-pressed="${zoomed}"`)}
           </div>` : ""}
           ${comparison()}
@@ -183,8 +188,8 @@ export function createBackgroundTool(hooks: Hooks) {
       case "background-preview":
         if (ready() && selected()) await run(async () => {
           preview = null; requestId = Date.now() * 1000 + 705; hooks.render();
-          const { result, mask, ...details } = await hooks.command<Preview>("background_preview", { libraryId, options: options(), requestId });
-          preview = { ...details, result: pngUrl(result), mask: pngUrl(mask) };
+          const { result, mask, original, ...details } = await hooks.command<Preview>("background_preview", { libraryId, options: options(), requestId });
+          preview = { ...details, result: pngUrl(result), mask: pngUrl(mask), original: pngUrl(original) };
         });
         return true;
       case "background-cancel":
@@ -194,7 +199,10 @@ export function createBackgroundTool(hooks: Hooks) {
         if (preview) { zoomed = !zoomed; hooks.render(); }
         return true;
       case "background-overlay":
-        if (preview) { overlay = !overlay; hooks.render(); }
+        if (preview) { view = view === "overlay" ? "mask" : "overlay"; hooks.render(); }
+        return true;
+      case "background-original":
+        if (preview) { view = view === "original" ? "mask" : "original"; hooks.render(); }
         return true;
       default: return false;
     }

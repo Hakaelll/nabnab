@@ -18,11 +18,12 @@ const setup = `
   const settings = { folder: "C:/Fixture", language: "es", reducedMotion: true, reducedTransparency: true, sidebarExpanded: true, trayEnabled: false };
   const snapshot = { settings, jobs: [], library: [{ id: "source", name: "Hojas.png", kind: "image", path: "C:/Fixture/Hojas.png" }], collections: [], drafts: [], sources: [], rules: [], smartCollections: [], presets: [], audioPlaylists: [] };
   const calls = window.backgroundCalls = [];
-  function sample(mask) {
+  function sample(mask, original = false) {
     const canvas = document.createElement("canvas");
     canvas.width = 640; canvas.height = 420;
     const ctx = canvas.getContext("2d");
     if (mask) { ctx.fillStyle = "#000"; ctx.fillRect(0, 0, canvas.width, canvas.height); }
+    if (original) { ctx.fillStyle = "#bda18f"; ctx.fillRect(0, 0, canvas.width, canvas.height); }
     ctx.translate(336, 210);
     ctx.lineCap = "round";
     ctx.strokeStyle = mask ? "#fff" : "#617053";
@@ -41,7 +42,7 @@ const setup = `
     if (command === "startup") return { ...snapshot, enginesReady: true };
     if (command === "get_snapshot") return snapshot;
     if (command === "optional_components") return [{ id: "background", installed: true, enabled: true, available: true }];
-    if (command === "background_preview") return { previewId: 42, dimensions: { width: 640, height: 420 }, result: sample(false), mask: sample(true) };
+    if (command === "background_preview") return { previewId: 42, dimensions: { width: 640, height: 420 }, result: sample(false), mask: sample(true), original: sample(false, true) };
   }, { shouldMockEvents: true });
   await import("/src/main.ts");
 `;
@@ -88,6 +89,25 @@ try {
   await tool.locator("#background-surface").selectOption("light");
   assert.deepEqual(await position(result), panned);
   assert.deepEqual(await position(mask), panned);
+  const compare = tool.getByRole("button", { name: "Comparar con original" });
+  const original = tool.getByRole("region", { name: "Original ampliado" });
+  await compare.press("Space");
+  assert.equal(await compare.getAttribute("aria-pressed"), "true");
+  assert.ok(await compare.evaluate(button => button === document.activeElement));
+  assert.deepEqual(await position(original), panned);
+  assert.deepEqual(await position(result), panned);
+  assert.notEqual(await original.locator("img").getAttribute("src"), await result.locator("img").getAttribute("src"));
+  for (const [width, height] of [[900, 620], [1180, 780]]) {
+    await page.setViewportSize({ width, height });
+    await original.locator("img").evaluate(image => image.decode());
+    assert.deepEqual(await position(original), await position(result));
+    assert.ok(await tool.evaluate(element => element.scrollWidth <= element.clientWidth + 1));
+    await tool.locator(".background-review").scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `${directory}/original-${width}.png` });
+  }
+  await compare.press("Space");
+  assert.equal(await compare.getAttribute("aria-pressed"), "false");
+  assert.deepEqual(await position(mask), await position(result));
   for (const [width, height] of [[900, 620], [1180, 780]]) {
     await page.setViewportSize({ width, height });
     assert.ok(await tool.evaluate(element => element.scrollWidth <= element.clientWidth + 1));
@@ -107,7 +127,15 @@ try {
     assert.equal(await overlay.getAttribute("aria-pressed"), "true");
     assert.ok(await overlay.evaluate(element => element === document.activeElement));
     assert.equal(await tool.locator("#background-mask").count(), 0);
-    assert.ok((await frame.boundingBox()).width > pairedWidth * 1.8);
+    const expanded = await frame.evaluate(async node => {
+      const image = node.querySelector("img");
+      await image.decode();
+      const maxHeight = Number.parseFloat(getComputedStyle(node).maxHeight);
+      return Math.min(node.closest(".background-pair").clientWidth, maxHeight * image.naturalWidth / image.naturalHeight);
+    });
+    const widthAfter = (await frame.boundingBox()).width;
+    assert.ok(widthAfter > pairedWidth && Math.abs(widthAfter - expanded) <= 3,
+      `Overlay width ${widthAfter} must grow from ${pairedWidth} to the available width or image height limit (${expanded}).`);
     assert.deepEqual(await tint.boundingBox(), await frame.locator("img").boundingBox());
     assert.ok(await tool.evaluate(element => element.scrollWidth <= element.clientWidth + 1));
     const png = (await frame.screenshot()).toString("base64");
