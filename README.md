@@ -2,13 +2,13 @@
 
 nabnab is a Windows desktop app for downloading media and documents, organizing files where they already live, and playing or editing them locally. Downloads and local processing share a queue. Finished files appear in your library.
 
-[Download the Windows x64 installer](https://github.com/Hakaelll/nabnab/releases/tag/v0.2.0) · [Run from source](#run-from-source) · [Browse supported platforms](docs/PLATFORMS.md)
+[Download the Windows x64 installer](https://github.com/Hakaelll/nabnab/releases/latest) · [Run from source](#run-from-source) · [Browse supported platforms](docs/PLATFORMS.md)
 
 ![The nabnab Home screen](docs/home-motion-after.png)
 
 ## Get started
 
-The unsigned 0.2.0 installer requires WebView2. Upgrading from ytnabber keeps your installation folder and app data. This README describes the current `main` branch. Check the release notes for the features bundled in the installer. [Release notes](docs/releases/0.2.0.md) · [Migration guide](docs/MIGRATION.md)
+The unsigned Windows installer requires WebView2. Upgrading from ytnabber keeps your installation folder and app data. This README describes the current `main` branch. Check the release notes for the features bundled in the installer. [Release notes](docs/releases/0.3.0.md) · [Migration guide](docs/MIGRATION.md)
 
 1. Paste a link in **Home** or import a list of links from a `.txt` file. Choose a download profile after nabnab analyzes the link.
 2. Click **Download** or **Add to queue**. Follow the job in **Downloads**. Verified outputs appear in **Library**.
