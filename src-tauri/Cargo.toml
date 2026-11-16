@@ -1,6 +1,6 @@
 [package]
 name = "nabnab"
-version = "0.2.0"
+version = "0.3.0"
 description = "Local media downloads, library and tools"
 edition = "2021"
 default-run = "nabnab"
